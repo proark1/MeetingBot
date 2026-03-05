@@ -15,6 +15,7 @@ greenlet==3.1.1
 
 # Real browser bot
 playwright==1.49.1
+playwright-stealth==1.0.6      # hides automation signals from Google/Microsoft
 
 # Audio transcription (Whisper via CTranslate2 — fast CPU inference)
 faster-whisper==1.1.0

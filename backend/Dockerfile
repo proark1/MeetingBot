@@ -1,17 +1,15 @@
 FROM python:3.12-slim
 
 # ── System dependencies ───────────────────────────────────────────────────────
-# ffmpeg      — audio recording from PulseAudio virtual sink
-# pulseaudio  — virtual audio sink for capturing meeting audio
-# xvfb        — virtual framebuffer (headed Chromium needs a display)
-# Chromium libs — required by Playwright's bundled Chromium
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Audio capture
     ffmpeg \
     pulseaudio \
     pulseaudio-utils \
+    # Virtual display (headed Chromium is more compatible with Google Meet/Teams)
     xvfb \
     x11-utils \
-    # Chromium / Playwright system deps
+    # Chromium / Playwright runtime libraries
     libnss3 \
     libnspr4 \
     libatk1.0-0 \
@@ -44,13 +42,26 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# ── Playwright: install Chromium browser ──────────────────────────────────────
+# ── Playwright: install Chromium and its system deps ─────────────────────────
 RUN playwright install chromium
 RUN playwright install-deps chromium
+
+# ── Pre-download Whisper model so the first bot run isn't slow ───────────────
+# Uses the same model size as the default in config.py (WHISPER_MODEL=base).
+# Change "base" here if you change the default in config.py.
+RUN python -c "\
+from faster_whisper import WhisperModel; \
+print('Downloading Whisper base model…'); \
+WhisperModel('base', device='cpu', compute_type='int8'); \
+print('Whisper model ready.')"
 
 # ── Application source ────────────────────────────────────────────────────────
 COPY . .
 
+# Make entrypoint executable
+RUN chmod +x /app/start.sh
+
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# start.sh initialises PulseAudio, then starts uvicorn
+CMD ["/app/start.sh", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
