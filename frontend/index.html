@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MeetingBot — Recall.ai Clone</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="logo">
+        <span class="logo-icon">🤖</span>
+        <span class="logo-text">MeetingBot</span>
+      </div>
+      <nav>
+        <a class="nav-item active" data-page="bots" href="#">
+          <span class="nav-icon">📋</span> Bots
+        </a>
+        <a class="nav-item" data-page="webhooks" href="#">
+          <span class="nav-icon">🔔</span> Webhooks
+        </a>
+        <a class="nav-item" data-page="docs" href="/api/docs" target="_blank">
+          <span class="nav-icon">📖</span> API Docs
+        </a>
+      </nav>
+      <div class="sidebar-footer">
+        <div id="ws-indicator" class="ws-indicator disconnected" title="WebSocket connection">
+          <span class="ws-dot"></span>
+          <span class="ws-label">Connecting…</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main content -->
+    <main class="main">
+
+      <!-- ── BOTS PAGE ── -->
+      <section id="page-bots" class="page active">
+        <div class="page-header">
+          <div>
+            <h1>Meeting Bots</h1>
+            <p class="subtitle">Deploy bots into Zoom, Google Meet, and Teams to record and analyse meetings</p>
+          </div>
+          <button class="btn btn-primary" id="btn-new-bot">+ New Bot</button>
+        </div>
+
+        <!-- Stats bar -->
+        <div class="stats-bar">
+          <div class="stat-card">
+            <div class="stat-value" id="stat-total">—</div>
+            <div class="stat-label">Total</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="stat-active">—</div>
+            <div class="stat-label">Active</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="stat-done">—</div>
+            <div class="stat-label">Done</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="stat-error">—</div>
+            <div class="stat-label">Error</div>
+          </div>
+        </div>
+
+        <!-- Bot list -->
+        <div class="card">
+          <div class="card-toolbar">
+            <div class="filter-group">
+              <button class="filter-btn active" data-status="">All</button>
+              <button class="filter-btn" data-status="joining">Joining</button>
+              <button class="filter-btn" data-status="in_call">In Call</button>
+              <button class="filter-btn" data-status="done">Done</button>
+              <button class="filter-btn" data-status="error">Error</button>
+            </div>
+            <button class="btn btn-ghost btn-sm" id="btn-refresh">↻ Refresh</button>
+          </div>
+          <div id="bot-list" class="bot-list"></div>
+        </div>
+      </section>
+
+      <!-- ── BOT DETAIL PAGE ── -->
+      <section id="page-bot-detail" class="page">
+        <div class="page-header">
+          <button class="btn btn-ghost" id="btn-back-bots">← Back to Bots</button>
+          <div id="bot-detail-badges" style="display:flex;gap:0.5rem;align-items:center"></div>
+        </div>
+
+        <!-- Lifecycle progress bar -->
+        <div class="card lifecycle-card" id="lifecycle-card">
+          <div class="lifecycle-steps" id="lifecycle-steps"></div>
+        </div>
+
+        <div id="bot-detail-content"></div>
+      </section>
+
+      <!-- ── WEBHOOKS PAGE ── -->
+      <section id="page-webhooks" class="page">
+        <div class="page-header">
+          <div>
+            <h1>Webhooks</h1>
+            <p class="subtitle">Receive real-time event notifications via HTTP POST</p>
+          </div>
+          <button class="btn btn-primary" id="btn-new-webhook">+ Add Webhook</button>
+        </div>
+        <div class="card">
+          <div id="webhook-list"></div>
+        </div>
+        <div class="card" style="margin-top:1.5rem">
+          <h3 style="margin-bottom:0.75rem">Available Events</h3>
+          <div class="event-chips">
+            <span class="chip chip-code">bot.joining</span>
+            <span class="chip chip-code">bot.in_call</span>
+            <span class="chip chip-code">bot.call_ended</span>
+            <span class="chip chip-code">bot.done</span>
+            <span class="chip chip-code">bot.error</span>
+            <span class="chip chip-code">bot.transcript_ready</span>
+            <span class="chip chip-code">bot.analysis_ready</span>
+          </div>
+          <p class="hint" style="margin-top:0.75rem">
+            Payloads are signed with HMAC-SHA256 when a secret is set.
+            Verify with header <code>X-MeetingBot-Signature: sha256=&lt;hash&gt;</code>.
+          </p>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- ── MODALS ── -->
+
+  <!-- New Bot Modal -->
+  <div class="modal-backdrop hidden" id="modal-new-bot">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Create Bot</h2>
+        <button class="modal-close" data-close="modal-new-bot">✕</button>
+      </div>
+      <div class="modal-body">
+        <label>
+          Meeting URL <span class="required">*</span>
+          <input class="input" id="new-bot-url"
+            placeholder="https://zoom.us/j/123… or meet.google.com/…" />
+          <span class="field-error hidden" id="new-bot-url-error"></span>
+        </label>
+        <label>
+          Bot Name
+          <input class="input" id="new-bot-name" placeholder="MeetingBot" value="MeetingBot" />
+        </label>
+        <p class="hint">
+          The bot will join, generate a transcript, then produce an AI-powered analysis —
+          all automatically. Supported: Zoom, Google Meet, Teams, Webex, Whereby.
+        </p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" data-close="modal-new-bot">Cancel</button>
+        <button class="btn btn-primary" id="btn-create-bot">Create Bot</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- New Webhook Modal -->
+  <div class="modal-backdrop hidden" id="modal-new-webhook">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Register Webhook</h2>
+        <button class="modal-close" data-close="modal-new-webhook">✕</button>
+      </div>
+      <div class="modal-body">
+        <label>
+          Endpoint URL <span class="required">*</span>
+          <input class="input" id="new-wh-url" placeholder="https://your-server.com/webhook" />
+          <span class="field-error hidden" id="new-wh-url-error"></span>
+        </label>
+        <label>
+          Signing Secret <span class="optional">(optional)</span>
+          <input class="input" id="new-wh-secret" type="password"
+            placeholder="Used to verify HMAC-SHA256 signature" />
+        </label>
+        <fieldset class="event-fieldset">
+          <legend>Events</legend>
+          <label class="checkbox-row">
+            <input type="checkbox" value="*" id="wh-ev-all" checked />
+            <span><strong>*</strong> — all events</span>
+          </label>
+          <div id="wh-event-list" class="event-checkbox-list disabled">
+            <label class="checkbox-row"><input type="checkbox" value="bot.joining" /><span>bot.joining</span></label>
+            <label class="checkbox-row"><input type="checkbox" value="bot.in_call" /><span>bot.in_call</span></label>
+            <label class="checkbox-row"><input type="checkbox" value="bot.call_ended" /><span>bot.call_ended</span></label>
+            <label class="checkbox-row"><input type="checkbox" value="bot.done" /><span>bot.done</span></label>
+            <label class="checkbox-row"><input type="checkbox" value="bot.error" /><span>bot.error</span></label>
+            <label class="checkbox-row"><input type="checkbox" value="bot.transcript_ready" /><span>bot.transcript_ready</span></label>
+            <label class="checkbox-row"><input type="checkbox" value="bot.analysis_ready" /><span>bot.analysis_ready</span></label>
+          </div>
+        </fieldset>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" data-close="modal-new-webhook">Cancel</button>
+        <button class="btn btn-primary" id="btn-create-webhook">Register</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast-container"></div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

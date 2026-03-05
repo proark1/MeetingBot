@@ -46,19 +46,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN playwright install chromium
 RUN playwright install-deps chromium
 
-# ── Pre-download Whisper model so the first bot run isn't slow ───────────────
-# Uses the same model size as the default in config.py (WHISPER_MODEL=base).
-# Change "base" here if you change the default in config.py.
-RUN python -c "\
-from faster_whisper import WhisperModel; \
-print('Downloading Whisper base model…'); \
-WhisperModel('base', device='cpu', compute_type='int8'); \
-print('Whisper model ready.')"
-
 # ── Application source ────────────────────────────────────────────────────────
 COPY . .
-
-# Make entrypoint executable
 RUN chmod +x /app/start.sh
 
 EXPOSE 8000

@@ -1,105 +1,121 @@
-"""Whisper-based audio transcription.
+"""Gemini-powered audio transcription.
 
-Uses faster-whisper (CTranslate2 backend) to transcribe meeting audio into
-timestamped transcript entries. Speaker labels are inferred from silence gaps
-between utterances (a simple but effective heuristic for meetings).
+Uploads the meeting WAV file to the Gemini Files API and asks Gemini to
+transcribe it with speaker labels and timestamps. Returns the same format
+used throughout the app:
+    [{"speaker": "Alice", "text": "...", "timestamp": 12.5}, ...]
 """
 
+import asyncio
+import json
 import logging
 import os
+import time
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Gap in seconds between segments that suggests a speaker change
-_SPEAKER_CHANGE_GAP = 1.5
-# How many distinct "speakers" to cycle through when using gap heuristic
-_MAX_HEURISTIC_SPEAKERS = 6
+_TRANSCRIPTION_PROMPT = """
+Transcribe the audio recording of this meeting.
+
+Return ONLY a valid JSON array — no markdown fences, no prose outside the array.
+
+Each element of the array must be an object with exactly these keys:
+  "speaker"   — the speaker's name, or "Participant 1" / "Participant 2" etc. if
+                 names cannot be determined from context
+  "text"      — what that speaker said (clean, no filler trimming needed)
+  "timestamp" — number of seconds from the start of the recording (float)
+
+Rules:
+- Identify distinct voices and give each a consistent label throughout.
+- If a real name is said in the meeting (e.g. "Thanks, Sarah"), use it.
+- Split long monologues into natural sentence-level entries.
+- Omit silences, background noise, and unintelligible segments.
+- Do not add commentary, summaries, or any text outside the JSON array.
+""".strip()
 
 
-async def transcribe_audio(
-    audio_path: str,
-    model_size: str = "base",
-) -> list[dict[str, Any]]:
+async def transcribe_audio(audio_path: str) -> list[dict[str, Any]]:
     """
-    Transcribe a WAV/MP3/M4A file and return a list of transcript entries.
-
-    Each entry:
-        {"speaker": "Participant 1", "text": "...", "timestamp": 12.34}
+    Transcribe an audio file using the Gemini API.
 
     Args:
-        audio_path:  Path to the audio file.
-        model_size:  Whisper model size — "tiny", "base", "small", "medium", "large".
-                     "base" is the default (good accuracy, fast on CPU).
-                     Use "small" or "medium" for better accuracy at higher cost.
+        audio_path: Path to a WAV (or MP3/M4A) file.
+
+    Returns:
+        List of transcript entries, or [] if transcription fails.
     """
+    from app.config import settings  # imported here to avoid circular import
+
+    if not settings.GEMINI_API_KEY:
+        logger.error("GEMINI_API_KEY is not set — cannot transcribe")
+        return []
+
     if not os.path.exists(audio_path):
         logger.error("Audio file not found: %s", audio_path)
         return []
 
-    file_size = os.path.getsize(audio_path)
-    if file_size < 4096:  # essentially empty
-        logger.warning("Audio file too small (%d bytes) — likely no audio was captured", file_size)
+    size = os.path.getsize(audio_path)
+    if size < 8192:
+        logger.warning("Audio file is too small (%d bytes) — likely no audio captured", size)
         return []
 
     try:
-        from faster_whisper import WhisperModel
+        import google.generativeai as genai
     except ImportError:
-        logger.error(
-            "faster-whisper is not installed. "
-            "Run: pip install faster-whisper"
-        )
+        logger.error("google-generativeai is not installed — run: pip install google-generativeai")
         return []
 
-    logger.info("Loading Whisper model '%s'…", model_size)
-    try:
-        # int8 quantization: fastest on CPU, negligible quality loss for speech
-        model = WhisperModel(model_size, device="cpu", compute_type="int8")
-    except Exception as exc:
-        logger.error("Failed to load Whisper model: %s", exc)
-        return []
+    genai.configure(api_key=settings.GEMINI_API_KEY)
 
-    logger.info("Transcribing %s…", audio_path)
+    uploaded = None
     try:
-        segments, info = model.transcribe(
-            audio_path,
-            beam_size=5,
-            vad_filter=True,
-            vad_parameters={"min_silence_duration_ms": 300},
-            word_timestamps=False,
+        # Upload audio to the Files API (handles files of any size)
+        logger.info("Uploading audio to Gemini Files API (%d bytes)…", size)
+        uploaded = await asyncio.to_thread(
+            genai.upload_file, audio_path, mime_type="audio/wav"
         )
 
-        logger.info(
-            "Detected language: %s (confidence %.0f%%)",
-            info.language,
-            info.language_probability * 100,
+        # Wait until processing is complete
+        for _ in range(30):
+            if uploaded.state.name != "PROCESSING":
+                break
+            await asyncio.sleep(2)
+            uploaded = await asyncio.to_thread(genai.get_file, uploaded.name)
+
+        if uploaded.state.name != "ACTIVE":
+            logger.error("Gemini file upload failed — state: %s", uploaded.state.name)
+            return []
+
+        logger.info("Audio uploaded (%s) — transcribing…", uploaded.name)
+        model = genai.GenerativeModel("gemini-2.0-flash")
+        response = await model.generate_content_async(
+            [_TRANSCRIPTION_PROMPT, uploaded],
+            generation_config={"temperature": 0, "max_output_tokens": 8192},
         )
 
-        transcript: list[dict[str, Any]] = []
-        speaker_idx = 0
-        last_end = 0.0
+        raw = response.text.strip()
+        # Strip markdown fences if Gemini added them anyway
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+            raw = raw.strip()
 
-        for seg in segments:
-            text = seg.text.strip()
-            if not text:
-                continue
-
-            # Heuristic: a gap longer than the threshold suggests a new speaker
-            if transcript and (seg.start - last_end) > _SPEAKER_CHANGE_GAP:
-                speaker_idx = (speaker_idx + 1) % _MAX_HEURISTIC_SPEAKERS
-
-            transcript.append(
-                {
-                    "speaker": f"Participant {speaker_idx + 1}",
-                    "text": text,
-                    "timestamp": round(seg.start, 2),
-                }
-            )
-            last_end = seg.end
-
-        logger.info("Transcription done: %d segments", len(transcript))
+        transcript = json.loads(raw)
+        logger.info("Transcription complete: %d entries", len(transcript))
         return transcript
 
-    except Exception as exc:
-        logger.error("Transcription failed: %s", exc)
+    except json.JSONDecodeError as exc:
+        logger.error("Gemini returned invalid JSON for transcript: %s", exc)
         return []
+    except Exception as exc:
+        logger.error("Transcription error: %s", exc)
+        return []
+    finally:
+        # Clean up uploaded file from Gemini storage
+        if uploaded:
+            try:
+                await asyncio.to_thread(genai.delete_file, uploaded.name)
+            except Exception:
+                pass
