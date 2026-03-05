@@ -1,0 +1,27 @@
+version: "3.9"
+
+services:
+  api:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+      - ./frontend:/frontend
+      - meetingbot_db:/app/data
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - DATABASE_URL=sqlite+aiosqlite:////app/data/meetingbot.db
+      - BOT_SIMULATION_DURATION=${BOT_SIMULATION_DURATION:-60}
+      - BOT_ADMISSION_TIMEOUT=${BOT_ADMISSION_TIMEOUT:-300}
+      - BOT_MAX_DURATION=${BOT_MAX_DURATION:-7200}
+      - WHISPER_MODEL=${WHISPER_MODEL:-base}
+      # PulseAudio needs a home directory for its socket
+      - PULSE_RUNTIME_PATH=/tmp/pulse
+    # Chromium requires extra shared memory; 2 GB is the recommended minimum
+    shm_size: "2gb"
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    restart: unless-stopped
+
+volumes:
+  meetingbot_db:

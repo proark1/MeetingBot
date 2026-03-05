@@ -1,0 +1,20 @@
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+sqlalchemy==2.0.36
+pydantic==2.10.3
+pydantic-settings==2.6.1
+anthropic==0.42.0
+httpx==0.28.1
+python-multipart==0.0.20
+aiofiles==24.1.0
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+python-dotenv==1.0.1
+aiosqlite==0.20.0
+greenlet==3.1.1
+
+# Real browser bot
+playwright==1.49.1
+
+# Audio transcription (Whisper via CTranslate2 — fast CPU inference)
+faster-whisper==1.1.0
