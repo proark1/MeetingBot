@@ -4,8 +4,8 @@ import asyncio
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
-from sqlalchemy import select, func
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select, func, case
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db, AsyncSessionLocal
@@ -16,8 +16,11 @@ from app.services import bot_service, intelligence_service
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/bot", tags=["Bots"])
 
-# Track running lifecycle tasks so we can cancel them
+# Track running lifecycle tasks so we can cancel them (single-process only)
 _running_tasks: dict[str, asyncio.Task] = {}
+
+# Statuses treated as "active" for stats
+_ACTIVE_STATUSES = ("ready", "joining", "in_call", "call_ended")
 
 
 def _bot_to_response(bot: Bot) -> BotResponse:
@@ -39,12 +42,36 @@ def _bot_to_response(bot: Bot) -> BotResponse:
     )
 
 
+# ── GET /api/v1/bot/stats ────────────────────────────────────────────────────
+# Must be defined before /{bot_id} to avoid path conflict
+
+@router.get("/stats", tags=["Bots"])
+async def get_stats(db: Annotated[AsyncSession, Depends(get_db)]):
+    """Aggregate counts by status for dashboard widgets."""
+    rows = (
+        await db.execute(
+            select(Bot.status, func.count(Bot.id).label("n")).group_by(Bot.status)
+        )
+    ).all()
+
+    counts: dict[str, int] = {row.status: row.n for row in rows}
+    total = sum(counts.values())
+    active = sum(counts.get(s, 0) for s in _ACTIVE_STATUSES)
+
+    return {
+        "total": total,
+        "active": active,
+        "done": counts.get("done", 0),
+        "error": counts.get("error", 0),
+        "by_status": counts,
+    }
+
+
 # ── POST /api/v1/bot ────────────────────────────────────────────────────────
 
 @router.post("", response_model=BotResponse, status_code=201)
 async def create_bot(
     payload: BotCreate,
-    background_tasks: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Create a new meeting bot and immediately start its lifecycle."""
@@ -59,7 +86,6 @@ async def create_bot(
     await db.commit()
     await db.refresh(bot)
 
-    # Launch lifecycle as an asyncio task (not a BackgroundTask) so we can cancel it
     task = asyncio.create_task(
         bot_service.run_bot_lifecycle(bot.id, AsyncSessionLocal)
     )
@@ -115,13 +141,17 @@ async def delete_bot(
     bot_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Remove bot from meeting (cancels lifecycle if still running)."""
+    """Remove bot from meeting and cancel lifecycle if still running."""
     bot = await _get_or_404(db, bot_id)
 
-    # Cancel lifecycle task if running
     task = _running_tasks.get(bot_id)
     if task and not task.done():
         task.cancel()
+        # Give it a moment to clean up gracefully
+        try:
+            await asyncio.wait_for(asyncio.shield(task), timeout=2.0)
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            pass
         logger.info("Cancelled lifecycle task for bot %s", bot_id)
 
     await db.delete(bot)
@@ -167,7 +197,7 @@ async def analyze_bot(
     return MeetingAnalysis(**analysis)
 
 
-# ── helper ───────────────────────────────────────────────────────────────────
+# ── helpers ───────────────────────────────────────────────────────────────────
 
 async def _get_or_404(db: AsyncSession, bot_id: str) -> Bot:
     result = await db.execute(select(Bot).where(Bot.id == bot_id))

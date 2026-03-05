@@ -4,11 +4,8 @@ const API = "/api/v1";
 
 // ── Utilities ──────────────────────────────────────────────────────────────
 
-async function api(method, path, body) {
-  const opts = {
-    method,
-    headers: { "Content-Type": "application/json" },
-  };
+async function apiFetch(method, path, body) {
+  const opts = { method, headers: { "Content-Type": "application/json" } };
   if (body) opts.body = JSON.stringify(body);
   const res = await fetch(API + path, opts);
   if (!res.ok) {
@@ -19,49 +16,65 @@ async function api(method, path, body) {
   return res.json();
 }
 
-let toastTimer;
-function showToast(msg, type = "success") {
-  const el = document.getElementById("toast");
-  el.textContent = msg;
-  el.className = `toast ${type}`;
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.add("hidden"), 3500);
+function esc(str) {
+  if (!str) return "";
+  return String(str)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
 function fmtDate(iso) {
   if (!iso) return "—";
-  return new Date(iso).toLocaleString();
+  const d = new Date(iso);
+  return d.toLocaleDateString("en-GB", { day:"2-digit", month:"short", year:"numeric" }) +
+    " " + d.toLocaleTimeString("en-GB", { hour:"2-digit", minute:"2-digit" });
 }
 
 function fmtDuration(start, end) {
   if (!start || !end) return "—";
   const secs = Math.round((new Date(end) - new Date(start)) / 1000);
-  const m = Math.floor(secs / 60);
-  const s = secs % 60;
-  return `${m}m ${s}s`;
+  const m = Math.floor(secs / 60), s = secs % 60;
+  return m > 0 ? `${m}m ${s}s` : `${s}s`;
 }
 
 function fmtTs(secs) {
-  const m = Math.floor(secs / 60).toString().padStart(2, "0");
-  const s = Math.floor(secs % 60).toString().padStart(2, "0");
+  const m = String(Math.floor(secs / 60)).padStart(2, "0");
+  const s = String(Math.floor(secs % 60)).padStart(2, "0");
   return `${m}:${s}`;
 }
 
 const PLATFORM_ICONS = {
-  zoom: "🔵",
-  google_meet: "🟢",
-  microsoft_teams: "🟣",
-  webex: "🔷",
-  whereby: "🟠",
-  unknown: "🤖",
+  zoom:"🔵", google_meet:"🟢", microsoft_teams:"🟣",
+  webex:"🔷", whereby:"🟠", bluejeans:"🔵", gotomeeting:"🟤", unknown:"🤖",
 };
+const platformIcon = (p) => PLATFORM_ICONS[p] || "🤖";
 
-function platformIcon(p) {
-  return PLATFORM_ICONS[p] || "🤖";
-}
+const LIFECYCLE_STEPS = [
+  { key: "ready",       label: "Ready",       icon: "○" },
+  { key: "joining",     label: "Joining",     icon: "→" },
+  { key: "in_call",     label: "In Call",     icon: "▶" },
+  { key: "call_ended",  label: "Ending",      icon: "■" },
+  { key: "done",        label: "Done",        icon: "✓" },
+];
+const STEP_ORDER = LIFECYCLE_STEPS.map((s) => s.key);
 
 function statusBadge(status) {
-  return `<span class="badge badge-${status}">${status.replace("_", " ")}</span>`;
+  return `<span class="badge badge-${esc(status)}">${esc(status.replace(/_/g, " "))}</span>`;
+}
+
+// ── Toast ──────────────────────────────────────────────────────────────────
+
+function showToast(msg, type = "info") {
+  const icons = { success: "✅", error: "❌", info: "ℹ️" };
+  const container = document.getElementById("toast-container");
+  const toast = document.createElement("div");
+  toast.className = `toast ${type}`;
+  toast.innerHTML = `<span class="toast-icon">${icons[type] || "ℹ️"}</span><span class="toast-text">${esc(msg)}</span>`;
+  container.appendChild(toast);
+  setTimeout(() => {
+    toast.classList.add("toast-out");
+    toast.addEventListener("animationend", () => toast.remove());
+  }, 3500);
 }
 
 // ── Routing ────────────────────────────────────────────────────────────────
@@ -69,7 +82,7 @@ function statusBadge(status) {
 function showPage(id) {
   document.querySelectorAll(".page").forEach((p) => p.classList.remove("active"));
   document.getElementById("page-" + id).classList.add("active");
-  document.querySelectorAll(".nav-item").forEach((n) => {
+  document.querySelectorAll(".nav-item[data-page]").forEach((n) => {
     n.classList.toggle("active", n.dataset.page === id);
   });
 }
@@ -79,13 +92,8 @@ document.querySelectorAll(".nav-item[data-page]").forEach((el) => {
     if (el.getAttribute("target") === "_blank") return;
     e.preventDefault();
     const page = el.dataset.page;
-    if (page === "bots") {
-      showPage("bots");
-      loadBots();
-    } else if (page === "webhooks") {
-      showPage("webhooks");
-      loadWebhooks();
-    }
+    if (page === "bots")     { showPage("bots"); loadBots(); }
+    if (page === "webhooks") { showPage("webhooks"); loadWebhooks(); }
   });
 });
 
@@ -96,291 +104,230 @@ function openModal(id) {
 }
 function closeModal(id) {
   document.getElementById(id).classList.add("hidden");
+  // Clear form fields
+  document.querySelectorAll(`#${id} .input`).forEach((inp) => {
+    if (inp.id === "new-bot-name") inp.value = "MeetingBot";
+    else if (inp.type !== "checkbox") inp.value = "";
+  });
+  document.querySelectorAll(`#${id} .field-error`).forEach((e) => {
+    e.classList.add("hidden"); e.textContent = "";
+  });
+  document.querySelectorAll(`#${id} .input.error`).forEach((e) => {
+    e.classList.remove("error");
+  });
 }
 
 document.querySelectorAll("[data-close]").forEach((btn) => {
   btn.addEventListener("click", () => closeModal(btn.dataset.close));
 });
 document.querySelectorAll(".modal-backdrop").forEach((bd) => {
-  bd.addEventListener("click", (e) => {
-    if (e.target === bd) closeModal(bd.id);
-  });
+  bd.addEventListener("click", (e) => { if (e.target === bd) closeModal(bd.id); });
 });
 
-// ── Bots ───────────────────────────────────────────────────────────────────
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    document.querySelectorAll(".modal-backdrop:not(.hidden)").forEach((m) => closeModal(m.id));
+  }
+});
 
-let _bots = [];
-let _refreshInterval = null;
+function showFieldError(inputId, errorId, msg) {
+  const inp = document.getElementById(inputId);
+  const err = document.getElementById(errorId);
+  if (inp) inp.classList.add("error");
+  if (err) { err.textContent = msg; err.classList.remove("hidden"); }
+}
 
-async function loadBots(filter = "") {
-  const listEl = document.getElementById("bot-list");
-  listEl.innerHTML = '<div class="loading">Loading…</div>';
-  try {
-    const qs = filter ? `?status=${filter}` : "";
-    const data = await api("GET", `/bot${qs}`);
-    _bots = data.results;
-    renderBots(_bots, data.count);
-  } catch (e) {
-    listEl.innerHTML = `<div class="empty">Error: ${e.message}</div>`;
+// ── WebSocket ──────────────────────────────────────────────────────────────
+
+let _wsRetryDelay = 1000;
+let _ws = null;
+
+function connectWS() {
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  _ws = new WebSocket(`${proto}//${location.host}/api/v1/ws`);
+
+  _ws.onopen = () => {
+    _wsRetryDelay = 1000;
+    setWsStatus(true);
+    // Keep-alive
+    setInterval(() => _ws && _ws.readyState === WebSocket.OPEN && _ws.send("ping"), 25000);
+  };
+
+  _ws.onmessage = (e) => {
+    try {
+      const { event, data } = JSON.parse(e.data);
+      if (event && data) handleServerEvent(event, data);
+    } catch (_) {}
+  };
+
+  _ws.onclose = () => {
+    setWsStatus(false);
+    setTimeout(connectWS, _wsRetryDelay);
+    _wsRetryDelay = Math.min(_wsRetryDelay * 2, 30000);
+  };
+
+  _ws.onerror = () => _ws.close();
+}
+
+function setWsStatus(connected) {
+  const el = document.getElementById("ws-indicator");
+  const label = el.querySelector(".ws-label");
+  el.className = `ws-indicator ${connected ? "connected" : "disconnected"}`;
+  label.textContent = connected ? "Live" : "Reconnecting…";
+}
+
+function handleServerEvent(event, data) {
+  // Update stats bar on any bot event
+  if (event.startsWith("bot.")) {
+    loadStats();
+
+    // If on the bots list page, refresh the affected row
+    if (document.getElementById("page-bots").classList.contains("active")) {
+      updateBotRow(data.bot_id, data);
+    }
+
+    // If the detail page is showing the same bot, refresh it
+    const detailPage = document.getElementById("page-bot-detail");
+    if (detailPage.classList.contains("active") && _currentBotId === data.bot_id) {
+      refreshBotDetail(data.bot_id);
+    }
   }
 }
 
-function renderBots(bots, total) {
-  // Stats
-  const active = bots.filter((b) => ["joining", "in_call"].includes(b.status)).length;
-  const done = bots.filter((b) => b.status === "done").length;
-  const err = bots.filter((b) => b.status === "error").length;
-  document.getElementById("stat-total").textContent = total ?? bots.length;
-  document.getElementById("stat-active").textContent = active;
-  document.getElementById("stat-done").textContent = done;
-  document.getElementById("stat-error").textContent = err;
+// ── Stats ──────────────────────────────────────────────────────────────────
 
+async function loadStats() {
+  try {
+    const s = await apiFetch("GET", "/bot/stats");
+    document.getElementById("stat-total").textContent = s.total;
+    document.getElementById("stat-active").textContent = s.active;
+    document.getElementById("stat-done").textContent = s.done;
+    document.getElementById("stat-error").textContent = s.error;
+  } catch (_) {}
+}
+
+// ── Bots list ──────────────────────────────────────────────────────────────
+
+let _currentFilter = "";
+let _bots = [];
+
+async function loadBots(filter = _currentFilter) {
+  _currentFilter = filter;
+  const listEl = document.getElementById("bot-list");
+  if (!_bots.length) listEl.innerHTML = '<div class="loading">Loading…</div>';
+
+  try {
+    const qs = filter ? `?status=${filter}` : "";
+    const data = await apiFetch("GET", `/bot${qs}`);
+    _bots = data.results;
+    renderBotList(_bots);
+  } catch (e) {
+    listEl.innerHTML = `<div class="empty">Error: ${esc(e.message)}</div>`;
+  }
+
+  await loadStats();
+}
+
+function renderBotList(bots) {
   const listEl = document.getElementById("bot-list");
   if (!bots.length) {
-    listEl.innerHTML = '<div class="empty">No bots yet. Create one to get started!</div>';
+    listEl.innerHTML = `
+      <div class="empty">
+        No bots yet${_currentFilter ? ` with status "${_currentFilter}"` : ""}.
+        <div class="empty-action">
+          <button class="btn btn-primary btn-sm" onclick="openModal('modal-new-bot')">+ Create your first bot</button>
+        </div>
+      </div>`;
     return;
   }
 
-  listEl.innerHTML = bots
-    .map(
-      (b) => `
-    <div class="bot-row" data-id="${b.id}">
+  listEl.innerHTML = bots.map((b) => `
+    <div class="bot-row" data-id="${esc(b.id)}">
       <div class="bot-platform-icon">${platformIcon(b.meeting_platform)}</div>
       <div class="bot-info">
-        <div class="bot-name">${escHtml(b.bot_name)}</div>
-        <div class="bot-url">${escHtml(b.meeting_url)}</div>
-        <div class="bot-meta">Created ${fmtDate(b.created_at)} · ${b.meeting_platform}</div>
+        <div class="bot-name">${esc(b.bot_name)}</div>
+        <div class="bot-url">${esc(b.meeting_url)}</div>
+        <div class="bot-meta">${esc(b.meeting_platform)} · ${fmtDate(b.created_at)}</div>
       </div>
       <div class="bot-actions">
-        ${statusBadge(b.status)}
-        <button class="btn btn-danger" data-delete="${b.id}" title="Delete bot">🗑</button>
+        <span data-badge-id="${esc(b.id)}">${statusBadge(b.status)}</span>
+        <button class="btn btn-danger btn-sm" data-delete-bot="${esc(b.id)}" title="Delete bot">🗑</button>
       </div>
-    </div>`
-    )
-    .join("");
+    </div>`).join("");
 
   listEl.querySelectorAll(".bot-row").forEach((row) => {
     row.addEventListener("click", (e) => {
-      if (e.target.closest("[data-delete]")) return;
+      if (e.target.closest("[data-delete-bot]")) return;
       showBotDetail(row.dataset.id);
     });
   });
 
-  listEl.querySelectorAll("[data-delete]").forEach((btn) => {
+  listEl.querySelectorAll("[data-delete-bot]").forEach((btn) => {
     btn.addEventListener("click", async (e) => {
       e.stopPropagation();
-      if (!confirm("Delete this bot?")) return;
+      if (!confirm("Delete this bot and all its data?")) return;
+      btn.disabled = true;
       try {
-        await api("DELETE", `/bot/${btn.dataset.delete}`);
-        showToast("Bot deleted");
+        await apiFetch("DELETE", `/bot/${btn.dataset.deleteBot}`);
+        showToast("Bot deleted", "success");
         loadBots();
       } catch (err) {
         showToast(err.message, "error");
+        btn.disabled = false;
       }
     });
   });
 }
 
-// Auto-refresh if any bot is in-flight
-function scheduleRefresh() {
-  clearInterval(_refreshInterval);
-  const hasActive = _bots.some((b) =>
-    ["ready", "joining", "in_call", "call_ended"].includes(b.status)
-  );
-  if (hasActive) {
-    _refreshInterval = setInterval(() => loadBots(), 4000);
-  }
+function updateBotRow(botId, data) {
+  // Update just the status badge on the list row without full refresh
+  const badgeEl = document.querySelector(`[data-badge-id="${botId}"]`);
+  if (badgeEl && data.status) badgeEl.innerHTML = statusBadge(data.status);
+  // Update _bots cache
+  const idx = _bots.findIndex((b) => b.id === botId);
+  if (idx >= 0) _bots[idx] = { ..._bots[idx], ...data };
 }
 
-// ── Bot Detail ─────────────────────────────────────────────────────────────
+// ── Filter buttons ─────────────────────────────────────────────────────────
 
-async function showBotDetail(botId) {
-  showPage("bot-detail");
-  const headerEl = document.getElementById("bot-detail-header");
-  const contentEl = document.getElementById("bot-detail-content");
-  contentEl.innerHTML = '<div class="loading">Loading…</div>';
+document.querySelectorAll(".filter-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".filter-btn").forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    loadBots(btn.dataset.status || "");
+  });
+});
 
-  let bot;
-  try {
-    bot = await api("GET", `/bot/${botId}`);
-  } catch (e) {
-    contentEl.innerHTML = `<div class="empty">Error: ${e.message}</div>`;
-    return;
-  }
-
-  headerEl.innerHTML = `
-    <div style="display:flex;align-items:center;gap:0.75rem">
-      <span style="font-size:1.5rem">${platformIcon(bot.meeting_platform)}</span>
-      <div>
-        <div style="font-weight:700;font-size:1.1rem">${escHtml(bot.bot_name)}</div>
-        <div style="color:var(--text-muted);font-size:0.8rem">${escHtml(bot.meeting_url)}</div>
-      </div>
-      ${statusBadge(bot.status)}
-    </div>`;
-
-  // Re-analyse button
-  const canAnalyse = bot.transcript && bot.transcript.length > 0;
-
-  contentEl.innerHTML = `
-    <div class="detail-meta">
-      <div class="meta-item"><div class="meta-label">Platform</div><div class="meta-value">${bot.meeting_platform}</div></div>
-      <div class="meta-item"><div class="meta-label">Status</div><div class="meta-value">${bot.status}</div></div>
-      <div class="meta-item"><div class="meta-label">Started</div><div class="meta-value">${fmtDate(bot.started_at)}</div></div>
-      <div class="meta-item"><div class="meta-label">Duration</div><div class="meta-value">${fmtDuration(bot.started_at, bot.ended_at)}</div></div>
-      <div class="meta-item"><div class="meta-label">Created</div><div class="meta-value">${fmtDate(bot.created_at)}</div></div>
-      <div class="meta-item"><div class="meta-label">Entries</div><div class="meta-value">${(bot.transcript || []).length}</div></div>
-    </div>
-
-    ${bot.error_message ? `<div class="card" style="border-color:var(--error);margin-bottom:1.25rem;color:var(--error)">⚠ ${escHtml(bot.error_message)}</div>` : ""}
-
-    <!-- Transcript -->
-    <div class="card" style="margin-bottom:1.25rem">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
-        <h3>Transcript</h3>
-        ${canAnalyse ? `<button class="btn btn-sm btn-primary" id="btn-reanalyse">✨ (Re-)Analyse with Claude</button>` : ""}
-      </div>
-      ${renderTranscript(bot.transcript)}
-    </div>
-
-    <!-- Analysis -->
-    <div class="card" id="analysis-card">
-      <h3 style="margin-bottom:1rem">AI Analysis</h3>
-      ${renderAnalysis(bot.analysis)}
-    </div>`;
-
-  if (canAnalyse) {
-    document.getElementById("btn-reanalyse").addEventListener("click", async () => {
-      const btn = document.getElementById("btn-reanalyse");
-      btn.disabled = true;
-      btn.textContent = "Analysing…";
-      try {
-        const analysis = await api("POST", `/bot/${botId}/analyze`);
-        document.getElementById("analysis-card").innerHTML = `<h3 style="margin-bottom:1rem">AI Analysis</h3>${renderAnalysis(analysis)}`;
-        showToast("Analysis complete!");
-      } catch (e) {
-        showToast(e.message, "error");
-      } finally {
-        btn.disabled = false;
-        btn.textContent = "✨ (Re-)Analyse with Claude";
-      }
-    });
-  }
-
-  // Poll if bot is still active
-  if (["ready", "joining", "in_call", "call_ended"].includes(bot.status)) {
-    const poll = setInterval(async () => {
-      const fresh = await api("GET", `/bot/${botId}`).catch(() => null);
-      if (!fresh) { clearInterval(poll); return; }
-      if (!["ready", "joining", "in_call", "call_ended"].includes(fresh.status)) {
-        clearInterval(poll);
-        showBotDetail(botId);  // reload full detail
-      } else {
-        // Update status badge
-        headerEl.querySelector(".badge").outerHTML = statusBadge(fresh.status);
-      }
-    }, 3000);
-  }
-}
-
-function renderTranscript(transcript) {
-  if (!transcript || !transcript.length) {
-    return '<div class="empty" style="padding:1.5rem">No transcript yet</div>';
-  }
-  const rows = transcript
-    .map(
-      (e) => `
-    <div class="transcript-entry">
-      <span class="t-speaker">${escHtml(e.speaker)}</span>
-      <span class="t-ts">${fmtTs(e.timestamp)}</span>
-      <span class="t-text">${escHtml(e.text)}</span>
-    </div>`
-    )
-    .join("");
-  return `<div class="transcript-list">${rows}</div>`;
-}
-
-function renderAnalysis(analysis) {
-  if (!analysis) {
-    return '<div class="empty" style="padding:1.5rem">No analysis yet — run the bot to generate one</div>';
-  }
-
-  const items =
-    (analysis.action_items || [])
-      .map(
-        (a) => `
-    <div class="action-item-row">
-      <span style="font-size:1rem">☑</span>
-      <div class="action-task">${escHtml(a.task)}</div>
-      ${a.assignee ? `<div class="action-assignee">@${escHtml(a.assignee)}</div>` : ""}
-    </div>`
-      )
-      .join("") || '<div class="empty" style="padding:0.5rem 0">No action items</div>';
-
-  const sentimentColor = { positive: "#22c55e", neutral: "#f59e0b", negative: "#ef4444" }[analysis.sentiment] || "var(--text-muted)";
-
-  return `
-    <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:1rem">
-      <span style="font-size:0.8rem;color:var(--text-muted)">Sentiment:</span>
-      <span style="font-weight:700;color:${sentimentColor}">${analysis.sentiment || "—"}</span>
-    </div>
-
-    <div class="analysis-section">
-      <h3>Summary</h3>
-      <div class="analysis-summary">${escHtml(analysis.summary || "")}</div>
-    </div>
-
-    <div class="analysis-section">
-      <h3>Topics</h3>
-      <div class="pill-list">
-        ${(analysis.topics || []).map((t) => `<span class="pill">${escHtml(t)}</span>`).join("") || "—"}
-      </div>
-    </div>
-
-    <div class="analysis-section">
-      <h3>Key Points</h3>
-      <ul style="padding-left:1.25rem;display:flex;flex-direction:column;gap:0.4rem">
-        ${(analysis.key_points || []).map((p) => `<li style="font-size:0.875rem">${escHtml(p)}</li>`).join("") || "<li style='color:var(--text-muted)'>—</li>"}
-      </ul>
-    </div>
-
-    <div class="analysis-section">
-      <h3>Action Items</h3>
-      ${items}
-    </div>
-
-    <div class="analysis-section">
-      <h3>Decisions</h3>
-      <ul style="padding-left:1.25rem;display:flex;flex-direction:column;gap:0.4rem">
-        ${(analysis.decisions || []).map((d) => `<li style="font-size:0.875rem">${escHtml(d)}</li>`).join("") || "<li style='color:var(--text-muted)'>—</li>"}
-      </ul>
-    </div>
-
-    <div class="analysis-section">
-      <h3>Next Steps</h3>
-      <ul style="padding-left:1.25rem;display:flex;flex-direction:column;gap:0.4rem">
-        ${(analysis.next_steps || []).map((s) => `<li style="font-size:0.875rem">${escHtml(s)}</li>`).join("") || "<li style='color:var(--text-muted)'>—</li>"}
-      </ul>
-    </div>`;
-}
+document.getElementById("btn-refresh").addEventListener("click", () => loadBots());
 
 // ── Create Bot ─────────────────────────────────────────────────────────────
 
 document.getElementById("btn-new-bot").addEventListener("click", () => openModal("modal-new-bot"));
 
-document.getElementById("btn-create-bot").addEventListener("click", async () => {
-  const url = document.getElementById("new-bot-url").value.trim();
-  const name = document.getElementById("new-bot-name").value.trim() || "MeetingBot";
-  if (!url) { showToast("Meeting URL is required", "error"); return; }
+async function submitCreateBot() {
+  const urlInput = document.getElementById("new-bot-url");
+  const nameInput = document.getElementById("new-bot-name");
+  const url = urlInput.value.trim();
+  const name = nameInput.value.trim() || "MeetingBot";
+
+  // Client-side validation
+  if (!url) {
+    showFieldError("new-bot-url", "new-bot-url-error", "Meeting URL is required");
+    return;
+  }
+  if (!url.startsWith("http://") && !url.startsWith("https://")) {
+    showFieldError("new-bot-url", "new-bot-url-error", "URL must start with http:// or https://");
+    return;
+  }
 
   const btn = document.getElementById("btn-create-bot");
   btn.disabled = true;
   btn.textContent = "Creating…";
 
   try {
-    const bot = await api("POST", "/bot", { meeting_url: url, bot_name: name });
+    const bot = await apiFetch("POST", "/bot", { meeting_url: url, bot_name: name });
     closeModal("modal-new-bot");
-    document.getElementById("new-bot-url").value = "";
-    showToast(`Bot created — ${bot.id}`);
+    showToast(`Bot created — joining now`, "success");
     showBotDetail(bot.id);
     loadBots();
   } catch (e) {
@@ -389,66 +336,315 @@ document.getElementById("btn-create-bot").addEventListener("click", async () => 
     btn.disabled = false;
     btn.textContent = "Create Bot";
   }
+}
+
+document.getElementById("btn-create-bot").addEventListener("click", submitCreateBot);
+document.getElementById("modal-new-bot").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.target.matches("textarea")) submitCreateBot();
 });
+
+// ── Bot Detail ─────────────────────────────────────────────────────────────
+
+let _currentBotId = null;
+
+async function showBotDetail(botId) {
+  _currentBotId = botId;
+  showPage("bot-detail");
+  renderBotDetailLoading();
+  await refreshBotDetail(botId);
+}
+
+function renderBotDetailLoading() {
+  document.getElementById("bot-detail-badges").innerHTML = "";
+  document.getElementById("lifecycle-steps").innerHTML =
+    LIFECYCLE_STEPS.map((s) => `
+      <div class="lifecycle-step" data-step="${s.key}">
+        <div class="step-dot">${s.icon}</div>
+        <div class="step-label">${s.label}</div>
+      </div>`).join("");
+  document.getElementById("bot-detail-content").innerHTML = '<div class="loading">Loading…</div>';
+}
+
+async function refreshBotDetail(botId) {
+  if (_currentBotId !== botId) return; // navigated away
+  try {
+    const bot = await apiFetch("GET", `/bot/${botId}`);
+    if (_currentBotId !== botId) return;
+    renderBotDetail(bot);
+  } catch (e) {
+    if (_currentBotId !== botId) return;
+    document.getElementById("bot-detail-content").innerHTML =
+      `<div class="empty">Error loading bot: ${esc(e.message)}</div>`;
+  }
+}
+
+function renderBotDetail(bot) {
+  // Badges in header
+  const badgesEl = document.getElementById("bot-detail-badges");
+  badgesEl.innerHTML = `
+    <span style="font-size:1.25rem">${platformIcon(bot.meeting_platform)}</span>
+    <strong style="font-size:1rem">${esc(bot.bot_name)}</strong>
+    ${statusBadge(bot.status)}`;
+
+  // Lifecycle steps
+  renderLifecycleSteps(bot.status);
+
+  // Meta grid
+  const duration = fmtDuration(bot.started_at, bot.ended_at);
+  const contentEl = document.getElementById("bot-detail-content");
+
+  const errorBanner = bot.error_message
+    ? `<div class="error-banner">⚠ ${esc(bot.error_message)}</div>`
+    : "";
+
+  contentEl.innerHTML = `
+    ${errorBanner}
+    <div class="detail-meta">
+      <div class="meta-item"><div class="meta-label">Platform</div><div class="meta-value">${esc(bot.meeting_platform)}</div></div>
+      <div class="meta-item"><div class="meta-label">Started</div><div class="meta-value">${fmtDate(bot.started_at)}</div></div>
+      <div class="meta-item"><div class="meta-label">Duration</div><div class="meta-value">${duration}</div></div>
+      <div class="meta-item"><div class="meta-label">Created</div><div class="meta-value">${fmtDate(bot.created_at)}</div></div>
+      <div class="meta-item"><div class="meta-label">Transcript</div><div class="meta-value">${(bot.transcript || []).length} entries</div></div>
+      <div class="meta-item"><div class="meta-label">Meeting URL</div><div class="meta-value" style="font-family:var(--font-mono);font-size:0.75rem;color:var(--text-muted)">${esc(bot.meeting_url.slice(0, 40))}${bot.meeting_url.length > 40 ? "…" : ""}</div></div>
+    </div>
+
+    <!-- Transcript section -->
+    <div class="section-card">
+      <div class="section-header">
+        <h3>Transcript <span style="color:var(--text-muted);font-size:0.8rem;font-weight:400">(${(bot.transcript||[]).length} entries)</span></h3>
+        <div style="display:flex;gap:0.5rem">
+          ${(bot.transcript||[]).length ? `<button class="btn btn-icon" id="btn-copy-transcript" title="Copy transcript">📋 Copy</button>` : ""}
+          ${(bot.transcript||[]).length && bot.analysis ? `<button class="btn btn-icon" id="btn-export-json" title="Download JSON">⬇ Export</button>` : ""}
+          ${(bot.transcript||[]).length ? `<button class="btn btn-sm btn-primary" id="btn-reanalyse">✨ Analyse with Claude</button>` : ""}
+        </div>
+      </div>
+      ${renderTranscript(bot.transcript)}
+    </div>
+
+    <!-- Analysis section -->
+    <div class="section-card" id="analysis-section">
+      <div class="section-header">
+        <h3>AI Analysis</h3>
+        ${bot.analysis ? `<span class="sentiment-badge sentiment-${esc(bot.analysis.sentiment || 'neutral')}">${esc(bot.analysis.sentiment || 'neutral')}</span>` : ""}
+      </div>
+      ${renderAnalysis(bot.analysis)}
+    </div>`;
+
+  // Wire up buttons
+  const copyBtn = document.getElementById("btn-copy-transcript");
+  if (copyBtn) copyBtn.addEventListener("click", () => copyTranscript(bot.transcript));
+
+  const exportBtn = document.getElementById("btn-export-json");
+  if (exportBtn) exportBtn.addEventListener("click", () => exportJson(bot));
+
+  const analyseBtn = document.getElementById("btn-reanalyse");
+  if (analyseBtn) analyseBtn.addEventListener("click", () => reanalyse(bot.id));
+}
+
+function renderLifecycleSteps(status) {
+  const stepsEl = document.getElementById("lifecycle-steps");
+  const currentIdx = status === "error"
+    ? STEP_ORDER.indexOf("call_ended") // show error at last reached step
+    : STEP_ORDER.indexOf(status);
+
+  stepsEl.innerHTML = LIFECYCLE_STEPS.map((s, i) => {
+    let cls = "";
+    if (status === "error" && i === currentIdx) cls = "error";
+    else if (i < currentIdx) cls = "done";
+    else if (i === currentIdx) cls = "active";
+
+    const icon = cls === "done" ? "✓" : s.icon;
+    return `
+      <div class="lifecycle-step ${cls}" data-step="${s.key}">
+        <div class="step-dot">${icon}</div>
+        <div class="step-label">${s.label}</div>
+      </div>`;
+  }).join("");
+}
+
+function renderTranscript(transcript) {
+  if (!transcript || !transcript.length) {
+    return '<div class="empty" style="padding:1.5rem">No transcript yet — bot is still running</div>';
+  }
+  return `<div class="transcript-list">` +
+    transcript.map((e) => `
+      <div class="transcript-entry">
+        <span class="t-speaker">${esc(e.speaker)}</span>
+        <span class="t-ts">${fmtTs(e.timestamp)}</span>
+        <span class="t-text">${esc(e.text)}</span>
+      </div>`).join("") +
+    `</div>`;
+}
+
+function renderAnalysis(a) {
+  if (!a) {
+    return '<div class="empty" style="padding:1.5rem">No analysis yet — appears automatically after the meeting ends</div>';
+  }
+
+  const actionItems = (a.action_items || []).length
+    ? (a.action_items || []).map((item) => `
+        <div class="action-row">
+          <span style="color:var(--accent)">☑</span>
+          <div class="action-task">${esc(item.task)}</div>
+          ${item.assignee ? `<div class="action-assignee">@${esc(item.assignee)}</div>` : ""}
+        </div>`).join("")
+    : '<div style="color:var(--text-muted);font-size:0.875rem">None identified</div>';
+
+  const bullets = (items) => !items?.length
+    ? '<li style="color:var(--text-muted)">—</li>'
+    : items.map((t) => `<li>${esc(t)}</li>`).join("");
+
+  return `
+    ${a.summary ? `<div class="analysis-summary">${esc(a.summary)}</div>` : ""}
+
+    ${(a.topics||[]).length ? `
+    <div class="analysis-section">
+      <div class="analysis-section-title">Topics</div>
+      <div class="pill-list">${(a.topics||[]).map((t) => `<span class="pill">${esc(t)}</span>`).join("")}</div>
+    </div>` : ""}
+
+    <div class="analysis-section">
+      <div class="analysis-section-title">Key Points</div>
+      <ul class="bullet-list">${bullets(a.key_points)}</ul>
+    </div>
+
+    <div class="analysis-section">
+      <div class="analysis-section-title">Action Items</div>
+      ${actionItems}
+    </div>
+
+    ${(a.decisions||[]).length ? `
+    <div class="analysis-section">
+      <div class="analysis-section-title">Decisions</div>
+      <ul class="bullet-list">${bullets(a.decisions)}</ul>
+    </div>` : ""}
+
+    ${(a.next_steps||[]).length ? `
+    <div class="analysis-section">
+      <div class="analysis-section-title">Next Steps</div>
+      <ul class="bullet-list">${bullets(a.next_steps)}</ul>
+    </div>` : ""}`;
+}
+
+async function reanalyse(botId) {
+  const btn = document.getElementById("btn-reanalyse");
+  if (!btn) return;
+  btn.disabled = true;
+  btn.textContent = "Analysing…";
+  try {
+    const analysis = await apiFetch("POST", `/bot/${botId}/analyze`);
+    // Patch in-place
+    const section = document.getElementById("analysis-section");
+    if (section) {
+      section.innerHTML = `
+        <div class="section-header">
+          <h3>AI Analysis</h3>
+          <span class="sentiment-badge sentiment-${esc(analysis.sentiment || 'neutral')}">${esc(analysis.sentiment || 'neutral')}</span>
+        </div>
+        ${renderAnalysis(analysis)}`;
+    }
+    showToast("Analysis complete!", "success");
+  } catch (e) {
+    showToast(e.message, "error");
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "✨ Analyse with Claude"; }
+  }
+}
+
+function copyTranscript(transcript) {
+  const text = (transcript || [])
+    .map((e) => `[${fmtTs(e.timestamp)}] ${e.speaker}: ${e.text}`)
+    .join("\n");
+  navigator.clipboard.writeText(text).then(
+    () => showToast("Transcript copied to clipboard", "success"),
+    () => showToast("Copy failed — try selecting manually", "error"),
+  );
+}
+
+function exportJson(bot) {
+  const data = {
+    id: bot.id,
+    bot_name: bot.bot_name,
+    meeting_url: bot.meeting_url,
+    meeting_platform: bot.meeting_platform,
+    started_at: bot.started_at,
+    ended_at: bot.ended_at,
+    transcript: bot.transcript,
+    analysis: bot.analysis,
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `meetingbot-${bot.id.slice(0, 8)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast("Exported as JSON", "success");
+}
 
 // ── Back button ────────────────────────────────────────────────────────────
 
 document.getElementById("btn-back-bots").addEventListener("click", () => {
+  _currentBotId = null;
   showPage("bots");
   loadBots();
 });
 
-// ── Refresh ────────────────────────────────────────────────────────────────
-
-document.getElementById("btn-refresh").addEventListener("click", () => {
-  const filter = document.getElementById("filter-status").value.trim();
-  loadBots(filter);
-});
-
-document.getElementById("filter-status").addEventListener("input", (e) => {
-  const filter = e.target.value.trim();
-  loadBots(filter);
-});
-
 // ── Webhooks ───────────────────────────────────────────────────────────────
+
+// Toggle "all events" checkbox vs individual
+document.getElementById("wh-ev-all").addEventListener("change", (e) => {
+  const list = document.getElementById("wh-event-list");
+  list.classList.toggle("disabled", e.target.checked);
+  if (e.target.checked) {
+    list.querySelectorAll("input[type=checkbox]").forEach((cb) => (cb.checked = false));
+  }
+});
 
 async function loadWebhooks() {
   const listEl = document.getElementById("webhook-list");
   listEl.innerHTML = '<div class="loading">Loading…</div>';
   try {
-    const webhooks = await api("GET", "/webhook");
+    const webhooks = await apiFetch("GET", "/webhook");
     if (!webhooks.length) {
-      listEl.innerHTML = '<div class="empty">No webhooks registered yet</div>';
+      listEl.innerHTML = `
+        <div class="empty">
+          No webhooks registered yet.
+          <div class="empty-action">
+            <button class="btn btn-primary btn-sm" onclick="openModal('modal-new-webhook')">+ Add Webhook</button>
+          </div>
+        </div>`;
       return;
     }
-    listEl.innerHTML = webhooks
-      .map(
-        (wh) => `
+    listEl.innerHTML = webhooks.map((wh) => `
       <div class="webhook-row">
-        <div class="webhook-url">${escHtml(wh.url)}</div>
+        <div class="webhook-url">${esc(wh.url)}</div>
         <div class="webhook-events">
-          ${wh.events.map((e) => `<span class="chip">${escHtml(e)}</span>`).join("")}
+          ${wh.events.map((e) => `<span class="chip chip-code">${esc(e)}</span>`).join("")}
         </div>
-        <div style="white-space:nowrap;font-size:0.78rem;color:var(--text-muted)">${wh.delivery_attempts} delivered</div>
-        <button class="btn btn-danger" data-delete-wh="${wh.id}" title="Delete webhook">🗑</button>
-      </div>`
-      )
-      .join("");
+        <div style="white-space:nowrap;font-size:0.75rem;color:var(--text-muted)">
+          ${wh.delivery_attempts} sent
+          ${wh.last_delivery_status ? `· ${wh.last_delivery_status}` : ""}
+        </div>
+        <button class="btn btn-danger btn-sm" data-del-wh="${esc(wh.id)}" title="Delete webhook">🗑</button>
+      </div>`).join("");
 
-    listEl.querySelectorAll("[data-delete-wh]").forEach((btn) => {
+    listEl.querySelectorAll("[data-del-wh]").forEach((btn) => {
       btn.addEventListener("click", async () => {
         if (!confirm("Delete this webhook?")) return;
+        btn.disabled = true;
         try {
-          await api("DELETE", `/webhook/${btn.dataset.deleteWh}`);
-          showToast("Webhook deleted");
+          await apiFetch("DELETE", `/webhook/${btn.dataset.delWh}`);
+          showToast("Webhook deleted", "success");
           loadWebhooks();
         } catch (e) {
           showToast(e.message, "error");
+          btn.disabled = false;
         }
       });
     });
   } catch (e) {
-    listEl.innerHTML = `<div class="empty">Error: ${e.message}</div>`;
+    listEl.innerHTML = `<div class="empty">Error: ${esc(e.message)}</div>`;
   }
 }
 
@@ -456,23 +652,37 @@ document.getElementById("btn-new-webhook").addEventListener("click", () =>
   openModal("modal-new-webhook")
 );
 
-document.getElementById("btn-create-webhook").addEventListener("click", async () => {
-  const url = document.getElementById("new-wh-url").value.trim();
-  const secret = document.getElementById("new-wh-secret").value.trim() || null;
-  const select = document.getElementById("new-wh-events");
-  const events = Array.from(select.selectedOptions).map((o) => o.value);
+async function submitCreateWebhook() {
+  const urlInput = document.getElementById("new-wh-url");
+  const url = urlInput.value.trim();
 
-  if (!url) { showToast("URL is required", "error"); return; }
+  if (!url) {
+    showFieldError("new-wh-url", "new-wh-url-error", "URL is required");
+    return;
+  }
+  if (!url.startsWith("http://") && !url.startsWith("https://")) {
+    showFieldError("new-wh-url", "new-wh-url-error", "Must start with http:// or https://");
+    return;
+  }
+
+  const secret = document.getElementById("new-wh-secret").value.trim() || null;
+  const allEvt = document.getElementById("wh-ev-all").checked;
+  let events = ["*"];
+  if (!allEvt) {
+    events = Array.from(
+      document.querySelectorAll("#wh-event-list input[type=checkbox]:checked")
+    ).map((cb) => cb.value);
+    if (!events.length) events = ["*"];
+  }
 
   const btn = document.getElementById("btn-create-webhook");
   btn.disabled = true;
   btn.textContent = "Registering…";
 
   try {
-    await api("POST", "/webhook", { url, events, secret });
+    await apiFetch("POST", "/webhook", { url, events, secret });
     closeModal("modal-new-webhook");
-    document.getElementById("new-wh-url").value = "";
-    showToast("Webhook registered");
+    showToast("Webhook registered", "success");
     loadWebhooks();
   } catch (e) {
     showToast(e.message, "error");
@@ -480,25 +690,14 @@ document.getElementById("btn-create-webhook").addEventListener("click", async ()
     btn.disabled = false;
     btn.textContent = "Register";
   }
-});
-
-// ── XSS safety ────────────────────────────────────────────────────────────
-
-function escHtml(str) {
-  if (!str) return "";
-  return String(str)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
 }
+
+document.getElementById("btn-create-webhook").addEventListener("click", submitCreateWebhook);
+document.getElementById("modal-new-webhook").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.target.matches("select")) submitCreateWebhook();
+});
 
 // ── Init ───────────────────────────────────────────────────────────────────
 
+connectWS();
 loadBots();
-setInterval(() => {
-  const hasActive = _bots.some((b) =>
-    ["ready", "joining", "in_call", "call_ended"].includes(b.status)
-  );
-  if (hasActive) loadBots();
-}, 5000);

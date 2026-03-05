@@ -3,8 +3,9 @@
 import asyncio
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -20,6 +21,8 @@ _PLATFORM_PATTERNS = [
     (r"teams\.microsoft\.com", "microsoft_teams"),
     (r"webex\.com", "webex"),
     (r"whereby\.com", "whereby"),
+    (r"bluejeans\.com", "bluejeans"),
+    (r"gotomeeting\.com", "gotomeeting"),
 ]
 
 
@@ -31,10 +34,14 @@ def detect_platform(url: str) -> str:
     return "unknown"
 
 
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
 async def _set_status(db: AsyncSession, bot: Bot, status: str, **kwargs) -> None:
-    """Update bot status and fire the corresponding webhook."""
+    """Update bot status, persist, and fire the corresponding event (webhook + WS)."""
     bot.status = status
-    bot.updated_at = datetime.utcnow()
+    bot.updated_at = _now()
     for key, val in kwargs.items():
         setattr(bot, key, val)
     await db.commit()
@@ -42,21 +49,21 @@ async def _set_status(db: AsyncSession, bot: Bot, status: str, **kwargs) -> None
 
     payload = {
         "bot_id": bot.id,
+        "bot_name": bot.bot_name,
         "status": status,
         "meeting_url": bot.meeting_url,
         "meeting_platform": bot.meeting_platform,
-        "ts": datetime.utcnow().isoformat(),
+        "ts": _now().isoformat(),
     }
     await webhook_service.dispatch_event(db, f"bot.{status}", payload)
 
 
 async def run_bot_lifecycle(bot_id: str, db_factory) -> None:
     """
-    Background task that simulates the full bot lifecycle:
+    Background task that drives the full bot lifecycle:
       ready → joining → in_call → call_ended → done
     """
     async with db_factory() as db:
-        from sqlalchemy import select
         result = await db.execute(select(Bot).where(Bot.id == bot_id))
         bot = result.scalar_one_or_none()
         if bot is None:
@@ -67,25 +74,20 @@ async def run_bot_lifecycle(bot_id: str, db_factory) -> None:
             # 1. joining
             await _set_status(db, bot, "joining")
             logger.info("Bot %s joining %s", bot_id, bot.meeting_url)
-            await asyncio.sleep(3)  # simulate connection delay
+            await asyncio.sleep(3)
 
             # 2. in_call
-            await _set_status(db, bot, "in_call", started_at=datetime.utcnow())
-            logger.info("Bot %s in_call", bot_id)
+            await _set_status(db, bot, "in_call", started_at=_now())
+            logger.info("Bot %s in_call  duration=%ds", bot_id, settings.BOT_SIMULATION_DURATION)
+            await asyncio.sleep(settings.BOT_SIMULATION_DURATION)
 
-            # Simulate meeting duration
-            duration = settings.BOT_SIMULATION_DURATION
-            await asyncio.sleep(duration)
+            # 3. Generate transcript (Claude or fallback)
+            logger.info("Bot %s generating transcript…", bot_id)
+            transcript = await intelligence_service.generate_demo_transcript(bot.meeting_url)
+            await _set_status(db, bot, "call_ended", ended_at=_now())
 
-            # 3. Generate transcript
-            logger.info("Bot %s generating transcript...", bot_id)
-            transcript = await intelligence_service.generate_demo_transcript(
-                bot.meeting_url
-            )
-            await _set_status(db, bot, "call_ended", ended_at=datetime.utcnow())
-
-            # Fire transcript_ready
             bot.transcript = transcript
+            bot.updated_at = _now()
             await db.commit()
             await webhook_service.dispatch_event(
                 db,
@@ -94,10 +96,10 @@ async def run_bot_lifecycle(bot_id: str, db_factory) -> None:
             )
 
             # 4. Analyse with Claude
-            logger.info("Bot %s analysing transcript with Claude...", bot_id)
+            logger.info("Bot %s analysing transcript…", bot_id)
             analysis = await intelligence_service.analyze_transcript(transcript)
             bot.analysis = analysis
-            bot.updated_at = datetime.utcnow()
+            bot.updated_at = _now()
             await db.commit()
             await webhook_service.dispatch_event(
                 db,
@@ -110,11 +112,16 @@ async def run_bot_lifecycle(bot_id: str, db_factory) -> None:
             logger.info("Bot %s done", bot_id)
 
         except asyncio.CancelledError:
-            logger.info("Bot %s lifecycle cancelled", bot_id)
-            await _set_status(db, bot, "error", error_message="Lifecycle cancelled")
+            logger.info("Bot %s lifecycle cancelled by caller", bot_id)
+            # Gracefully mark as ended rather than error
+            try:
+                await _set_status(db, bot, "call_ended", ended_at=_now())
+            except Exception:
+                pass
             raise
         except Exception as exc:
             logger.exception("Bot %s lifecycle error: %s", bot_id, exc)
-            await _set_status(
-                db, bot, "error", error_message=str(exc)
-            )
+            try:
+                await _set_status(db, bot, "error", error_message=str(exc))
+            except Exception:
+                pass
