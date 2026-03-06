@@ -44,7 +44,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # ── Playwright: install Chromium and its system deps ─────────────────────────
 RUN playwright install chromium
-RUN playwright install-deps chromium
+# playwright install-deps fails on Debian Trixie due to missing ttf-ubuntu-font-family/ttf-unifont
+# Install the Debian equivalents manually
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    fonts-unifont \
+    fonts-ubuntu \
+    && rm -rf /var/lib/apt/lists/*
 
 # ── Application source ────────────────────────────────────────────────────────
 COPY . .
