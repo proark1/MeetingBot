@@ -54,6 +54,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY . .
 RUN chmod +x /app/start.sh
 
+# Verify all Python imports resolve correctly — fails the build if there are errors
+RUN python -c "from app.main import app; print('Import verification passed')"
+
 EXPOSE 8000
 
 # start.sh initialises PulseAudio, then starts uvicorn
