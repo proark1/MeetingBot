@@ -48,7 +48,6 @@ RUN playwright install chromium
 # Install the Debian equivalents manually
 RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-unifont \
-    fonts-ubuntu \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Application source ────────────────────────────────────────────────────────
