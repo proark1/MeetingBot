@@ -57,4 +57,5 @@ RUN chmod +x /app/start.sh
 EXPOSE 8000
 
 # start.sh initialises PulseAudio, then starts uvicorn
-CMD ["/app/start.sh", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Use shell form so ${PORT:-8000} is expanded (Railway injects PORT)
+CMD ["/bin/sh", "-c", "/app/start.sh uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
