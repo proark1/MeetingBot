@@ -65,6 +65,7 @@ app.include_router(ws_router, prefix="/api/v1")
 
 # ── Health check ──────────────────────────────────────────────────────────────
 
+@app.get("/health", tags=["Health"])
 @app.get("/api/health", tags=["Health"])
 async def health():
     return {"status": "ok", "service": "MeetingBot"}
