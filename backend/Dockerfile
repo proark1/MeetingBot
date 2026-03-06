@@ -38,6 +38,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
+# Flush Python stdout/stderr immediately so logs appear in Railway even if the process crashes
+ENV PYTHONUNBUFFERED=1
+
 # ── Python dependencies ───────────────────────────────────────────────────────
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
