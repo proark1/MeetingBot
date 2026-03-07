@@ -37,7 +37,7 @@ def _get_model():
             "google-generativeai is not installed — run: pip install google-generativeai"
         )
     genai.configure(api_key=settings.GEMINI_API_KEY)
-    return genai.GenerativeModel("gemini-2.0-flash")
+    return genai.GenerativeModel("gemini-2.5-flash")
 
 
 def _strip_fences(text: str) -> str:

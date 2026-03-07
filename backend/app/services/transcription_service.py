@@ -90,7 +90,7 @@ async def transcribe_audio(audio_path: str) -> list[dict[str, Any]]:
             return []
 
         logger.info("Audio uploaded (%s) — transcribing…", uploaded.name)
-        model = genai.GenerativeModel("gemini-2.0-flash")
+        model = genai.GenerativeModel("gemini-2.5-flash")
         response = await model.generate_content_async(
             [_TRANSCRIPTION_PROMPT, uploaded],
             generation_config={"temperature": 0, "max_output_tokens": 8192},
