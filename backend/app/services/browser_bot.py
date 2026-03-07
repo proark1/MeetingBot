@@ -389,15 +389,17 @@ async def _join_google_meet(page: Page, url: str, bot_name: str) -> None:
         await _screenshot(page, "gmeet_no_name_field")
         raise MeetingBotError("Could not find name input on Google Meet")
 
-    # Mute mic and camera (they may not always be present)
+    # Mute mic if currently on (aria-pressed="true" = active/on → click to mute)
     await _click(page, [
         "button[aria-label*='Turn off microphone' i]",
-        "button[aria-label*='microphone' i][aria-pressed='false']",
+        "button[aria-label*='microphone' i][aria-pressed='true']",
     ], timeout=2000)
+    # Turn off camera if currently on
     await _click(page, [
         "button[aria-label*='Turn off camera' i]",
-        "button[aria-label*='camera' i][aria-pressed='false']",
+        "button[aria-label*='camera' i][aria-pressed='true']",
     ], timeout=2000)
+    logger.info("Google Meet: mic and camera muted before joining")
 
     # Ask to join / Join now
     logger.info("Clicking join button…")
@@ -450,6 +452,22 @@ async def _join_zoom(page: Page, url: str, bot_name: str) -> None:
         await _screenshot(page, "zoom_no_name_field")
         raise MeetingBotError("Could not find name input on Zoom")
 
+    # Mute mic & camera on pre-join screen
+    await _click(page, [
+        "button.preview-audio-control",
+        "button[aria-label*='mute microphone' i]",
+        "button[aria-label*='mute audio' i]",
+        "button[aria-label*='microphone' i]",
+        ".join-audio-by-voip__mute-btn",
+    ], timeout=2000)
+    await _click(page, [
+        "button.preview-video-control",
+        "button[aria-label*='stop video' i]",
+        "button[aria-label*='turn off camera' i]",
+        "button[aria-label*='camera' i]",
+    ], timeout=2000)
+    logger.info("Zoom: mic and camera muted before joining")
+
     # Join button
     ok = await _click(page, [
         "button#joinBtn",
@@ -489,13 +507,21 @@ async def _join_teams(page: Page, url: str, bot_name: str) -> None:
         await _screenshot(page, "teams_no_name_field")
         raise MeetingBotError("Could not find name input on Teams")
 
-    # Mute mic & camera
-    for label in ["Mute", "Turn off camera"]:
-        await _click(page, [
-            f"button[aria-label*='{label}' i]",
-            f"div[role='button'][aria-label*='{label}' i]",
-        ], timeout=2000)
-        await asyncio.sleep(0.3)
+    # Mute mic if on (aria-pressed="true" = active/unmuted → click to mute)
+    await _click(page, [
+        "button[aria-label*='Mute' i][aria-pressed='true']",
+        "button[aria-label*='Mute microphone' i]",
+        "button[aria-label*='microphone' i][aria-pressed='true']",
+        "div[role='button'][aria-label*='Mute' i]",
+    ], timeout=2000)
+    # Turn off camera if on
+    await _click(page, [
+        "button[aria-label*='Turn off camera' i]",
+        "button[aria-label*='camera' i][aria-pressed='true']",
+        "button[aria-label*='Stop video' i]",
+        "div[role='button'][aria-label*='Turn off camera' i]",
+    ], timeout=2000)
+    logger.info("Teams: mic and camera muted before joining")
 
     # Join
     ok = await _click(page, [
