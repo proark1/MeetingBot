@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.config import settings
 from app.database import init_db
 from app.api.bots import router as bots_router
 from app.api.webhooks import router as webhooks_router
@@ -31,6 +32,11 @@ FRONTEND_DIR = Path(__file__).parent.parent.parent / "frontend"
 async def lifespan(app: FastAPI):
     logger.info("Initialising database…")
     await init_db()
+    if not settings.GEMINI_API_KEY:
+        logger.warning(
+            "⚠ GEMINI_API_KEY is NOT set — transcription and analysis will be "
+            "DISABLED.  Set it in Railway variables or your .env file."
+        )
     logger.info("MeetingBot ready")
     yield
     logger.info("MeetingBot shutting down")

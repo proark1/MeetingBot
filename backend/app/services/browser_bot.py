@@ -735,8 +735,11 @@ async def run_browser_bot(
         # Explicitly point Chrome at the PulseAudio server so it does not
         # fall back to a dummy audio output or PipeWire, both of which would
         # mean no audio reaches our null-sink monitor (and thus no recording).
-        pulse_server = os.environ.get("PULSE_SERVER", "unix:/tmp/pulse-socket")
-        env["PULSE_SERVER"] = pulse_server
+        # start.sh sets XDG_RUNTIME_DIR=/tmp/runtime-meetingbot, so the socket
+        # lives at /tmp/runtime-meetingbot/pulse/native.
+        rt = os.environ.get("XDG_RUNTIME_DIR", "/tmp/runtime-meetingbot")
+        default_pulse = f"unix:{rt}/pulse/native"
+        env["PULSE_SERVER"] = os.environ.get("PULSE_SERVER", default_pulse)
         env["PULSE_SINK"] = PULSE_SINK_NAME
 
     launch_args = [

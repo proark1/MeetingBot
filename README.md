@@ -22,7 +22,7 @@ Set these in a `.env` file or as environment variables:
 
 | Variable | Default | Description |
 |---|---|---|
-| `GEMINI_API_KEY` | *(required)* | Google Gemini API key — used for transcription and analysis |
+| `GEMINI_API_KEY` | *(required)* | Google Gemini API key — used for transcription and analysis. The server logs a warning at startup if this is missing. |
 | `BOT_NAME_DEFAULT` | `MeetingBot` | Display name shown inside the meeting |
 | `BOT_ADMISSION_TIMEOUT` | `300` | Seconds to wait for the host to admit the bot before giving up |
 | `BOT_MAX_DURATION` | `7200` | Maximum meeting recording length in seconds (2 hours) |
