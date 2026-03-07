@@ -509,23 +509,69 @@ async def _join_teams(page: Page, url: str, bot_name: str) -> None:
         "button:has-text('Join on the web instead')",
         "a:has-text('Continue on this browser')",
         "button:has-text('Join without Teams')",
-    ], timeout=3000)
+    ], timeout=2000)
     if ok:
         await asyncio.sleep(3)
     else:
-        # No gate button found — page may already be at pre-join screen
+        # No gate button found — light experience lands directly on pre-join screen
         await _screenshot(page, "teams_no_continue_button")
+        await asyncio.sleep(3)  # give the SPA time to render the pre-join UI
 
-    # Step 2: Fill name — use longer timeout since page may still be loading
-    ok = await _fill(page, [
+    # Step 2: Fill name
+    # Fluent UI v9 wraps <input> in a styled <span>; the inner element may not
+    # pass Playwright's strict "visible" check even though it renders fine.
+    # Strategy: try force-fill on known selectors first (bypasses actionability
+    # checks), then fall back to normal _fill, then JS.
+    ok = False
+    for sel in [
         "input[data-tid='prejoin-display-name-input']",
         "input[data-tid='anonymous-join-name-input']",
-        "input[placeholder*='Enter your name' i]",
+        "input[placeholder='Type your name']",
         "input[placeholder*='name' i]",
-        "input[aria-label*='name' i]",
-        "input[name='displayName']",
         "input[type='text']",
-    ], bot_name, timeout=15000)
+    ]:
+        try:
+            el = page.locator(sel).first
+            await el.wait_for(state="attached", timeout=10000)
+            await el.fill(bot_name, force=True)
+            ok = True
+            logger.info("Teams: name filled with selector %s (force)", sel)
+            break
+        except Exception:
+            pass
+
+    # If force-fill failed, try a JS fallback that fills the first
+    # visible <input type="text"> or contenteditable element on the page.
+    if not ok:
+        try:
+            filled = await page.evaluate("""(name) => {
+                const inputs = [...document.querySelectorAll(
+                    'input[type="text"], input:not([type]), [contenteditable="true"], [role="textbox"]'
+                )];
+                const el = inputs.find(e => {
+                    const r = e.getBoundingClientRect();
+                    return r.width > 0 && r.height > 0;
+                });
+                if (!el) return false;
+                el.focus();
+                if (el.isContentEditable) {
+                    el.textContent = name;
+                } else {
+                    const nativeSetter = Object.getOwnPropertyDescriptor(
+                        window.HTMLInputElement.prototype, 'value'
+                    ).set;
+                    nativeSetter.call(el, name);
+                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+                return true;
+            }""", bot_name)
+            ok = bool(filled)
+            if ok:
+                logger.info("Teams: name filled via JS fallback")
+        except Exception as js_err:
+            logger.warning("Teams: JS name fallback failed: %s", js_err)
+
     if not ok:
         await _screenshot(page, "teams_no_name_field")
         raise MeetingBotError("Could not find name input on Teams")
