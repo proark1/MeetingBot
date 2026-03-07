@@ -56,6 +56,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # ── Application source ────────────────────────────────────────────────────────
 COPY . .
 RUN chmod +x /app/start.sh
+RUN test -f /app/frontend/index.html || (echo "ERROR: frontend/index.html not found in build context" && exit 1)
 
 # Verify all Python imports resolve correctly — fails the build if there are errors
 RUN python -c "from app.main import app; print('Import verification passed')"

@@ -11,8 +11,9 @@ A self-hosted meeting bot that joins Google Meet, Zoom, and Microsoft Teams call
 GEMINI_API_KEY=your-key docker compose up
 ```
 
-The API is available at `http://localhost:8080`.
-Interactive docs (Swagger UI): `http://localhost:8080/docs`
+The web UI (Reports) is available at `http://localhost:8080`.
+The API is available at `http://localhost:8080/api/v1`.
+Interactive docs (Swagger UI): `http://localhost:8080/api/docs`
 
 ---
 
