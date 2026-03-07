@@ -678,3 +678,50 @@ code {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--border2); }
+
+/* ── Debug / Screenshots ──────────────────────────────────────────────────── */
+.debug-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 1rem;
+  padding: 1rem;
+}
+.debug-card {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.debug-thumb {
+  width: 100%;
+  height: 160px;
+  object-fit: cover;
+  object-position: top;
+  display: block;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.debug-html-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 160px;
+  font-size: 0.9rem;
+  color: var(--accent);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  text-decoration: none;
+}
+.debug-html-link:hover { background: var(--bg-hover); }
+.debug-card-info { padding: 0.75rem; display: flex; flex-direction: column; gap: 0.35rem; }
+.debug-card-name {
+  font-size: 0.78rem;
+  font-family: var(--font-mono);
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.debug-card-meta { font-size: 0.72rem; color: var(--text-muted); }

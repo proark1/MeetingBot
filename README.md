@@ -272,6 +272,19 @@ DELETE /api/v1/webhook/{webhook_id}
 
 ---
 
+### Debug
+
+Browser screenshots and HTML page dumps saved when a bot fails to join a meeting are accessible via:
+
+```
+GET /api/v1/debug/screenshots              # list all files (name, type, size, modified)
+GET /api/v1/debug/screenshots/{filename}   # view/download a PNG or HTML dump
+```
+
+These are also visible in the dashboard under the **Debug** tab.
+
+---
+
 ### Real-time (WebSocket)
 
 Connect once to receive all bot events in real time:

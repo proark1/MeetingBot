@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from app.config import settings
 from app.database import init_db
 from app.api.bots import router as bots_router
+from app.api.debug import router as debug_router
 from app.api.webhooks import router as webhooks_router
 from app.api.ws import router as ws_router
 
@@ -73,6 +74,7 @@ app.add_middleware(
 
 # API routes
 app.include_router(bots_router, prefix="/api/v1")
+app.include_router(debug_router, prefix="/api/v1")
 app.include_router(webhooks_router, prefix="/api/v1")
 app.include_router(ws_router, prefix="/api/v1")
 

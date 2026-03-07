@@ -94,6 +94,7 @@ document.querySelectorAll(".nav-item[data-page]").forEach((el) => {
     const page = el.dataset.page;
     if (page === "bots")     { showPage("bots"); loadBots(); }
     if (page === "webhooks") { showPage("webhooks"); loadWebhooks(); }
+    if (page === "debug")    { showPage("debug"); loadDebugFiles(); }
   });
 });
 
@@ -707,6 +708,45 @@ document.getElementById("btn-create-webhook").addEventListener("click", submitCr
 document.getElementById("modal-new-webhook").addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.target.matches("select")) submitCreateWebhook();
 });
+
+// ── Debug / Screenshots ────────────────────────────────────────────────────
+
+async function loadDebugFiles() {
+  const listEl = document.getElementById("debug-file-list");
+  listEl.innerHTML = '<div class="loading">Loading…</div>';
+  try {
+    const data = await apiFetch("GET", "/debug/screenshots");
+    const files = data.files || [];
+    if (!files.length) {
+      listEl.innerHTML = `<div class="empty">No screenshots yet — they appear here when a bot fails to join a meeting.</div>`;
+      return;
+    }
+    listEl.innerHTML = `<div class="debug-grid">${files.map((f) => debugFileCard(f)).join("")}</div>`;
+  } catch (e) {
+    listEl.innerHTML = `<div class="empty">Error: ${esc(e.message)}</div>`;
+  }
+}
+
+function debugFileCard(f) {
+  const ts = new Date(f.modified * 1000).toLocaleString("en-GB");
+  const sizeKb = (f.size / 1024).toFixed(1);
+  const url = `/api/v1/debug/screenshots/${encodeURIComponent(f.name)}`;
+  const isImg = f.type === "png";
+  const thumb = isImg
+    ? `<a href="${url}" target="_blank"><img class="debug-thumb" src="${url}" alt="${esc(f.name)}" loading="lazy" /></a>`
+    : `<a class="debug-html-link" href="${url}" target="_blank">📄 View HTML dump</a>`;
+  return `
+    <div class="debug-card">
+      ${thumb}
+      <div class="debug-card-info">
+        <div class="debug-card-name" title="${esc(f.name)}">${esc(f.name)}</div>
+        <div class="debug-card-meta">${ts} · ${sizeKb} KB</div>
+        <a class="btn btn-ghost btn-sm" href="${url}" target="_blank" download="${esc(f.name)}">⬇ Download</a>
+      </div>
+    </div>`;
+}
+
+document.getElementById("btn-refresh-debug").addEventListener("click", () => loadDebugFiles());
 
 // ── Init ───────────────────────────────────────────────────────────────────
 

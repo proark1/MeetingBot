@@ -21,6 +21,9 @@
         <a class="nav-item" data-page="webhooks" href="#">
           <span class="nav-icon">🔔</span> Webhooks
         </a>
+        <a class="nav-item" data-page="debug" href="#">
+          <span class="nav-icon">🔍</span> Debug
+        </a>
         <a class="nav-item" data-page="docs" href="/api/docs" target="_blank">
           <span class="nav-icon">📖</span> API Docs
         </a>
@@ -95,6 +98,21 @@
         </div>
 
         <div id="bot-detail-content"></div>
+      </section>
+
+      <!-- ── DEBUG PAGE ── -->
+      <section id="page-debug" class="page">
+        <div class="page-header">
+          <div>
+            <h1>Debug</h1>
+            <p class="subtitle">Screenshots and HTML dumps captured during bot join attempts</p>
+          </div>
+          <button class="btn btn-ghost btn-sm" id="btn-refresh-debug">↻ Refresh</button>
+        </div>
+
+        <div class="card">
+          <div id="debug-file-list"><p class="empty-state">Loading…</p></div>
+        </div>
       </section>
 
       <!-- ── WEBHOOKS PAGE ── -->
