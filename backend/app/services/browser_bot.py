@@ -482,27 +482,43 @@ async def _join_zoom(page: Page, url: str, bot_name: str) -> None:
 
 async def _join_teams(page: Page, url: str, bot_name: str) -> None:
     await page.goto(url, wait_until="domcontentloaded", timeout=30_000)
-    await asyncio.sleep(3)
+    # New Teams React app needs extra time to render (may also redirect to teams.live.com)
+    await asyncio.sleep(5)
 
-    # "Continue on this browser"
+    # Step 1: Click through any gate button (short per-selector timeout to avoid long waits)
+    # New Teams (/meet/ URLs): "Join anonymously" / "Continue without signing in"
+    # Old Teams (/l/meetup-join/ URLs): "Continue on this browser"
     ok = await _click(page, [
+        # New Teams — personal / teams.live.com
+        "button:has-text('Join anonymously')",
+        "button[data-tid='anonymous-join-button']",
+        "button[data-tid='joinAsGuestButton']",
+        # New Teams — business
+        "button:has-text('Continue without signing in')",
+        "button:has-text('Join as a guest')",
+        "button:has-text('Join as guest')",
+        # Old Teams
         "button:has-text('Continue on this browser')",
         "button:has-text('Join on the web instead')",
         "a:has-text('Continue on this browser')",
         "button:has-text('Join without Teams')",
-    ], timeout=8000)
+    ], timeout=3000)
     if ok:
         await asyncio.sleep(3)
     else:
+        # No gate button found — page may already be at pre-join screen
         await _screenshot(page, "teams_no_continue_button")
 
-    # Name input
+    # Step 2: Fill name — use longer timeout since page may still be loading
     ok = await _fill(page, [
         "input[data-tid='prejoin-display-name-input']",
+        "input[data-tid='anonymous-join-name-input']",
+        "input[placeholder*='Enter your name' i]",
         "input[placeholder*='name' i]",
         "input[aria-label*='name' i]",
         "input[name='displayName']",
-    ], bot_name)
+        "input[type='text']",
+    ], bot_name, timeout=15000)
     if not ok:
         await _screenshot(page, "teams_no_name_field")
         raise MeetingBotError("Could not find name input on Teams")
@@ -523,9 +539,10 @@ async def _join_teams(page: Page, url: str, bot_name: str) -> None:
     ], timeout=2000)
     logger.info("Teams: mic and camera muted before joining")
 
-    # Join
+    # Step 3: Join
     ok = await _click(page, [
         "button[data-tid='prejoin-join-button']",
+        "button[data-tid='prejoin-join-btn']",
         "button:has-text('Join now')",
         "button:has-text('Join meeting')",
         "button:has-text('Join')",
