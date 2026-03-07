@@ -96,6 +96,7 @@ Poll this until `status` is `done` (or `error`). The full `transcript` and `anal
 | `in_call` | Host admitted the bot — recording in progress |
 | `call_ended` | Meeting ended — transcription and analysis running |
 | `done` | Transcript and analysis are ready |
+| `cancelled` | Bot was stopped via `DELETE` — record kept, transcript accessible if captured |
 | `error` | Something failed — check `error_message` |
 
 **Auto-leave behaviour:**
@@ -176,7 +177,7 @@ GET /api/v1/bot?limit=20&offset=0&status=done
 DELETE /api/v1/bot/{bot_id}
 ```
 
-Cancels the bot if still in a call and removes the record. Returns `204 No Content`.
+Cancels the bot if still in a call and sets its status to `cancelled`. The bot record is **kept** so the transcript (if any was captured before cancellation) remains accessible. Returns `204 No Content`.
 
 ---
 

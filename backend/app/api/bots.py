@@ -163,7 +163,14 @@ async def delete_bot(
     bot_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Remove bot from meeting and cancel lifecycle if still running."""
+    """Remove bot from meeting and cancel lifecycle if still running.
+
+    The bot record is **kept** so the transcript and analysis remain
+    accessible after cancellation.  The status is set to ``cancelled``
+    (or left as-is if the lifecycle had already finished).
+    """
+    from datetime import datetime, timezone
+
     bot = await _get_or_404(db, bot_id)
 
     task = _running_tasks.get(bot_id)
@@ -176,8 +183,13 @@ async def delete_bot(
             pass
         logger.info("Cancelled lifecycle task for bot %s", bot_id)
 
-    await db.delete(bot)
-    await db.commit()
+    # Mark as cancelled only while still in an active state; if it already
+    # reached done/error leave the status intact.
+    if bot.status not in ("done", "error", "cancelled"):
+        bot.status = "cancelled"
+        bot.ended_at = bot.ended_at or datetime.now(timezone.utc)
+        bot.updated_at = datetime.now(timezone.utc)
+        await db.commit()
 
 
 # ── GET /api/v1/bot/{id}/transcript ─────────────────────────────────────────
@@ -189,7 +201,7 @@ async def get_transcript(
 ):
     """Get the meeting transcript."""
     bot = await _get_or_404(db, bot_id)
-    if bot.status not in ("call_ended", "done"):
+    if bot.status not in ("call_ended", "done", "cancelled"):
         raise HTTPException(
             status_code=425,
             detail=f"Transcript not yet available (bot status: {bot.status})",
