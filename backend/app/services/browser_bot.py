@@ -732,6 +732,12 @@ async def run_browser_bot(
         env["DISPLAY"] = ":99"
     if pulse_ok:
         env["PULSE_LATENCY_MSEC"] = "30"
+        # Explicitly point Chrome at the PulseAudio server so it does not
+        # fall back to a dummy audio output or PipeWire, both of which would
+        # mean no audio reaches our null-sink monitor (and thus no recording).
+        pulse_server = os.environ.get("PULSE_SERVER", "unix:/tmp/pulse-socket")
+        env["PULSE_SERVER"] = pulse_server
+        env["PULSE_SINK"] = PULSE_SINK_NAME
 
     launch_args = [
         "--no-sandbox",
@@ -744,9 +750,9 @@ async def run_browser_bot(
         "--no-first-run",
         "--no-default-browser-check",
         "--exclude-switches=enable-automation",
-        # Media
-        "--use-fake-ui-for-media-stream",           # auto-grant mic/camera
-        "--use-file-for-fake-audio-capture=/dev/zero",  # send silence as mic
+        # Media — auto-grant mic/camera permissions; send silence as mic input
+        "--use-fake-ui-for-media-stream",
+        "--use-fake-device-for-media-stream",       # use fake mic (silence)
         "--autoplay-policy=no-user-gesture-required",
         # Performance
         "--disable-background-timer-throttling",

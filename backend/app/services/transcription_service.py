@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
 from typing import Any
 
@@ -56,6 +57,7 @@ async def transcribe_audio(audio_path: str) -> list[dict[str, Any]]:
         return []
 
     size = os.path.getsize(audio_path)
+    logger.info("Audio file size: %d bytes (%s)", size, audio_path)
     if size < 8192:
         logger.warning("Audio file is too small (%d bytes) — likely no audio captured", size)
         return []
@@ -95,19 +97,29 @@ async def transcribe_audio(audio_path: str) -> list[dict[str, Any]]:
         )
 
         raw = response.text.strip()
-        # Strip markdown fences if Gemini added them anyway
-        if raw.startswith("```"):
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-            raw = raw.strip()
+
+        # Extract the JSON array from wherever Gemini put it.
+        # Gemini sometimes wraps the array in prose or markdown fences;
+        # we find the first '[' … matching ']' to be robust about it.
+        json_match = re.search(r"\[[\s\S]*\]", raw)
+        if json_match:
+            raw = json_match.group(0)
+        else:
+            logger.error(
+                "Gemini response contains no JSON array. First 500 chars: %s",
+                raw[:500],
+            )
+            return []
 
         transcript = json.loads(raw)
         logger.info("Transcription complete: %d entries", len(transcript))
         return transcript
 
     except json.JSONDecodeError as exc:
-        logger.error("Gemini returned invalid JSON for transcript: %s", exc)
+        logger.error(
+            "Gemini returned invalid JSON for transcript (%s). Raw (first 500): %s",
+            exc, raw[:500] if "raw" in dir() else "<unavailable>",
+        )
         return []
     except Exception as exc:
         logger.error("Transcription error: %s", exc)

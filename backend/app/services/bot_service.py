@@ -165,9 +165,9 @@ async def run_bot_lifecycle(bot_id: str, db_factory) -> None:
 
                 if not transcript:
                     logger.warning(
-                        "Bot %s: Whisper returned empty transcript — "
-                        "audio may not have been captured (check PulseAudio setup). "
-                        "Falling back to Claude demo transcript.",
+                        "Bot %s: Gemini returned empty transcript — "
+                        "audio may not have been captured (check PulseAudio/ffmpeg setup). "
+                        "Falling back to demo transcript.",
                         bot_id,
                     )
                     transcript = await intelligence_service.generate_demo_transcript(
