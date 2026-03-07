@@ -437,23 +437,65 @@ async def _join_zoom(page: Page, url: str, bot_name: str) -> None:
     await page.goto(web_url, wait_until="domcontentloaded", timeout=30_000)
     await asyncio.sleep(3)
 
-    # "Join from browser" link
+    # "Join from browser" link — short timeout, page may skip this step
     clicked = await _click(page, [
         "a:has-text('join from your browser')",
         "a:has-text('Join from Browser')",
+        "a:has-text('join from browser')",
         "#btnJoinByBrowser",
         "span:has-text('join from your browser')",
-    ], timeout=6000)
+        "button:has-text('Join from Browser')",
+        "button:has-text('join from your browser')",
+    ], timeout=3000)
     if clicked:
         await asyncio.sleep(3)
 
-    # Name input
-    ok = await _fill(page, [
+    # Name input — use force=True to bypass Zoom web client's actionability quirks
+    ok = False
+    for sel in [
         "input#inputname",
         "input[name='inputname']",
         "input[placeholder*='name' i]",
         "input[aria-label*='name' i]",
-    ], bot_name)
+        "input[type='text']",
+    ]:
+        try:
+            el = page.locator(sel).first
+            await el.wait_for(state="attached", timeout=10000)
+            await el.fill(bot_name, force=True)
+            ok = True
+            logger.info("Zoom: name filled with selector %s (force)", sel)
+            break
+        except Exception:
+            pass
+
+    # JS fallback
+    if not ok:
+        try:
+            filled = await page.evaluate("""(name) => {
+                const inputs = [...document.querySelectorAll(
+                    'input[type="text"], input:not([type]), [contenteditable="true"], [role="textbox"]'
+                )];
+                const el = inputs.find(e => {
+                    const r = e.getBoundingClientRect();
+                    return r.width > 0 && r.height > 0;
+                });
+                if (!el) return false;
+                el.focus();
+                const nativeSetter = Object.getOwnPropertyDescriptor(
+                    window.HTMLInputElement.prototype, 'value'
+                ).set;
+                nativeSetter.call(el, name);
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+                return true;
+            }""", bot_name)
+            ok = bool(filled)
+            if ok:
+                logger.info("Zoom: name filled via JS fallback")
+        except Exception as js_err:
+            logger.warning("Zoom: JS name fallback failed: %s", js_err)
+
     if not ok:
         await _screenshot(page, "zoom_no_name_field")
         raise MeetingBotError("Could not find name input on Zoom")
