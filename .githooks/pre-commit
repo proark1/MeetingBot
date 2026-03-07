@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Pre-commit hook: require README.md to be updated whenever API-related
+# files change (routes, schemas, config, main app description).
+#
+# Files that count as "API surface":
+#   backend/app/api/*.py
+#   backend/app/schemas/*.py
+#   backend/app/config.py
+#   backend/app/main.py
+
+set -euo pipefail
+
+STAGED=$(git diff --cached --name-only)
+
+api_changed=0
+doc_changed=0
+
+while IFS= read -r f; do
+    case "$f" in
+        backend/app/api/*.py \
+        | backend/app/schemas/*.py \
+        | backend/app/config.py \
+        | backend/app/main.py)
+            api_changed=1 ;;
+        README.md)
+            doc_changed=1 ;;
+    esac
+done <<< "$STAGED"
+
+if [ "$api_changed" -eq 1 ] && [ "$doc_changed" -eq 0 ]; then
+    echo ""
+    echo "╔══════════════════════════════════════════════════════════╗"
+    echo "║  API files changed — README.md must be updated too.     ║"
+    echo "║                                                          ║"
+    echo "║  Staged API files:                                       ║"
+    git diff --cached --name-only | grep -E \
+        '^backend/app/(api|schemas)/.*\.py$|^backend/app/(config|main)\.py$' \
+        | sed 's/^/║    /' | sed 's/$//' | awk '{printf "%-60s║\n", $0}'
+    echo "║                                                          ║"
+    echo "║  Update README.md and stage it, then commit again.      ║"
+    echo "╚══════════════════════════════════════════════════════════╝"
+    echo ""
+    exit 1
+fi
+
+exit 0
