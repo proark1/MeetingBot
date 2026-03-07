@@ -74,7 +74,15 @@ async def create_bot(
     payload: BotCreate,
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Create a new meeting bot and immediately start its lifecycle."""
+    """Create a new meeting bot and immediately start its lifecycle.
+
+    The bot navigates to the meeting URL, waits to be admitted, records audio,
+    transcribes with Gemini, and analyses the transcript.
+
+    **Auto-leave:** if the bot is the only participant for `BOT_ALONE_TIMEOUT`
+    seconds (default 5 min) — either because the room was empty on join, or
+    because everyone else left — it will leave automatically.
+    """
     bot = Bot(
         meeting_url=payload.meeting_url,
         meeting_platform=bot_service.detect_platform(payload.meeting_url),
@@ -129,7 +137,21 @@ async def get_bot(
     bot_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Get a single bot by ID."""
+    """Get a single bot by ID.
+
+    Poll this endpoint until `status` is `done` (or `error`).
+    The full `transcript` and `analysis` are included in the response once available.
+
+    **Statuses:**
+    - `joining` — browser opening, navigating to meeting URL
+    - `in_call` — host admitted the bot; recording in progress
+    - `call_ended` — meeting ended (or bot left); transcription running
+    - `done` — transcript and analysis ready
+    - `error` — something failed; see `error_message`
+
+    **Auto-leave** triggers `call_ended` when the bot has been alone for
+    `BOT_ALONE_TIMEOUT` seconds (default 5 min).
+    """
     bot = await _get_or_404(db, bot_id)
     return _bot_to_response(bot)
 

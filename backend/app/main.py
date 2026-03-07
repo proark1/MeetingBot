@@ -39,8 +39,16 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="MeetingBot API",
     description=(
-        "A Recall.ai clone — send bots into Zoom, Google Meet, and Teams meetings "
-        "to record, transcribe, and analyse them with Claude AI."
+        "Send bots into Zoom, Google Meet, and Teams meetings to record, transcribe, "
+        "and analyse them with Gemini AI.\n\n"
+        "## Bot lifecycle\n"
+        "`joining` → `in_call` → `call_ended` → `done` (or `error`)\n\n"
+        "## Auto-leave behaviour\n"
+        "The bot leaves automatically when it has been the **only participant** for "
+        "`BOT_ALONE_TIMEOUT` seconds (default **5 minutes**). This covers two cases:\n"
+        "- **Empty room on join** — admitted to an empty meeting; leaves if no one joins.\n"
+        "- **Everyone left** — all other participants leave mid-call; leaves if no one rejoins.\n\n"
+        "The timer resets whenever other participants are detected again."
     ),
     version="1.0.0",
     lifespan=lifespan,

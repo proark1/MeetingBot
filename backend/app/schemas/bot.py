@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class BotCreate(BaseModel):
@@ -28,14 +28,31 @@ class BotResponse(BaseModel):
     meeting_url: str
     meeting_platform: str
     bot_name: str
-    status: str
+    status: str = Field(
+        description=(
+            "Current lifecycle status. One of: "
+            "`joining` (navigating to meeting), "
+            "`in_call` (admitted, recording), "
+            "`call_ended` (meeting over, transcribing), "
+            "`done` (transcript + analysis ready), "
+            "`error` (see error_message). "
+            "Auto-leave (empty room or everyone left for 5 min) transitions "
+            "the bot from `in_call` → `call_ended` automatically."
+        )
+    )
     error_message: str | None = None
     created_at: datetime
     updated_at: datetime
-    started_at: datetime | None = None
-    ended_at: datetime | None = None
-    transcript: list[dict[str, Any]] = []
-    analysis: MeetingAnalysis | None = None
+    started_at: datetime | None = Field(default=None, description="When the bot was admitted into the call.")
+    ended_at: datetime | None = Field(default=None, description="When the call ended or the bot left.")
+    transcript: list[dict[str, Any]] = Field(
+        default=[],
+        description="Array of {speaker, text, timestamp} entries. Populated once status is `done`.",
+    )
+    analysis: MeetingAnalysis | None = Field(
+        default=None,
+        description="AI-generated meeting analysis. Populated once status is `done`.",
+    )
     recording_url: str | None = None
     extra_metadata: dict[str, Any] = {}
 
