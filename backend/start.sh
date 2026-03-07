@@ -23,5 +23,9 @@ else
     echo "[start.sh] PulseAudio already running"
 fi
 
-# Hand off to the main process (e.g. uvicorn)
-exec "$@"
+# Hand off to the main process (e.g. uvicorn), or use args if provided
+if [ $# -gt 0 ]; then
+    exec "$@"
+else
+    exec uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-8000}"
+fi
