@@ -274,20 +274,24 @@ async def _gmeet_dismiss_consent(page: Page) -> None:
     ], timeout=3000)
 
 
-async def _gmeet_click_guest(page: Page) -> None:
-    """Click through any 'join as guest / continue without signing in' prompts."""
-    await _click(page, [
+async def _gmeet_click_guest(page: Page) -> bool:
+    """Click through any 'join as guest / continue without signing in' prompts.
+
+    Returns True if a button was found and clicked.
+    Uses a short timeout since these buttons are optional — they may not exist
+    on every page state.
+    """
+    return await _click(page, [
         "button:has-text('Continue without signing in')",
         "button:has-text('Use without an account')",
         "button:has-text('Join as guest')",
         "a:has-text('Join as guest')",
         "button:has-text('Use a guest account')",
-        # jsname-based buttons Google uses internally
-        "button[jsname='LgbsSe']",
-        "button[jsname='Qx7uuf']",
         "span:has-text('Continue without signing in')",
         "span:has-text('Use without an account')",
-    ], timeout=5000)
+        # jsname-based buttons Google uses internally (try last — risky)
+        "button[jsname='LgbsSe']",
+    ], timeout=1500)
 
 
 async def _gmeet_fill_name(page: Page, bot_name: str) -> bool:
