@@ -166,31 +166,70 @@ h3 { font-size: 1rem; font-weight: 600; }
 .filter-btn:hover { border-color: var(--border2); color: var(--text); }
 .filter-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 
-/* ── Bot list ─────────────────────────────────────────────────────────────── */
-.bot-list { display: flex; flex-direction: column; gap: 0.6rem; }
+/* ── Reports list ─────────────────────────────────────────────────────────── */
+.bot-list { display: flex; flex-direction: column; gap: 0; }
 
-.bot-row {
+.report-card {
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.report-card:first-child { border-radius: 8px 8px 0 0; }
+.report-card:last-child  { border-bottom: none; border-radius: 0 0 8px 8px; }
+.report-card:only-child  { border-radius: 8px; border-bottom: none; }
+.report-card:hover { background: var(--surface3); }
+
+.report-header {
   display: flex;
   align-items: center;
-  gap: 1rem;
-  padding: 0.875rem 1rem;
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
-  position: relative;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.35rem;
 }
-.bot-row:hover { border-color: var(--accent); background: var(--surface3); }
-
-.bot-platform-icon { font-size: 1.4rem; min-width: 30px; text-align: center; }
-
-.bot-info { flex: 1; min-width: 0; }
-.bot-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.bot-url { color: var(--text-muted); font-size: 0.8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: var(--font-mono); }
-.bot-meta { font-size: 0.72rem; color: var(--text-dim); margin-top: 0.2rem; }
-
-.bot-actions { display: flex; gap: 0.5rem; align-items: center; flex-shrink: 0; }
+.report-platform {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.report-platform-icon { font-size: 1rem; }
+.report-platform-name {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+.report-header-right {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+.report-url {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 0.4rem;
+}
+.report-stats {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  margin-bottom: 0.4rem;
+}
+.report-summary {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+  padding: 0.4rem 0.6rem;
+  background: var(--surface2);
+  border-left: 2px solid var(--accent);
+  border-radius: 0 4px 4px 0;
+  margin-top: 0.35rem;
+}
 
 /* ── Status badges ────────────────────────────────────────────────────────── */
 .badge {

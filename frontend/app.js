@@ -234,43 +234,70 @@ function renderBotList(bots) {
   if (!bots.length) {
     listEl.innerHTML = `
       <div class="empty">
-        No bots yet${_currentFilter ? ` with status "${_currentFilter}"` : ""}.
+        No reports yet${_currentFilter ? ` with status "${_currentFilter}"` : ""}.
         <div class="empty-action">
-          <button class="btn btn-primary btn-sm" onclick="openModal('modal-new-bot')">+ Create your first bot</button>
+          <button class="btn btn-primary btn-sm" onclick="openModal('modal-new-bot')">+ Send your first bot</button>
         </div>
       </div>`;
     return;
   }
 
-  listEl.innerHTML = bots.map((b) => `
-    <div class="bot-row" data-id="${esc(b.id)}">
-      <div class="bot-platform-icon">${platformIcon(b.meeting_platform)}</div>
-      <div class="bot-info">
-        <div class="bot-name">${esc(b.bot_name)}</div>
-        <div class="bot-url">${esc(b.meeting_url)}</div>
-        <div class="bot-meta">${esc(b.meeting_platform)} · ${fmtDate(b.created_at)}</div>
-      </div>
-      <div class="bot-actions">
-        <span data-badge-id="${esc(b.id)}">${statusBadge(b.status)}</span>
-        <button class="btn btn-danger btn-sm" data-delete-bot="${esc(b.id)}" title="Delete bot">🗑</button>
-      </div>
-    </div>`).join("");
+  listEl.innerHTML = bots.map((b) => {
+    const duration = fmtDuration(b.started_at, b.ended_at);
+    const participants = (b.participants || []).length;
+    const transcriptLen = (b.transcript || []).length;
+    const summary = b.analysis?.summary || "";
+    const sentiment = b.analysis?.sentiment || "";
 
-  listEl.querySelectorAll(".bot-row").forEach((row) => {
-    row.addEventListener("click", (e) => {
+    const stats = [
+      b.started_at ? `🕐 ${fmtDate(b.started_at)}` : `📅 ${fmtDate(b.created_at)}`,
+      duration !== "—" ? `⏱ ${duration}` : "",
+      participants ? `👥 ${participants} participant${participants !== 1 ? "s" : ""}` : "",
+      transcriptLen ? `💬 ${transcriptLen} entries` : "",
+    ].filter(Boolean).join(" &nbsp;·&nbsp; ");
+
+    const sentimentChip = sentiment
+      ? `<span class="sentiment-badge sentiment-${esc(sentiment)}">${esc(sentiment)}</span>`
+      : "";
+
+    const summaryEl = summary
+      ? `<div class="report-summary">${esc(summary.length > 160 ? summary.slice(0, 160) + "…" : summary)}</div>`
+      : "";
+
+    return `
+    <div class="report-card" data-id="${esc(b.id)}">
+      <div class="report-header">
+        <div class="report-platform">
+          <span class="report-platform-icon">${platformIcon(b.meeting_platform)}</span>
+          <span class="report-platform-name">${esc(b.meeting_platform.replace(/_/g, " "))}</span>
+        </div>
+        <div class="report-header-right">
+          <span data-badge-id="${esc(b.id)}">${statusBadge(b.status)}</span>
+          ${sentimentChip}
+          <button class="btn btn-danger btn-sm" data-delete-bot="${esc(b.id)}" title="Delete">🗑</button>
+        </div>
+      </div>
+      <div class="report-url">${esc(b.meeting_url)}</div>
+      <div class="report-stats">${stats}</div>
+      ${summaryEl}
+    </div>`;
+  }).join("");
+
+  listEl.querySelectorAll(".report-card").forEach((card) => {
+    card.addEventListener("click", (e) => {
       if (e.target.closest("[data-delete-bot]")) return;
-      showBotDetail(row.dataset.id);
+      showBotDetail(card.dataset.id);
     });
   });
 
   listEl.querySelectorAll("[data-delete-bot]").forEach((btn) => {
     btn.addEventListener("click", async (e) => {
       e.stopPropagation();
-      if (!confirm("Delete this bot and all its data?")) return;
+      if (!confirm("Delete this report and all its data?")) return;
       btn.disabled = true;
       try {
         await apiFetch("DELETE", `/bot/${btn.dataset.deleteBot}`);
-        showToast("Bot deleted", "success");
+        showToast("Report deleted", "success");
         loadBots();
       } catch (err) {
         showToast(err.message, "error");
