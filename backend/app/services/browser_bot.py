@@ -264,6 +264,73 @@ class AdmissionTimeoutError(MeetingBotError):
     pass
 
 
+async def _gmeet_dismiss_consent(page: Page) -> None:
+    """Dismiss Google consent/cookie banners."""
+    await _click(page, [
+        "button:has-text('Accept all')",
+        "button:has-text('Reject all')",
+        "button:has-text('Accept')",
+        "form[action*='consent'] button",
+    ], timeout=3000)
+
+
+async def _gmeet_click_guest(page: Page) -> None:
+    """Click through any 'join as guest / continue without signing in' prompts."""
+    await _click(page, [
+        "button:has-text('Continue without signing in')",
+        "button:has-text('Use without an account')",
+        "button:has-text('Join as guest')",
+        "a:has-text('Join as guest')",
+        "button:has-text('Use a guest account')",
+        # jsname-based buttons Google uses internally
+        "button[jsname='LgbsSe']",
+        "button[jsname='Qx7uuf']",
+        "span:has-text('Continue without signing in')",
+        "span:has-text('Use without an account')",
+    ], timeout=5000)
+
+
+async def _gmeet_fill_name(page: Page, bot_name: str) -> bool:
+    """Try multiple strategies to fill the guest name field."""
+    # Strategy 1: standard attribute selectors
+    ok = await _fill(page, [
+        "input[placeholder*='name' i]",
+        "input[aria-label*='name' i]",
+        "input[data-initial-value]",
+        "input[autocomplete='name']",
+        "input[jsname]",
+        "input[type='text']:visible",
+        "input[type='text']",
+    ], bot_name)
+    if ok:
+        return True
+
+    # Strategy 2: JS-based — find any visible text input and fill it
+    try:
+        filled = await page.evaluate(f"""
+            () => {{
+                const inputs = Array.from(document.querySelectorAll('input[type="text"], input:not([type])'));
+                const visible = inputs.find(el => {{
+                    const r = el.getBoundingClientRect();
+                    return r.width > 0 && r.height > 0 && !el.disabled && !el.readOnly;
+                }});
+                if (!visible) return false;
+                visible.focus();
+                visible.value = {repr(bot_name)};
+                visible.dispatchEvent(new Event('input', {{bubbles: true}}));
+                visible.dispatchEvent(new Event('change', {{bubbles: true}}));
+                return true;
+            }}
+        """)
+        if filled:
+            logger.info("Filled name via JS fallback")
+            return True
+    except Exception as exc:
+        logger.debug("JS name fill failed: %s", exc)
+
+    return False
+
+
 async def _join_google_meet(page: Page, url: str, bot_name: str) -> None:
     await page.goto(url, wait_until="domcontentloaded", timeout=30_000)
     await asyncio.sleep(3)
@@ -272,39 +339,35 @@ async def _join_google_meet(page: Page, url: str, bot_name: str) -> None:
 
     # Google may redirect to accounts.google.com — escape it
     if "accounts.google.com" in page.url:
-        await _click(page, [
-            "text=Use without an account",
-            "text=Continue without signing in",
-            "text=Join as guest",
-            "[data-action='cancel']",
-        ], timeout=6000)
-        await asyncio.sleep(2)
+        await _gmeet_dismiss_consent(page)
+        await asyncio.sleep(1)
+        await _gmeet_click_guest(page)
+        await asyncio.sleep(3)
+        # After redirect back to meet.google.com, re-check URL
+        logger.info("After guest click, URL: %s", page.url)
 
-    # Dismiss cookie/consent banners
-    await _click(page, [
-        "button:has-text('Accept all')",
-        "button:has-text('Reject all')",
-        "button:has-text('Accept')",
-        "form[action*='consent'] button",
-    ], timeout=3000)
+    # Dismiss cookie/consent banners on the Meet page
+    await _gmeet_dismiss_consent(page)
     await asyncio.sleep(1)
 
-    # "Continue without signing in" on the Meet page itself
-    await _click(page, [
-        "button:has-text('Continue without signing in')",
-        "button:has-text('Use without an account')",
-        "a:has-text('Join as guest')",
-    ], timeout=4000)
+    # "Continue without signing in" on the Meet page itself (two rounds — Google
+    # sometimes shows this prompt again after the consent banner)
+    await _gmeet_click_guest(page)
+    await asyncio.sleep(2)
+    await _gmeet_click_guest(page)
     await asyncio.sleep(2)
 
-    # Enter bot name
-    ok = await _fill(page, [
-        "input[placeholder*='name' i]",
-        "input[aria-label*='name' i]",
-        "input[data-initial-value]",
-        "input[autocomplete='name']",
-        "input[type='text']",
-    ], bot_name)
+    # Enter bot name — try up to 3 times with short waits between attempts
+    ok = False
+    for attempt in range(3):
+        ok = await _gmeet_fill_name(page, bot_name)
+        if ok:
+            break
+        logger.debug("Name fill attempt %d failed, waiting…", attempt + 1)
+        # Try clicking the guest button once more in case a new prompt appeared
+        await _gmeet_click_guest(page)
+        await asyncio.sleep(2)
+
     if not ok:
         await _screenshot(page, "gmeet_no_name_field")
         raise MeetingBotError("Could not find name input on Google Meet")
