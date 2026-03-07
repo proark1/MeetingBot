@@ -112,9 +112,7 @@ async def run_bot_lifecycle(bot_id: str, db_factory) -> None:
                 await _set_status(db, bot, "call_ended", ended_at=_now())
                 logger.info("Bot %s transcribing audio…", bot_id)
 
-                transcript = await transcribe_audio(
-                    audio_path, model_size=settings.WHISPER_MODEL
-                )
+                transcript = await transcribe_audio(audio_path)
 
                 if not transcript:
                     logger.warning(

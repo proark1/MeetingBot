@@ -265,13 +265,13 @@ class AdmissionTimeoutError(MeetingBotError):
 
 
 async def _gmeet_dismiss_consent(page: Page) -> None:
-    """Dismiss Google consent/cookie banners."""
+    """Dismiss Google consent/cookie banners (optional — short timeout)."""
     await _click(page, [
         "button:has-text('Accept all')",
         "button:has-text('Reject all')",
         "button:has-text('Accept')",
         "form[action*='consent'] button",
-    ], timeout=3000)
+    ], timeout=1500)
 
 
 async def _gmeet_click_guest(page: Page) -> bool:
@@ -296,7 +296,7 @@ async def _gmeet_click_guest(page: Page) -> bool:
 
 async def _gmeet_fill_name(page: Page, bot_name: str) -> bool:
     """Try multiple strategies to fill the guest name field."""
-    # Strategy 1: standard attribute selectors
+    # Strategy 1: standard attribute selectors (short timeout — fail fast)
     ok = await _fill(page, [
         "input[placeholder*='name' i]",
         "input[aria-label*='name' i]",
@@ -305,7 +305,7 @@ async def _gmeet_fill_name(page: Page, bot_name: str) -> bool:
         "input[jsname]",
         "input[type='text']:visible",
         "input[type='text']",
-    ], bot_name)
+    ], bot_name, timeout=2000)
     if ok:
         return True
 
@@ -335,61 +335,72 @@ async def _gmeet_fill_name(page: Page, bot_name: str) -> bool:
     return False
 
 
+async def _gmeet_wait_ready(page: Page) -> None:
+    """Wait until the Meet page has rendered enough to interact with."""
+    # networkidle or 4s, whichever comes first
+    try:
+        await page.wait_for_load_state("networkidle", timeout=4000)
+    except Exception:
+        pass  # best-effort — proceed even if still loading
+
+
 async def _join_google_meet(page: Page, url: str, bot_name: str) -> None:
     await page.goto(url, wait_until="domcontentloaded", timeout=30_000)
-    await asyncio.sleep(3)
+    await _gmeet_wait_ready(page)
 
     logger.info("Google Meet page loaded: %s", page.url)
 
     # Google may redirect to accounts.google.com — escape it
     if "accounts.google.com" in page.url:
+        logger.info("Redirected to Google sign-in — clicking guest option")
         await _gmeet_dismiss_consent(page)
-        await asyncio.sleep(1)
-        await _gmeet_click_guest(page)
-        await asyncio.sleep(3)
-        # After redirect back to meet.google.com, re-check URL
-        logger.info("After guest click, URL: %s", page.url)
+        clicked = await _gmeet_click_guest(page)
+        if clicked:
+            # Wait for redirect back to meet.google.com
+            try:
+                await page.wait_for_url("**/meet.google.com/**", timeout=8000)
+            except Exception:
+                pass
+            await _gmeet_wait_ready(page)
+            logger.info("After guest click, URL: %s", page.url)
 
     # Dismiss cookie/consent banners on the Meet page
     await _gmeet_dismiss_consent(page)
-    await asyncio.sleep(1)
 
-    # "Continue without signing in" on the Meet page itself (two rounds — Google
-    # sometimes shows this prompt again after the consent banner)
-    await _gmeet_click_guest(page)
-    await asyncio.sleep(2)
-    await _gmeet_click_guest(page)
-    await asyncio.sleep(2)
+    # "Continue without signing in" — try once; if not present, proceed
+    guest_clicked = await _gmeet_click_guest(page)
+    if guest_clicked:
+        logger.info("Clicked guest/continue button")
+        await _gmeet_wait_ready(page)
 
-    # Enter bot name — try up to 3 times with short waits between attempts
+    # Enter bot name — up to 3 attempts, clicking guest button between each
+    logger.info("Looking for name input field…")
     ok = False
     for attempt in range(3):
         ok = await _gmeet_fill_name(page, bot_name)
         if ok:
+            logger.info("Name filled on attempt %d", attempt + 1)
             break
-        logger.debug("Name fill attempt %d failed, waiting…", attempt + 1)
-        # Try clicking the guest button once more in case a new prompt appeared
+        logger.debug("Name fill attempt %d failed — retrying guest click", attempt + 1)
         await _gmeet_click_guest(page)
-        await asyncio.sleep(2)
+        await _gmeet_wait_ready(page)
 
     if not ok:
         await _screenshot(page, "gmeet_no_name_field")
         raise MeetingBotError("Could not find name input on Google Meet")
-    await asyncio.sleep(1)
 
-    # Mute mic (sends silence — no echo in the call)
+    # Mute mic and camera (they may not always be present)
     await _click(page, [
         "button[aria-label*='Turn off microphone' i]",
         "button[aria-label*='microphone' i][aria-pressed='false']",
     ], timeout=2000)
-    # Camera off
     await _click(page, [
         "button[aria-label*='Turn off camera' i]",
         "button[aria-label*='camera' i][aria-pressed='false']",
     ], timeout=2000)
-    await asyncio.sleep(0.5)
 
     # Ask to join / Join now
+    logger.info("Clicking join button…")
     ok = await _click(page, [
         "button[jsname='Qx7uuf']",
         "button[data-idom-class*='join' i]",
