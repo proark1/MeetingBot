@@ -163,33 +163,30 @@ async def delete_bot(
     bot_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Remove bot from meeting and cancel lifecycle if still running.
+    """Cancel the bot and return immediately.
 
-    The bot record is **kept** so the transcript and analysis remain
-    accessible after cancellation.  The status is set to ``cancelled``
-    (or left as-is if the lifecycle had already finished).
+    The lifecycle task catches the cancellation, salvages any captured audio,
+    produces a transcript + analysis, and sets status = ``cancelled`` on its
+    own — so the record (and transcript) remain accessible after this call.
+
+    If the bot had already finished (``done`` / ``error``) nothing changes.
     """
-    from datetime import datetime, timezone
-
     bot = await _get_or_404(db, bot_id)
 
     task = _running_tasks.get(bot_id)
     if task and not task.done():
         task.cancel()
-        # Give it a moment to clean up gracefully
+        # The lifecycle task does NOT re-raise CancelledError; it salvages the
+        # transcript and then finishes cleanly.  We shield it and give it up to
+        # 5 s to exit the hot-path before we return 204.  If it needs longer
+        # (e.g. Gemini transcription) it continues in the background.
         try:
-            await asyncio.wait_for(asyncio.shield(task), timeout=2.0)
+            await asyncio.wait_for(asyncio.shield(task), timeout=5.0)
         except (asyncio.TimeoutError, asyncio.CancelledError):
             pass
         logger.info("Cancelled lifecycle task for bot %s", bot_id)
-
-    # Mark as cancelled only while still in an active state; if it already
-    # reached done/error leave the status intact.
-    if bot.status not in ("done", "error", "cancelled"):
-        bot.status = "cancelled"
-        bot.ended_at = bot.ended_at or datetime.now(timezone.utc)
-        bot.updated_at = datetime.now(timezone.utc)
-        await db.commit()
+        # Status is set to "cancelled" by the lifecycle task itself; no DB
+        # write needed here.
 
 
 # ── GET /api/v1/bot/{id}/transcript ─────────────────────────────────────────

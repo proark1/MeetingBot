@@ -61,6 +61,54 @@ async def _set_status(db: AsyncSession, bot: Bot, status: str, **kwargs) -> None
     })
 
 
+async def _salvage_and_finish(
+    db: AsyncSession,
+    bot: Bot,
+    bot_id: str,
+    audio_path: str,
+    use_real_bot: bool,
+    final_status: str,
+    **status_kwargs,
+) -> None:
+    """Transcribe any captured audio (or generate a demo), run analysis, and
+    set the final status.  Called from both the CancelledError and Exception
+    handlers so that a transcript is always produced regardless of how the
+    lifecycle ended.
+    """
+    # ── transcript ─────────────────────────────────────────────────────────
+    if not bot.transcript:
+        transcript: list = []
+
+        if use_real_bot and os.path.exists(audio_path) and os.path.getsize(audio_path) > 0:
+            logger.info(
+                "Bot %s: transcribing partial audio (%d bytes)",
+                bot_id, os.path.getsize(audio_path),
+            )
+            transcript = await transcribe_audio(audio_path)
+
+        if not transcript:
+            logger.info("Bot %s: no captured audio — generating demo transcript", bot_id)
+            transcript = await intelligence_service.generate_demo_transcript(bot.meeting_url)
+
+        bot.transcript = transcript
+        bot.updated_at = _now()
+        await db.commit()
+        await webhook_service.dispatch_event(db, "bot.transcript_ready", {
+            "bot_id": bot_id, "entry_count": len(transcript),
+        })
+
+    # ── analysis ───────────────────────────────────────────────────────────
+    if not bot.analysis and bot.transcript:
+        analysis = await intelligence_service.analyze_transcript(bot.transcript)
+        bot.analysis = analysis
+        bot.updated_at = _now()
+        await db.commit()
+        await webhook_service.dispatch_event(db, "bot.analysis_ready", {"bot_id": bot_id})
+
+    # ── final status ───────────────────────────────────────────────────────
+    await _set_status(db, bot, final_status, ended_at=bot.ended_at or _now(), **status_kwargs)
+
+
 async def run_bot_lifecycle(bot_id: str, db_factory) -> None:
     """
     Full bot lifecycle:
@@ -160,19 +208,33 @@ async def run_bot_lifecycle(bot_id: str, db_factory) -> None:
             logger.info("Bot %s done", bot_id)
 
         except asyncio.CancelledError:
-            logger.info("Bot %s cancelled", bot_id)
+            logger.info("Bot %s cancelled — salvaging transcript", bot_id)
             try:
-                await _set_status(db, bot, "call_ended", ended_at=_now())
+                await _salvage_and_finish(
+                    db, bot, bot_id, audio_path, use_real_bot, "cancelled"
+                )
             except Exception:
-                pass
-            raise
+                logger.exception("Bot %s: error during cancellation cleanup", bot_id)
+                try:
+                    await _set_status(db, bot, "cancelled", ended_at=bot.ended_at or _now())
+                except Exception:
+                    pass
+            # Do NOT re-raise: let the task finish cleanly so asyncio.shield()
+            # in delete_bot can observe completion rather than propagating cancel.
 
         except Exception as exc:
             logger.exception("Bot %s error: %s", bot_id, exc)
             try:
-                await _set_status(db, bot, "error", error_message=str(exc))
+                await _salvage_and_finish(
+                    db, bot, bot_id, audio_path, use_real_bot,
+                    "error", error_message=str(exc),
+                )
             except Exception:
-                pass
+                logger.exception("Bot %s: error during error cleanup", bot_id)
+                try:
+                    await _set_status(db, bot, "error", error_message=str(exc))
+                except Exception:
+                    pass
 
         finally:
             try:

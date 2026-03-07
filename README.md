@@ -177,7 +177,14 @@ GET /api/v1/bot?limit=20&offset=0&status=done
 DELETE /api/v1/bot/{bot_id}
 ```
 
-Cancels the bot if still in a call and sets its status to `cancelled`. The bot record is **kept** so the transcript (if any was captured before cancellation) remains accessible. Returns `204 No Content`.
+Cancels the bot if still in a call. Returns `204 No Content` immediately. The bot record is **kept** and the lifecycle task continues in the background to:
+
+1. Transcribe any audio that was captured before cancellation
+2. Fall back to a Gemini-generated demo transcript if no audio was recorded
+3. Run analysis on the transcript
+4. Set status to `cancelled` when done
+
+This means `GET /bot/{id}/transcript` will always return a non-empty transcript eventually, even for cancelled bots.
 
 ---
 
