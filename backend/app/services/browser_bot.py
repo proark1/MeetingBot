@@ -23,7 +23,7 @@ from playwright.async_api import Browser, BrowserContext, Page, async_playwright
 logger = logging.getLogger(__name__)
 
 PULSE_SINK_NAME = "meetingbot_sink"
-SCREENSHOT_DIR = Path("/tmp/meetingbot_screenshots")
+SCREENSHOT_DIR = Path("/app/data/screenshots")
 
 # ── Stealth JS ────────────────────────────────────────────────────────────────
 # Patches the most common automation signals that Google Meet and Teams check.
@@ -210,9 +210,15 @@ def _stop_ffmpeg(proc: subprocess.Popen) -> None:
 async def _screenshot(page: Page, label: str) -> None:
     try:
         SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
-        path = SCREENSHOT_DIR / f"{label}_{int(time.time())}.png"
-        await page.screenshot(path=str(path), full_page=True)
-        logger.info("Screenshot → %s", path)
+        ts = int(time.time())
+        png_path = SCREENSHOT_DIR / f"{label}_{ts}.png"
+        await page.screenshot(path=str(png_path), full_page=True)
+        logger.info("Screenshot → %s", png_path)
+        # Also dump page HTML so selectors can be diagnosed without a display
+        html_path = SCREENSHOT_DIR / f"{label}_{ts}.html"
+        html = await page.content()
+        html_path.write_text(html, encoding="utf-8")
+        logger.info("HTML dump  → %s", html_path)
     except Exception:
         pass
 
@@ -484,6 +490,7 @@ async def _join_teams(page: Page, url: str, bot_name: str) -> None:
     await page.goto(url, wait_until="domcontentloaded", timeout=30_000)
     # New Teams React app needs extra time to render (may also redirect to teams.live.com)
     await asyncio.sleep(5)
+    logger.info("Teams: landed on %s", page.url)
 
     # Step 1: Click through any gate button (short per-selector timeout to avoid long waits)
     # New Teams (/meet/ URLs): "Join anonymously" / "Continue without signing in"
