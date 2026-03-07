@@ -985,9 +985,13 @@ async def run_browser_bot(
         "--no-first-run",
         "--no-default-browser-check",
         "--exclude-switches=enable-automation",
-        # Media — auto-grant mic/camera permissions; send silence as mic input
+        # Media — auto-grant mic/camera permissions without UI prompts.
+        # NOTE: do NOT add --use-fake-device-for-media-stream here — that flag
+        # replaces Chrome's audio OUTPUT device with an internal fake sink,
+        # bypassing PulseAudio entirely so ffmpeg records silence instead of
+        # real meeting audio.  PulseAudio's null-sink is already set as the
+        # default device; Chrome will use it for both output and mic input.
         "--use-fake-ui-for-media-stream",
-        "--use-fake-device-for-media-stream",       # use fake mic (silence)
         "--autoplay-policy=no-user-gesture-required",
         # Performance
         "--disable-background-timer-throttling",
