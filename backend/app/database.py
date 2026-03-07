@@ -1,3 +1,4 @@
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 
@@ -32,3 +33,11 @@ async def init_db():
     async with engine.begin() as conn:
         from app.models import bot, webhook  # noqa: F401 — registers models
         await conn.run_sync(Base.metadata.create_all)
+        # Migrate existing tables: add columns introduced after initial creation
+        for stmt in [
+            "ALTER TABLE bots ADD COLUMN participants JSON DEFAULT '[]'",
+        ]:
+            try:
+                await conn.execute(text(stmt))
+            except Exception:
+                pass  # column already exists

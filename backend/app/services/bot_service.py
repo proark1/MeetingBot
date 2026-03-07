@@ -158,10 +158,11 @@ async def run_bot_lifecycle(bot_id: str, db_factory) -> None:
                     raise RuntimeError(bot_result["error"] or "Browser bot failed")
 
                 # ── 2. call_ended → transcribe ────────────────────────────
+                scraped_participants: list[str] = bot_result.get("participants") or []
                 await _set_status(db, bot, "call_ended", ended_at=_now())
                 logger.info("Bot %s transcribing audio…", bot_id)
 
-                transcript = await transcribe_audio(audio_path)
+                transcript = await transcribe_audio(audio_path, known_participants=scraped_participants)
 
                 if not transcript:
                     logger.warning(
@@ -187,8 +188,19 @@ async def run_bot_lifecycle(bot_id: str, db_factory) -> None:
                     bot.meeting_url
                 )
 
-            # ── 3. Store transcript ───────────────────────────────────────
+            # ── 3. Store transcript + participants ────────────────────────
             bot.transcript = transcript
+            # Derive participants: prefer scraped names, fall back to transcript speakers
+            if use_real_bot:
+                speaker_names = {e["speaker"] for e in transcript if e.get("speaker")}
+                # Merge scraped names with speaker names from transcript
+                all_participants = scraped_participants or []
+                for name in speaker_names:
+                    if name not in all_participants:
+                        all_participants.append(name)
+                bot.participants = sorted(all_participants)
+            else:
+                bot.participants = sorted({e["speaker"] for e in transcript if e.get("speaker")})
             bot.updated_at = _now()
             await db.commit()
             await webhook_service.dispatch_event(db, "bot.transcript_ready", {

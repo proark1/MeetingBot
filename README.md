@@ -71,6 +71,7 @@ POST /api/v1/bot
   "updated_at": "2026-03-07T03:01:48Z",
   "started_at": null,
   "ended_at": null,
+  "participants": [],
   "transcript": [],
   "analysis": null,
   "error_message": null,

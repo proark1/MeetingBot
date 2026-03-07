@@ -45,6 +45,10 @@ class BotResponse(BaseModel):
     updated_at: datetime
     started_at: datetime | None = Field(default=None, description="When the bot was admitted into the call.")
     ended_at: datetime | None = Field(default=None, description="When the call ended or the bot left.")
+    participants: list[str] = Field(
+        default=[],
+        description="List of participant display names detected during the meeting.",
+    )
     transcript: list[dict[str, Any]] = Field(
         default=[],
         description="Array of {speaker, text, timestamp} entries. Populated once status is `done`.",

@@ -626,11 +626,95 @@ async def _wait_for_admission(
     return False
 
 
+async def _collect_participants(page: Page, platform: str) -> set[str]:
+    """Best-effort scrape of visible participant names from the meeting UI."""
+    names: set[str] = set()
+    try:
+        if platform == "google_meet":
+            # Video tile name labels (multiple possible class names across versions)
+            for sel in [
+                "[data-participant-id] [jsname='EkIl7d']",
+                "[data-participant-id] .zWGUib",
+                "[data-participant-id] [aria-label]",
+            ]:
+                els = page.locator(sel)
+                count = await els.count()
+                for i in range(min(count, 20)):
+                    try:
+                        txt = (await els.nth(i).inner_text()).strip()
+                        if txt and len(txt) < 60 and not txt.lower().startswith("you"):
+                            names.add(txt)
+                    except Exception:
+                        pass
+            # Also try JS approach for tile overlays
+            try:
+                found = await page.evaluate("""
+                    () => {
+                        const names = [];
+                        document.querySelectorAll('[data-participant-id]').forEach(tile => {
+                            const nameEl = tile.querySelector('[jsname], .zWGUib, [data-self-name]');
+                            if (nameEl) {
+                                const txt = nameEl.innerText || nameEl.textContent || nameEl.getAttribute('aria-label') || '';
+                                if (txt.trim()) names.push(txt.trim());
+                            }
+                        });
+                        return names;
+                    }
+                """)
+                for name in (found or []):
+                    if name and len(name) < 60:
+                        names.add(name)
+            except Exception:
+                pass
+
+        elif platform == "zoom":
+            for sel in [
+                ".participants__participant--name",
+                ".video-avatar__name",
+                ".display-name",
+                "[class*='participant-name']",
+            ]:
+                els = page.locator(sel)
+                count = await els.count()
+                for i in range(min(count, 20)):
+                    try:
+                        txt = (await els.nth(i).inner_text()).strip()
+                        if txt and len(txt) < 60:
+                            names.add(txt)
+                    except Exception:
+                        pass
+
+        elif platform == "microsoft_teams":
+            for sel in [
+                "[data-tid='roster-participant'] [data-tid='roster-participant-displayname']",
+                "[data-tid='roster-participant'] span",
+                "[data-cid='calling-roster-participant-display-name']",
+                ".ts-calling-roster-participant-name",
+            ]:
+                els = page.locator(sel)
+                count = await els.count()
+                for i in range(min(count, 20)):
+                    try:
+                        txt = (await els.nth(i).inner_text()).strip()
+                        if txt and len(txt) < 60:
+                            names.add(txt)
+                    except Exception:
+                        pass
+
+    except Exception as exc:
+        logger.debug("_collect_participants error: %s", exc)
+
+    # Filter out obvious non-names
+    names.discard("")
+    return {n for n in names if len(n) >= 2}
+
+
 async def _wait_for_meeting_end(
     page: Page,
     platform: str,
     max_s: int,
     alone_timeout_s: int = 300,
+    participants: set | None = None,
 ) -> str:
     """
     Wait until the meeting ends, the max duration is reached, or the bot has
@@ -646,6 +730,7 @@ async def _wait_for_meeting_end(
     asyncio.get_event_loop().call_later(5, _move_chrome_audio)
 
     alone_since: Optional[float] = None
+    _last_participant_scrape = 0.0
 
     while time.monotonic() < deadline:
         try:
@@ -656,6 +741,15 @@ async def _wait_for_meeting_end(
         except Exception:
             logger.info("Page inaccessible — meeting likely ended")
             return "ended"
+
+        # ── Participant name scraping (every 30s) ─────────────────────────
+        now = time.monotonic()
+        if participants is not None and now - _last_participant_scrape >= 30:
+            _last_participant_scrape = now
+            found = await _collect_participants(page, platform)
+            if found:
+                participants.update(found)
+                logger.debug("Participants so far: %s", participants)
 
         # ── Alone / empty-room detection ──────────────────────────────────
         alone = await _is_bot_alone(page, platform)
@@ -710,7 +804,7 @@ async def run_browser_bot(
         on_admitted:       Optional async callback fired when the bot is let in.
 
     Returns:
-        {"success", "audio_path", "error", "admitted", "duration_seconds", "exit_reason"}
+        {"success", "audio_path", "error", "admitted", "duration_seconds", "exit_reason", "participants"}
     """
     pulse_idx: Optional[str] = None
     ffmpeg_proc: Optional[subprocess.Popen] = None
@@ -812,9 +906,15 @@ async def run_browser_bot(
 
             await _screenshot(page, f"{platform}_in_meeting")
             logger.info("Bot is in the meeting — monitoring for end…")
+            _participants: set[str] = set()
             exit_reason = await _wait_for_meeting_end(
-                page, platform, max_duration, alone_timeout
+                page, platform, max_duration, alone_timeout, _participants
             )
+            # One final scrape at end of meeting
+            try:
+                _participants.update(await _collect_participants(page, platform))
+            except Exception:
+                pass
 
             duration   = time.monotonic() - t0
             has_audio  = (
@@ -829,6 +929,7 @@ async def run_browser_bot(
                 "admitted": True,
                 "duration_seconds": duration,
                 "exit_reason": exit_reason,
+                "participants": sorted(_participants),
             }
 
         except Exception as exc:
@@ -841,6 +942,7 @@ async def run_browser_bot(
                 "admitted": False,
                 "duration_seconds": time.monotonic() - t0,
                 "exit_reason": "error",
+                "participants": [],
             }
 
         finally:

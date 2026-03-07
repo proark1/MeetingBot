@@ -404,9 +404,19 @@ function renderBotDetail(bot) {
       <div class="meta-item"><div class="meta-label">Started</div><div class="meta-value">${fmtDate(bot.started_at)}</div></div>
       <div class="meta-item"><div class="meta-label">Duration</div><div class="meta-value">${duration}</div></div>
       <div class="meta-item"><div class="meta-label">Created</div><div class="meta-value">${fmtDate(bot.created_at)}</div></div>
+      <div class="meta-item"><div class="meta-label">Participants</div><div class="meta-value">${(bot.participants || []).length || "—"}</div></div>
       <div class="meta-item"><div class="meta-label">Transcript</div><div class="meta-value">${(bot.transcript || []).length} entries</div></div>
       <div class="meta-item"><div class="meta-label">Meeting URL</div><div class="meta-value" style="font-family:var(--font-mono);font-size:0.75rem;color:var(--text-muted)">${esc(bot.meeting_url.slice(0, 40))}${bot.meeting_url.length > 40 ? "…" : ""}</div></div>
     </div>
+
+    <!-- Participants section -->
+    ${(bot.participants || []).length ? `
+    <div class="section-card">
+      <div class="section-header"><h3>Participants</h3></div>
+      <div class="pill-list" style="padding:0.25rem 0 0.5rem">
+        ${(bot.participants || []).map((p) => `<span class="pill">${esc(p)}</span>`).join("")}
+      </div>
+    </div>` : ""}
 
     <!-- Transcript section -->
     <div class="section-card">
@@ -569,6 +579,7 @@ function exportJson(bot) {
     meeting_platform: bot.meeting_platform,
     started_at: bot.started_at,
     ended_at: bot.ended_at,
+    participants: bot.participants || [],
     transcript: bot.transcript,
     analysis: bot.analysis,
   };

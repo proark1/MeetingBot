@@ -35,6 +35,7 @@ def _bot_to_response(bot: Bot) -> BotResponse:
         updated_at=bot.updated_at,
         started_at=bot.started_at,
         ended_at=bot.ended_at,
+        participants=bot.participants or [],
         transcript=bot.transcript or [],
         analysis=MeetingAnalysis(**bot.analysis) if bot.analysis else None,
         recording_url=bot.recording_url,

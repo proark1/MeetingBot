@@ -41,6 +41,7 @@ class Bot(Base):
 
     # Output data
     transcript: Mapped[list] = mapped_column(JSON, default=list)
+    participants: Mapped[list] = mapped_column(JSON, default=list)
     analysis: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     recording_url: Mapped[str | None] = mapped_column(Text, nullable=True)
 
