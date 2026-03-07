@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     # Real browser bot
     BOT_ADMISSION_TIMEOUT: int = 300   # seconds to wait for host to admit the bot
     BOT_MAX_DURATION: int = 7200       # max meeting length in seconds (2 hours)
+    BOT_ALONE_TIMEOUT: int = 300       # seconds alone before bot leaves (5 minutes)
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 

@@ -528,6 +528,56 @@ _END_TEXTS = {
     "microsoft_teams": ["the meeting has ended", "call ended", "you left"],
 }
 
+# Text signals that the bot is the only one in the meeting
+_ALONE_TEXTS = {
+    "google_meet": [
+        "no one else is here",
+        "you're the only one",
+        "you are the only one",
+        "no one else has joined",
+        "add others to this call",
+    ],
+    "zoom": [
+        "you are the only participant",
+        "waiting for others to join",
+    ],
+    "microsoft_teams": [
+        "you're the only one here",
+        "you are the only one here",
+        "no one else is here",
+    ],
+}
+
+
+async def _is_bot_alone(page: Page, platform: str) -> bool:
+    """Return True if the bot appears to be the only participant in the meeting."""
+    try:
+        body = (await page.inner_text("body")).lower()
+
+        if any(t in body for t in _ALONE_TEXTS.get(platform, [])):
+            return True
+
+        # DOM participant tile count as secondary signal.
+        # Only trust count == 1 (just the bot's own tile); count == 0 may mean
+        # the DOM hasn't rendered yet, so we skip that to avoid false positives.
+        if platform == "google_meet":
+            count = await page.locator("[data-participant-id]").count()
+            if count == 1:
+                return True
+        elif platform == "zoom":
+            count = await page.locator(
+                ".video-avatar__avatar, .participants-list-item"
+            ).count()
+            if count == 1:
+                return True
+        elif platform == "microsoft_teams":
+            count = await page.locator("[data-tid='roster-participant']").count()
+            if count == 1:
+                return True
+    except Exception:
+        pass
+    return False
+
 
 async def _wait_for_admission(
     page: Page,
@@ -576,7 +626,18 @@ async def _wait_for_admission(
     return False
 
 
-async def _wait_for_meeting_end(page: Page, platform: str, max_s: int) -> None:
+async def _wait_for_meeting_end(
+    page: Page,
+    platform: str,
+    max_s: int,
+    alone_timeout_s: int = 300,
+) -> str:
+    """
+    Wait until the meeting ends, the max duration is reached, or the bot has
+    been the only participant for alone_timeout_s consecutive seconds.
+
+    Returns one of: "ended" | "max_duration" | "alone_timeout"
+    """
     end_texts = _END_TEXTS.get(platform, [])
     deadline  = time.monotonic() + max_s
 
@@ -584,18 +645,41 @@ async def _wait_for_meeting_end(page: Page, platform: str, max_s: int) -> None:
     # (belt-and-suspenders in case the default-sink setting wasn't picked up)
     asyncio.get_event_loop().call_later(5, _move_chrome_audio)
 
+    alone_since: Optional[float] = None
+
     while time.monotonic() < deadline:
         try:
             body = (await page.inner_text("body")).lower()
             if any(t in body for t in end_texts):
                 logger.info("Meeting end detected (%s)", platform)
-                return
+                return "ended"
         except Exception:
             logger.info("Page inaccessible — meeting likely ended")
-            return
+            return "ended"
+
+        # ── Alone / empty-room detection ──────────────────────────────────
+        alone = await _is_bot_alone(page, platform)
+        if alone:
+            if alone_since is None:
+                alone_since = time.monotonic()
+                logger.info(
+                    "Bot is alone in the meeting — will leave in %ds if no one joins",
+                    alone_timeout_s,
+                )
+            elif time.monotonic() - alone_since >= alone_timeout_s:
+                logger.info(
+                    "Bot has been alone for %ds — leaving meeting", alone_timeout_s
+                )
+                return "alone_timeout"
+        else:
+            if alone_since is not None:
+                logger.info("Other participants detected — resetting alone timer")
+            alone_since = None
+
         await asyncio.sleep(10)
 
     logger.info("Max meeting duration (%ds) reached", max_s)
+    return "max_duration"
 
 
 # ── Main entry point ──────────────────────────────────────────────────────────
@@ -607,6 +691,7 @@ async def run_browser_bot(
     audio_path: str,
     admission_timeout: int = 300,
     max_duration: int = 7200,
+    alone_timeout: int = 300,
     on_admitted: Optional[Callable[[], Awaitable[None]]] = None,
 ) -> dict:
     """
@@ -619,10 +704,13 @@ async def run_browser_bot(
         audio_path:        Path where the WAV recording will be written.
         admission_timeout: Seconds to wait for the host to admit the bot.
         max_duration:      Max meeting length in seconds before bot leaves.
+        alone_timeout:     Seconds the bot may be the only participant before
+                           it leaves automatically (covers both the empty-room
+                           case and the everyone-left case).
         on_admitted:       Optional async callback fired when the bot is let in.
 
     Returns:
-        {"success", "audio_path", "error", "admitted", "duration_seconds"}
+        {"success", "audio_path", "error", "admitted", "duration_seconds", "exit_reason"}
     """
     pulse_idx: Optional[str] = None
     ffmpeg_proc: Optional[subprocess.Popen] = None
@@ -715,7 +803,9 @@ async def run_browser_bot(
 
             await _screenshot(page, f"{platform}_in_meeting")
             logger.info("Bot is in the meeting — monitoring for end…")
-            await _wait_for_meeting_end(page, platform, max_duration)
+            exit_reason = await _wait_for_meeting_end(
+                page, platform, max_duration, alone_timeout
+            )
 
             duration   = time.monotonic() - t0
             has_audio  = (
@@ -729,6 +819,7 @@ async def run_browser_bot(
                 "error": None,
                 "admitted": True,
                 "duration_seconds": duration,
+                "exit_reason": exit_reason,
             }
 
         except Exception as exc:
@@ -740,6 +831,7 @@ async def run_browser_bot(
                 "error": str(exc),
                 "admitted": False,
                 "duration_seconds": time.monotonic() - t0,
+                "exit_reason": "error",
             }
 
         finally:

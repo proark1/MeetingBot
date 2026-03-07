@@ -26,6 +26,7 @@ Set these in a `.env` file or as environment variables:
 | `BOT_NAME_DEFAULT` | `MeetingBot` | Display name shown inside the meeting |
 | `BOT_ADMISSION_TIMEOUT` | `300` | Seconds to wait for the host to admit the bot before giving up |
 | `BOT_MAX_DURATION` | `7200` | Maximum meeting recording length in seconds (2 hours) |
+| `BOT_ALONE_TIMEOUT` | `300` | Seconds the bot stays alone before leaving automatically (5 minutes) — covers both the empty-room case and the everyone-left case |
 | `DATABASE_URL` | `sqlite+aiosqlite:///./meetingbot.db` | SQLAlchemy async DB URL |
 | `SECRET_KEY` | *(dev default)* | Change in production |
 
@@ -96,6 +97,15 @@ Poll this until `status` is `done` (or `error`). The full `transcript` and `anal
 | `call_ended` | Meeting ended — transcription and analysis running |
 | `done` | Transcript and analysis are ready |
 | `error` | Something failed — check `error_message` |
+
+**Auto-leave behaviour:**
+
+The bot automatically leaves in two cases, both controlled by `BOT_ALONE_TIMEOUT` (default 5 minutes):
+
+- **Empty room on join** — the bot is admitted but no other participants are present. If no one joins within 5 minutes, the bot leaves.
+- **Everyone left** — participants were in the call but all left. If no one rejoins within 5 minutes, the bot leaves.
+
+If a participant rejoins before the timer expires, the timer resets and the bot stays. The timeout is configurable via `BOT_ALONE_TIMEOUT`.
 
 ---
 

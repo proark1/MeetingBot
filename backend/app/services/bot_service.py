@@ -102,6 +102,7 @@ async def run_bot_lifecycle(bot_id: str, db_factory) -> None:
                     audio_path=audio_path,
                     admission_timeout=settings.BOT_ADMISSION_TIMEOUT,
                     max_duration=settings.BOT_MAX_DURATION,
+                    alone_timeout=settings.BOT_ALONE_TIMEOUT,
                     on_admitted=on_admitted,
                 )
 
