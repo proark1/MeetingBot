@@ -20,6 +20,27 @@ logger = logging.getLogger(__name__)
 _MAX_RETRIES = 3
 _RETRY_DELAYS = [1, 3, 8]  # seconds between attempts
 
+# Persistent client — reused across all webhook deliveries to avoid the
+# connection-pool warmup cost of creating a new client on every status change.
+_http_client: httpx.AsyncClient | None = None
+
+
+def _get_client() -> httpx.AsyncClient:
+    global _http_client
+    if _http_client is None or _http_client.is_closed:
+        _http_client = httpx.AsyncClient(
+            timeout=settings.WEBHOOK_TIMEOUT_SECONDS,
+            follow_redirects=True,
+        )
+    return _http_client
+
+
+async def close_http_client() -> None:
+    """Close the persistent client on app shutdown."""
+    global _http_client
+    if _http_client and not _http_client.is_closed:
+        await _http_client.aclose()
+
 
 async def dispatch_event(
     db: AsyncSession,
@@ -42,23 +63,23 @@ async def dispatch_event(
         {"event": event, "data": payload, "ts": datetime.now(timezone.utc).isoformat()}
     )
 
-    async with httpx.AsyncClient(timeout=settings.WEBHOOK_TIMEOUT_SECONDS) as client:
-        for wh in webhooks:
-            subscribed = wh.events == "*" or event in wh.events.split(",")
-            if not subscribed:
-                continue
+    client = _get_client()
+    for wh in webhooks:
+        subscribed = wh.events == "*" or event in wh.events.split(",")
+        if not subscribed:
+            continue
 
-            headers = {"Content-Type": "application/json", "User-Agent": "MeetingBot/1.0"}
-            if wh.secret:
-                sig = hmac.new(
-                    wh.secret.encode(), body.encode(), hashlib.sha256
-                ).hexdigest()
-                headers["X-MeetingBot-Signature"] = f"sha256={sig}"
+        headers = {"Content-Type": "application/json", "User-Agent": "MeetingBot/1.0"}
+        if wh.secret:
+            sig = hmac.new(
+                wh.secret.encode(), body.encode(), hashlib.sha256
+            ).hexdigest()
+            headers["X-MeetingBot-Signature"] = f"sha256={sig}"
 
-            status_code = await _deliver_with_retry(client, wh.url, body, headers)
-            wh.delivery_attempts += 1
-            wh.last_delivery_at = datetime.now(timezone.utc)
-            wh.last_delivery_status = status_code
+        status_code = await _deliver_with_retry(client, wh.url, body, headers)
+        wh.delivery_attempts += 1
+        wh.last_delivery_at = datetime.now(timezone.utc)
+        wh.last_delivery_status = status_code
 
     await db.commit()
 

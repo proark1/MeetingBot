@@ -5,12 +5,12 @@ import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, func, case
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db, AsyncSessionLocal
 from app.models.bot import Bot
-from app.schemas.bot import BotCreate, BotListResponse, BotResponse, MeetingAnalysis
+from app.schemas.bot import BotCreate, BotListResponse, BotResponse, BotSummary, MeetingAnalysis
 from app.services import bot_service, intelligence_service
 
 logger = logging.getLogger(__name__)
@@ -21,6 +21,29 @@ _running_tasks: dict[str, asyncio.Task] = {}
 
 # Statuses treated as "active" for stats
 _ACTIVE_STATUSES = ("ready", "joining", "in_call", "call_ended")
+
+
+def _is_demo(bot: Bot) -> bool:
+    return bool((bot.extra_metadata or {}).get("is_demo_transcript"))
+
+
+def _bot_to_summary(bot: Bot) -> BotSummary:
+    return BotSummary(
+        id=bot.id,
+        meeting_url=bot.meeting_url,
+        meeting_platform=bot.meeting_platform,
+        bot_name=bot.bot_name,
+        status=bot.status,
+        error_message=bot.error_message,
+        created_at=bot.created_at,
+        updated_at=bot.updated_at,
+        started_at=bot.started_at,
+        ended_at=bot.ended_at,
+        participants=bot.participants or [],
+        recording_url=bot.recording_url,
+        extra_metadata=bot.extra_metadata or {},
+        is_demo_transcript=_is_demo(bot),
+    )
 
 
 def _bot_to_response(bot: Bot) -> BotResponse:
@@ -40,6 +63,7 @@ def _bot_to_response(bot: Bot) -> BotResponse:
         analysis=MeetingAnalysis(**bot.analysis) if bot.analysis else None,
         recording_url=bot.recording_url,
         extra_metadata=bot.extra_metadata or {},
+        is_demo_transcript=_is_demo(bot),
     )
 
 
@@ -84,9 +108,22 @@ async def create_bot(
     seconds (default 5 min) — either because the room was empty on join, or
     because everyone else left — it will leave automatically.
     """
+    from app.config import settings
+
+    # Rate limit: cap concurrent browser bots to avoid OOM crashes
+    active = sum(1 for t in _running_tasks.values() if not t.done())
+    if active >= settings.MAX_CONCURRENT_BOTS:
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                f"Too many bots running ({active}/{settings.MAX_CONCURRENT_BOTS}). "
+                "Wait for a bot to finish before creating another."
+            ),
+        )
+
     bot = Bot(
-        meeting_url=payload.meeting_url,
-        meeting_platform=bot_service.detect_platform(payload.meeting_url),
+        meeting_url=str(payload.meeting_url),
+        meeting_platform=bot_service.detect_platform(str(payload.meeting_url)),
         bot_name=payload.bot_name,
         join_at=payload.join_at,
         extra_metadata=payload.extra_metadata,
@@ -114,7 +151,7 @@ async def list_bots(
     offset: int = Query(default=0, ge=0),
     status: str | None = Query(default=None),
 ):
-    """List all bots with optional status filter."""
+    """List all bots. Returns lightweight summaries (no transcript/analysis)."""
     query = select(Bot).order_by(Bot.created_at.desc())
     count_query = select(func.count()).select_from(Bot)
 
@@ -126,7 +163,7 @@ async def list_bots(
     bots = (await db.execute(query.limit(limit).offset(offset))).scalars().all()
 
     return BotListResponse(
-        results=[_bot_to_response(b) for b in bots],
+        results=[_bot_to_summary(b) for b in bots],
         count=total,
     )
 
@@ -138,10 +175,9 @@ async def get_bot(
     bot_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Get a single bot by ID.
+    """Get a single bot by ID including full transcript and analysis.
 
     Poll this endpoint until `status` is `done` (or `error`).
-    The full `transcript` and `analysis` are included in the response once available.
 
     **Statuses:**
     - `joining` — browser opening, navigating to meeting URL
@@ -177,17 +213,11 @@ async def delete_bot(
     task = _running_tasks.get(bot_id)
     if task and not task.done():
         task.cancel()
-        # The lifecycle task does NOT re-raise CancelledError; it salvages the
-        # transcript and then finishes cleanly.  We shield it and give it up to
-        # 5 s to exit the hot-path before we return 204.  If it needs longer
-        # (e.g. Gemini transcription) it continues in the background.
         try:
             await asyncio.wait_for(asyncio.shield(task), timeout=5.0)
         except (asyncio.TimeoutError, asyncio.CancelledError):
             pass
         logger.info("Cancelled lifecycle task for bot %s", bot_id)
-        # Status is set to "cancelled" by the lifecycle task itself; no DB
-        # write needed here.
 
 
 # ── GET /api/v1/bot/{id}/transcript ─────────────────────────────────────────

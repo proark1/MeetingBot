@@ -17,6 +17,20 @@ class Settings(BaseSettings):
     BOT_MAX_DURATION: int = 7200       # max meeting length in seconds (2 hours)
     BOT_ALONE_TIMEOUT: int = 300       # seconds alone before bot leaves (5 minutes)
 
+    # Security
+    # If set, all /api/v1/* endpoints require:  Authorization: Bearer <API_KEY>
+    # Leave empty to disable auth (backward-compatible default).
+    API_KEY: str = ""
+
+    # CORS — comma-separated list of allowed origins, or "*" for all.
+    # When set to specific origins, credentials are allowed.
+    # When "*", credentials are disabled (browsers reject credentialed wildcard CORS).
+    CORS_ORIGINS: str = "*"
+
+    # Concurrency — maximum number of browser bots that can run simultaneously.
+    # Each bot spawns a Chromium process + ffmpeg; too many will crash the container.
+    MAX_CONCURRENT_BOTS: int = 3
+
     model_config = {"env_file": ".env", "extra": "ignore"}
 
 

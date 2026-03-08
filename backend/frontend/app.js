@@ -260,6 +260,10 @@ function renderBotList(bots) {
       ? `<span class="sentiment-badge sentiment-${esc(sentiment)}">${esc(sentiment)}</span>`
       : "";
 
+    const demoChip = b.is_demo_transcript
+      ? `<span class="badge badge-demo" title="No real audio was captured — this transcript was AI-generated">demo</span>`
+      : "";
+
     const summaryEl = summary
       ? `<div class="report-summary">${esc(summary.length > 160 ? summary.slice(0, 160) + "…" : summary)}</div>`
       : "";
@@ -274,6 +278,7 @@ function renderBotList(bots) {
         <div class="report-header-right">
           <span data-badge-id="${esc(b.id)}">${statusBadge(b.status)}</span>
           ${sentimentChip}
+          ${demoChip}
           <button class="btn btn-danger btn-sm" data-delete-bot="${esc(b.id)}" title="Delete">🗑</button>
         </div>
       </div>
@@ -409,10 +414,14 @@ async function refreshBotDetail(botId) {
 function renderBotDetail(bot) {
   // Badges in header
   const badgesEl = document.getElementById("bot-detail-badges");
+  const demoBadge = bot.is_demo_transcript
+    ? `<span class="badge badge-demo" title="No real audio was captured — this transcript was AI-generated">demo transcript</span>`
+    : "";
   badgesEl.innerHTML = `
     <span style="font-size:1.25rem">${platformIcon(bot.meeting_platform)}</span>
     <strong style="font-size:1rem">${esc(bot.bot_name)}</strong>
-    ${statusBadge(bot.status)}`;
+    ${statusBadge(bot.status)}
+    ${demoBadge}`;
 
   // Lifecycle steps
   renderLifecycleSteps(bot.status);

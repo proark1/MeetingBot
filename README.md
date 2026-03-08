@@ -23,11 +23,14 @@ Set these in a `.env` file or as environment variables:
 
 | Variable | Default | Description |
 |---|---|---|
-| `GEMINI_API_KEY` | *(required)* | Google Gemini API key — used for transcription and analysis. The server logs a warning at startup if this is missing. |
+| `GEMINI_API_KEY` | *(required)* | Google Gemini API key — used for transcription and analysis. |
+| `API_KEY` | *(empty = no auth)* | If set, all `/api/v1/*` requests must include `Authorization: Bearer <API_KEY>`. Leave empty to disable. |
+| `CORS_ORIGINS` | `*` | Comma-separated allowed origins, e.g. `https://app.example.com,https://admin.example.com`. `*` allows all origins. |
+| `MAX_CONCURRENT_BOTS` | `3` | Maximum number of browser bots running simultaneously. Returns 429 if exceeded. |
 | `BOT_NAME_DEFAULT` | `MeetingBot` | Display name shown inside the meeting |
 | `BOT_ADMISSION_TIMEOUT` | `300` | Seconds to wait for the host to admit the bot before giving up |
 | `BOT_MAX_DURATION` | `7200` | Maximum meeting recording length in seconds (2 hours) |
-| `BOT_ALONE_TIMEOUT` | `300` | Seconds the bot stays alone before leaving automatically (5 minutes) — covers both the empty-room case and the everyone-left case |
+| `BOT_ALONE_TIMEOUT` | `300` | Seconds the bot stays alone before leaving automatically (5 minutes) |
 | `DATABASE_URL` | `sqlite+aiosqlite:///./meetingbot.db` | SQLAlchemy async DB URL |
 | `SECRET_KEY` | *(dev default)* | Change in production |
 
@@ -169,7 +172,10 @@ POST /api/v1/bot/{bot_id}/analyze
 GET /api/v1/bot?limit=20&offset=0&status=done
 ```
 
+Returns lightweight summaries — `transcript` and `analysis` are omitted to keep responses small. Use `GET /api/v1/bot/{id}` for the full payload.
+
 - `status` filter is optional: `joining`, `in_call`, `call_ended`, `done`, `error`
+- `is_demo_transcript: true` is set when no real audio was captured and a Gemini-generated transcript was used as fallback
 
 ---
 

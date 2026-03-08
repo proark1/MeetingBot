@@ -25,6 +25,32 @@ logger = logging.getLogger(__name__)
 PULSE_SINK_NAME = "meetingbot_sink"
 SCREENSHOT_DIR = Path("/app/data/screenshots")
 
+# Track all live subprocesses (ffmpeg, Xvfb) so they can be killed on SIGTERM.
+_active_procs: list[subprocess.Popen] = []
+
+
+def _register_proc(proc: subprocess.Popen) -> subprocess.Popen:
+    _active_procs.append(proc)
+    return proc
+
+
+def _unregister_proc(proc: subprocess.Popen) -> None:
+    try:
+        _active_procs.remove(proc)
+    except ValueError:
+        pass
+
+
+def kill_all_procs() -> None:
+    """Kill every tracked subprocess. Called on SIGTERM to avoid orphaned
+    ffmpeg/Xvfb processes surviving a Railway redeploy."""
+    for proc in list(_active_procs):
+        try:
+            proc.kill()
+        except Exception:
+            pass
+    _active_procs.clear()
+
 # ── Stealth JS ────────────────────────────────────────────────────────────────
 # Patches the most common automation signals that Google Meet and Teams check.
 _STEALTH_JS = """
@@ -163,6 +189,7 @@ def _start_xvfb(display: str = ":99") -> Optional[subprocess.Popen]:
         )
         time.sleep(1.5)
         if proc.poll() is None:
+            _register_proc(proc)
             logger.info("Xvfb started on display %s", display)
             return proc
         logger.warning("Xvfb exited immediately")
@@ -185,6 +212,7 @@ def _start_ffmpeg(audio_path: str) -> Optional[subprocess.Popen]:
         )
         time.sleep(0.5)
         if proc.poll() is None:
+            _register_proc(proc)
             logger.info("ffmpeg recording → %s", audio_path)
             return proc
         logger.warning("ffmpeg exited immediately — PulseAudio sink may not be ready")
@@ -195,6 +223,7 @@ def _start_ffmpeg(audio_path: str) -> Optional[subprocess.Popen]:
 
 
 def _stop_ffmpeg(proc: subprocess.Popen) -> None:
+    _unregister_proc(proc)
     try:
         proc.terminate()
         proc.wait(timeout=15)
@@ -1094,6 +1123,7 @@ async def run_browser_bot(
             if pulse_idx:
                 _unload_pulse_sink(pulse_idx)
             if xvfb_proc:
+                _unregister_proc(xvfb_proc)
                 try:
                     xvfb_proc.terminate()
                     xvfb_proc.wait(timeout=5)

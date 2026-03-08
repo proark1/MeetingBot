@@ -89,6 +89,7 @@ async def _salvage_and_finish(
         if not transcript:
             logger.info("Bot %s: no captured audio — generating demo transcript", bot_id)
             transcript = await intelligence_service.generate_demo_transcript(bot.meeting_url)
+            bot.extra_metadata = {**(bot.extra_metadata or {}), "is_demo_transcript": True}
 
         bot.transcript = transcript
         bot.updated_at = _now()
@@ -174,6 +175,7 @@ async def run_bot_lifecycle(bot_id: str, db_factory) -> None:
                     transcript = await intelligence_service.generate_demo_transcript(
                         bot.meeting_url
                     )
+                    bot.extra_metadata = {**(bot.extra_metadata or {}), "is_demo_transcript": True}
             else:
                 # ── Unsupported platform — demo mode ──────────────────────
                 logger.info(
@@ -187,6 +189,7 @@ async def run_bot_lifecycle(bot_id: str, db_factory) -> None:
                 transcript = await intelligence_service.generate_demo_transcript(
                     bot.meeting_url
                 )
+                bot.extra_metadata = {**(bot.extra_metadata or {}), "is_demo_transcript": True}
 
             # ── 3. Store transcript + participants ────────────────────────
             bot.transcript = transcript

@@ -252,6 +252,7 @@ h3 { font-size: 1rem; font-weight: 600; }
 .badge-call_ended  { background: rgba(245,158,11,0.15); color: var(--warning); }
 .badge-done        { background: rgba(34,197,94,0.1); color: var(--success); }
 .badge-error       { background: rgba(239,68,68,0.15); color: var(--error); }
+.badge-demo        { background: rgba(245,158,11,0.15); color: var(--warning); }
 
 .badge-joining::before,
 .badge-in_call::before { animation: pulse 1.5s ease-in-out infinite; }
