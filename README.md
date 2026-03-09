@@ -27,6 +27,8 @@ Set these in a `.env` file or as environment variables:
 | `API_KEY` | *(empty = no auth)* | If set, all `/api/v1/*` requests must include `Authorization: Bearer <API_KEY>`. Leave empty to disable. |
 | `CORS_ORIGINS` | `*` | Comma-separated allowed origins, e.g. `https://app.example.com,https://admin.example.com`. `*` allows all origins. |
 | `MAX_CONCURRENT_BOTS` | `3` | Maximum number of browser bots running simultaneously. Returns 429 if exceeded. |
+| `BOT_JOIN_MAX_RETRIES` | `2` | Number of retry attempts if the bot fails to join before being admitted. |
+| `BOT_JOIN_RETRY_DELAY_S` | `30` | Seconds to wait between join retry attempts. |
 | `BOT_NAME_DEFAULT` | `MeetingBot` | Display name shown inside the meeting |
 | `BOT_ADMISSION_TIMEOUT` | `300` | Seconds to wait for the host to admit the bot before giving up |
 | `BOT_MAX_DURATION` | `7200` | Maximum meeting recording length in seconds (2 hours) |

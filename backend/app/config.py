@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     # Each bot spawns a Chromium process + ffmpeg; too many will crash the container.
     MAX_CONCURRENT_BOTS: int = 3
 
+    # Join retry — extra attempts after the first failure before giving up.
+    BOT_JOIN_MAX_RETRIES: int = 2      # 0 = no retry
+    BOT_JOIN_RETRY_DELAY_S: int = 30   # seconds between attempts
+
     model_config = {"env_file": ".env", "extra": "ignore"}
 
 

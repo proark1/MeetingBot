@@ -20,7 +20,7 @@ router = APIRouter(prefix="/bot", tags=["Bots"])
 _running_tasks: dict[str, asyncio.Task] = {}
 
 # Statuses treated as "active" for stats
-_ACTIVE_STATUSES = ("ready", "joining", "in_call", "call_ended")
+_ACTIVE_STATUSES = ("ready", "scheduled", "joining", "in_call", "call_ended")
 
 
 def _is_demo(bot: Bot) -> bool:
@@ -121,11 +121,18 @@ async def create_bot(
             ),
         )
 
+    from datetime import timezone as _tz
+    from datetime import datetime as _dt
+    is_scheduled = (
+        payload.join_at is not None
+        and payload.join_at.replace(tzinfo=_tz.utc) > _dt.now(_tz.utc)
+    )
     bot = Bot(
         meeting_url=str(payload.meeting_url),
         meeting_platform=bot_service.detect_platform(str(payload.meeting_url)),
         bot_name=payload.bot_name,
         join_at=payload.join_at,
+        status="scheduled" if is_scheduled else "ready",
         extra_metadata=payload.extra_metadata,
     )
     db.add(bot)
@@ -150,6 +157,7 @@ async def list_bots(
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     status: str | None = Query(default=None),
+    search: str | None = Query(default=None, description="Filter by meeting URL (partial match)"),
 ):
     """List all bots. Returns lightweight summaries (no transcript/analysis)."""
     query = select(Bot).order_by(Bot.created_at.desc())
@@ -158,6 +166,11 @@ async def list_bots(
     if status:
         query = query.where(Bot.status == status)
         count_query = count_query.where(Bot.status == status)
+
+    if search:
+        pattern = f"%{search}%"
+        query = query.where(Bot.meeting_url.ilike(pattern))
+        count_query = count_query.where(Bot.meeting_url.ilike(pattern))
 
     total = (await db.execute(count_query)).scalar_one()
     bots = (await db.execute(query.limit(limit).offset(offset))).scalars().all()

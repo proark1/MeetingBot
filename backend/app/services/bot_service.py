@@ -113,13 +113,13 @@ async def _salvage_and_finish(
 async def run_bot_lifecycle(bot_id: str, db_factory) -> None:
     """
     Full bot lifecycle:
-      ready → joining → in_call → call_ended → done
+      (scheduled →) joining → in_call → call_ended → done
 
     Real platforms (Google Meet, Zoom, Teams):
-      A Playwright browser bot joins the call, records audio, Whisper transcribes.
+      A Playwright browser bot joins the call, records audio, Gemini transcribes.
 
     Unsupported platforms:
-      Simulated lifecycle with a Claude-generated demo transcript.
+      Simulated lifecycle with a Gemini-generated demo transcript.
     """
     async with db_factory() as db:
         result = await db.execute(select(Bot).where(Bot.id == bot_id))
@@ -132,6 +132,18 @@ async def run_bot_lifecycle(bot_id: str, db_factory) -> None:
         use_real_bot = bot.meeting_platform in _REAL_PLATFORMS
 
         try:
+            # ── 0. scheduled — wait until join_at ─────────────────────────
+            if bot.join_at:
+                delay = (bot.join_at.replace(tzinfo=timezone.utc) - _now()).total_seconds()
+                if delay > 86400:
+                    logger.warning(
+                        "Bot %s join_at is more than 24 h away (%.0f s) — starting immediately",
+                        bot_id, delay,
+                    )
+                elif delay > 0:
+                    logger.info("Bot %s scheduled — waiting %.0f s until join_at", bot_id, delay)
+                    await asyncio.sleep(delay)
+
             # ── 1. joining ────────────────────────────────────────────────
             await _set_status(db, bot, "joining")
             logger.info("Bot %s joining %s (%s)", bot_id, bot.meeting_url, bot.meeting_platform)
@@ -140,23 +152,53 @@ async def run_bot_lifecycle(bot_id: str, db_factory) -> None:
                 # on_admitted is called the moment the host admits the bot —
                 # we update the status to in_call right then, not after the
                 # whole meeting is over.
+                admitted = False
+
                 async def on_admitted() -> None:
+                    nonlocal admitted
+                    admitted = True
                     await _set_status(db, bot, "in_call", started_at=_now())
                     logger.info("Bot %s is now in_call", bot_id)
 
-                bot_result = await run_browser_bot(
-                    meeting_url=bot.meeting_url,
-                    platform=bot.meeting_platform,
-                    bot_name=bot.bot_name or settings.BOT_NAME_DEFAULT,
-                    audio_path=audio_path,
-                    admission_timeout=settings.BOT_ADMISSION_TIMEOUT,
-                    max_duration=settings.BOT_MAX_DURATION,
-                    alone_timeout=settings.BOT_ALONE_TIMEOUT,
-                    on_admitted=on_admitted,
-                )
+                max_retries = settings.BOT_JOIN_MAX_RETRIES
+                retry_delay = settings.BOT_JOIN_RETRY_DELAY_S
+                last_error: str = ""
 
-                if not bot_result["success"]:
-                    raise RuntimeError(bot_result["error"] or "Browser bot failed")
+                for attempt in range(max_retries + 1):
+                    if attempt > 0:
+                        logger.info(
+                            "Bot %s join attempt %d/%d (retrying in %d s)…",
+                            bot_id, attempt + 1, max_retries + 1, retry_delay,
+                        )
+                        await asyncio.sleep(retry_delay)
+                        admitted = False  # reset for fresh attempt
+
+                    bot_result = await run_browser_bot(
+                        meeting_url=bot.meeting_url,
+                        platform=bot.meeting_platform,
+                        bot_name=bot.bot_name or settings.BOT_NAME_DEFAULT,
+                        audio_path=audio_path,
+                        admission_timeout=settings.BOT_ADMISSION_TIMEOUT,
+                        max_duration=settings.BOT_MAX_DURATION,
+                        alone_timeout=settings.BOT_ALONE_TIMEOUT,
+                        on_admitted=on_admitted,
+                    )
+
+                    if bot_result["success"]:
+                        break
+
+                    last_error = bot_result["error"] or "Browser bot failed"
+                    # Don't retry if the bot was admitted — the failure happened
+                    # during the call, not during the join phase.
+                    if admitted:
+                        break
+                    if attempt < max_retries:
+                        logger.warning("Bot %s join failed (attempt %d): %s", bot_id, attempt + 1, last_error)
+                    else:
+                        raise RuntimeError(last_error)
+
+                if not bot_result["success"] and not admitted:
+                    raise RuntimeError(last_error or "Browser bot failed after all retries")
 
                 # ── 2. call_ended → transcribe ────────────────────────────
                 scraped_participants: list[str] = bot_result.get("participants") or []

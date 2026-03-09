@@ -7,11 +7,13 @@ used throughout the app:
 """
 
 import asyncio
+import glob as _glob
 import json
 import logging
 import os
 import re
 import time
+import uuid
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -34,6 +36,72 @@ Rules:
 - Omit silences, background noise, and unintelligible segments.
 - Do not add commentary, summaries, or any text outside the JSON array.
 """.strip()
+
+
+_CHUNK_THRESHOLD_S = 2100   # 35 min — below this, transcribe as a single file
+_CHUNK_SIZE_S      = 1800   # 30 min per chunk
+
+
+def _estimate_duration_s(file_path: str) -> float:
+    """Rough duration estimate from file size (16 kHz mono PCM = 32 000 bytes/s)."""
+    return os.path.getsize(file_path) / 32_000
+
+
+async def _split_audio(audio_path: str, chunk_s: int = _CHUNK_SIZE_S) -> list[str]:
+    """
+    Split *audio_path* into ≤chunk_s-second WAV segments using ffmpeg.
+    Returns a sorted list of temp file paths (caller must delete them).
+    """
+    uid = uuid.uuid4().hex
+    pattern = f"/tmp/chunk_{uid}_%03d.wav"
+    proc = await asyncio.create_subprocess_exec(
+        "ffmpeg", "-y", "-i", audio_path,
+        "-f", "segment", "-segment_time", str(chunk_s),
+        "-c", "copy", pattern,
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    await proc.wait()
+    chunks = sorted(_glob.glob(f"/tmp/chunk_{uid}_*.wav"))
+    logger.info("Split %s into %d chunk(s)", audio_path, len(chunks))
+    return chunks
+
+
+async def _transcribe_chunked(
+    audio_path: str,
+    known_participants: list[str] | None,
+    estimated_s: float,
+) -> list[dict[str, Any]]:
+    """Split the audio into 30-min chunks and transcribe them sequentially."""
+    logger.info(
+        "Long recording (~%.0f min) — splitting into chunks of %d s",
+        estimated_s / 60, _CHUNK_SIZE_S,
+    )
+    chunks = await _split_audio(audio_path, _CHUNK_SIZE_S)
+    if not chunks:
+        logger.error("Audio split produced no chunks — cannot transcribe")
+        return []
+
+    all_entries: list[dict[str, Any]] = []
+    chunk_files = list(chunks)
+    try:
+        for idx, chunk_path in enumerate(chunk_files):
+            offset_s = idx * _CHUNK_SIZE_S
+            logger.info("Transcribing chunk %d/%d (offset %d s)…", idx + 1, len(chunk_files), offset_s)
+            entries = await transcribe_audio(chunk_path, known_participants)
+            for entry in entries:
+                entry = dict(entry)
+                entry["timestamp"] = float(entry.get("timestamp", 0)) + offset_s
+                all_entries.append(entry)
+    finally:
+        for path in chunk_files:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+
+    logger.info("Chunked transcription complete: %d total entries from %d chunks", len(all_entries), len(chunk_files))
+    return all_entries
 
 
 async def transcribe_audio(audio_path: str, known_participants: list[str] | None = None) -> list[dict[str, Any]]:
@@ -61,6 +129,11 @@ async def transcribe_audio(audio_path: str, known_participants: list[str] | None
     if size < 8192:
         logger.warning("Audio file is too small (%d bytes) — likely no audio captured", size)
         return []
+
+    # For long recordings, split into chunks and transcribe sequentially
+    estimated_s = _estimate_duration_s(audio_path)
+    if estimated_s > _CHUNK_THRESHOLD_S:
+        return await _transcribe_chunked(audio_path, known_participants, estimated_s)
 
     try:
         import google.generativeai as genai

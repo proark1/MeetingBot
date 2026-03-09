@@ -209,24 +209,58 @@ async function loadStats() {
 
 // ── Bots list ──────────────────────────────────────────────────────────────
 
+const PAGE_SIZE = 10;
 let _currentFilter = "";
-let _bots = [];
+let _currentSearch = "";
+let _currentPage   = 0;
+let _totalBots     = 0;
 
-async function loadBots(filter = _currentFilter) {
+// Debounce helper
+function _debounce(fn, ms) {
+  let t;
+  return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+}
+
+async function loadBots(filter = _currentFilter, search = _currentSearch, page = _currentPage) {
   _currentFilter = filter;
+  _currentSearch = search;
+  _currentPage   = page;
+
   const listEl = document.getElementById("bot-list");
-  if (!_bots.length) listEl.innerHTML = '<div class="loading">Loading…</div>';
+  listEl.innerHTML = '<div class="loading">Loading…</div>';
 
   try {
-    const qs = filter ? `?status=${filter}` : "";
-    const data = await apiFetch("GET", `/bot${qs}`);
-    _bots = data.results;
-    renderBotList(_bots);
+    const params = new URLSearchParams({ limit: PAGE_SIZE, offset: page * PAGE_SIZE });
+    if (filter) params.set("status", filter);
+    if (search) params.set("search", search);
+    const data = await apiFetch("GET", `/bot?${params}`);
+    _totalBots = data.count;
+    renderBotList(data.results);
+    renderPagination();
   } catch (e) {
     listEl.innerHTML = `<div class="empty">Error: ${esc(e.message)}</div>`;
   }
 
   await loadStats();
+}
+
+function renderPagination() {
+  const el = document.getElementById("bot-pagination");
+  if (!el) return;
+  const totalPages = Math.ceil(_totalBots / PAGE_SIZE);
+  if (totalPages <= 1) { el.innerHTML = ""; return; }
+  const start = _currentPage * PAGE_SIZE + 1;
+  const end   = Math.min((_currentPage + 1) * PAGE_SIZE, _totalBots);
+  el.innerHTML = `
+    <div class="pagination">
+      <button class="btn btn-ghost btn-sm" id="btn-prev-page" ${_currentPage === 0 ? "disabled" : ""}>← Prev</button>
+      <span class="pagination-info">${start}–${end} of ${_totalBots}</span>
+      <button class="btn btn-ghost btn-sm" id="btn-next-page" ${end >= _totalBots ? "disabled" : ""}>Next →</button>
+    </div>`;
+  el.querySelector("#btn-prev-page")?.addEventListener("click", () =>
+    loadBots(_currentFilter, _currentSearch, _currentPage - 1));
+  el.querySelector("#btn-next-page")?.addEventListener("click", () =>
+    loadBots(_currentFilter, _currentSearch, _currentPage + 1));
 }
 
 function renderBotList(bots) {
@@ -316,9 +350,6 @@ function updateBotRow(botId, data) {
   // Update just the status badge on the list row without full refresh
   const badgeEl = document.querySelector(`[data-badge-id="${botId}"]`);
   if (badgeEl && data.status) badgeEl.innerHTML = statusBadge(data.status);
-  // Update _bots cache
-  const idx = _bots.findIndex((b) => b.id === botId);
-  if (idx >= 0) _bots[idx] = { ..._bots[idx], ...data };
 }
 
 // ── Filter buttons ─────────────────────────────────────────────────────────
@@ -327,11 +358,20 @@ document.querySelectorAll(".filter-btn").forEach((btn) => {
   btn.addEventListener("click", () => {
     document.querySelectorAll(".filter-btn").forEach((b) => b.classList.remove("active"));
     btn.classList.add("active");
-    loadBots(btn.dataset.status || "");
+    loadBots(btn.dataset.status || "", _currentSearch, 0);
   });
 });
 
-document.getElementById("btn-refresh").addEventListener("click", () => loadBots());
+document.getElementById("btn-refresh").addEventListener("click", () =>
+  loadBots(_currentFilter, _currentSearch, 0));
+
+// Search input — debounced so we don't fire on every keystroke
+const _searchInput = document.getElementById("bot-search");
+if (_searchInput) {
+  _searchInput.addEventListener("input", _debounce((e) => {
+    loadBots(_currentFilter, e.target.value.trim(), 0);
+  }, 300));
+}
 
 // ── Create Bot ─────────────────────────────────────────────────────────────
 

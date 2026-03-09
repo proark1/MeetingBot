@@ -74,14 +74,17 @@
           <div class="card-toolbar">
             <div class="filter-group">
               <button class="filter-btn active" data-status="">All</button>
+              <button class="filter-btn" data-status="scheduled">Scheduled</button>
               <button class="filter-btn" data-status="joining">Joining</button>
               <button class="filter-btn" data-status="in_call">In Call</button>
               <button class="filter-btn" data-status="done">Done</button>
               <button class="filter-btn" data-status="error">Error</button>
             </div>
+            <input class="input btn-sm" id="bot-search" type="search" placeholder="Search by URL…" style="width:200px">
             <button class="btn btn-ghost btn-sm" id="btn-refresh">↻ Refresh</button>
           </div>
           <div id="bot-list" class="bot-list"></div>
+          <div id="bot-pagination"></div>
         </div>
       </section>
 
