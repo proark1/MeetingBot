@@ -96,7 +96,7 @@ async def generate_demo_transcript(meeting_url: str) -> list[dict[str, Any]]:
             f"{_DEMO_TRANSCRIPT_PROMPT}\n\n"
             f"Generate a realistic meeting transcript for a video call at: {meeting_url}\n"
             "Topics should feel natural for this kind of meeting. Include 3–4 distinct speakers.",
-            generation_config={"temperature": 0.8, "max_output_tokens": 4096},
+            generation_config={"temperature": 0.8, "max_output_tokens": 8192},
         )
         return json.loads(_strip_fences(response.text))
 

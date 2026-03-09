@@ -5,7 +5,7 @@ import logging
 import os
 import tempfile
 from datetime import datetime, timezone
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs, unquote
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,6 +17,19 @@ from app.services.browser_bot import run_browser_bot
 from app.services.transcription_service import transcribe_audio
 
 logger = logging.getLogger(__name__)
+
+def _unwrap_safelinks(url: str) -> str:
+    """Extract the real URL from a Microsoft SafeLinks wrapper URL."""
+    try:
+        parsed = urlparse(url)
+        if "safelinks.protection.outlook.com" in parsed.netloc:
+            qs = parse_qs(parsed.query)
+            if "url" in qs:
+                return unquote(qs["url"][0])
+    except Exception:
+        pass
+    return url
+
 
 _PLATFORM_NETLOC: dict[str, set[str]] = {
     "zoom":              {"zoom.us", "zoom.com"},
@@ -34,6 +47,7 @@ _REAL_PLATFORMS = {"google_meet", "zoom", "microsoft_teams"}
 def detect_platform(url: str) -> str:
     """Return platform key by matching the parsed netloc — prevents subdomain spoofing."""
     try:
+        url = _unwrap_safelinks(url)
         netloc = urlparse(url).netloc.lower().removeprefix("www.")
     except Exception:
         return "unknown"
