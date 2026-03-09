@@ -67,6 +67,31 @@ async def delete_webhook(
     await db.commit()
 
 
+@router.post("/{webhook_id}/test")
+async def test_webhook(
+    webhook_id: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Send a test delivery to this webhook endpoint and return the HTTP status code."""
+    wh = await _get_or_404(db, webhook_id)
+    from app.services.webhook_service import _get_client, _deliver_with_retry
+    import hashlib, hmac, json
+    body = json.dumps({
+        "event": "bot.test",
+        "data": {"message": "Test delivery from MeetingBot"},
+        "ts": datetime.now(timezone.utc).isoformat(),
+    })
+    headers = {"Content-Type": "application/json", "User-Agent": "MeetingBot/1.0"}
+    if wh.secret:
+        sig = hmac.new(wh.secret.encode(), body.encode(), hashlib.sha256).hexdigest()
+        headers["X-MeetingBot-Signature"] = f"sha256={sig}"
+    client = _get_client()
+    status_code = await _deliver_with_retry(client, wh.url, body, headers)
+    if status_code is None:
+        raise HTTPException(status_code=502, detail="Test delivery failed — endpoint unreachable or returned 5xx")
+    return {"status_code": status_code, "url": wh.url}
+
+
 async def _get_or_404(db: AsyncSession, webhook_id: str) -> Webhook:
     result = await db.execute(select(Webhook).where(Webhook.id == webhook_id))
     wh = result.scalar_one_or_none()

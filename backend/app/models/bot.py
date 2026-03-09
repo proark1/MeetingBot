@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import String, DateTime, JSON, Text
+from sqlalchemy import String, DateTime, JSON, Text, Index
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -47,3 +47,9 @@ class Bot(Base):
 
     # Arbitrary caller metadata
     extra_metadata: Mapped[dict] = mapped_column(JSON, default=dict)
+
+    __table_args__ = (
+        Index("ix_bot_status",      "status"),
+        Index("ix_bot_created_at",  "created_at"),
+        Index("ix_bot_meeting_url", "meeting_url"),
+    )

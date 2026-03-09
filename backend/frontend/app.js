@@ -244,6 +244,7 @@ async function loadBots(filter = _currentFilter, search = _currentSearch, page =
     _totalBots = data.count;
     renderBotList(data.results);
     renderPagination();
+    _startLiveTimers();
   } catch (e) {
     if (seq !== _loadBotsSeq) return;
     listEl.innerHTML = `<div class="empty">Error: ${esc(e.message)}</div>`;
@@ -288,9 +289,14 @@ function renderBotList(bots) {
     const summary = b.analysis?.summary || "";
     const sentiment = b.analysis?.sentiment || "";
 
+    // Live timer for active calls
+    const durationDisplay = b.status === "in_call" && b.started_at
+      ? `<span class="live-timer" data-live-start="${b.started_at}">…</span>`
+      : (duration !== "—" ? duration : "");
+
     const stats = [
       b.started_at ? `🕐 ${fmtDate(b.started_at)}` : `📅 ${fmtDate(b.created_at)}`,
-      duration !== "—" ? `⏱ ${duration}` : "",
+      durationDisplay ? `⏱ ${durationDisplay}` : "",
       participants ? `👥 ${participants} participant${participants !== 1 ? "s" : ""}` : "",
       transcriptLen ? `💬 ${transcriptLen} entries` : "",
     ].filter(Boolean).join(" &nbsp;·&nbsp; ");
@@ -305,6 +311,10 @@ function renderBotList(bots) {
 
     const summaryEl = summary
       ? `<div class="report-summary">${esc(summary.length > 160 ? summary.slice(0, 160) + "…" : summary)}</div>`
+      : "";
+
+    const errorEl = b.status === "error" && b.error_message
+      ? `<div class="report-error">⚠ ${esc(b.error_message.length > 120 ? b.error_message.slice(0, 120) + "…" : b.error_message)}</div>`
       : "";
 
     return `
@@ -324,6 +334,7 @@ function renderBotList(bots) {
       <div class="report-url">${esc(b.meeting_url)}</div>
       <div class="report-stats">${stats}</div>
       ${summaryEl}
+      ${errorEl}
     </div>`;
   }).join("");
 
@@ -355,6 +366,36 @@ function updateBotRow(botId, data) {
   // Update just the status badge on the list row without full refresh
   const badgeEl = document.querySelector(`[data-badge-id="${botId}"]`);
   if (badgeEl && data.status) badgeEl.innerHTML = statusBadge(data.status);
+}
+
+// Live timer for in-call bots — single interval, updates all [data-live-start] spans
+let _liveTimerInterval = null;
+function _startLiveTimers() {
+  if (_liveTimerInterval) return;
+  _liveTimerInterval = setInterval(() => {
+    const spans = document.querySelectorAll("[data-live-start]");
+    if (!spans.length) return;
+    spans.forEach((el) => {
+      const secs = Math.floor((Date.now() - new Date(el.dataset.liveStart)) / 1000);
+      el.textContent = _fmtSecs(secs) + " ●";
+    });
+  }, 1000);
+}
+function _fmtSecs(s) {
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), ss = s % 60;
+  return h ? `${h}h ${m}m` : m ? `${m}m ${ss}s` : `${ss}s`;
+}
+
+async function cancelBot(botId) {
+  if (!confirm("Cancel this bot and stop the recording?")) return;
+  try {
+    await apiFetch("DELETE", `/bot/${botId}`);
+    showToast("Bot cancelled", "info");
+    await refreshBotDetail(botId);
+    loadBots();
+  } catch (e) {
+    showToast(e.message, "error");
+  }
 }
 
 // ── Filter buttons ─────────────────────────────────────────────────────────
@@ -413,10 +454,19 @@ async function submitCreateBot() {
   btn.disabled = true;
   btn.textContent = "Creating…";
 
+  const joinAtInput = document.getElementById("new-bot-join-at");
+  const joinAtVal = joinAtInput ? joinAtInput.value : "";
+  const body = { meeting_url: url, bot_name: name };
+  if (joinAtVal) body.join_at = new Date(joinAtVal).toISOString();
+
   try {
-    const bot = await apiFetch("POST", "/bot", { meeting_url: url, bot_name: name });
+    const bot = await apiFetch("POST", "/bot", body);
     closeModal("modal-new-bot");
-    showToast(`Bot created — joining now`, "success");
+    if (joinAtVal) {
+      showToast(`Bot scheduled for ${new Date(joinAtVal).toLocaleString()}`, "success");
+    } else {
+      showToast("Bot created — joining now", "success");
+    }
     showBotDetail(bot.id);
     loadBots();
   } catch (e) {
@@ -479,6 +529,12 @@ function renderBotDetail(bot) {
     ${statusBadge(bot.status)}
     ${demoBadge}`;
 
+  if (["scheduled","joining","in_call","call_ended"].includes(bot.status)) {
+    badgesEl.insertAdjacentHTML("beforeend",
+      `<button class="btn btn-danger btn-sm" id="btn-cancel-bot">✕ Cancel</button>`);
+    document.getElementById("btn-cancel-bot").addEventListener("click", () => cancelBot(bot.id));
+  }
+
   // Lifecycle steps
   renderLifecycleSteps(bot.status);
 
@@ -515,13 +571,23 @@ function renderBotDetail(bot) {
     <div class="section-card">
       <div class="section-header">
         <h3>Transcript <span style="color:var(--text-muted);font-size:0.8rem;font-weight:400">(${(bot.transcript||[]).length} entries)</span></h3>
-        <div style="display:flex;gap:0.5rem">
+        <div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center">
           ${(bot.transcript||[]).length ? `<button class="btn btn-icon" id="btn-copy-transcript" title="Copy transcript">📋 Copy</button>` : ""}
-          ${(bot.transcript||[]).length && bot.analysis ? `<button class="btn btn-icon" id="btn-export-json" title="Download JSON">⬇ Export</button>` : ""}
+          ${(bot.transcript||[]).length ? `<button class="btn btn-icon" id="btn-export-csv" title="Download CSV">⬇ CSV</button>` : ""}
+          ${(bot.transcript||[]).length ? `<button class="btn btn-icon" id="btn-export-md" title="Download Markdown">⬇ MD</button>` : ""}
+          ${(bot.transcript||[]).length && bot.analysis ? `<button class="btn btn-icon" id="btn-export-json" title="Download JSON">⬇ JSON</button>` : ""}
           ${(bot.transcript||[]).length ? `<button class="btn btn-sm btn-primary" id="btn-reanalyse">✨ Analyse with Claude</button>` : ""}
         </div>
       </div>
-      ${renderTranscript(bot.transcript)}
+      ${(bot.transcript||[]).length ? `
+      <div class="transcript-toolbar">
+        <select class="input btn-sm" id="transcript-speaker-filter" style="width:auto">
+          <option value="">All speakers</option>
+          ${[...new Set((bot.transcript||[]).map(e => e.speaker))].map(s => `<option value="${esc(s)}">${esc(s)}</option>`).join("")}
+        </select>
+        <input class="input btn-sm" id="transcript-search" type="search" placeholder="Search…" style="width:160px">
+      </div>` : ""}
+      <div id="transcript-body">${renderTranscript(bot.transcript)}</div>
     </div>
 
     <!-- Analysis section -->
@@ -533,15 +599,35 @@ function renderBotDetail(bot) {
       ${renderAnalysis(bot.analysis)}
     </div>`;
 
-  // Wire up buttons
+  // Wire up transcript toolbar
   const copyBtn = document.getElementById("btn-copy-transcript");
   if (copyBtn) copyBtn.addEventListener("click", () => copyTranscript(bot.transcript));
+
+  const exportCsvBtn = document.getElementById("btn-export-csv");
+  if (exportCsvBtn) exportCsvBtn.addEventListener("click", () => exportTranscriptCsv(bot));
+
+  const exportMdBtn = document.getElementById("btn-export-md");
+  if (exportMdBtn) exportMdBtn.addEventListener("click", () => exportTranscriptMd(bot));
 
   const exportBtn = document.getElementById("btn-export-json");
   if (exportBtn) exportBtn.addEventListener("click", () => exportJson(bot));
 
   const analyseBtn = document.getElementById("btn-reanalyse");
   if (analyseBtn) analyseBtn.addEventListener("click", () => reanalyse(bot.id));
+
+  // Transcript filter + search
+  function _filterTranscript() {
+    const speaker = document.getElementById("transcript-speaker-filter")?.value || "";
+    const q = (document.getElementById("transcript-search")?.value || "").toLowerCase();
+    const filtered = (bot.transcript || []).filter((e) =>
+      (!speaker || e.speaker === speaker) &&
+      (!q || e.text.toLowerCase().includes(q) || e.speaker.toLowerCase().includes(q))
+    );
+    const body = document.getElementById("transcript-body");
+    if (body) body.innerHTML = renderTranscript(filtered);
+  }
+  document.getElementById("transcript-speaker-filter")?.addEventListener("change", _filterTranscript);
+  document.getElementById("transcript-search")?.addEventListener("input", _filterTranscript);
 }
 
 function renderLifecycleSteps(status) {
@@ -686,6 +772,29 @@ function exportJson(bot) {
   showToast("Exported as JSON", "success");
 }
 
+function _downloadBlob(content, filename, mime) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+}
+
+function exportTranscriptCsv(bot) {
+  const rows = [["speaker", "timestamp", "text"]];
+  (bot.transcript || []).forEach((e) => rows.push([e.speaker, fmtTs(e.timestamp), e.text]));
+  const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
+  _downloadBlob(csv, `transcript-${bot.id.slice(0, 8)}.csv`, "text/csv");
+  showToast("Exported as CSV", "success");
+}
+
+function exportTranscriptMd(bot) {
+  const lines = [`# Meeting Transcript\n`, `**Bot:** ${bot.bot_name}  `, `**URL:** ${bot.meeting_url}  `, `**Date:** ${fmtDate(bot.started_at || bot.created_at)}\n`];
+  (bot.transcript || []).forEach((e) => lines.push(`**${e.speaker}** (${fmtTs(e.timestamp)}): ${e.text}\n`));
+  _downloadBlob(lines.join("\n"), `transcript-${bot.id.slice(0, 8)}.md`, "text/markdown");
+  showToast("Exported as Markdown", "success");
+}
+
 // ── Back button ────────────────────────────────────────────────────────────
 
 document.getElementById("btn-back-bots").addEventListener("click", () => {
@@ -730,8 +839,25 @@ async function loadWebhooks() {
           ${wh.delivery_attempts} sent
           ${wh.last_delivery_status ? `· ${wh.last_delivery_status}` : ""}
         </div>
+        <button class="btn btn-ghost btn-sm" data-test-wh="${esc(wh.id)}" title="Send test delivery">Test</button>
         <button class="btn btn-danger btn-sm" data-del-wh="${esc(wh.id)}" title="Delete webhook">🗑</button>
       </div>`).join("");
+
+    listEl.querySelectorAll("[data-test-wh]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        btn.disabled = true;
+        btn.textContent = "Sending…";
+        try {
+          const res = await apiFetch("POST", `/webhook/${btn.dataset.testWh}/test`);
+          showToast(`Test delivered — HTTP ${res.status_code}`, res.status_code < 400 ? "success" : "error");
+        } catch (e) {
+          showToast(`Test failed: ${e.message}`, "error");
+        } finally {
+          btn.disabled = false;
+          btn.textContent = "Test";
+        }
+      });
+    });
 
     listEl.querySelectorAll("[data-del-wh]").forEach((btn) => {
       btn.addEventListener("click", async () => {

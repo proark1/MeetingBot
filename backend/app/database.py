@@ -43,8 +43,17 @@ async def init_db():
         # Migrate existing tables: add columns introduced after initial creation
         for stmt in [
             "ALTER TABLE bots ADD COLUMN participants JSON DEFAULT '[]'",
+            "ALTER TABLE webhooks ADD COLUMN consecutive_failures INTEGER DEFAULT 0",
         ]:
             try:
                 await conn.execute(text(stmt))
             except Exception:
                 pass  # column already exists
+
+        # Indexes on hot query columns (idempotent)
+        for stmt in [
+            "CREATE INDEX IF NOT EXISTS ix_bot_status      ON bots (status)",
+            "CREATE INDEX IF NOT EXISTS ix_bot_created_at  ON bots (created_at)",
+            "CREATE INDEX IF NOT EXISTS ix_bot_meeting_url ON bots (meeting_url)",
+        ]:
+            await conn.execute(text(stmt))

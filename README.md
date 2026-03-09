@@ -271,6 +271,14 @@ GET /api/v1/bot/{bot_id}
 
 ---
 
+#### Test a webhook
+
+```
+POST /api/v1/webhook/{webhook_id}/test
+```
+
+Sends a sample `bot.test` payload to the webhook URL immediately. Returns `{"status_code": 200, "url": "..."}` on success or 502 if the endpoint is unreachable. Webhooks are auto-disabled after 5 consecutive delivery failures.
+
 #### List / delete webhooks
 
 ```

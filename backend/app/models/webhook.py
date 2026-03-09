@@ -26,6 +26,7 @@ class Webhook(Base):
 
     # Delivery stats
     delivery_attempts: Mapped[int] = mapped_column(default=0)
+    consecutive_failures: Mapped[int] = mapped_column(default=0)
     last_delivery_at: Mapped[datetime | None] = mapped_column(
         DateTime, nullable=True
     )

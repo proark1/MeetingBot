@@ -104,8 +104,17 @@ async def _salvage_and_finish(
 
     # ── analysis ───────────────────────────────────────────────────────────
     if not bot.analysis and bot.transcript:
-        analysis = await intelligence_service.analyze_transcript(bot.transcript)
-        bot.analysis = analysis
+        try:
+            analysis = await intelligence_service.analyze_transcript(bot.transcript)
+            bot.analysis = analysis
+        except Exception as exc:
+            logger.error("Analysis failed for bot %s: %s", bot_id, exc)
+            bot.analysis = {
+                "summary": "Analysis unavailable — an error occurred during processing.",
+                "key_points": [], "action_items": [], "decisions": [],
+                "next_steps": [], "sentiment": "neutral", "topics": [],
+            }
+            bot.error_message = (bot.error_message or "") + f" [analysis error: {exc}]"
         bot.updated_at = _now()
         await db.commit()
         await webhook_service.dispatch_event(db, "bot.analysis_ready", {"bot_id": bot_id})
@@ -262,8 +271,17 @@ async def run_bot_lifecycle(bot_id: str, db_factory) -> None:
 
             # ── 4. Analyse with Claude ────────────────────────────────────
             logger.info("Bot %s analysing transcript…", bot_id)
-            analysis = await intelligence_service.analyze_transcript(transcript)
-            bot.analysis = analysis
+            try:
+                analysis = await intelligence_service.analyze_transcript(transcript)
+                bot.analysis = analysis
+            except Exception as exc:
+                logger.error("Analysis failed for bot %s: %s", bot_id, exc)
+                bot.analysis = {
+                    "summary": "Analysis unavailable — an error occurred during processing.",
+                    "key_points": [], "action_items": [], "decisions": [],
+                    "next_steps": [], "sentiment": "neutral", "topics": [],
+                }
+                bot.error_message = (bot.error_message or "") + f" [analysis error: {exc}]"
             bot.updated_at = _now()
             await db.commit()
             await webhook_service.dispatch_event(db, "bot.analysis_ready", {"bot_id": bot_id})

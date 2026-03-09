@@ -81,6 +81,18 @@ async def dispatch_event(
         wh.last_delivery_at = datetime.now(timezone.utc)
         wh.last_delivery_status = status_code
 
+        # Track consecutive failures; auto-disable after 5
+        if status_code is None or status_code >= 500:
+            wh.consecutive_failures = (wh.consecutive_failures or 0) + 1
+            if wh.consecutive_failures >= 5:
+                wh.is_active = False
+                logger.warning(
+                    "Webhook %s auto-disabled after %d consecutive failures (url=%s)",
+                    wh.id, wh.consecutive_failures, wh.url,
+                )
+        else:
+            wh.consecutive_failures = 0
+
     await db.commit()
 
 
