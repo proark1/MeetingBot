@@ -33,7 +33,7 @@ Set these in a `.env` file or as environment variables:
 | `BOT_ADMISSION_TIMEOUT` | `300` | Seconds to wait for the host to admit the bot before giving up |
 | `BOT_MAX_DURATION` | `7200` | Maximum meeting recording length in seconds (2 hours) |
 | `BOT_ALONE_TIMEOUT` | `300` | Seconds the bot stays alone before leaving automatically (5 minutes) |
-| `DATABASE_URL` | `sqlite+aiosqlite:///./meetingbot.db` | SQLAlchemy async DB URL |
+| `DATABASE_URL` | `sqlite+aiosqlite:///./meetingbot.db` | SQLAlchemy async DB URL. Connection timeout is 15 s. |
 | `SECRET_KEY` | *(dev default)* | Change in production |
 
 ---

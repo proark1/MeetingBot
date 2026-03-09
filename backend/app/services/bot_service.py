@@ -3,9 +3,9 @@
 import asyncio
 import logging
 import os
-import re
 import tempfile
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,24 +18,28 @@ from app.services.transcription_service import transcribe_audio
 
 logger = logging.getLogger(__name__)
 
-_PLATFORM_PATTERNS = [
-    (r"zoom\.us",             "zoom"),
-    (r"meet\.google\.com",    "google_meet"),
-    (r"teams\.microsoft\.com","microsoft_teams"),
-    (r"webex\.com",           "webex"),
-    (r"whereby\.com",         "whereby"),
-    (r"bluejeans\.com",       "bluejeans"),
-    (r"gotomeeting\.com",     "gotomeeting"),
-]
+_PLATFORM_NETLOC: dict[str, set[str]] = {
+    "zoom":              {"zoom.us", "zoom.com"},
+    "google_meet":       {"meet.google.com"},
+    "microsoft_teams":   {"teams.microsoft.com", "teams.live.com"},
+    "webex":             {"webex.com", "cisco.webex.com"},
+    "whereby":           {"whereby.com"},
+    "bluejeans":         {"bluejeans.com"},
+    "gotomeeting":       {"gotomeeting.com"},
+}
 
 _REAL_PLATFORMS = {"google_meet", "zoom", "microsoft_teams"}
 
 
 def detect_platform(url: str) -> str:
-    url_lower = url.lower()
-    for pattern, name in _PLATFORM_PATTERNS:
-        if re.search(pattern, url_lower):
-            return name
+    """Return platform key by matching the parsed netloc — prevents subdomain spoofing."""
+    try:
+        netloc = urlparse(url).netloc.lower().removeprefix("www.")
+    except Exception:
+        return "unknown"
+    for platform, hosts in _PLATFORM_NETLOC.items():
+        if any(netloc == h or netloc.endswith("." + h) for h in hosts):
+            return platform
     return "unknown"
 
 
@@ -235,17 +239,21 @@ async def run_bot_lifecycle(bot_id: str, db_factory) -> None:
 
             # ── 3. Store transcript + participants ────────────────────────
             bot.transcript = transcript
-            # Derive participants: prefer scraped names, fall back to transcript speakers
-            if use_real_bot:
-                speaker_names = {e["speaker"] for e in transcript if e.get("speaker")}
-                # Merge scraped names with speaker names from transcript
-                all_participants = scraped_participants or []
-                for name in speaker_names:
-                    if name not in all_participants:
-                        all_participants.append(name)
-                bot.participants = sorted(all_participants)
-            else:
-                bot.participants = sorted({e["speaker"] for e in transcript if e.get("speaker")})
+            # Derive participants: prefer scraped names, fall back to transcript speakers.
+            # Dedup case-insensitively so "Alice" and "alice" count as one person.
+            raw_names: list[str] = list(scraped_participants or []) if use_real_bot else []
+            for e in transcript:
+                name = e.get("speaker", "")
+                if name:
+                    raw_names.append(name)
+            seen_lower: set[str] = set()
+            unique_names: list[str] = []
+            for name in raw_names:
+                key = name.strip().lower()
+                if key and key not in seen_lower:
+                    seen_lower.add(key)
+                    unique_names.append(name.strip())
+            bot.participants = sorted(unique_names)
             bot.updated_at = _now()
             await db.commit()
             await webhook_service.dispatch_event(db, "bot.transcript_ready", {

@@ -4,6 +4,7 @@ Run with:
     uvicorn app.main:app --reload
 """
 
+import asyncio
 import logging
 import signal
 from contextlib import asynccontextmanager
@@ -73,6 +74,14 @@ async def lifespan(app: FastAPI):
 
     logger.info("MeetingBot ready")
     yield
+
+    # Cancel all running bot tasks so they clean up before the process exits
+    from app.api.bots import _running_tasks
+    if _running_tasks:
+        logger.info("Cancelling %d running bot task(s)…", len(_running_tasks))
+        for task in list(_running_tasks.values()):
+            task.cancel()
+        await asyncio.gather(*list(_running_tasks.values()), return_exceptions=True)
 
     # Close the persistent httpx client used by the webhook service
     from app.services import webhook_service

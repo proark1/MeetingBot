@@ -142,6 +142,7 @@ function showFieldError(inputId, errorId, msg) {
 
 let _wsRetryDelay = 1000;
 let _ws = null;
+let _wsKeepaliveTimer = null;
 
 function connectWS() {
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
@@ -150,8 +151,11 @@ function connectWS() {
   _ws.onopen = () => {
     _wsRetryDelay = 1000;
     setWsStatus(true);
-    // Keep-alive
-    setInterval(() => _ws && _ws.readyState === WebSocket.OPEN && _ws.send("ping"), 25000);
+    // Keep-alive — clear any previous timer first to avoid accumulation on reconnect
+    if (_wsKeepaliveTimer) clearInterval(_wsKeepaliveTimer);
+    _wsKeepaliveTimer = setInterval(
+      () => _ws && _ws.readyState === WebSocket.OPEN && _ws.send("ping"), 25000
+    );
   };
 
   _ws.onmessage = (e) => {
@@ -214,6 +218,7 @@ let _currentFilter = "";
 let _currentSearch = "";
 let _currentPage   = 0;
 let _totalBots     = 0;
+let _loadBotsSeq   = 0;  // incremented on each call; stale responses are discarded
 
 // Debounce helper
 function _debounce(fn, ms) {
@@ -225,6 +230,7 @@ async function loadBots(filter = _currentFilter, search = _currentSearch, page =
   _currentFilter = filter;
   _currentSearch = search;
   _currentPage   = page;
+  const seq = ++_loadBotsSeq;
 
   const listEl = document.getElementById("bot-list");
   listEl.innerHTML = '<div class="loading">Loading…</div>';
@@ -234,10 +240,12 @@ async function loadBots(filter = _currentFilter, search = _currentSearch, page =
     if (filter) params.set("status", filter);
     if (search) params.set("search", search);
     const data = await apiFetch("GET", `/bot?${params}`);
+    if (seq !== _loadBotsSeq) return;  // a newer call superseded this one — discard
     _totalBots = data.count;
     renderBotList(data.results);
     renderPagination();
   } catch (e) {
+    if (seq !== _loadBotsSeq) return;
     listEl.innerHTML = `<div class="empty">Error: ${esc(e.message)}</div>`;
   }
 
@@ -251,16 +259,13 @@ function renderPagination() {
   if (totalPages <= 1) { el.innerHTML = ""; return; }
   const start = _currentPage * PAGE_SIZE + 1;
   const end   = Math.min((_currentPage + 1) * PAGE_SIZE, _totalBots);
+  // Buttons use data-page-dir; clicks are handled via event delegation (no per-render listeners)
   el.innerHTML = `
     <div class="pagination">
-      <button class="btn btn-ghost btn-sm" id="btn-prev-page" ${_currentPage === 0 ? "disabled" : ""}>← Prev</button>
+      <button class="btn btn-ghost btn-sm" data-page-dir="prev" ${_currentPage === 0 ? "disabled" : ""}>← Prev</button>
       <span class="pagination-info">${start}–${end} of ${_totalBots}</span>
-      <button class="btn btn-ghost btn-sm" id="btn-next-page" ${end >= _totalBots ? "disabled" : ""}>Next →</button>
+      <button class="btn btn-ghost btn-sm" data-page-dir="next" ${end >= _totalBots ? "disabled" : ""}>Next →</button>
     </div>`;
-  el.querySelector("#btn-prev-page")?.addEventListener("click", () =>
-    loadBots(_currentFilter, _currentSearch, _currentPage - 1));
-  el.querySelector("#btn-next-page")?.addEventListener("click", () =>
-    loadBots(_currentFilter, _currentSearch, _currentPage + 1));
 }
 
 function renderBotList(bots) {
@@ -364,6 +369,17 @@ document.querySelectorAll(".filter-btn").forEach((btn) => {
 
 document.getElementById("btn-refresh").addEventListener("click", () =>
   loadBots(_currentFilter, _currentSearch, 0));
+
+// Pagination — single delegated listener on the static container (no per-render binding)
+document.getElementById("bot-pagination").addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-page-dir]");
+  if (!btn || btn.disabled) return;
+  const dir = btn.dataset.pageDir;
+  if (dir === "prev" && _currentPage > 0)
+    loadBots(_currentFilter, _currentSearch, _currentPage - 1);
+  else if (dir === "next")
+    loadBots(_currentFilter, _currentSearch, _currentPage + 1);
+});
 
 // Search input — debounced so we don't fire on every keystroke
 const _searchInput = document.getElementById("bot-search");

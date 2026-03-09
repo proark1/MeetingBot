@@ -24,6 +24,17 @@ logger = logging.getLogger(__name__)
 
 PULSE_SINK_NAME = "meetingbot_sink"
 SCREENSHOT_DIR = Path("/app/data/screenshots")
+_SCREENSHOT_MAX_AGE_S = 7 * 86_400  # 7 days
+
+
+def _prune_screenshots() -> None:
+    """Delete screenshot/HTML files older than 7 days to prevent disk exhaustion."""
+    if not SCREENSHOT_DIR.exists():
+        return
+    cutoff = time.time() - _SCREENSHOT_MAX_AGE_S
+    for f in SCREENSHOT_DIR.iterdir():
+        if f.is_file() and f.stat().st_mtime < cutoff:
+            f.unlink(missing_ok=True)
 
 # Track all live subprocesses (ffmpeg, Xvfb) so they can be killed on SIGTERM.
 _active_procs: list[subprocess.Popen] = []
@@ -1129,3 +1140,7 @@ async def run_browser_bot(
                     xvfb_proc.wait(timeout=5)
                 except Exception:
                     pass
+            try:
+                _prune_screenshots()
+            except Exception:
+                pass

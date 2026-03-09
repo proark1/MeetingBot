@@ -189,8 +189,17 @@ async def transcribe_audio(audio_path: str, known_participants: list[str] | None
             return []
 
         transcript = json.loads(raw)
-        logger.info("Transcription complete: %d entries", len(transcript))
-        return transcript
+
+        # Validate each entry has the required keys before returning
+        _REQUIRED = {"speaker", "text", "timestamp"}
+        validated = [e for e in transcript if isinstance(e, dict) and _REQUIRED.issubset(e)]
+        skipped = len(transcript) - len(validated)
+        if skipped:
+            logger.warning("Skipped %d malformed transcript entry(ies) from Gemini", skipped)
+        if not validated and transcript:
+            logger.error("All %d transcript entries were malformed — returning empty", len(transcript))
+        logger.info("Transcription complete: %d valid entries", len(validated))
+        return validated
 
     except json.JSONDecodeError as exc:
         logger.error(

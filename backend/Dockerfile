@@ -33,6 +33,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxext6 \
     fonts-liberation \
     ca-certificates \
+    curl \
     wget \
     && rm -rf /var/lib/apt/lists/*
 
@@ -62,6 +63,9 @@ RUN test -f /app/frontend/index.html || (echo "ERROR: frontend/index.html not fo
 RUN python -c "from app.main import app; print('Import verification passed')"
 
 EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD curl -sf "http://localhost:${PORT:-8000}/health" || exit 1
 
 # start.sh initialises PulseAudio, then starts uvicorn
 # Use shell form so ${PORT:-8000} is expanded (Railway injects PORT)
