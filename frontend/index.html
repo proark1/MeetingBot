@@ -21,6 +21,12 @@
         <a class="nav-item" data-page="search" href="#">
           <span class="nav-icon">🔍</span> Search
         </a>
+        <a class="nav-item" data-page="action-items" href="#">
+          <span class="nav-icon">✅</span> Action Items
+        </a>
+        <a class="nav-item" data-page="templates" href="#">
+          <span class="nav-icon">📝</span> Templates
+        </a>
         <a class="nav-item" data-page="analytics" href="#">
           <span class="nav-icon">📊</span> Analytics
         </a>
@@ -139,6 +145,42 @@
         <div id="analytics-content"><p class="loading">Loading…</p></div>
       </section>
 
+      <!-- ── ACTION ITEMS PAGE ── -->
+      <section id="page-action-items" class="page">
+        <div class="page-header">
+          <div>
+            <h1>Action Items</h1>
+            <p class="subtitle">Open tasks across all meetings</p>
+          </div>
+          <div style="display:flex;gap:0.5rem;align-items:center">
+            <select class="input btn-sm" id="ai-filter-done" style="width:140px">
+              <option value="">All</option>
+              <option value="false">Pending</option>
+              <option value="true">Done</option>
+            </select>
+            <input class="input btn-sm" id="ai-filter-assignee" placeholder="Assignee…" style="width:150px">
+            <button class="btn btn-ghost btn-sm" id="btn-refresh-ai">↻ Refresh</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div id="ai-stats" class="stats-bar" style="margin-bottom:1rem"></div>
+          <div id="action-items-list"></div>
+        </div>
+      </section>
+
+      <!-- ── TEMPLATES PAGE ── -->
+      <section id="page-templates" class="page">
+        <div class="page-header">
+          <div>
+            <h1>Meeting Templates</h1>
+            <p class="subtitle">Customise AI analysis prompts per meeting type</p>
+          </div>
+          <button class="btn btn-primary" id="btn-new-template">+ New Template</button>
+        </div>
+        <div id="templates-list" class="templates-grid"></div>
+      </section>
+
       <!-- ── DEBUG PAGE ── -->
       <section id="page-debug" class="page">
         <div class="page-header">
@@ -215,6 +257,16 @@
           Email Summary <span class="optional">(optional — receive summary after meeting)</span>
           <input class="input" id="new-bot-email" type="email" placeholder="you@example.com" />
         </label>
+        <label>
+          Meeting Template <span class="optional">(optional — customise AI analysis)</span>
+          <select class="input" id="new-bot-template">
+            <option value="">Default analysis</option>
+          </select>
+        </label>
+        <label>
+          Custom Vocabulary <span class="optional">(optional — comma-separated terms for better transcription)</span>
+          <input class="input" id="new-bot-vocab" placeholder="Acme, SKU-123, Project Phoenix" />
+        </label>
         <p class="hint">
           The bot will join, generate a transcript, then produce an AI-powered analysis —
           all automatically. Supported: Zoom, Google Meet, Teams, Webex, Whereby.
@@ -265,6 +317,36 @@
       <div class="modal-footer">
         <button class="btn btn-ghost" data-close="modal-new-webhook">Cancel</button>
         <button class="btn btn-primary" id="btn-create-webhook">Register</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- New Template Modal -->
+  <div class="modal-backdrop hidden" id="modal-new-template">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>New Template</h2>
+        <button class="modal-close" data-close="modal-new-template">✕</button>
+      </div>
+      <div class="modal-body">
+        <label>
+          Name <span class="required">*</span>
+          <input class="input" id="new-tmpl-name" placeholder="e.g. Sales Call" />
+        </label>
+        <label>
+          Description <span class="optional">(optional)</span>
+          <input class="input" id="new-tmpl-desc" placeholder="What this template is for" />
+        </label>
+        <label>
+          Custom Prompt <span class="optional">(leave blank to use default)</span>
+          <textarea class="input" id="new-tmpl-prompt" rows="6"
+            placeholder="You are analysing a meeting transcript. Extract: buying signals, objections, next steps…"
+            style="resize:vertical;font-family:monospace;font-size:0.85rem"></textarea>
+        </label>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" data-close="modal-new-template">Cancel</button>
+        <button class="btn btn-primary" id="btn-create-template">Create</button>
       </div>
     </div>
   </div>

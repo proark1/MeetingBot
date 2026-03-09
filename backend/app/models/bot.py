@@ -50,6 +50,10 @@ class Bot(Base):
     share_token: Mapped[str | None] = mapped_column(String(24), nullable=True, unique=True)
     notify_email: Mapped[str | None] = mapped_column(String(256), nullable=True)
 
+    # Template / vocabulary
+    template_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    vocabulary: Mapped[list | None] = mapped_column(JSON, nullable=True)
+
     # Arbitrary caller metadata
     extra_metadata: Mapped[dict] = mapped_column(JSON, default=dict)
 

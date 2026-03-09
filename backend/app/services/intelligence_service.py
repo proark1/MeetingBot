@@ -56,8 +56,18 @@ def _strip_fences(text: str) -> str:
     return text
 
 
-async def analyze_transcript(transcript: list[dict[str, Any]]) -> dict[str, Any]:
-    """Send transcript to Gemini and return structured meeting analysis."""
+async def analyze_transcript(
+    transcript: list[dict[str, Any]],
+    prompt_override: str | None = None,
+    vocabulary: list[str] | None = None,
+) -> dict[str, Any]:
+    """Send transcript to Gemini and return structured meeting analysis.
+
+    Args:
+        prompt_override: If set (e.g. from a meeting template), replaces the default
+            analysis prompt. Should instruct Gemini to return valid JSON.
+        vocabulary: Domain-specific terms to prepend as transcription hints.
+    """
     from app.config import settings
 
     if not settings.GEMINI_API_KEY:
@@ -67,15 +77,21 @@ async def analyze_transcript(transcript: list[dict[str, Any]]) -> dict[str, Any]
     if not transcript:
         return _empty_analysis()
 
-    lines = "\n".join(
+    vocab_hint = ""
+    if vocabulary:
+        vocab_hint = f"Known terms and names (prefer these spellings): {', '.join(vocabulary)}\n\n"
+
+    lines = vocab_hint + "\n".join(
         f"[{e.get('timestamp', 0):.1f}s] {e['speaker']}: {e['text']}"
         for e in transcript
     )
 
+    prompt = prompt_override or _ANALYSIS_PROMPT
+
     try:
         model = _get_model()
         response = await model.generate_content_async(
-            f"{_ANALYSIS_PROMPT}\n\nAnalyze this meeting transcript:\n\n{lines}",
+            f"{prompt}\n\nAnalyze this meeting transcript:\n\n{lines}",
             generation_config={"temperature": 0.2, "max_output_tokens": 4096},
         )
         return json.loads(_strip_fences(response.text))

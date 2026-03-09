@@ -30,6 +30,8 @@ class BotCreate(BaseModel):
     bot_name: str = Field(default="MeetingBot", max_length=100)
     join_at: datetime | None = None
     notify_email: str | None = None
+    template_id: str | None = None
+    vocabulary: list[str] | None = None
     extra_metadata: dict[str, Any] = {}
 
     @field_validator("meeting_url", mode="before")

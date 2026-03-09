@@ -32,7 +32,7 @@ async def get_db():
 
 async def init_db():
     async with engine.begin() as conn:
-        from app.models import bot, webhook, highlight  # noqa: F401 — registers models
+        from app.models import bot, webhook, highlight, action_item, template  # noqa: F401 — registers models
         await conn.run_sync(Base.metadata.create_all)
 
         # Enable WAL mode: prevents "database is locked" under concurrent async
@@ -49,6 +49,8 @@ async def init_db():
             "ALTER TABLE bots ADD COLUMN recording_path TEXT",
             "ALTER TABLE bots ADD COLUMN share_token TEXT",
             "ALTER TABLE bots ADD COLUMN notify_email TEXT",
+            "ALTER TABLE bots ADD COLUMN template_id TEXT",
+            "ALTER TABLE bots ADD COLUMN vocabulary JSON",
         ]:
             try:
                 await conn.execute(text(stmt))

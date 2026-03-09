@@ -20,6 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.models.action_item import ActionItem
 from app.models.bot import Bot
 from app.services import intelligence_service, webhook_service
 from app.services.browser_bot import run_browser_bot
@@ -28,21 +29,39 @@ from app.services.transcription_service import transcribe_audio
 logger = logging.getLogger(__name__)
 
 
+import re as _re
+_FILLER_WORDS = _re.compile(r'\b(um|uh|like|you know|so|basically|literally|actually|right)\b', _re.IGNORECASE)
+
+
 def _compute_speaker_stats(transcript: list[dict]) -> list[dict]:
-    """Compute per-speaker talk-time from transcript timestamps."""
+    """Compute per-speaker talk-time + conversation intelligence from transcript."""
     if not transcript:
         return []
     entries = sorted(transcript, key=lambda e: e.get("timestamp", 0))
+
     speaker_time: dict[str, float] = {}
+    speaker_questions: dict[str, int] = {}
+    speaker_fillers: dict[str, int] = {}
+    speaker_monologue: dict[str, float] = {}  # longest single turn in seconds
+    speaker_turns: dict[str, int] = {}
+
     for i, e in enumerate(entries):
         speaker = e.get("speaker", "Unknown")
-        # Duration = gap to next entry, capped at 60 s to ignore long silences
+        text = e.get("text", "")
+
+        # Duration = gap to next entry, capped at 60 s
         if i + 1 < len(entries):
             duration = entries[i + 1].get("timestamp", 0) - e.get("timestamp", 0)
         else:
             duration = 5.0
         duration = min(max(duration, 0.0), 60.0)
+
         speaker_time[speaker] = speaker_time.get(speaker, 0.0) + duration
+        speaker_turns[speaker] = speaker_turns.get(speaker, 0) + 1
+        speaker_questions[speaker] = speaker_questions.get(speaker, 0) + text.count("?")
+        speaker_fillers[speaker] = speaker_fillers.get(speaker, 0) + len(_FILLER_WORDS.findall(text))
+        speaker_monologue[speaker] = max(speaker_monologue.get(speaker, 0.0), duration)
+
     total = sum(speaker_time.values())
     if total == 0:
         return []
@@ -51,6 +70,10 @@ def _compute_speaker_stats(transcript: list[dict]) -> list[dict]:
             "name": name,
             "talk_time_s": round(t, 1),
             "talk_pct": round(t / total * 100, 1),
+            "turns": speaker_turns.get(name, 0),
+            "questions": speaker_questions.get(name, 0),
+            "filler_words": speaker_fillers.get(name, 0),
+            "longest_monologue_s": round(speaker_monologue.get(name, 0.0), 1),
         }
         for name, t in sorted(speaker_time.items(), key=lambda x: x[1], reverse=True)
     ]
@@ -333,8 +356,23 @@ async def run_bot_lifecycle(bot_id: str, db_factory) -> None:
 
             # ── 4. Analyse + chapters + speaker stats ─────────────────────
             logger.info("Bot %s analysing transcript…", bot_id)
+            prompt_override = None
+            if bot.template_id:
+                try:
+                    from app.models.template import MeetingTemplate
+                    tmpl_row = (await db.execute(
+                        select(MeetingTemplate).where(MeetingTemplate.id == bot.template_id)
+                    )).scalar_one_or_none()
+                    if tmpl_row and tmpl_row.prompt_override:
+                        prompt_override = tmpl_row.prompt_override
+                except Exception as exc:
+                    logger.warning("Template lookup failed for bot %s: %s", bot_id, exc)
             try:
-                analysis = await intelligence_service.analyze_transcript(transcript)
+                analysis = await intelligence_service.analyze_transcript(
+                    transcript,
+                    prompt_override=prompt_override,
+                    vocabulary=bot.vocabulary or [],
+                )
                 bot.analysis = analysis
             except Exception as exc:
                 logger.error("Analysis failed for bot %s: %s", bot_id, exc)
@@ -361,7 +399,11 @@ async def run_bot_lifecycle(bot_id: str, db_factory) -> None:
             await db.commit()
             await webhook_service.dispatch_event(db, "bot.analysis_ready", {"bot_id": bot_id})
 
-            # ── 5. Email summary if requested ─────────────────────────────
+            # ── 5. Persist action items to DB ─────────────────────────────
+            if bot.analysis:
+                await _persist_action_items(db, bot)
+
+            # ── 6. Post-meeting notifications ─────────────────────────────
             if bot.notify_email:
                 try:
                     from app.services import email_service
@@ -369,7 +411,29 @@ async def run_bot_lifecycle(bot_id: str, db_factory) -> None:
                 except Exception as exc:
                     logger.warning("Email summary failed for bot %s: %s", bot_id, exc)
 
-            # ── 6. done ───────────────────────────────────────────────────
+            if settings.SLACK_WEBHOOK_URL or (bot.extra_metadata or {}).get("slack_webhook_url"):
+                webhook_url = (bot.extra_metadata or {}).get("slack_webhook_url") or settings.SLACK_WEBHOOK_URL
+                try:
+                    from app.services import slack_service
+                    await slack_service.send_meeting_summary(bot, webhook_url)
+                except Exception as exc:
+                    logger.warning("Slack summary failed for bot %s: %s", bot_id, exc)
+
+            if settings.NOTION_API_KEY and settings.NOTION_DATABASE_ID:
+                try:
+                    from app.services import notion_service
+                    await notion_service.push_meeting(bot)
+                except Exception as exc:
+                    logger.warning("Notion push failed for bot %s: %s", bot_id, exc)
+
+            if settings.LINEAR_API_KEY and settings.LINEAR_TEAM_ID:
+                try:
+                    from app.services import linear_service
+                    await linear_service.push_action_items(bot)
+                except Exception as exc:
+                    logger.warning("Linear push failed for bot %s: %s", bot_id, exc)
+
+            # ── 7. done ───────────────────────────────────────────────────
             await _set_status(db, bot, "done")
             logger.info("Bot %s done", bot_id)
 
@@ -409,3 +473,24 @@ async def run_bot_lifecycle(bot_id: str, db_factory) -> None:
                     os.remove(audio_path)
             except Exception:
                 pass
+
+
+async def _persist_action_items(db: AsyncSession, bot: Bot) -> None:
+    """Upsert action items from bot.analysis into the ActionItem table."""
+    try:
+        items = (bot.analysis or {}).get("action_items", [])
+        for item in items:
+            task = (item.get("task") or "").strip()
+            if not task:
+                continue
+            ai = ActionItem(
+                bot_id=bot.id,
+                task=task,
+                assignee=(item.get("assignee") or None),
+                due_date=(item.get("due_date") or None),
+            )
+            db.add(ai)
+        if items:
+            await db.commit()
+    except Exception as exc:
+        logger.warning("Failed to persist action items for bot %s: %s", bot.id, exc)

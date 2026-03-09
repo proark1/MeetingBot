@@ -35,6 +35,18 @@ Set these in a `.env` file or as environment variables:
 | `BOT_ALONE_TIMEOUT` | `300` | Seconds the bot stays alone before leaving automatically (5 minutes) |
 | `DATABASE_URL` | `sqlite+aiosqlite:///./meetingbot.db` | SQLAlchemy async DB URL. Connection timeout is 15 s. |
 | `SECRET_KEY` | *(dev default)* | Change in production |
+| `SLACK_WEBHOOK_URL` | *(empty)* | Slack Incoming Webhook URL — post meeting summaries to Slack after each meeting. |
+| `SMTP_HOST` | *(empty)* | SMTP server for email summaries. Leave empty to disable. |
+| `SMTP_PORT` | `587` | SMTP port |
+| `SMTP_USER` | *(empty)* | SMTP username |
+| `SMTP_PASS` | *(empty)* | SMTP password |
+| `SMTP_FROM` | `meetingbot@example.com` | From address for emails |
+| `BASE_URL` | *(empty)* | Public URL used in share links, e.g. `https://meetingbot.example.com` |
+| `NOTION_API_KEY` | *(empty)* | Notion API key — push meeting summaries to a Notion database. |
+| `NOTION_DATABASE_ID` | *(empty)* | Notion database ID to write meeting pages into. |
+| `LINEAR_API_KEY` | *(empty)* | Linear API key — push action items as Linear issues. |
+| `LINEAR_TEAM_ID` | *(empty)* | Linear team ID to create issues in. |
+| `DIGEST_EMAIL` | *(empty)* | Comma-separated recipients for the weekly digest email (Mondays 9am). |
 
 ---
 
@@ -54,11 +66,18 @@ POST /api/v1/bot
 ```json
 {
   "meeting_url": "https://meet.google.com/abc-defg-hij",
-  "bot_name": "1tab.ai Notetaker",
+  "bot_name": "MeetingBot",
   "join_at": null,
+  "notify_email": "you@example.com",
+  "template_id": "seed-sales",
+  "vocabulary": ["Acme", "SKU-123"],
   "extra_metadata": {}
 }
 ```
+
+`template_id` — optional ID of a meeting template (see `/api/v1/templates`). Templates customise the AI analysis prompt.
+`vocabulary` — optional list of domain-specific terms to hint at during transcription.
+
 
 **Supported platforms** (auto-detected from URL):
 - `meet.google.com` → Google Meet
@@ -399,3 +418,29 @@ Send `ping` to receive `pong` (keepalive). Events arrive as JSON:
 | Zoom | Yes | Yes | Yes (Gemini) |
 | Microsoft Teams | Yes | Yes | Yes (Gemini) |
 | Others | — | — | Demo transcript only |
+
+---
+
+## Action Items
+
+Cross-meeting action item tracking. Action items extracted by AI from each meeting are automatically stored in the database and can be queried across all meetings.
+
+```
+GET  /api/v1/action-items?done=false&assignee=Alice&limit=100
+PATCH /api/v1/action-items/{id}   — toggle done, update assignee/due_date
+GET  /api/v1/action-items/stats   — {total, done, pending}
+```
+
+---
+
+## Meeting Templates
+
+Templates let you customise the AI analysis prompt per meeting type.
+
+```
+GET    /api/v1/templates           — list all (includes 3 built-ins: seed-sales, seed-standup, seed-1on1)
+POST   /api/v1/templates           — create custom template {name, description, prompt_override}
+DELETE /api/v1/templates/{id}      — delete a custom template
+```
+
+Pass `template_id` when creating a bot to use a template's custom analysis prompt.

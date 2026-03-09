@@ -95,8 +95,10 @@ document.querySelectorAll(".nav-item[data-page]").forEach((el) => {
     if (page === "bots")      { showPage("bots"); loadBots(); }
     if (page === "webhooks")  { showPage("webhooks"); loadWebhooks(); }
     if (page === "debug")     { showPage("debug"); loadDebugFiles(); }
-    if (page === "search")    { showPage("search"); }
-    if (page === "analytics") { showPage("analytics"); loadAnalytics(); }
+    if (page === "search")       { showPage("search"); }
+    if (page === "action-items") { showPage("action-items"); loadActionItems(); }
+    if (page === "templates")    { showPage("templates"); loadTemplates(); }
+    if (page === "analytics")    { showPage("analytics"); loadAnalytics(); }
   });
 });
 
@@ -434,7 +436,18 @@ if (_searchInput) {
 
 // ── Create Bot ─────────────────────────────────────────────────────────────
 
-document.getElementById("btn-new-bot").addEventListener("click", () => openModal("modal-new-bot"));
+document.getElementById("btn-new-bot").addEventListener("click", async () => {
+  openModal("modal-new-bot");
+  // Populate template dropdown
+  try {
+    const tmpls = await apiFetch("GET", "/templates");
+    const sel = document.getElementById("new-bot-template");
+    if (sel) {
+      sel.innerHTML = '<option value="">Default analysis</option>' +
+        tmpls.map(t => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join("");
+    }
+  } catch (_) {}
+});
 
 async function submitCreateBot() {
   const urlInput = document.getElementById("new-bot-url");
@@ -460,9 +473,14 @@ async function submitCreateBot() {
   const joinAtVal = joinAtInput ? joinAtInput.value : "";
   const emailInput = document.getElementById("new-bot-email");
   const notifyEmail = emailInput ? emailInput.value.trim() : "";
+  const templateId = (document.getElementById("new-bot-template")?.value || "").trim();
+  const vocabRaw = (document.getElementById("new-bot-vocab")?.value || "").trim();
+  const vocabulary = vocabRaw ? vocabRaw.split(",").map(s => s.trim()).filter(Boolean) : null;
   const body = { meeting_url: url, bot_name: name };
   if (joinAtVal) body.join_at = new Date(joinAtVal).toISOString();
   if (notifyEmail) body.notify_email = notifyEmail;
+  if (templateId) body.template_id = templateId;
+  if (vocabulary) body.vocabulary = vocabulary;
 
   try {
     const bot = await apiFetch("POST", "/bot", body);
@@ -1297,6 +1315,121 @@ function _renderBarChart(items) {
 }
 
 document.getElementById("btn-refresh-analytics")?.addEventListener("click", loadAnalytics);
+
+// ── Action Items ─────────────────────────────────────────────────────────
+
+async function loadActionItems() {
+  const listEl = document.getElementById("action-items-list");
+  const statsEl = document.getElementById("ai-stats");
+  listEl.innerHTML = '<div class="loading">Loading…</div>';
+  try {
+    const doneFilter = document.getElementById("ai-filter-done")?.value ?? "";
+    const assignee = document.getElementById("ai-filter-assignee")?.value.trim() ?? "";
+    const params = new URLSearchParams({ limit: 200 });
+    if (doneFilter !== "") params.set("done", doneFilter);
+    if (assignee) params.set("assignee", assignee);
+    const items = await apiFetch("GET", `/action-items?${params}`);
+
+    // Stats
+    const stats = await apiFetch("GET", "/action-items/stats");
+    if (statsEl) statsEl.innerHTML = `
+      <div class="stat-card"><div class="stat-value">${stats.total}</div><div class="stat-label">Total</div></div>
+      <div class="stat-card"><div class="stat-value">${stats.pending}</div><div class="stat-label">Pending</div></div>
+      <div class="stat-card"><div class="stat-value">${stats.done}</div><div class="stat-label">Done</div></div>`;
+
+    if (!items.length) {
+      listEl.innerHTML = '<div class="empty-state">No action items found.</div>';
+      return;
+    }
+
+    listEl.innerHTML = `<table class="ai-table">
+      <thead><tr><th></th><th>Task</th><th>Assignee</th><th>Due Date</th><th>Meeting</th><th>Date</th></tr></thead>
+      <tbody>${items.map(item => `
+        <tr class="ai-row${item.done ? " ai-done" : ""}" data-ai-id="${esc(item.id)}">
+          <td><input type="checkbox" class="ai-checkbox" ${item.done ? "checked" : ""}></td>
+          <td class="ai-task">${esc(item.task)}</td>
+          <td><span class="ai-assignee">${esc(item.assignee || "—")}</span></td>
+          <td>${esc(item.due_date || "—")}</td>
+          <td><span class="chip chip-sm">${esc(item.meeting_platform || "")}</span> <small>${esc(item.bot_name || "")}</small></td>
+          <td><small>${fmtDate(item.created_at)}</small></td>
+        </tr>`).join("")}
+      </tbody>
+    </table>`;
+
+    // Wire checkboxes
+    listEl.querySelectorAll(".ai-checkbox").forEach(cb => {
+      cb.addEventListener("change", async () => {
+        const row = cb.closest("[data-ai-id]");
+        const id = row.dataset.aiId;
+        try {
+          await apiFetch("PATCH", `/action-items/${id}`, { done: cb.checked });
+          row.classList.toggle("ai-done", cb.checked);
+        } catch (e) {
+          showToast(e.message, "error");
+          cb.checked = !cb.checked;
+        }
+      });
+    });
+  } catch (e) {
+    listEl.innerHTML = `<div class="empty-state">Error: ${esc(e.message)}</div>`;
+  }
+}
+
+document.getElementById("btn-refresh-ai")?.addEventListener("click", loadActionItems);
+document.getElementById("ai-filter-done")?.addEventListener("change", loadActionItems);
+document.getElementById("ai-filter-assignee")?.addEventListener("input", _debounce(loadActionItems, 400));
+
+// ── Templates ─────────────────────────────────────────────────────────────
+
+async function loadTemplates() {
+  const gridEl = document.getElementById("templates-list");
+  if (!gridEl) return;
+  gridEl.innerHTML = '<div class="loading">Loading…</div>';
+  try {
+    const tmpls = await apiFetch("GET", "/templates");
+    if (!tmpls.length) {
+      gridEl.innerHTML = '<div class="empty-state">No templates yet.</div>';
+      return;
+    }
+    gridEl.innerHTML = tmpls.map(t => `
+      <div class="template-card${t.id.startsWith("seed-") ? " template-seed" : ""}" data-tmpl-id="${esc(t.id)}">
+        <div class="template-header">
+          <span class="template-name">${esc(t.name)}</span>
+          ${t.id.startsWith("seed-") ? '<span class="chip chip-sm">Built-in</span>' : `<button class="btn btn-ghost btn-sm tmpl-del-btn" data-del-tmpl="${esc(t.id)}">Delete</button>`}
+        </div>
+        ${t.description ? `<p class="template-desc">${esc(t.description)}</p>` : ""}
+        ${t.prompt_override ? `<pre class="template-prompt">${esc(t.prompt_override.slice(0, 200))}${t.prompt_override.length > 200 ? "…" : ""}</pre>` : '<p class="hint">Uses default analysis prompt.</p>'}
+      </div>`).join("");
+
+    gridEl.querySelectorAll("[data-del-tmpl]").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        if (!confirm(`Delete template "${btn.closest("[data-tmpl-id]").querySelector(".template-name").textContent}"?`)) return;
+        try {
+          await apiFetch("DELETE", `/templates/${btn.dataset.delTmpl}`);
+          showToast("Template deleted", "success");
+          loadTemplates();
+        } catch (e) { showToast(e.message, "error"); }
+      });
+    });
+  } catch (e) {
+    gridEl.innerHTML = `<div class="empty-state">Error: ${esc(e.message)}</div>`;
+  }
+}
+
+document.getElementById("btn-new-template")?.addEventListener("click", () => openModal("modal-new-template"));
+
+document.getElementById("btn-create-template")?.addEventListener("click", async () => {
+  const name = document.getElementById("new-tmpl-name")?.value.trim();
+  if (!name) { showToast("Template name is required", "error"); return; }
+  const desc = document.getElementById("new-tmpl-desc")?.value.trim();
+  const prompt = document.getElementById("new-tmpl-prompt")?.value.trim();
+  try {
+    await apiFetch("POST", "/templates", { name, description: desc || null, prompt_override: prompt || null });
+    closeModal("modal-new-template");
+    showToast("Template created", "success");
+    loadTemplates();
+  } catch (e) { showToast(e.message, "error"); }
+});
 
 // ── Init ───────────────────────────────────────────────────────────────────
 

@@ -879,3 +879,24 @@ code {
   font-size: 0.65rem; color: var(--text-muted); white-space: nowrap;
 }
 .bar-chart-label { font-size: 0.6rem; color: var(--text-muted); margin-top: 4px; text-align: center; }
+
+/* ── Action Items ──────────────────────────────────────────────────────── */
+.ai-table { width: 100%; border-collapse: collapse; }
+.ai-table thead th { text-align: left; padding: 0.5rem 0.75rem; font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid var(--border); }
+.ai-table tbody td { padding: 0.6rem 0.75rem; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.ai-row:hover { background: var(--surface2); }
+.ai-row.ai-done .ai-task { text-decoration: line-through; color: var(--text-muted); }
+.ai-row.ai-done { opacity: 0.7; }
+.ai-checkbox { width: 16px; height: 16px; cursor: pointer; accent-color: var(--accent); }
+.ai-task { max-width: 320px; }
+.ai-assignee { font-size: 0.82rem; color: var(--text-muted); }
+
+/* ── Templates ─────────────────────────────────────────────────────────── */
+.templates-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1rem; padding: 0; }
+.template-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1rem 1.1rem; }
+.template-card:hover { border-color: var(--accent); }
+.template-seed { border-left: 3px solid var(--accent); }
+.template-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
+.template-name { font-weight: 600; font-size: 0.95rem; }
+.template-desc { font-size: 0.82rem; color: var(--text-muted); margin-bottom: 0.5rem; }
+.template-prompt { font-size: 0.75rem; font-family: var(--font-mono); background: var(--surface2); border-radius: 6px; padding: 0.5rem 0.6rem; color: var(--text-muted); white-space: pre-wrap; overflow: hidden; max-height: 100px; }

@@ -43,6 +43,20 @@ class Settings(BaseSettings):
     SMTP_FROM: str = "meetingbot@example.com"
     BASE_URL: str = ""  # e.g. https://meetingbot-production-4d6a.up.railway.app
 
+    # Slack integration (optional) — set SLACK_WEBHOOK_URL to enable
+    SLACK_WEBHOOK_URL: str = ""
+
+    # Notion integration (optional)
+    NOTION_API_KEY: str = ""
+    NOTION_DATABASE_ID: str = ""
+
+    # Linear integration (optional)
+    LINEAR_API_KEY: str = ""
+    LINEAR_TEAM_ID: str = ""
+
+    # Weekly digest email (optional) — comma-separated recipients
+    DIGEST_EMAIL: str = ""
+
     model_config = {"env_file": ".env", "extra": "ignore"}
 
 
