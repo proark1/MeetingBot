@@ -599,6 +599,14 @@ async def _join_teams(page: Page, url: str, bot_name: str) -> None:
         await _screenshot(page, "teams_no_continue_button")
         await asyncio.sleep(3)  # give the SPA time to render the pre-join UI
 
+    # Step 1b: Dismiss "Continue without audio or video" dialog.
+    # Teams shows this when the browser denies camera/mic permissions.
+    # Non-fatal: the helper returns False silently if the dialog is absent.
+    await _click(page, [
+        "button:has-text('Continue without audio or video')",
+        "button:has-text('Continue without audio')",
+    ], timeout=3000)
+
     # Step 2: Fill name
     # Fluent UI v9 wraps <input> in a styled <span>; the inner element may not
     # pass Playwright's strict "visible" check even though it renders fine.
