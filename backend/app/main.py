@@ -19,8 +19,11 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.database import init_db
-from app.api.bots import router as bots_router
+from app.api.analytics import router as analytics_router
+from app.api.bots import router as bots_router, share_router
 from app.api.debug import router as debug_router
+from app.api.highlights import router as highlights_router
+from app.api.search import router as search_router
 from app.api.webhooks import router as webhooks_router
 from app.api.ws import router as ws_router
 
@@ -125,10 +128,15 @@ app.add_middleware(
 
 # API routes — all protected by the optional API key dependency
 _auth = [Depends(require_api_key)]
-app.include_router(bots_router,     prefix="/api/v1", dependencies=_auth)
-app.include_router(debug_router,    prefix="/api/v1", dependencies=_auth)
-app.include_router(webhooks_router, prefix="/api/v1", dependencies=_auth)
-app.include_router(ws_router,       prefix="/api/v1")  # WS auth handled separately
+app.include_router(bots_router,       prefix="/api/v1", dependencies=_auth)
+app.include_router(debug_router,      prefix="/api/v1", dependencies=_auth)
+app.include_router(webhooks_router,   prefix="/api/v1", dependencies=_auth)
+app.include_router(highlights_router, prefix="/api/v1", dependencies=_auth)
+app.include_router(search_router,     prefix="/api/v1", dependencies=_auth)
+app.include_router(analytics_router,  prefix="/api/v1", dependencies=_auth)
+app.include_router(ws_router,         prefix="/api/v1")  # WS auth handled separately
+# Share endpoint is public (no API key required)
+app.include_router(share_router, prefix="/api/v1")
 
 
 # ── Health check ──────────────────────────────────────────────────────────────

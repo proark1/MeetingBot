@@ -302,6 +302,65 @@ These are also visible in the dashboard under the **Debug** tab.
 
 ---
 
+### Search
+
+```
+GET /api/v1/search?q=keyword        # full-text search across all transcripts
+```
+
+Returns matching meetings with highlighted snippets.
+
+---
+
+### Analytics
+
+```
+GET /api/v1/analytics               # sentiment, topics, platform breakdown, participant stats
+```
+
+---
+
+### Highlights
+
+```
+POST   /api/v1/bot/{id}/highlight   # bookmark a transcript moment
+GET    /api/v1/bot/{id}/highlight   # list highlights for a meeting
+DELETE /api/v1/bot/highlight/{id}   # remove a highlight
+```
+
+---
+
+### Share
+
+```
+GET /api/v1/share/{token}           # public read-only meeting report (no auth required)
+```
+
+Each bot gets a unique `share_token` at creation. Copy the share link from the detail page.
+
+---
+
+### Recording
+
+```
+GET /api/v1/bot/{id}/recording      # download meeting audio (WAV)
+```
+
+Available when real audio was captured (not demo mode).
+
+---
+
+### Ask Anything
+
+```
+POST /api/v1/bot/{id}/ask
+{ "question": "What were the main decisions?" }
+```
+
+Asks Gemini a free-form question about the meeting transcript.
+
+---
+
 ### Real-time (WebSocket)
 
 Connect once to receive all bot events in real time:

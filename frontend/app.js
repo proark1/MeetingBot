@@ -92,9 +92,11 @@ document.querySelectorAll(".nav-item[data-page]").forEach((el) => {
     if (el.getAttribute("target") === "_blank") return;
     e.preventDefault();
     const page = el.dataset.page;
-    if (page === "bots")     { showPage("bots"); loadBots(); }
-    if (page === "webhooks") { showPage("webhooks"); loadWebhooks(); }
-    if (page === "debug")    { showPage("debug"); loadDebugFiles(); }
+    if (page === "bots")      { showPage("bots"); loadBots(); }
+    if (page === "webhooks")  { showPage("webhooks"); loadWebhooks(); }
+    if (page === "debug")     { showPage("debug"); loadDebugFiles(); }
+    if (page === "search")    { showPage("search"); }
+    if (page === "analytics") { showPage("analytics"); loadAnalytics(); }
   });
 });
 
@@ -456,8 +458,11 @@ async function submitCreateBot() {
 
   const joinAtInput = document.getElementById("new-bot-join-at");
   const joinAtVal = joinAtInput ? joinAtInput.value : "";
+  const emailInput = document.getElementById("new-bot-email");
+  const notifyEmail = emailInput ? emailInput.value.trim() : "";
   const body = { meeting_url: url, bot_name: name };
   if (joinAtVal) body.join_at = new Date(joinAtVal).toISOString();
+  if (notifyEmail) body.notify_email = notifyEmail;
 
   try {
     const bot = await apiFetch("POST", "/bot", body);
@@ -535,6 +540,19 @@ function renderBotDetail(bot) {
     document.getElementById("btn-cancel-bot").addEventListener("click", () => cancelBot(bot.id));
   }
 
+  // Share link button
+  if (bot.share_token) {
+    badgesEl.insertAdjacentHTML("beforeend",
+      `<button class="btn btn-ghost btn-sm" id="btn-share-bot" title="Copy public share link">🔗 Share</button>`);
+    document.getElementById("btn-share-bot").addEventListener("click", () => {
+      const url = `${location.origin}/share/${bot.share_token}`;
+      navigator.clipboard.writeText(url).then(
+        () => showToast("Share link copied!", "success"),
+        () => showToast("Copy failed", "error"),
+      );
+    });
+  }
+
   // Lifecycle steps
   renderLifecycleSteps(bot.status);
 
@@ -558,13 +576,48 @@ function renderBotDetail(bot) {
       <div class="meta-item"><div class="meta-label">Meeting URL</div><div class="meta-value" style="font-family:var(--font-mono);font-size:0.75rem;color:var(--text-muted)">${esc(bot.meeting_url.slice(0, 40))}${bot.meeting_url.length > 40 ? "…" : ""}</div></div>
     </div>
 
-    <!-- Participants section -->
-    ${(bot.participants || []).length ? `
+    <!-- Participants + Speaker Stats -->
+    ${(bot.participants || []).length || (bot.speaker_stats || []).length ? `
     <div class="section-card">
       <div class="section-header"><h3>Participants</h3></div>
       <div class="pill-list" style="padding:0.25rem 0 0.5rem">
         ${(bot.participants || []).map((p) => `<span class="pill">${esc(p)}</span>`).join("")}
       </div>
+      ${(bot.speaker_stats || []).length ? `
+      <div class="speaker-stats">
+        ${(bot.speaker_stats || []).map((s) => `
+          <div class="speaker-stat-row">
+            <div class="speaker-stat-name">${esc(s.name)}</div>
+            <div class="speaker-stat-bar-wrap">
+              <div class="speaker-stat-bar" style="width:${s.talk_pct}%"></div>
+            </div>
+            <div class="speaker-stat-pct">${s.talk_pct}%</div>
+            <div class="speaker-stat-time">${_fmtSecs(s.talk_time_s)}</div>
+          </div>`).join("")}
+      </div>` : ""}
+    </div>` : ""}
+
+    <!-- Smart Chapters -->
+    ${(bot.chapters || []).length ? `
+    <div class="section-card">
+      <div class="section-header"><h3>Chapters</h3></div>
+      <div class="chapters-list">
+        ${(bot.chapters || []).map((c, i) => `
+          <div class="chapter-item" data-ts="${c.start_time || 0}">
+            <div class="chapter-num">${i + 1}</div>
+            <div class="chapter-body">
+              <div class="chapter-title">${esc(c.title)}</div>
+              <div class="chapter-meta">${fmtTs(c.start_time || 0)} · ${esc(c.summary || "")}</div>
+            </div>
+          </div>`).join("")}
+      </div>
+    </div>` : ""}
+
+    <!-- Recording download -->
+    ${bot.recording_path ? `
+    <div class="section-card">
+      <div class="section-header"><h3>Recording</h3></div>
+      <a class="btn btn-ghost" href="/api/v1/bot/${esc(bot.id)}/recording" download>⬇ Download Audio (WAV)</a>
     </div>` : ""}
 
     <!-- Transcript section -->
@@ -597,6 +650,23 @@ function renderBotDetail(bot) {
         ${bot.analysis ? `<span class="sentiment-badge sentiment-${esc(bot.analysis.sentiment || 'neutral')}">${esc(bot.analysis.sentiment || 'neutral')}</span>` : ""}
       </div>
       ${renderAnalysis(bot.analysis)}
+    </div>
+
+    <!-- Ask Anything -->
+    ${bot.transcript?.length ? `
+    <div class="section-card" id="ask-section">
+      <div class="section-header"><h3>Ask About This Meeting</h3></div>
+      <div class="ask-row">
+        <input class="input" id="ask-input" placeholder="e.g. What were the main decisions?" style="flex:1" />
+        <button class="btn btn-primary" id="btn-ask">Ask</button>
+      </div>
+      <div id="ask-answer" class="ask-answer hidden"></div>
+    </div>` : ""}
+
+    <!-- Highlights -->
+    <div class="section-card" id="highlights-section">
+      <div class="section-header"><h3>Highlights</h3></div>
+      <div id="highlights-list"><div class="empty" style="padding:0.5rem 0">No highlights yet — click the bookmark icon on a transcript entry</div></div>
     </div>`;
 
   // Wire up transcript toolbar
@@ -628,6 +698,114 @@ function renderBotDetail(bot) {
   }
   document.getElementById("transcript-speaker-filter")?.addEventListener("change", _filterTranscript);
   document.getElementById("transcript-search")?.addEventListener("input", _filterTranscript);
+
+  // Chapters: click to jump to timestamp in transcript
+  document.querySelectorAll(".chapter-item[data-ts]").forEach((el) => {
+    el.addEventListener("click", () => {
+      const ts = parseFloat(el.dataset.ts);
+      const tFilter = document.getElementById("transcript-search");
+      if (tFilter) { tFilter.value = ""; _filterTranscript(); }
+      // Scroll to nearest transcript entry
+      setTimeout(() => {
+        const entries = document.querySelectorAll(".transcript-entry");
+        let closest = null, minDiff = Infinity;
+        entries.forEach((row) => {
+          const rowTs = parseFloat(row.dataset.ts || "0");
+          const diff = Math.abs(rowTs - ts);
+          if (diff < minDiff) { minDiff = diff; closest = row; }
+        });
+        closest?.scrollIntoView({ behavior: "smooth", block: "center" });
+      }, 50);
+    });
+  });
+
+  // Ask Anything
+  const askBtn = document.getElementById("btn-ask");
+  if (askBtn) {
+    askBtn.addEventListener("click", async () => {
+      const q = document.getElementById("ask-input")?.value.trim();
+      if (!q) return;
+      askBtn.disabled = true;
+      askBtn.textContent = "Thinking…";
+      const answerEl = document.getElementById("ask-answer");
+      if (answerEl) { answerEl.classList.add("hidden"); answerEl.textContent = ""; }
+      try {
+        const res = await apiFetch("POST", `/bot/${bot.id}/ask`, { question: q });
+        if (answerEl) {
+          answerEl.textContent = res.answer;
+          answerEl.classList.remove("hidden");
+        }
+      } catch (e) {
+        showToast(e.message, "error");
+      } finally {
+        askBtn.disabled = false;
+        askBtn.textContent = "Ask";
+      }
+    });
+    document.getElementById("ask-input")?.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") askBtn.click();
+    });
+  }
+
+  // Highlights: add bookmark icon to transcript entries and load existing
+  _loadHighlights(bot.id);
+  _wireHighlightButtons(bot.id);
+}
+
+async function _loadHighlights(botId) {
+  const listEl = document.getElementById("highlights-list");
+  if (!listEl) return;
+  try {
+    const highlights = await apiFetch("GET", `/bot/${botId}/highlight`);
+    if (!highlights.length) {
+      listEl.innerHTML = '<div class="empty" style="padding:0.5rem 0">No highlights yet — click the 🔖 icon on a transcript entry</div>';
+      return;
+    }
+    listEl.innerHTML = highlights.map((h) => `
+      <div class="highlight-row" data-hid="${esc(h.id)}">
+        <div class="highlight-ts">${fmtTs(h.timestamp)}</div>
+        <div class="highlight-body">
+          <div class="highlight-speaker">${esc(h.speaker)}</div>
+          <div class="highlight-text">${esc(h.text_snippet)}</div>
+          ${h.comment ? `<div class="highlight-comment">${esc(h.comment)}</div>` : ""}
+        </div>
+        <button class="btn btn-ghost btn-sm" data-del-hl="${esc(h.id)}" title="Remove highlight">✕</button>
+      </div>`).join("");
+    listEl.querySelectorAll("[data-del-hl]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        await apiFetch("DELETE", `/bot/highlight/${btn.dataset.delHl}`);
+        _loadHighlights(botId);
+      });
+    });
+  } catch (_) {}
+}
+
+function _wireHighlightButtons(botId) {
+  // Add bookmark button to each transcript entry
+  document.querySelectorAll(".transcript-entry").forEach((row) => {
+    if (row.querySelector(".hl-btn")) return;
+    const hlBtn = document.createElement("button");
+    hlBtn.className = "btn btn-icon hl-btn";
+    hlBtn.title = "Bookmark";
+    hlBtn.textContent = "🔖";
+    hlBtn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const speaker = row.querySelector(".t-speaker")?.textContent || "";
+      const text = row.querySelector(".t-text")?.textContent || "";
+      const tsStr = row.querySelector(".t-ts")?.textContent || "00:00";
+      const [mm, ss] = tsStr.split(":").map(Number);
+      const timestamp = (mm || 0) * 60 + (ss || 0);
+      const comment = prompt("Add a comment (optional):", "") ?? null;
+      try {
+        await apiFetch("POST", `/bot/${botId}/highlight`, { timestamp, text_snippet: text, speaker, comment: comment || null });
+        showToast("Highlight saved", "success");
+        _loadHighlights(botId);
+      } catch (err) {
+        showToast(err.message, "error");
+      }
+    });
+    row.appendChild(hlBtn);
+  });
 }
 
 function renderLifecycleSteps(status) {
@@ -657,7 +835,7 @@ function renderTranscript(transcript) {
   }
   return `<div class="transcript-list">` +
     transcript.map((e) => `
-      <div class="transcript-entry">
+      <div class="transcript-entry" data-ts="${e.timestamp || 0}">
         <span class="t-speaker">${esc(e.speaker)}</span>
         <span class="t-ts">${fmtTs(e.timestamp)}</span>
         <span class="t-text">${esc(e.text)}</span>
@@ -965,6 +1143,160 @@ function debugFileCard(f) {
 }
 
 document.getElementById("btn-refresh-debug").addEventListener("click", () => loadDebugFiles());
+
+// ── Search ─────────────────────────────────────────────────────────────────
+
+async function runSearch() {
+  const q = document.getElementById("search-input")?.value.trim();
+  const resultsEl = document.getElementById("search-results");
+  if (!q || q.length < 2) {
+    if (resultsEl) resultsEl.innerHTML = '<div class="empty">Enter at least 2 characters to search</div>';
+    return;
+  }
+  if (resultsEl) resultsEl.innerHTML = '<div class="loading">Searching…</div>';
+  try {
+    const data = await apiFetch("GET", `/search?q=${encodeURIComponent(q)}`);
+    if (!data.results.length) {
+      resultsEl.innerHTML = `<div class="empty">No results for <em>${esc(q)}</em></div>`;
+      return;
+    }
+    resultsEl.innerHTML = `<div class="search-count">${data.total} meeting${data.total !== 1 ? "s" : ""} matched</div>` +
+      data.results.map((r) => `
+        <div class="search-result-card" data-id="${esc(r.bot_id)}">
+          <div class="search-result-header">
+            <span>${platformIcon(r.meeting_platform)}</span>
+            <strong>${esc(r.bot_name)}</strong>
+            <span class="search-result-date">${r.started_at ? fmtDate(r.started_at) : "—"}</span>
+            <span class="search-result-count">${r.match_count} match${r.match_count !== 1 ? "es" : ""}</span>
+          </div>
+          <div class="search-result-url">${esc(r.meeting_url)}</div>
+          <div class="search-snippets">
+            ${r.snippets.map((s) => `
+              <div class="search-snippet">
+                <span class="t-ts">${fmtTs(s.timestamp)}</span>
+                <span class="t-speaker">${esc(s.speaker)}</span>
+                <span class="t-text">${esc(s.text).replace(
+                  new RegExp(esc(q), "gi"),
+                  (m) => `<mark>${m}</mark>`
+                )}</span>
+              </div>`).join("")}
+          </div>
+        </div>`).join("");
+
+    resultsEl.querySelectorAll(".search-result-card").forEach((card) => {
+      card.addEventListener("click", () => showBotDetail(card.dataset.id));
+    });
+  } catch (e) {
+    resultsEl.innerHTML = `<div class="empty">Error: ${esc(e.message)}</div>`;
+  }
+}
+
+document.getElementById("btn-search")?.addEventListener("click", runSearch);
+document.getElementById("search-input")?.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") runSearch();
+});
+
+// ── Analytics ──────────────────────────────────────────────────────────────
+
+async function loadAnalytics() {
+  const el = document.getElementById("analytics-content");
+  if (!el) return;
+  el.innerHTML = '<div class="loading">Loading…</div>';
+  try {
+    const d = await apiFetch("GET", "/analytics");
+    el.innerHTML = `
+      <!-- Summary cards -->
+      <div class="analytics-cards">
+        <div class="stat-card">
+          <div class="stat-value">${d.total_meetings}</div>
+          <div class="stat-label">Total Meetings</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">${d.avg_duration_fmt}</div>
+          <div class="stat-label">Avg Duration</div>
+        </div>
+        <div class="stat-card positive">
+          <div class="stat-value">${d.sentiment_distribution.positive}</div>
+          <div class="stat-label">Positive</div>
+        </div>
+        <div class="stat-card negative">
+          <div class="stat-value">${d.sentiment_distribution.negative}</div>
+          <div class="stat-label">Negative</div>
+        </div>
+      </div>
+
+      <div class="analytics-grid">
+        <!-- Meetings per day chart -->
+        <div class="card analytics-chart-card">
+          <h3>Meetings (last 30 days)</h3>
+          ${_renderBarChart(d.meetings_per_day.map((r) => ({ label: r.date.slice(5), value: r.count })))}
+        </div>
+
+        <!-- Top topics -->
+        <div class="card">
+          <h3>Top Topics</h3>
+          ${d.top_topics.length
+            ? d.top_topics.map((t) => `
+              <div class="analytics-topic-row">
+                <span class="analytics-topic-label">${esc(t.topic)}</span>
+                <div class="speaker-stat-bar-wrap" style="flex:1">
+                  <div class="speaker-stat-bar" style="width:${Math.round(t.count / d.top_topics[0].count * 100)}%"></div>
+                </div>
+                <span class="analytics-topic-count">${t.count}</span>
+              </div>`).join("")
+            : '<div class="empty">No topics yet</div>'}
+        </div>
+
+        <!-- Platform breakdown -->
+        <div class="card">
+          <h3>By Platform</h3>
+          ${Object.entries(d.platform_breakdown).length
+            ? Object.entries(d.platform_breakdown).sort((a,b)=>b[1]-a[1]).map(([p, c]) => `
+              <div class="analytics-topic-row">
+                <span class="analytics-topic-label">${platformIcon(p)} ${esc(p.replace(/_/g," "))}</span>
+                <div class="speaker-stat-bar-wrap" style="flex:1">
+                  <div class="speaker-stat-bar" style="width:${Math.round(c / d.total_meetings * 100)}%"></div>
+                </div>
+                <span class="analytics-topic-count">${c}</span>
+              </div>`).join("")
+            : '<div class="empty">No data yet</div>'}
+        </div>
+
+        <!-- Top participants -->
+        <div class="card">
+          <h3>Top Participants</h3>
+          ${d.top_participants.length
+            ? d.top_participants.map((p) => `
+              <div class="analytics-topic-row">
+                <span class="analytics-topic-label">${esc(p.name)}</span>
+                <div class="speaker-stat-bar-wrap" style="flex:1">
+                  <div class="speaker-stat-bar" style="width:${Math.round(p.meetings / d.top_participants[0].meetings * 100)}%"></div>
+                </div>
+                <span class="analytics-topic-count">${p.meetings}</span>
+              </div>`).join("")
+            : '<div class="empty">No data yet</div>'}
+        </div>
+      </div>`;
+  } catch (e) {
+    el.innerHTML = `<div class="empty">Error loading analytics: ${esc(e.message)}</div>`;
+  }
+}
+
+function _renderBarChart(items) {
+  if (!items.length) return '<div class="empty">No data</div>';
+  const max = Math.max(...items.map((i) => i.value), 1);
+  return `<div class="bar-chart">
+    ${items.map((i) => `
+      <div class="bar-chart-col">
+        <div class="bar-chart-bar" style="height:${Math.round(i.value / max * 100)}%" title="${i.value}">
+          ${i.value > 0 ? `<span class="bar-chart-val">${i.value}</span>` : ""}
+        </div>
+        <div class="bar-chart-label">${esc(i.label)}</div>
+      </div>`).join("")}
+  </div>`;
+}
+
+document.getElementById("btn-refresh-analytics")?.addEventListener("click", loadAnalytics);
 
 // ── Init ───────────────────────────────────────────────────────────────────
 

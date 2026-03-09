@@ -2,9 +2,11 @@
 
 import asyncio
 import logging
+import secrets
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import FileResponse
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -41,6 +43,7 @@ def _bot_to_summary(bot: Bot) -> BotSummary:
         ended_at=bot.ended_at,
         participants=bot.participants or [],
         recording_url=bot.recording_url,
+        share_token=bot.share_token,
         extra_metadata=bot.extra_metadata or {},
         is_demo_transcript=_is_demo(bot),
     )
@@ -61,7 +64,11 @@ def _bot_to_response(bot: Bot) -> BotResponse:
         participants=bot.participants or [],
         transcript=bot.transcript or [],
         analysis=MeetingAnalysis(**bot.analysis) if bot.analysis else None,
+        chapters=bot.chapters or [],
+        speaker_stats=bot.speaker_stats or [],
         recording_url=bot.recording_url,
+        recording_path=bot.recording_path,
+        share_token=bot.share_token,
         extra_metadata=bot.extra_metadata or {},
         is_demo_transcript=_is_demo(bot),
     )
@@ -132,8 +139,10 @@ async def create_bot(
         meeting_platform=bot_service.detect_platform(str(payload.meeting_url)),
         bot_name=payload.bot_name,
         join_at=payload.join_at,
+        notify_email=payload.notify_email,
         status="scheduled" if is_scheduled else "ready",
         extra_metadata=payload.extra_metadata,
+        share_token=secrets.token_urlsafe(12),
     )
     db.add(bot)
     await db.commit()
@@ -270,6 +279,60 @@ async def analyze_bot(
     await db.commit()
 
     return MeetingAnalysis(**analysis)
+
+
+# ── GET /api/v1/bot/{id}/recording ──────────────────────────────────────────
+
+@router.get("/{bot_id}/recording")
+async def download_recording(
+    bot_id: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Download the meeting audio recording (WAV)."""
+    import os
+    bot = await _get_or_404(db, bot_id)
+    path = bot.recording_path
+    if not path or not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Recording not available")
+    return FileResponse(path, media_type="audio/wav", filename=f"recording-{bot_id[:8]}.wav")
+
+
+# ── POST /api/v1/bot/{id}/ask ────────────────────────────────────────────────
+
+@router.post("/{bot_id}/ask")
+async def ask_bot(
+    bot_id: str,
+    payload: dict,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Ask a free-form question about the meeting transcript."""
+    question = (payload.get("question") or "").strip()
+    if not question:
+        raise HTTPException(status_code=422, detail="question is required")
+    bot = await _get_or_404(db, bot_id)
+    if not bot.transcript:
+        raise HTTPException(status_code=425, detail="No transcript available yet")
+    answer = await intelligence_service.ask_about_transcript(bot.transcript, question)
+    return {"bot_id": bot_id, "question": question, "answer": answer}
+
+
+# ── GET /api/v1/share/{token} ────────────────────────────────────────────────
+# This endpoint is registered on a separate public router in main.py
+
+share_router = APIRouter(prefix="/share", tags=["Share"])
+
+
+@share_router.get("/{token}")
+async def get_shared_bot(
+    token: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Public read-only view of a meeting by share token."""
+    result = await db.execute(select(Bot).where(Bot.share_token == token))
+    bot = result.scalar_one_or_none()
+    if bot is None:
+        raise HTTPException(status_code=404, detail="Shared report not found")
+    return _bot_to_response(bot)
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────

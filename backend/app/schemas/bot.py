@@ -29,6 +29,7 @@ class BotCreate(BaseModel):
     meeting_url: AnyHttpUrl
     bot_name: str = Field(default="MeetingBot", max_length=100)
     join_at: datetime | None = None
+    notify_email: str | None = None
     extra_metadata: dict[str, Any] = {}
 
     @field_validator("meeting_url", mode="before")
@@ -66,6 +67,7 @@ class BotSummary(BaseModel):
     ended_at: datetime | None = None
     participants: list[str] = []
     recording_url: str | None = None
+    share_token: str | None = None
     extra_metadata: dict[str, Any] = {}
     is_demo_transcript: bool = False
 
@@ -107,6 +109,10 @@ class BotResponse(BaseModel):
         description="AI-generated meeting analysis. Populated once status is `done`.",
     )
     recording_url: str | None = None
+    recording_path: str | None = None
+    share_token: str | None = None
+    chapters: list[dict] | None = None
+    speaker_stats: list[dict] | None = None
     extra_metadata: dict[str, Any] = {}
     is_demo_transcript: bool = Field(
         default=False,

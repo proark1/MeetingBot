@@ -21,6 +21,11 @@ Required JSON shape:
   "topics":       ["<topic 1>", ...]
 }"""
 
+_CHAPTERS_PROMPT = """You are a meeting analyst. Segment the following transcript into 3–8 named chapters.
+Return ONLY a JSON array — no markdown, no prose outside the array.
+Each entry: {"title": "Short Chapter Title", "start_time": <seconds_float>, "summary": "1–2 sentence summary."}.
+Order by start_time ascending."""
+
 _DEMO_TRANSCRIPT_PROMPT = """You generate realistic meeting transcripts.
 Return ONLY a JSON array of transcript entries — no markdown, no prose outside the array.
 Each entry: {"speaker": "Name", "text": "...", "timestamp": <seconds_float>}.
@@ -81,6 +86,58 @@ async def analyze_transcript(transcript: list[dict[str, Any]]) -> dict[str, Any]
     except Exception as exc:
         logger.error("Gemini analysis error: %s", exc)
         return _stub_analysis(transcript)
+
+
+async def generate_chapters(transcript: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Segment the transcript into named chapters with timestamps."""
+    from app.config import settings
+
+    if not settings.GEMINI_API_KEY or not transcript:
+        return []
+
+    lines = "\n".join(
+        f"[{e.get('timestamp', 0):.1f}s] {e['speaker']}: {e['text']}"
+        for e in transcript
+    )
+
+    try:
+        model = _get_model()
+        response = await model.generate_content_async(
+            f"{_CHAPTERS_PROMPT}\n\nTranscript:\n{lines}",
+            generation_config={"temperature": 0.2, "max_output_tokens": 2048},
+        )
+        return json.loads(_strip_fences(response.text))
+    except Exception as exc:
+        logger.warning("Chapter generation failed: %s", exc)
+        return []
+
+
+async def ask_about_transcript(transcript: list[dict[str, Any]], question: str) -> str:
+    """Answer a free-form question about the meeting transcript."""
+    from app.config import settings
+
+    if not settings.GEMINI_API_KEY:
+        return "Gemini API key not configured."
+    if not transcript:
+        return "No transcript available to answer questions about."
+
+    lines = "\n".join(
+        f"[{e.get('timestamp', 0):.1f}s] {e['speaker']}: {e['text']}"
+        for e in transcript
+    )
+
+    try:
+        model = _get_model()
+        response = await model.generate_content_async(
+            f"You are a meeting assistant. Answer the following question based ONLY on the meeting transcript below. "
+            f"Be concise and specific. If the answer is not in the transcript, say so.\n\n"
+            f"Question: {question}\n\nTranscript:\n{lines}",
+            generation_config={"temperature": 0.3, "max_output_tokens": 1024},
+        )
+        return response.text.strip()
+    except Exception as exc:
+        logger.error("ask_about_transcript error: %s", exc)
+        return f"Error generating answer: {exc}"
 
 
 async def generate_demo_transcript(meeting_url: str) -> list[dict[str, Any]]:

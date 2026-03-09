@@ -5,7 +5,16 @@ import logging
 import os
 import tempfile
 from datetime import datetime, timezone
+from pathlib import Path
 from urllib.parse import urlparse, parse_qs, unquote
+
+# Persistent recordings directory — created at module import time
+_RECORDINGS_DIR = Path(os.environ.get("RECORDINGS_DIR", "/app/data/recordings"))
+try:
+    _RECORDINGS_DIR.mkdir(parents=True, exist_ok=True)
+except Exception:
+    _RECORDINGS_DIR = Path(tempfile.gettempdir()) / "meetingbot_recordings"
+    _RECORDINGS_DIR.mkdir(parents=True, exist_ok=True)
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,6 +26,35 @@ from app.services.browser_bot import run_browser_bot
 from app.services.transcription_service import transcribe_audio
 
 logger = logging.getLogger(__name__)
+
+
+def _compute_speaker_stats(transcript: list[dict]) -> list[dict]:
+    """Compute per-speaker talk-time from transcript timestamps."""
+    if not transcript:
+        return []
+    entries = sorted(transcript, key=lambda e: e.get("timestamp", 0))
+    speaker_time: dict[str, float] = {}
+    for i, e in enumerate(entries):
+        speaker = e.get("speaker", "Unknown")
+        # Duration = gap to next entry, capped at 60 s to ignore long silences
+        if i + 1 < len(entries):
+            duration = entries[i + 1].get("timestamp", 0) - e.get("timestamp", 0)
+        else:
+            duration = 5.0
+        duration = min(max(duration, 0.0), 60.0)
+        speaker_time[speaker] = speaker_time.get(speaker, 0.0) + duration
+    total = sum(speaker_time.values())
+    if total == 0:
+        return []
+    return [
+        {
+            "name": name,
+            "talk_time_s": round(t, 1),
+            "talk_pct": round(t / total * 100, 1),
+        }
+        for name, t in sorted(speaker_time.items(), key=lambda x: x[1], reverse=True)
+    ]
+
 
 def _unwrap_safelinks(url: str) -> str:
     """Extract the real URL from a Microsoft SafeLinks wrapper URL."""
@@ -116,7 +154,7 @@ async def _salvage_and_finish(
             "bot_id": bot_id, "entry_count": len(transcript),
         })
 
-    # ── analysis ───────────────────────────────────────────────────────────
+    # ── analysis + chapters + speaker stats ────────────────────────────────
     if not bot.analysis and bot.transcript:
         try:
             analysis = await intelligence_service.analyze_transcript(bot.transcript)
@@ -129,6 +167,16 @@ async def _salvage_and_finish(
                 "next_steps": [], "sentiment": "neutral", "topics": [],
             }
             bot.error_message = (bot.error_message or "") + f" [analysis error: {exc}]"
+
+        bot.speaker_stats = _compute_speaker_stats(bot.transcript)
+        try:
+            bot.chapters = await intelligence_service.generate_chapters(bot.transcript)
+        except Exception:
+            bot.chapters = []
+
+        if use_real_bot and os.path.exists(audio_path) and os.path.getsize(audio_path) > 0:
+            bot.recording_path = audio_path
+
         bot.updated_at = _now()
         await db.commit()
         await webhook_service.dispatch_event(db, "bot.analysis_ready", {"bot_id": bot_id})
@@ -155,7 +203,7 @@ async def run_bot_lifecycle(bot_id: str, db_factory) -> None:
             logger.error("Bot %s not found", bot_id)
             return
 
-        audio_path   = os.path.join(tempfile.gettempdir(), f"meetingbot_{bot_id}.wav")
+        audio_path   = str(_RECORDINGS_DIR / f"{bot_id}.wav")
         use_real_bot = bot.meeting_platform in _REAL_PLATFORMS
 
         try:
@@ -283,7 +331,7 @@ async def run_bot_lifecycle(bot_id: str, db_factory) -> None:
                 "bot_id": bot_id, "entry_count": len(transcript),
             })
 
-            # ── 4. Analyse with Claude ────────────────────────────────────
+            # ── 4. Analyse + chapters + speaker stats ─────────────────────
             logger.info("Bot %s analysing transcript…", bot_id)
             try:
                 analysis = await intelligence_service.analyze_transcript(transcript)
@@ -296,11 +344,32 @@ async def run_bot_lifecycle(bot_id: str, db_factory) -> None:
                     "next_steps": [], "sentiment": "neutral", "topics": [],
                 }
                 bot.error_message = (bot.error_message or "") + f" [analysis error: {exc}]"
+
+            bot.speaker_stats = _compute_speaker_stats(transcript)
+
+            try:
+                bot.chapters = await intelligence_service.generate_chapters(transcript)
+            except Exception as exc:
+                logger.warning("Chapter generation failed for bot %s: %s", bot_id, exc)
+                bot.chapters = []
+
+            # Persist recording path if audio was captured
+            if use_real_bot and os.path.exists(audio_path) and os.path.getsize(audio_path) > 0:
+                bot.recording_path = audio_path
+
             bot.updated_at = _now()
             await db.commit()
             await webhook_service.dispatch_event(db, "bot.analysis_ready", {"bot_id": bot_id})
 
-            # ── 5. done ───────────────────────────────────────────────────
+            # ── 5. Email summary if requested ─────────────────────────────
+            if bot.notify_email:
+                try:
+                    from app.services import email_service
+                    await email_service.send_meeting_summary(bot)
+                except Exception as exc:
+                    logger.warning("Email summary failed for bot %s: %s", bot_id, exc)
+
+            # ── 6. done ───────────────────────────────────────────────────
             await _set_status(db, bot, "done")
             logger.info("Bot %s done", bot_id)
 
@@ -334,8 +403,9 @@ async def run_bot_lifecycle(bot_id: str, db_factory) -> None:
                     pass
 
         finally:
+            # Only delete audio if NOT stored as a recording (recording_path set means we keep it)
             try:
-                if os.path.exists(audio_path):
+                if os.path.exists(audio_path) and not bot.recording_path:
                     os.remove(audio_path)
             except Exception:
                 pass

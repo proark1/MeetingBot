@@ -35,6 +35,14 @@ class Settings(BaseSettings):
     BOT_JOIN_MAX_RETRIES: int = 2      # 0 = no retry
     BOT_JOIN_RETRY_DELAY_S: int = 30   # seconds between attempts
 
+    # Email summary (optional) — set SMTP_HOST to enable
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASS: str = ""
+    SMTP_FROM: str = "meetingbot@example.com"
+    BASE_URL: str = ""  # e.g. https://meetingbot-production-4d6a.up.railway.app
+
     model_config = {"env_file": ".env", "extra": "ignore"}
 
 
