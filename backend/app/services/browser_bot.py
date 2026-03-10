@@ -1012,9 +1012,58 @@ async def _leave_meeting(page: Page, platform: str) -> None:
         logger.debug("_leave_meeting: %s", exc)
 
 
+async def _captions_already_active(page: Page, platform: str) -> bool:
+    """Return True if live captions appear to be ON already.
+
+    Checks:
+    1. Whether the CC/captions button has aria-pressed/checked = true
+    2. Whether a known caption container element exists in the DOM
+    """
+    try:
+        if platform == "google_meet":
+            result = await page.evaluate("""
+                () => {
+                    // 1. Button pressed-state — most reliable indicator
+                    const btns = document.querySelectorAll(
+                        'button[aria-label*="caption" i], button[aria-label*="subtitle" i]'
+                    );
+                    for (const btn of btns) {
+                        const pressed = btn.getAttribute('aria-pressed');
+                        const checked = btn.getAttribute('aria-checked');
+                        if (pressed === 'true' || checked === 'true') return true;
+                        // Filled / highlighted icon class (varies by Meet version)
+                        if (btn.className && btn.className.includes('r6xAKc')) return true;
+                    }
+                    // 2. Caption container present in the DOM
+                    const containers = [
+                        'div[jsname="tgaKEf"]', 'div[jsname="YSxPC"]',
+                        'div[jsname="VUpckd"]', 'div[jsname="z1asCe"]',
+                        'div[class*="a4cQT"]',  // CC overlay class
+                    ];
+                    for (const s of containers) {
+                        if (document.querySelector(s)) return true;
+                    }
+                    return false;
+                }
+            """)
+            return bool(result)
+    except Exception:
+        pass
+    return False
+
+
 async def _enable_captions(page: Page, platform: str) -> None:
-    """Best-effort: click the live-captions button so caption text appears in DOM."""
+    """Best-effort: ensure live captions are ON.
+
+    Checks whether captions are already active before clicking the toggle —
+    clicking when ON would turn them OFF (same toggle-close bug as chat panel).
+    After clicking, verifies captions are now active; if they disappeared we
+    accidentally toggled them off and click once more to restore.
+    """
     if platform == "google_meet":
+        if await _captions_already_active(page, platform):
+            logger.debug("Google Meet captions already active — skipping toggle click")
+            return
         await _click(page, [
             "button[aria-label*='caption' i]",
             "button[aria-label*='captions' i]",
@@ -1022,6 +1071,17 @@ async def _enable_captions(page: Page, platform: str) -> None:
             "button[aria-label*='subtitles' i]",
             "div[role='button'][aria-label*='caption' i]",
         ], timeout=3000)
+        # Brief wait then verify: if we accidentally toggled OFF, click again
+        await asyncio.sleep(1.5)
+        if not await _captions_already_active(page, platform):
+            # May have been on already (so we turned them off) — click once more
+            await _click(page, [
+                "button[aria-label*='caption' i]",
+                "button[aria-label*='captions' i]",
+                "button[aria-label*='live caption' i]",
+                "button[aria-label*='subtitles' i]",
+                "div[role='button'][aria-label*='caption' i]",
+            ], timeout=2000)
     elif platform == "zoom":
         # Captions may live inside a "More" overflow menu
         await _click(page, [
@@ -1430,13 +1490,15 @@ async def _mention_monitor(
 
         if not raw:
             _empty_streak += 1
-            # Log every 30s when no captions detected — helps diagnose selector issues
-            if _empty_streak % 30 == 0:
-                logger.debug(
-                    "Mention monitor: no caption text in %d polls — "
-                    "captions may be disabled or DOM selectors need updating",
-                    _empty_streak,
+            if _empty_streak == 30:
+                logger.warning(
+                    "Mention monitor: no caption text in 30 polls — "
+                    "attempting to re-enable captions"
                 )
+                try:
+                    await _enable_captions(page, platform)
+                except Exception as exc:
+                    logger.warning("Caption re-enable failed: %s", exc)
             continue
 
         _empty_streak = 0
@@ -1451,9 +1513,9 @@ async def _mention_monitor(
             new_text = raw
         seen_text = raw
 
-        # Log first caption seen and every 60s thereafter for diagnostics
-        if _poll_count <= 3 or _poll_count % 60 == 0:
-            logger.debug("Caption sample (poll %d): %r", _poll_count, raw[:120])
+        # Log first caption seen at INFO so it's visible in production logs
+        if _poll_count <= 5:
+            logger.info("Caption sample (poll %d): %r", _poll_count, raw[:200])
 
         if not new_text.strip():
             continue
