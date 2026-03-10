@@ -225,7 +225,7 @@ Returns lightweight summaries — `transcript` and `analysis` are omitted to kee
 DELETE /api/v1/bot/{bot_id}
 ```
 
-Cancels the bot if still in a call. Returns `204 No Content` immediately. The bot record is **kept** and the lifecycle task continues in the background to:
+Cancels the bot if still in a call. Returns `204 No Content` immediately. The status is set to `call_ended` right away (so the UI updates instantly), then the lifecycle task continues in the background to:
 
 1. Transcribe any audio that was captured before cancellation
 2. Fall back to a Gemini-generated demo transcript if no audio was recorded

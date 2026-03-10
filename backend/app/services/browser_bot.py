@@ -1172,41 +1172,45 @@ async def _scrape_captions(page: Page, platform: str) -> str:
         if platform == "google_meet":
             text = await page.evaluate("""
                 () => {
-                    // Ordered from most-specific to broadest fallback.
-                    // Google Meet obfuscates class names so we try many options.
-                    const specific = [
-                        // Jsname-based — most stable across Meet versions
+                    // Try caption-specific containers in order of specificity.
+                    // IMPORTANT: do NOT use aria-live='polite' — that matches
+                    // Google Meet's screen-reader announcements ("You have joined
+                    // the call", "Your microphone is on", etc.) which are NOT
+                    // speech captions and would break mention detection.
+                    const selectors = [
+                        // jsname attrs — caption-specific, most stable
                         "div[jsname='tgaKEf']",
                         "div[jsname='YSxPC']",
                         "div[jsname='VUpckd']",
                         "div[jsname='z1asCe']",
-                        // Aria-based
-                        "div[aria-live='polite']",
-                        "div[aria-live='assertive']",
+                        // aria-label specifically for captions
                         "div[aria-label*='caption' i]",
-                        // Class-name fragments (obfuscated but often contain 'caption'/'subtitle')
-                        "div[class*='caption']",
+                        // Class-name fragments seen in the caption overlay
                         "div[class*='VbkSUe']",
                         "div[class*='CNusmb']",
-                        "div[class*='subtitle']",
-                        "div[class*='lTnCnb']",
+                        "div[class*='a4cQT']",
+                        "div[class*='caption']",
                         "div[class*='bj4p3b']",
+                        "div[class*='lTnCnb']",
+                        "div[class*='subtitle']",
                     ];
-                    for (const s of specific) {
+                    // Known accessibility-announcement prefixes to skip
+                    const skipPrefixes = [
+                        'You have joined', 'Your microphone', 'Your camera',
+                        'There is one other', 'There are ', 'You are now',
+                        'This call is being', 'Your hand',
+                    ];
+                    for (const s of selectors) {
                         const el = document.querySelector(s);
                         if (el) {
-                            const t = el.innerText || el.textContent;
-                            if (t && t.trim()) return t.trim();
+                            const t = (el.innerText || el.textContent || '').trim();
+                            if (t && t.length > 3 &&
+                                !skipPrefixes.some(p => t.startsWith(p))) {
+                                return t;
+                            }
                         }
                     }
-                    // Last resort: collect ALL aria-live regions and any element
-                    // whose accessible role suggests caption/transcript text.
-                    const collected = [];
-                    document.querySelectorAll('[aria-live]').forEach(el => {
-                        const t = (el.innerText || el.textContent || '').trim();
-                        if (t && t.length > 3) collected.push(t);
-                    });
-                    return collected.join(' ').trim();
+                    return '';
                 }
             """)
         elif platform == "zoom":
@@ -1862,6 +1866,11 @@ async def run_browser_bot(
             }
 
         finally:
+            # Always cancel the monitor task (handles external cancellation of run_browser_bot)
+            if monitor_task is not None and not monitor_task.done():
+                monitor_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await monitor_task
             await browser.close()
             if ffmpeg_proc:
                 _stop_ffmpeg(ffmpeg_proc)

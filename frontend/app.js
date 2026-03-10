@@ -399,13 +399,19 @@ function _fmtSecs(s) {
 
 async function cancelBot(botId, isInCall) {
   const msg = isInCall
-    ? "Remove the bot from the meeting? It will leave the call and generate the transcript + summary."
+    ? "End the meeting? The bot will leave the call and generate the transcript + summary."
     : "Cancel this bot?";
   if (!confirm(msg)) return;
   try {
     await apiFetch("DELETE", `/bot/${botId}`);
-    showToast(isInCall ? "Bot leaving meeting — summary in progress…" : "Bot cancelled", "info");
-    await refreshBotDetail(botId);
+    if (isInCall) {
+      showToast("Bot leaving meeting — transcript processing…", "info");
+      // Navigate to bot detail so user can see transcript arriving
+      showBotDetail(botId);
+    } else {
+      showToast("Bot cancelled", "info");
+      await refreshBotDetail(botId);
+    }
     loadBots();
   } catch (e) {
     showToast(e.message, "error");

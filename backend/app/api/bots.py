@@ -240,6 +240,15 @@ async def delete_bot(
 
     task = _running_tasks.get(bot_id)
     if task and not task.done():
+        # Immediately mark the bot as call_ended so the UI updates right away
+        # rather than staying on "in_call" for the duration of transcription.
+        if bot.status == "in_call":
+            from datetime import datetime, timezone as _tz
+            bot.status = "call_ended"
+            bot.ended_at = datetime.now(_tz.utc)
+            bot.updated_at = datetime.now(_tz.utc)
+            await db.commit()
+
         task.cancel()
         try:
             await asyncio.wait_for(asyncio.shield(task), timeout=5.0)

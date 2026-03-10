@@ -175,20 +175,35 @@ async def transcribe_audio(audio_path: str, known_participants: list[str] | None
 
         raw = response.text.strip()
 
-        # Extract the JSON array from wherever Gemini put it.
-        # Gemini sometimes wraps the array in prose or markdown fences;
-        # we find the first '[' … matching ']' to be robust about it.
-        json_match = re.search(r"\[[\s\S]*\]", raw)
-        if json_match:
-            raw = json_match.group(0)
-        else:
+        # Robustly extract the JSON array — Gemini sometimes wraps it in prose
+        # or markdown fences.  Try multiple strategies in order:
+        transcript = None
+        # 1. Direct parse (response is already clean JSON)
+        try:
+            transcript = json.loads(raw)
+        except json.JSONDecodeError:
+            pass
+        # 2. Strip markdown fences then parse
+        if transcript is None:
+            cleaned = re.sub(r"```(?:json)?\s*", "", raw).replace("```", "").strip()
+            try:
+                transcript = json.loads(cleaned)
+            except json.JSONDecodeError:
+                pass
+        # 3. Regex-extract the outermost [...] block
+        if transcript is None:
+            m = re.search(r"\[[\s\S]*\]", raw)
+            if m:
+                try:
+                    transcript = json.loads(m.group(0))
+                except json.JSONDecodeError:
+                    pass
+        if transcript is None:
             logger.error(
-                "Gemini response contains no JSON array. First 500 chars: %s",
+                "Gemini response could not be parsed as JSON array. First 500 chars: %s",
                 raw[:500],
             )
             return []
-
-        transcript = json.loads(raw)
 
         # Validate each entry has the required keys before returning
         _REQUIRED = {"speaker", "text", "timestamp"}
