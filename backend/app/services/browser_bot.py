@@ -986,8 +986,47 @@ async def _enable_captions(page: Page, platform: str) -> None:
         ], timeout=3000)
 
 
+async def _chat_input_visible(page: Page, platform: str) -> bool:
+    """Return True if the chat input element is already visible on screen."""
+    if platform == "google_meet":
+        sels = [
+            "div[contenteditable='true'][aria-label*='message' i]",
+            "div[contenteditable='true'][aria-label*='chat' i]",
+            "div[contenteditable='true'][role='textbox']",
+            "textarea[aria-label*='message' i]",
+        ]
+    elif platform == "zoom":
+        sels = [
+            "input[placeholder*='message' i]",
+            "textarea[placeholder*='message' i]",
+            "div[contenteditable='true']",
+        ]
+    elif platform == "microsoft_teams":
+        sels = [
+            "div[data-tid='send-message-input']",
+            "div[contenteditable='true'][role='textbox']",
+        ]
+    else:
+        return False
+    for sel in sels:
+        try:
+            if await page.locator(sel).first.is_visible(timeout=400):
+                return True
+        except Exception:
+            pass
+    return False
+
+
 async def _open_chat(page: Page, platform: str) -> None:
-    """Best-effort: ensure the meeting chat panel is open."""
+    """Ensure the meeting chat panel is open.
+
+    Checks whether the chat input is already visible before clicking the toggle
+    button — clicking it when the panel is already open would close it.
+    """
+    if await _chat_input_visible(page, platform):
+        logger.debug("Chat panel already open on %s — skipping toggle click", platform)
+        return
+
     if platform == "google_meet":
         await _click(page, [
             "button[aria-label*='chat' i]",
