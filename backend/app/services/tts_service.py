@@ -89,9 +89,8 @@ async def _synthesize_gemini(text: str, api_key: str, voice: str) -> str | None:
         f"{GEMINI_TTS_MODEL}:generateContent?key={api_key}"
     )
     body = {
-        "systemInstruction": {
-            "parts": [{"text": "You are a text-to-speech system. Read the provided text aloud as speech audio exactly as written. Do not add commentary, explanations, or any text response — only produce audio."}]
-        },
+        # NOTE: systemInstruction is NOT supported by TTS models — omit it
+        # or the API returns HTTP 500.
         "contents": [{"role": "user", "parts": [{"text": text}]}],
         "generationConfig": {
             "responseModalities": ["AUDIO"],
