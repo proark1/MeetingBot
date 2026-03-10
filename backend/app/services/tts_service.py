@@ -173,9 +173,11 @@ async def synthesize(
     if provider == "gemini":
         if not api_key:
             logger.warning("Gemini TTS requested but no API key provided — falling back to edge-tts")
-            provider = "edge"
         else:
-            return await _synthesize_gemini(text, api_key, voice or GEMINI_DEFAULT_VOICE)
+            result = await _synthesize_gemini(text, api_key, voice or GEMINI_DEFAULT_VOICE)
+            if result:
+                return result
+            logger.warning("Gemini TTS failed — falling back to edge-tts")
 
     return await _synthesize_edge(text, voice or EDGE_DEFAULT_VOICE)
 
