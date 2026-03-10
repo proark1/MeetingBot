@@ -141,6 +141,7 @@ async def generate_mention_response(
     caption_context: str,
     bot_name: str,
     for_voice: bool = False,
+    source: str = "caption",
 ) -> str:
     """Generate an in-meeting reply when the bot's name is called.
 
@@ -150,14 +151,16 @@ async def generate_mention_response(
     - Simple greeting / name call → brief acknowledgement + offer to help
 
     Args:
-        caption_context: Recent live-caption text (~1 500 chars) from the meeting.
-        bot_name:        Bot's display name — prepended to the final reply.
+        caption_context: Recent live-caption or chat text (~1 500 chars).
+        bot_name:        Bot's display name.
         for_voice:       When True the reply is constrained to 2–3 short spoken
                          sentences (no markdown, no bullet points).
+        source:          "caption" or "chat" — affects how the context is labelled
+                         so the model understands it as a question/message to answer,
+                         not as ongoing speech to continue.
 
     Returns:
-        A reply string like "Judas: The Q3 revenue target was mentioned as $2.4M."
-        Empty string if Gemini is unavailable or the reply is empty.
+        Answer text string, or empty string if Gemini is unavailable.
     """
     from app.config import settings
 
@@ -166,31 +169,36 @@ async def generate_mention_response(
 
     if for_voice:
         length_rule = (
-            "Keep the answer to 2–3 short sentences (aim for under 40 words total). "
+            "Keep the answer to 2–3 short sentences (aim for under 50 words total). "
             "Write in natural spoken language — no bullet points, no markdown, no lists."
         )
-        max_tokens = 120
+        max_tokens = 200
     else:
         length_rule = (
-            "Give a helpful, complete answer in up to 4 sentences. "
+            "Give a helpful, complete answer in up to 5 sentences. "
             "No markdown formatting."
         )
-        max_tokens = 256
+        max_tokens = 400
+
+    # Label the context correctly so the model treats it as input to answer,
+    # not as ongoing speech to continue (which caused "It's currently…" completions).
+    if source == "chat":
+        context_label = "Recent in-meeting chat messages (these are text messages, not speech):"
+    else:
+        context_label = "Recent live captions from the meeting (spoken words):"
 
     prompt = (
-        f"You are '{bot_name}', an AI assistant attending this meeting as a participant.\n"
-        "Your name was just spoken. Read the recent conversation below and determine what was asked or said.\n\n"
+        f"You are '{bot_name}', an AI assistant attending a meeting as a participant.\n"
+        f"Someone addressed you by name. Read the context below and respond appropriately.\n\n"
         "Instructions:\n"
-        "1. If a MEETING-SPECIFIC question was asked (about something discussed in this call, "
-        "e.g. decisions made, action items, who said what), answer it using the context below.\n"
-        "2. If a GENERAL KNOWLEDGE question was asked (e.g. 'What is X?', 'How does Y work?', "
-        "anything not specific to this meeting), answer it from your own knowledge — do not "
-        "claim the answer is in the transcript.\n"
-        "3. If no clear question was asked and you were just greeted or addressed by name, "
+        "1. If a SPECIFIC QUESTION was asked (about this meeting, general knowledge, math, etc.) "
+        "answer it directly and completely.\n"
+        "2. Do NOT say 'I don't know' for general knowledge questions — answer from your training.\n"
+        "3. If no clear question was asked and you were just greeted or called by name, "
         "briefly acknowledge and offer to help.\n"
         f"4. {length_rule}\n"
-        "5. Return ONLY the answer text — no name prefix, no quotes, no extra explanation.\n\n"
-        f"Recent meeting captions:\n{caption_context}"
+        "5. Return ONLY the answer text — no name prefix, no quotes, no preamble.\n\n"
+        f"{context_label}\n{caption_context}"
     )
     try:
         model = _get_model()

@@ -1526,8 +1526,12 @@ async def _unmute_mic(page: Page, platform: str) -> None:
         ok = await _click(page, sels, timeout=2000)
         if ok:
             logger.info("Mic unmuted on %s", platform)
-        else:
-            logger.warning("_unmute_mic: no button matched on %s — mic may stay muted", platform)
+            return
+        logger.warning("_unmute_mic: button click failed on %s — trying Ctrl+D shortcut", platform)
+    if platform == "google_meet":
+        # Ctrl+D toggles mic in Google Meet; bot always joins muted so this unmutes
+        await page.keyboard.press("Control+d")
+        logger.info("Mic toggled via Ctrl+D on google_meet")
 
 
 async def _mute_mic(page: Page, platform: str) -> None:
@@ -1697,7 +1701,7 @@ async def _mention_monitor(
                     uses_voice = mention_response_mode in ("voice", "both")
                     try:
                         reply = await _intel.generate_mention_response(
-                            context, bot_name, for_voice=uses_voice
+                            context, bot_name, for_voice=uses_voice, source="caption"
                         )
                     except Exception as exc:
                         logger.warning("generate_mention_response error: %s", exc)
@@ -1735,7 +1739,7 @@ async def _mention_monitor(
                         uses_voice = mention_response_mode in ("voice", "both")
                         try:
                             reply = await _intel.generate_mention_response(
-                                context, bot_name, for_voice=uses_voice
+                                context, bot_name, for_voice=uses_voice, source="chat"
                             )
                         except Exception as exc:
                             logger.warning("generate_mention_response error: %s", exc)
