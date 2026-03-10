@@ -166,9 +166,14 @@ async def _salvage_and_finish(
             transcript = await transcribe_audio(audio_path)
 
         if not transcript:
-            logger.info("Bot %s: no captured audio — generating demo transcript", bot_id)
-            transcript = await intelligence_service.generate_demo_transcript(bot.meeting_url)
-            bot.extra_metadata = {**(bot.extra_metadata or {}), "is_demo_transcript": True}
+            logger.warning(
+                "Bot %s: no usable audio captured — transcript will be empty",
+                bot_id,
+            )
+            bot.error_message = (
+                (bot.error_message or "") +
+                " No audio was captured or transcription returned no content."
+            )
 
         bot.transcript = transcript
         bot.updated_at = _now()
@@ -311,14 +316,13 @@ async def run_bot_lifecycle(bot_id: str, db_factory) -> None:
                 if not transcript:
                     logger.warning(
                         "Bot %s: Gemini returned empty transcript — "
-                        "audio may not have been captured (check PulseAudio/ffmpeg setup). "
-                        "Falling back to demo transcript.",
+                        "audio may not have been captured (check PulseAudio/ffmpeg setup).",
                         bot_id,
                     )
-                    transcript = await intelligence_service.generate_demo_transcript(
-                        bot.meeting_url
+                    bot.error_message = (
+                        (bot.error_message or "") +
+                        " Transcription returned no content — the audio may be silent or too short."
                     )
-                    bot.extra_metadata = {**(bot.extra_metadata or {}), "is_demo_transcript": True}
             else:
                 # ── Unsupported platform — demo mode ──────────────────────
                 logger.info(
