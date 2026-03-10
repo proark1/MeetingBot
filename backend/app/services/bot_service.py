@@ -509,4 +509,5 @@ async def _persist_action_items(db: AsyncSession, bot: Bot) -> None:
         if items:
             await db.commit()
     except Exception as exc:
+        await db.rollback()
         logger.warning("Failed to persist action items for bot %s: %s", bot.id, exc)

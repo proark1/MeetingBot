@@ -30,7 +30,8 @@ class ConnectionManager:
         for ws in set(self._connections):  # snapshot to avoid mutation mid-loop
             try:
                 await ws.send_text(message)
-            except Exception:
+            except Exception as exc:
+                logger.debug("WS send failed — dropping connection: %s", exc)
                 dead.add(ws)
         self._connections -= dead
 

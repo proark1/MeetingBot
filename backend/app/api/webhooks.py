@@ -1,6 +1,8 @@
 """Webhook registration API."""
 
+import ipaddress
 from typing import Annotated
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
@@ -11,6 +13,24 @@ from app.models.webhook import Webhook
 from app.schemas.webhook import WebhookCreate, WebhookResponse
 
 router = APIRouter(prefix="/webhook", tags=["Webhooks"])
+
+_PRIVATE_NETS = [ipaddress.ip_network(n) for n in [
+    "127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12",
+    "192.168.0.0/16", "169.254.0.0/16", "::1/128", "fc00::/7",
+]]
+
+
+def _block_ssrf(url: str) -> None:
+    """Reject URLs that target localhost or private/internal IP ranges."""
+    host = urlparse(url).hostname or ""
+    if host in ("localhost", ""):
+        raise HTTPException(status_code=400, detail="Webhook URL must not target localhost")
+    try:
+        addr = ipaddress.ip_address(host)
+        if any(addr in net for net in _PRIVATE_NETS):
+            raise HTTPException(status_code=400, detail="Webhook URL must not target a private/internal address")
+    except ValueError:
+        pass  # hostname (not raw IP) — allow
 
 
 def _to_response(wh: Webhook) -> WebhookResponse:
@@ -31,6 +51,7 @@ async def create_webhook(
     payload: WebhookCreate,
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
+    _block_ssrf(payload.url)
     wh = Webhook(
         url=payload.url,
         events=",".join(payload.events),
@@ -76,6 +97,7 @@ async def test_webhook(
     wh = await _get_or_404(db, webhook_id)
     from app.services.webhook_service import _get_client, _deliver_with_retry
     import hashlib, hmac, json
+    from datetime import datetime, timezone
     body = json.dumps({
         "event": "bot.test",
         "data": {"message": "Test delivery from MeetingBot"},

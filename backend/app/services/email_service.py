@@ -1,5 +1,6 @@
 """Post-meeting email summary via SMTP."""
 
+import html
 import logging
 import smtplib
 from email.mime.multipart import MIMEMultipart
@@ -25,30 +26,38 @@ async def send_meeting_summary(bot) -> None:
         return
 
     analysis = bot.analysis or {}
-    duration = _fmt_duration(bot.started_at, bot.ended_at)
-    participants = ", ".join(bot.participants or []) or "—"
-    summary = analysis.get("summary", "No summary available.")
+    duration = html.escape(_fmt_duration(bot.started_at, bot.ended_at))
+    participants = html.escape(", ".join(bot.participants or []) or "—")
+    summary = html.escape(analysis.get("summary", "No summary available."))
 
     action_items_html = ""
     for item in analysis.get("action_items", []):
-        assignee = f" <em>(@{item.get('assignee', '')})</em>" if item.get("assignee") else ""
-        action_items_html += f"<li>{item.get('task', '')}{assignee}</li>"
+        task = html.escape(item.get("task", ""))
+        if item.get("assignee"):
+            assignee = f" <em>(@{html.escape(item['assignee'])})</em>"
+        else:
+            assignee = ""
+        action_items_html += f"<li>{task}{assignee}</li>"
 
-    decisions_html = "".join(f"<li>{d}</li>" for d in analysis.get("decisions", []))
-    next_steps_html = "".join(f"<li>{s}</li>" for s in analysis.get("next_steps", []))
+    decisions_html = "".join(f"<li>{html.escape(str(d))}</li>" for d in analysis.get("decisions", []))
+    next_steps_html = "".join(f"<li>{html.escape(str(s))}</li>" for s in analysis.get("next_steps", []))
 
     share_link = ""
     if bot.share_token and settings.BASE_URL:
         share_link = f'<p><a href="{settings.BASE_URL}/share/{bot.share_token}">View full report →</a></p>'
 
-    html = f"""
+    bot_name_esc = html.escape(bot.bot_name or "")
+    platform_esc = html.escape(bot.meeting_platform.replace("_", " ").title())
+    sentiment_esc = html.escape(analysis.get("sentiment", "neutral").title())
+
+    body_html = f"""
     <html><body style="font-family:sans-serif;max-width:600px;margin:0 auto;color:#1a1a2e">
-    <h2 style="color:#4361ee">Meeting Summary — {bot.bot_name}</h2>
+    <h2 style="color:#4361ee">Meeting Summary — {bot_name_esc}</h2>
     <table style="width:100%;border-collapse:collapse;margin-bottom:1.5rem">
-      <tr><td style="padding:4px 0;color:#666">Platform</td><td>{bot.meeting_platform.replace("_"," ").title()}</td></tr>
+      <tr><td style="padding:4px 0;color:#666">Platform</td><td>{platform_esc}</td></tr>
       <tr><td style="padding:4px 0;color:#666">Duration</td><td>{duration}</td></tr>
       <tr><td style="padding:4px 0;color:#666">Participants</td><td>{participants}</td></tr>
-      <tr><td style="padding:4px 0;color:#666">Sentiment</td><td>{analysis.get("sentiment","neutral").title()}</td></tr>
+      <tr><td style="padding:4px 0;color:#666">Sentiment</td><td>{sentiment_esc}</td></tr>
     </table>
     <h3>Summary</h3><p>{summary}</p>
     {f'<h3>Action Items</h3><ul>{action_items_html}</ul>' if action_items_html else ''}
@@ -63,7 +72,7 @@ async def send_meeting_summary(bot) -> None:
     msg["Subject"] = f"Meeting Summary: {bot.bot_name}"
     msg["From"] = settings.SMTP_FROM
     msg["To"] = bot.notify_email
-    msg.attach(MIMEText(html, "html"))
+    msg.attach(MIMEText(body_html, "html"))
 
     try:
         with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as smtp:
@@ -76,4 +85,3 @@ async def send_meeting_summary(bot) -> None:
         logger.info("Meeting summary sent to %s for bot %s", bot.notify_email, bot.id)
     except Exception as exc:
         logger.error("Failed to send meeting summary email: %s", exc)
-        raise
