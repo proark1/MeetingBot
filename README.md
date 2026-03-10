@@ -72,6 +72,7 @@ POST /api/v1/bot
   "template_id": "seed-sales",
   "vocabulary": ["Acme", "SKU-123"],
   "analysis_mode": "full",
+  "respond_on_mention": true,
   "extra_metadata": {}
 }
 ```
@@ -79,6 +80,8 @@ POST /api/v1/bot
 `analysis_mode` — controls post-meeting processing:
 - `"full"` *(default)* — runs full AI analysis: summary, key points, action items, smart chapters, sentiment, speaker stats, and all post-meeting notifications (email, Slack, Notion, Linear).
 - `"transcript_only"` — skips all AI processing and returns only the raw speaker-labelled transcript. Faster completion, lower cost, full privacy. Speaker stats are still computed locally.
+
+`respond_on_mention` — when `true` (default), the bot monitors live captions during the call. If its name is mentioned, it generates a short Gemini-powered reply and sends it to the meeting chat. Responses are debounced to once every 30 seconds. Requires live captions to be available on the platform.
 
 `template_id` — optional ID of a meeting template (see `/api/v1/templates`). Templates customise the AI analysis prompt.
 `vocabulary` — optional list of domain-specific terms to hint at during transcription.

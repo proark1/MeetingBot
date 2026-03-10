@@ -143,6 +143,7 @@ async def create_bot(
         template_id=payload.template_id,
         vocabulary=payload.vocabulary,
         analysis_mode=payload.analysis_mode,
+        respond_on_mention=payload.respond_on_mention,
         status="scheduled" if is_scheduled else "ready",
         extra_metadata=payload.extra_metadata,
         share_token=secrets.token_urlsafe(12),

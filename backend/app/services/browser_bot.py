@@ -11,6 +11,7 @@ Strategy:
 """
 
 import asyncio
+import contextlib
 import logging
 import os
 import subprocess
@@ -950,6 +951,265 @@ async def _collect_participants(page: Page, platform: str) -> set[str]:
     return {n for n in names if len(n) >= 2}
 
 
+# ── Live-caption & chat helpers (for respond-on-mention) ──────────────────────
+
+async def _enable_captions(page: Page, platform: str) -> None:
+    """Best-effort: click the live-captions button so caption text appears in DOM."""
+    if platform == "google_meet":
+        await _click(page, [
+            "button[aria-label*='caption' i]",
+            "button[aria-label*='captions' i]",
+            "button[aria-label*='live caption' i]",
+            "button[aria-label*='subtitles' i]",
+            "div[role='button'][aria-label*='caption' i]",
+        ], timeout=3000)
+    elif platform == "zoom":
+        # Captions may live inside a "More" overflow menu
+        await _click(page, [
+            "button[aria-label*='More' i]",
+            "button[aria-label='More actions']",
+        ], timeout=1500)
+        await asyncio.sleep(0.4)
+        await _click(page, [
+            "button[aria-label*='caption' i]",
+            "button[aria-label*='live caption' i]",
+            "button:has-text('Enable live caption')",
+            "button:has-text('Start live transcription')",
+            "button[aria-label*='CC' i]",
+        ], timeout=2000)
+    elif platform == "microsoft_teams":
+        await _click(page, [
+            "button[aria-label*='Live caption' i]",
+            "button[aria-label*='Caption' i]",
+            "button[data-tid*='caption']",
+            "button:has-text('Turn on live captions')",
+        ], timeout=3000)
+
+
+async def _open_chat(page: Page, platform: str) -> None:
+    """Best-effort: ensure the meeting chat panel is open."""
+    if platform == "google_meet":
+        await _click(page, [
+            "button[aria-label*='chat' i]",
+            "button[aria-label*='message' i]",
+            "button[aria-label*='show chat' i]",
+            "div[role='button'][aria-label*='chat' i]",
+        ], timeout=2000)
+    elif platform == "zoom":
+        await _click(page, [
+            "button[aria-label*='chat' i]",
+            "button[aria-label*='open chat' i]",
+        ], timeout=2000)
+        await asyncio.sleep(0.3)
+    elif platform == "microsoft_teams":
+        await _click(page, [
+            "button[aria-label*='Chat' i]",
+            "button[aria-label*='Open chat' i]",
+        ], timeout=1500)
+
+
+async def _scrape_captions(page: Page, platform: str) -> str:
+    """Return the current live-caption text visible in the DOM, or '' on failure."""
+    try:
+        if platform == "google_meet":
+            text = await page.evaluate("""
+                () => {
+                    const sel = [
+                        "div[aria-label*='caption' i]",
+                        "div[class*='caption']",
+                        "div[jsname='z1asCe']",
+                        "div[class*='subtitle']",
+                    ];
+                    for (const s of sel) {
+                        const el = document.querySelector(s);
+                        if (el && el.innerText) return el.innerText;
+                    }
+                    return '';
+                }
+            """)
+        elif platform == "zoom":
+            text = await page.evaluate("""
+                () => {
+                    const sel = [
+                        ".zm-caption-container",
+                        "div[class*='caption']",
+                        "div[role='region']",
+                        "div[class*='subtitle']",
+                    ];
+                    for (const s of sel) {
+                        const el = document.querySelector(s);
+                        if (el && el.innerText) return el.innerText;
+                    }
+                    return '';
+                }
+            """)
+        elif platform == "microsoft_teams":
+            text = await page.evaluate("""
+                () => {
+                    const sel = [
+                        "div[data-tid*='caption']",
+                        "div[class*='captions-container']",
+                        "div[role='region'][aria-label*='caption' i]",
+                        "div[class*='subtitle']",
+                    ];
+                    for (const s of sel) {
+                        const el = document.querySelector(s);
+                        if (el && el.innerText) return el.innerText;
+                    }
+                    return '';
+                }
+            """)
+        else:
+            return ""
+        return (text or "").strip()
+    except Exception:
+        return ""
+
+
+async def _send_chat_message(page: Page, platform: str, message: str) -> bool:
+    """Type and send a chat message. Returns True on success."""
+    try:
+        if platform == "google_meet":
+            # Ensure chat panel is open
+            await _open_chat(page, platform)
+            await asyncio.sleep(0.4)
+            input_sels = [
+                "textarea[aria-label*='chat' i]",
+                "input[aria-label*='chat' i]",
+                "div[contenteditable='true'][aria-label*='chat' i]",
+                "div[contenteditable='true'][role='textbox']",
+            ]
+            filled = await _fill(page, input_sels, message, timeout=3000)
+            if not filled:
+                return False
+            sent = await _click(page, ["button[aria-label*='send' i]"], timeout=2000)
+            if not sent:
+                await page.keyboard.press("Enter")
+            return True
+
+        elif platform == "zoom":
+            await _open_chat(page, platform)
+            await asyncio.sleep(0.4)
+            input_sels = [
+                "input[placeholder*='message' i]",
+                "textarea[placeholder*='message' i]",
+                "div[contenteditable='true']",
+            ]
+            # Try standard fill first, fallback to type() for contenteditable
+            filled = await _fill(page, input_sels, message, timeout=3000)
+            if not filled:
+                try:
+                    el = page.locator("div[contenteditable='true']").first
+                    await el.click(timeout=2000)
+                    await el.type(message)
+                    filled = True
+                except Exception:
+                    return False
+            sent = await _click(page, [
+                "button[aria-label*='send' i]",
+                "button[id*='send']",
+            ], timeout=2000)
+            if not sent:
+                await page.keyboard.press("Enter")
+            return True
+
+        elif platform == "microsoft_teams":
+            await _open_chat(page, platform)
+            await asyncio.sleep(0.3)
+            input_sels = [
+                "div[data-tid='send-message-input']",
+                "div[contenteditable='true'][role='textbox']",
+                "textarea[aria-label*='message' i]",
+            ]
+            filled = await _fill(page, input_sels, message, timeout=3000)
+            if not filled:
+                try:
+                    el = page.locator(
+                        "div[data-tid='send-message-input'], div[contenteditable='true'][role='textbox']"
+                    ).first
+                    await el.click(timeout=2000)
+                    await el.type(message)
+                    filled = True
+                except Exception:
+                    return False
+            sent = await _click(page, [
+                "button[aria-label*='send' i]",
+                "button[aria-label*='Send message' i]",
+                "button[data-tid*='send']",
+            ], timeout=2000)
+            if not sent:
+                await page.keyboard.press("Control+Enter")
+            return True
+
+    except Exception as exc:
+        logger.warning("_send_chat_message failed (%s): %s", platform, exc)
+    return False
+
+
+async def _mention_monitor(
+    page: Page,
+    platform: str,
+    bot_name: str,
+) -> None:
+    """Coroutine that polls live captions and replies when the bot's name is mentioned.
+
+    Designed to run concurrently with _wait_for_meeting_end and be cancelled when
+    the meeting ends.
+    """
+    from app.services import intelligence_service as _intel
+
+    seen_text: str = ""
+    last_response_at: float = 0.0
+    caption_log: list[str] = []          # rolling buffer — last 40 caption chunks
+    bot_name_lower = bot_name.lower()
+
+    logger.info("Mention monitor started for bot '%s' on %s", bot_name, platform)
+
+    while True:
+        await asyncio.sleep(2)
+        try:
+            raw = await _scrape_captions(page, platform)
+        except Exception:
+            continue
+
+        if not raw:
+            continue
+
+        # Only process text that appeared since the last poll
+        new_text = raw[len(seen_text):] if raw.startswith(seen_text[:50]) else raw
+        seen_text = raw
+
+        if not new_text.strip():
+            continue
+
+        caption_log.append(new_text.strip())
+        caption_log = caption_log[-40:]
+
+        # Check for bot name in new text
+        if bot_name_lower not in new_text.lower():
+            continue
+
+        # Debounce: don't reply more than once every 30 s
+        if time.monotonic() - last_response_at < 30:
+            logger.debug("Mention detected but debounced (last response < 30s ago)")
+            continue
+
+        context = " ".join(caption_log)[-1500:]
+        try:
+            reply = await _intel.generate_mention_response(context, bot_name)
+        except Exception as exc:
+            logger.warning("generate_mention_response error: %s", exc)
+            reply = ""
+
+        if reply:
+            success = await _send_chat_message(page, platform, reply)
+            if success:
+                last_response_at = time.monotonic()
+                logger.info("Bot replied to mention: %s", reply)
+            else:
+                logger.warning("Bot mention reply failed to send")
+
+
 async def _wait_for_meeting_end(
     page: Page,
     platform: str,
@@ -1028,6 +1288,7 @@ async def run_browser_bot(
     max_duration: int = 7200,
     alone_timeout: int = 300,
     on_admitted: Optional[Callable[[], Awaitable[None]]] = None,
+    respond_on_mention: bool = True,
 ) -> dict:
     """
     Join a meeting as a named guest, record audio, wait for it to end.
@@ -1150,10 +1411,33 @@ async def run_browser_bot(
 
             await _screenshot(page, f"{platform}_in_meeting")
             logger.info("Bot is in the meeting — monitoring for end…")
+
+            # Enable live captions so the mention monitor can read them
+            if respond_on_mention:
+                try:
+                    await _enable_captions(page, platform)
+                    logger.info("Live captions enabled on %s", platform)
+                except Exception as exc:
+                    logger.warning("Could not enable captions on %s: %s", platform, exc)
+
             _participants: set[str] = set()
+
+            # Run mention monitor concurrently with the meeting-end watcher
+            monitor_task: asyncio.Task | None = None
+            if respond_on_mention:
+                monitor_task = asyncio.create_task(
+                    _mention_monitor(page, platform, bot_name)
+                )
+
             exit_reason = await _wait_for_meeting_end(
                 page, platform, max_duration, alone_timeout, _participants
             )
+
+            # Cancel the monitor cleanly when the meeting ends
+            if monitor_task is not None:
+                monitor_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await monitor_task
             # One final scrape at end of meeting
             try:
                 _participants.update(await _collect_participants(page, platform))

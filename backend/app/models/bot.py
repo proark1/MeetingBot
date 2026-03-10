@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import String, DateTime, JSON, Text, Index
+from sqlalchemy import String, DateTime, JSON, Text, Index, Boolean
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -56,6 +56,9 @@ class Bot(Base):
 
     # Analysis mode: "full" (AI summary + chapters) | "transcript_only" (raw text only)
     analysis_mode: Mapped[str] = mapped_column(String(32), default="full")
+
+    # Live in-call: reply in meeting chat when the bot's name is mentioned
+    respond_on_mention: Mapped[bool] = mapped_column(Boolean, default=True)
 
     # Arbitrary caller metadata
     extra_metadata: Mapped[dict] = mapped_column(JSON, default=dict)

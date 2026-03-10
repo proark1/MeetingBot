@@ -508,7 +508,13 @@ async function submitCreateBot() {
   const vocabRaw = (document.getElementById("new-bot-vocab")?.value || "").trim();
   const vocabulary = vocabRaw ? vocabRaw.split(",").map(s => s.trim()).filter(Boolean) : null;
   const analysisMode = document.querySelector('input[name="analysis_mode"]:checked')?.value || "full";
-  const body = { meeting_url: url, bot_name: name, analysis_mode: analysisMode };
+  const respondOnMention = document.getElementById("new-bot-respond-mention")?.checked ?? true;
+  const body = {
+    meeting_url: url,
+    bot_name: name,
+    analysis_mode: analysisMode,
+    respond_on_mention: respondOnMention,
+  };
   if (joinAtVal) body.join_at = new Date(joinAtVal).toISOString();
   if (notifyEmail) body.notify_email = notifyEmail;
   if (analysisMode === "full") {

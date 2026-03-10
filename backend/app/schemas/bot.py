@@ -40,6 +40,13 @@ class BotCreate(BaseModel):
             "`transcript_only` skips all AI processing and returns only the raw transcript."
         ),
     )
+    respond_on_mention: bool = Field(
+        default=True,
+        description=(
+            "When true, the bot monitors live captions during the call and sends a "
+            "short Gemini-generated reply to the meeting chat whenever its name is mentioned."
+        ),
+    )
     extra_metadata: dict[str, Any] = {}
 
     @field_validator("meeting_url", mode="before")
@@ -79,6 +86,7 @@ class BotSummary(BaseModel):
     recording_url: str | None = None
     share_token: str | None = None
     analysis_mode: str = "full"
+    respond_on_mention: bool = True
     extra_metadata: dict[str, Any] = {}
     is_demo_transcript: bool = False
 
@@ -127,6 +135,10 @@ class BotResponse(BaseModel):
     analysis_mode: str = Field(
         default="full",
         description="Whether AI analysis was run (`full`) or skipped (`transcript_only`).",
+    )
+    respond_on_mention: bool = Field(
+        default=True,
+        description="Whether the bot is configured to reply in chat when its name is mentioned.",
     )
     extra_metadata: dict[str, Any] = {}
     is_demo_transcript: bool = Field(

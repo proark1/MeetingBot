@@ -128,6 +128,47 @@ async def generate_chapters(transcript: list[dict[str, Any]]) -> list[dict[str, 
         return []
 
 
+async def generate_mention_response(caption_context: str, bot_name: str) -> str:
+    """Generate a short in-meeting chat reply when the bot's name is called.
+
+    Args:
+        caption_context: Recent live-caption text (last ~1 500 chars) scraped from the meeting.
+        bot_name:        The bot's display name, prepended to the reply.
+
+    Returns:
+        A reply string like "MeetingBot: Happy to help! What would you like to know?"
+        Returns an empty string if Gemini is unavailable or returns nothing useful.
+    """
+    from app.config import settings
+
+    if not settings.GEMINI_API_KEY:
+        return ""
+
+    prompt = (
+        f"You are '{bot_name}', a helpful AI meeting assistant attending this call. "
+        "Someone just addressed you by name in the meeting. "
+        "Write a short, friendly reply (1–2 sentences, under 180 characters) that "
+        "acknowledges them and offers to help — or directly answers any question visible "
+        "in the recent conversation context below. "
+        "Return ONLY the reply text with no quotes, no name prefix, and no markdown.\n\n"
+        f"Recent meeting captions:\n{caption_context}"
+    )
+    try:
+        model = _get_model()
+        response = await model.generate_content_async(
+            prompt,
+            generation_config={"temperature": 0.4, "max_output_tokens": 128},
+        )
+        text = response.text.strip().strip('"').strip("'")
+        if not text:
+            return ""
+        # Prepend bot name so participants know who replied
+        return f"{bot_name}: {text}"
+    except Exception as exc:
+        logger.warning("generate_mention_response error: %s", exc)
+        return ""
+
+
 async def ask_about_transcript(transcript: list[dict[str, Any]], question: str) -> str:
     """Answer a free-form question about the meeting transcript."""
     from app.config import settings
