@@ -1066,45 +1066,80 @@ async def _scrape_captions(page: Page, platform: str) -> str:
         return ""
 
 
+async def _type_into_chat(page: Page, selectors: list[str], message: str, timeout: int = 4000) -> bool:
+    """Click and type a message into a chat input — works for both <textarea> and contenteditable divs.
+
+    Unlike _fill() (which calls Playwright's .fill() and only works on <input>/<textarea>),
+    this function uses .click() + page.keyboard.type() which works on all element types.
+    """
+    for sel in selectors:
+        try:
+            el = page.locator(sel).first
+            await el.wait_for(state="visible", timeout=timeout)
+            await el.click()
+            # Clear existing content (triple-click selects all, then type replaces)
+            await page.keyboard.press("Control+a")
+            await page.keyboard.type(message, delay=20)
+            return True
+        except Exception as exc:
+            logger.debug("_type_into_chat selector %r failed: %s", sel, exc)
+    return False
+
+
 async def _send_chat_message(page: Page, platform: str, message: str) -> bool:
     """Type and send a chat message. Returns True on success."""
     try:
         if platform == "google_meet":
-            # Ensure chat panel is open
-            await _open_chat(page, platform)
-            await asyncio.sleep(0.4)
+            # Step 1: Open chat panel
+            opened = await _click(page, [
+                "button[aria-label*='chat' i]",
+                "button[aria-label*='message' i]",
+                "button[aria-label*='show chat' i]",
+                "div[role='button'][aria-label*='chat' i]",
+            ], timeout=2000)
+            logger.debug("GMeet open-chat click: %s", opened)
+            await asyncio.sleep(1.0)  # give panel time to animate open
+
+            # Step 2: Find and fill chat input (Google Meet uses a contenteditable div)
             input_sels = [
-                "textarea[aria-label*='chat' i]",
-                "input[aria-label*='chat' i]",
+                # contenteditable div — most common in modern Meet
+                "div[contenteditable='true'][aria-label*='message' i]",
                 "div[contenteditable='true'][aria-label*='chat' i]",
                 "div[contenteditable='true'][role='textbox']",
+                # textarea fallback (older Meet versions)
+                "textarea[aria-label*='message' i]",
+                "textarea[aria-label*='chat' i]",
+                "input[aria-label*='message' i]",
             ]
-            filled = await _fill(page, input_sels, message, timeout=3000)
-            if not filled:
+            typed = await _type_into_chat(page, input_sels, message, timeout=4000)
+            logger.debug("GMeet type-into-chat: %s", typed)
+            if not typed:
+                await _screenshot(page, "gmeet_chat_input_not_found")
                 return False
-            sent = await _click(page, ["button[aria-label*='send' i]"], timeout=2000)
+
+            # Step 3: Send (button or Enter)
+            sent = await _click(page, [
+                "button[aria-label*='send' i]",
+                "button[aria-label*='Send message' i]",
+            ], timeout=2000)
             if not sent:
                 await page.keyboard.press("Enter")
+            logger.debug("GMeet chat message sent")
             return True
 
         elif platform == "zoom":
             await _open_chat(page, platform)
-            await asyncio.sleep(0.4)
+            await asyncio.sleep(0.8)
             input_sels = [
                 "input[placeholder*='message' i]",
                 "textarea[placeholder*='message' i]",
                 "div[contenteditable='true']",
             ]
-            # Try standard fill first, fallback to type() for contenteditable
-            filled = await _fill(page, input_sels, message, timeout=3000)
-            if not filled:
-                try:
-                    el = page.locator("div[contenteditable='true']").first
-                    await el.click(timeout=2000)
-                    await el.type(message)
-                    filled = True
-                except Exception:
-                    return False
+            typed = await _type_into_chat(page, input_sels, message, timeout=3000)
+            logger.debug("Zoom type-into-chat: %s", typed)
+            if not typed:
+                await _screenshot(page, "zoom_chat_input_not_found")
+                return False
             sent = await _click(page, [
                 "button[aria-label*='send' i]",
                 "button[id*='send']",
@@ -1115,23 +1150,17 @@ async def _send_chat_message(page: Page, platform: str, message: str) -> bool:
 
         elif platform == "microsoft_teams":
             await _open_chat(page, platform)
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(0.5)
             input_sels = [
                 "div[data-tid='send-message-input']",
                 "div[contenteditable='true'][role='textbox']",
                 "textarea[aria-label*='message' i]",
             ]
-            filled = await _fill(page, input_sels, message, timeout=3000)
-            if not filled:
-                try:
-                    el = page.locator(
-                        "div[data-tid='send-message-input'], div[contenteditable='true'][role='textbox']"
-                    ).first
-                    await el.click(timeout=2000)
-                    await el.type(message)
-                    filled = True
-                except Exception:
-                    return False
+            typed = await _type_into_chat(page, input_sels, message, timeout=3000)
+            logger.debug("Teams type-into-chat: %s", typed)
+            if not typed:
+                await _screenshot(page, "teams_chat_input_not_found")
+                return False
             sent = await _click(page, [
                 "button[aria-label*='send' i]",
                 "button[aria-label*='Send message' i]",
@@ -1202,12 +1231,13 @@ async def _mention_monitor(
             reply = ""
 
         if reply:
+            logger.info("Mention detected — attempting chat reply: %s", reply)
             success = await _send_chat_message(page, platform, reply)
             if success:
                 last_response_at = time.monotonic()
                 logger.info("Bot replied to mention: %s", reply)
             else:
-                logger.warning("Bot mention reply failed to send")
+                logger.warning("Bot mention reply failed to send — see debug screenshot for DOM state")
 
 
 async def _wait_for_meeting_end(
