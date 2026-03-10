@@ -82,7 +82,7 @@ async def analyze_transcript(
         vocab_hint = f"Known terms and names (prefer these spellings): {', '.join(vocabulary)}\n\n"
 
     lines = vocab_hint + "\n".join(
-        f"[{e.get('timestamp', 0):.1f}s] {e['speaker']}: {e['text']}"
+        f"[{e.get('timestamp', 0):.1f}s] {e.get('speaker', '?')}: {e.get('text', '')}"
         for e in transcript
     )
 
@@ -123,6 +123,9 @@ async def generate_chapters(transcript: list[dict[str, Any]]) -> list[dict[str, 
             generation_config={"temperature": 0.2, "max_output_tokens": 2048},
         )
         return json.loads(_strip_fences(response.text))
+    except json.JSONDecodeError as exc:
+        logger.error("Gemini chapters: invalid JSON — %s", exc)
+        return []
     except Exception as exc:
         logger.warning("Chapter generation failed: %s", exc)
         return []
@@ -257,7 +260,7 @@ def _empty_analysis() -> dict[str, Any]:
 
 
 def _stub_analysis(transcript: list[dict]) -> dict[str, Any]:
-    speakers = list({e["speaker"] for e in transcript})
+    speakers = list({e.get("speaker", "Unknown") for e in transcript})
     return {
         "summary": (
             f"Meeting with {len(speakers)} participant(s): {', '.join(speakers)}. "

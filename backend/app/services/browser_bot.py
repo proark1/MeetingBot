@@ -1047,6 +1047,36 @@ async def _captions_already_active(page: Page, platform: str) -> bool:
                 }
             """)
             return bool(result)
+        elif platform == "zoom":
+            result = await page.evaluate("""
+                () => {
+                    // Check if Live Transcript button is pressed
+                    const btns = document.querySelectorAll(
+                        'button[aria-label*="Live Transcript" i], button[aria-label*="caption" i]'
+                    );
+                    for (const btn of btns) {
+                        if (btn.getAttribute('aria-pressed') === 'true' ||
+                            btn.getAttribute('aria-checked') === 'true') return true;
+                    }
+                    // Caption container visible
+                    return !!document.querySelector('.zm-caption-container');
+                }
+            """)
+            return bool(result)
+        elif platform == "microsoft_teams":
+            result = await page.evaluate("""
+                () => {
+                    const btns = document.querySelectorAll(
+                        'button[data-tid*="caption"], button[aria-label*="caption" i]'
+                    );
+                    for (const btn of btns) {
+                        if (btn.getAttribute('aria-pressed') === 'true' ||
+                            btn.getAttribute('aria-checked') === 'true') return true;
+                    }
+                    return !!document.querySelector('div[data-tid*="caption"]');
+                }
+            """)
+            return bool(result)
     except Exception:
         pass
     return False
@@ -1224,7 +1254,8 @@ async def _scrape_captions(page: Page, platform: str) -> str:
                     ];
                     for (const s of sel) {
                         const el = document.querySelector(s);
-                        if (el && el.innerText) return el.innerText;
+                        const t = el ? (el.innerText || el.textContent || '').trim() : '';
+                        if (t && t.length > 3) return t;
                     }
                     return '';
                 }
@@ -1240,7 +1271,8 @@ async def _scrape_captions(page: Page, platform: str) -> str:
                     ];
                     for (const s of sel) {
                         const el = document.querySelector(s);
-                        if (el && el.innerText) return el.innerText;
+                        const t = el ? (el.innerText || el.textContent || '').trim() : '';
+                        if (t && t.length > 3) return t;
                     }
                     return '';
                 }
@@ -1284,7 +1316,11 @@ async def _send_chat_message(page: Page, platform: str, message: str) -> bool:
                 "div[role='button'][aria-label*='chat' i]",
             ], timeout=2000)
             logger.debug("GMeet open-chat click: %s", opened)
-            await asyncio.sleep(1.0)  # give panel time to animate open
+            # Poll for chat input (up to 2s) instead of a fixed sleep
+            for _ in range(8):
+                if await _chat_input_visible(page, platform):
+                    break
+                await asyncio.sleep(0.25)
 
             # Step 2: Find and fill chat input (Google Meet uses a contenteditable div)
             input_sels = [
@@ -1479,8 +1515,6 @@ async def _mention_monitor(
     bot_name_lower = bot_name.lower()
     _poll_count = 0
     _empty_streak = 0
-    _speaking_until: float = 0.0         # suppress caption self-triggers while TTS is playing
-
     logger.info("Mention monitor started for bot '%s' on %s", bot_name, platform)
 
     while True:

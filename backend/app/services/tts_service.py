@@ -106,9 +106,16 @@ async def _synthesize_gemini(text: str, api_key: str, voice: str) -> str | None:
             r.raise_for_status()
             data = r.json()
 
-        part      = data["candidates"][0]["content"]["parts"][0]
-        mime_type = part["inlineData"]["mimeType"]          # e.g. "audio/pcm;rate=24000"
-        raw_b64   = part["inlineData"]["data"]
+        if not data.get("candidates"):
+            logger.error("Gemini TTS: empty candidates in response")
+            return None
+        try:
+            part      = data["candidates"][0]["content"]["parts"][0]
+            mime_type = part["inlineData"]["mimeType"]      # e.g. "audio/pcm;rate=24000"
+            raw_b64   = part["inlineData"]["data"]
+        except (KeyError, IndexError) as exc:
+            logger.error("Gemini TTS: unexpected response shape — %s", exc)
+            return None
         pcm_bytes = base64.b64decode(raw_b64)
 
         # Parse sample rate from mime type
@@ -183,7 +190,11 @@ async def play_audio(path: str, sink: str) -> None:
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL,
         )
-        await proc.wait()
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=15.0)
+        except asyncio.TimeoutError:
+            proc.kill()
+            logger.warning("TTS playback timed out — killed ffmpeg")
         logger.debug("TTS playback complete: %s", path)
     except Exception as exc:
         logger.warning("TTS playback failed: %s", exc)
