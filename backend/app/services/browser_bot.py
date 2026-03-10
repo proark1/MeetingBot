@@ -1229,13 +1229,22 @@ async def _scrape_captions(page: Page, platform: str) -> str:
                         'You have joined', 'Your microphone', 'Your camera',
                         'There is one other', 'There are ', 'You are now',
                         'This call is being', 'Your hand',
+                        // Material icon text + UI button labels that leak into
+                        // caption containers via the "scroll to bottom" button
+                        'arrow_downward', 'Jump to bottom',
+                        'expand_more', 'expand_less', 'keyboard_arrow',
                     ];
+                    // Also skip strings that look like a Material icon name only
+                    // (all lowercase/underscores, no spaces) — these are never speech.
+                    const materialIconRe = /^[a-z][a-z_]+$/;
                     for (const s of selectors) {
                         const el = document.querySelector(s);
                         if (el) {
                             const t = (el.innerText || el.textContent || '').trim();
                             if (t && t.length > 3 &&
-                                !skipPrefixes.some(p => t.startsWith(p))) {
+                                !skipPrefixes.some(p => t.startsWith(p)) &&
+                                !t.includes('Jump to bottom') &&
+                                !materialIconRe.test(t.split('\n')[0])) {
                                 return t;
                             }
                         }
