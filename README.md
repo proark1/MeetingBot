@@ -81,7 +81,12 @@ POST /api/v1/bot
 - `"full"` *(default)* — runs full AI analysis: summary, key points, action items, smart chapters, sentiment, speaker stats, and all post-meeting notifications (email, Slack, Notion, Linear).
 - `"transcript_only"` — skips all AI processing and returns only the raw speaker-labelled transcript. Faster completion, lower cost, full privacy. Speaker stats are still computed locally.
 
-`respond_on_mention` — when `true` (default), the bot monitors live captions during the call. If its name is mentioned, it generates a short Gemini-powered reply and sends it to the meeting chat. Responses are debounced to once every 30 seconds. Requires live captions to be available on the platform.
+`respond_on_mention` — when `true` (default), the bot monitors live captions during the call and replies whenever its name is mentioned. Responses are debounced to once every 30 seconds.
+
+`mention_response_mode` — controls how the bot replies when mentioned:
+- `"text"` *(default)* — sends a message to the meeting chat.
+- `"voice"` — speaks the reply aloud via TTS (Microsoft Edge TTS, ~300 ms synthesis, no API key required). All participants hear the bot's voice. Requires the PulseAudio virtual mic to be available.
+- `"both"` — sends a chat message and speaks simultaneously.
 
 `template_id` — optional ID of a meeting template (see `/api/v1/templates`). Templates customise the AI analysis prompt.
 `vocabulary` — optional list of domain-specific terms to hint at during transcription.

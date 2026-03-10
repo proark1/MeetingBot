@@ -24,6 +24,7 @@ from playwright.async_api import Browser, BrowserContext, Page, async_playwright
 logger = logging.getLogger(__name__)
 
 PULSE_SINK_NAME = "meetingbot_sink"
+PULSE_MIC_NAME  = "meetingbot_mic"   # TTS audio plays here; Chrome captures it as mic input
 SCREENSHOT_DIR = Path("/app/data/screenshots")
 _SCREENSHOT_MAX_AGE_S = 7 * 86_400  # 7 days
 
@@ -165,6 +166,32 @@ def _create_pulse_sink() -> Optional[str]:
         return idx
     except Exception as exc:
         logger.warning("PulseAudio sink setup failed: %s", exc)
+        return None
+
+
+def _create_pulse_mic() -> Optional[str]:
+    """Create a second null sink for TTS playback.
+
+    Chrome will use its monitor as a virtual microphone, so when we play
+    TTS audio into this sink all meeting participants hear the bot speak.
+    Returns the PulseAudio module index, or None on failure.
+    """
+    try:
+        r = _run([
+            "pactl", "load-module", "module-null-sink",
+            f"sink_name={PULSE_MIC_NAME}",
+            "sink_properties=device.description=MeetingBotMic",
+        ])
+        if r.returncode != 0:
+            logger.warning("Could not create TTS mic sink: %s", r.stderr)
+            return None
+        idx = r.stdout.strip()
+        # Make the monitor the default SOURCE so Chrome uses it as its microphone
+        _run(["pacmd", "set-default-source", f"{PULSE_MIC_NAME}.monitor"])
+        logger.info("PulseAudio TTS mic sink ready (module %s)", idx)
+        return idx
+    except Exception as exc:
+        logger.warning("PulseAudio mic sink setup failed: %s", exc)
         return None
 
 
@@ -1214,10 +1241,101 @@ async def _send_chat_message(page: Page, platform: str, message: str) -> bool:
     return False
 
 
+# ── Mic mute / unmute & voice output ─────────────────────────────────────────
+
+_MIC_UNMUTE_SELS: dict[str, list[str]] = {
+    "google_meet": [
+        "button[aria-label*='unmute' i]",
+        "button[aria-label*='Turn on microphone' i]",
+        "button[data-is-muted='true'][aria-label*='microphone' i]",
+    ],
+    "zoom": [
+        "button[aria-label*='unmute' i]",
+        "button[title*='unmute' i]",
+    ],
+    "microsoft_teams": [
+        "button[aria-label*='unmute' i]",
+        "button[data-tid*='microphone'][aria-pressed='false']",
+        "button[title*='unmute' i]",
+    ],
+}
+
+_MIC_MUTE_SELS: dict[str, list[str]] = {
+    "google_meet": [
+        "button[aria-label*='Turn off microphone' i]",
+        "button[aria-label*='mute microphone' i]",
+        "button[data-is-muted='false'][aria-label*='microphone' i]",
+    ],
+    "zoom": [
+        "button[aria-label*='mute' i]:not([aria-label*='un' i])",
+        "button[title*='mute' i]:not([title*='un' i])",
+    ],
+    "microsoft_teams": [
+        "button[aria-label*='mute' i]:not([aria-label*='un' i])",
+        "button[data-tid*='microphone'][aria-pressed='true']",
+    ],
+}
+
+
+async def _unmute_mic(page: Page, platform: str) -> None:
+    """Best-effort: unmute the bot's microphone in the meeting UI."""
+    sels = _MIC_UNMUTE_SELS.get(platform, [])
+    if sels:
+        await _click(page, sels, timeout=2000)
+
+
+async def _mute_mic(page: Page, platform: str) -> None:
+    """Best-effort: mute the bot's microphone in the meeting UI."""
+    sels = _MIC_MUTE_SELS.get(platform, [])
+    if sels:
+        await _click(page, sels, timeout=2000)
+
+
+async def _speak_in_meeting(page: Page, platform: str, text: str) -> bool:
+    """Speak *text* aloud in the meeting via TTS → PulseAudio virtual mic.
+
+    Flow (fully overlapped for minimum latency):
+      1. Start TTS synthesis (edge-tts → temp MP3)
+      2. Unmute mic simultaneously (asyncio.gather)
+      3. Play the MP3 into the TTS mic sink
+      4. Mute mic when done
+
+    Returns True on success.
+    """
+    from app.services import tts_service
+
+    try:
+        # Step 1+2: synthesize and unmute at the same time
+        tts_path, _ = await asyncio.gather(
+            tts_service.synthesize(text),
+            _unmute_mic(page, platform),
+        )
+        if not tts_path:
+            logger.warning("TTS synthesis returned no file — skipping voice response")
+            await _mute_mic(page, platform)
+            return False
+
+        # Step 3: play into the TTS mic sink (Chrome hears it as microphone input)
+        await tts_service.play_audio(tts_path, PULSE_MIC_NAME)
+
+        # Step 4: mute again
+        await _mute_mic(page, platform)
+        return True
+
+    except Exception as exc:
+        logger.warning("_speak_in_meeting failed: %s", exc)
+        try:
+            await _mute_mic(page, platform)
+        except Exception:
+            pass
+        return False
+
+
 async def _mention_monitor(
     page: Page,
     platform: str,
     bot_name: str,
+    mention_response_mode: str = "text",
 ) -> None:
     """Coroutine that polls live captions and replies when the bot's name is mentioned.
 
@@ -1234,7 +1352,7 @@ async def _mention_monitor(
     logger.info("Mention monitor started for bot '%s' on %s", bot_name, platform)
 
     while True:
-        await asyncio.sleep(2)
+        await asyncio.sleep(1)   # 1 s poll — minimum latency to detect a mention
         try:
             raw = await _scrape_captions(page, platform)
         except Exception:
@@ -1269,14 +1387,24 @@ async def _mention_monitor(
             logger.warning("generate_mention_response error: %s", exc)
             reply = ""
 
-        if reply:
-            logger.info("Mention detected — attempting chat reply: %s", reply)
+        if not reply:
+            continue
+
+        logger.info("Mention detected — responding (mode=%s): %s", mention_response_mode, reply)
+        last_response_at = time.monotonic()  # set early to prevent re-trigger during slow ops
+
+        # Dispatch based on mode (voice and text can run concurrently for "both")
+        if mention_response_mode == "voice":
+            await _speak_in_meeting(page, platform, reply)
+        elif mention_response_mode == "both":
+            await asyncio.gather(
+                _speak_in_meeting(page, platform, reply),
+                _send_chat_message(page, platform, reply),
+            )
+        else:  # "text" (default)
             success = await _send_chat_message(page, platform, reply)
-            if success:
-                last_response_at = time.monotonic()
-                logger.info("Bot replied to mention: %s", reply)
-            else:
-                logger.warning("Bot mention reply failed to send — see debug screenshot for DOM state")
+            if not success:
+                logger.warning("Bot mention chat reply failed — see debug screenshot for DOM state")
 
 
 async def _wait_for_meeting_end(
@@ -1358,6 +1486,7 @@ async def run_browser_bot(
     alone_timeout: int = 300,
     on_admitted: Optional[Callable[[], Awaitable[None]]] = None,
     respond_on_mention: bool = True,
+    mention_response_mode: str = "text",
 ) -> dict:
     """
     Join a meeting as a named guest, record audio, wait for it to end.
@@ -1388,6 +1517,9 @@ async def run_browser_bot(
         pulse_idx = _create_pulse_sink()
         if pulse_idx:
             ffmpeg_proc = _start_ffmpeg(audio_path)
+        # Create the TTS mic sink so the bot can speak in the meeting.
+        # Must be created before Chrome launches so PULSE_SOURCE takes effect.
+        _create_pulse_mic()
 
     xvfb_proc = _start_xvfb(":99")
     headless  = xvfb_proc is None   # fall back to headless if no Xvfb
@@ -1405,7 +1537,11 @@ async def run_browser_bot(
         rt = os.environ.get("XDG_RUNTIME_DIR", "/tmp/runtime-meetingbot")
         default_pulse = f"unix:{rt}/pulse/native"
         env["PULSE_SERVER"] = os.environ.get("PULSE_SERVER", default_pulse)
-        env["PULSE_SINK"] = PULSE_SINK_NAME
+        env["PULSE_SINK"]   = PULSE_SINK_NAME
+        # Point Chrome's microphone at the TTS sink monitor.
+        # When we play TTS audio into PULSE_MIC_NAME, Chrome captures it
+        # and broadcasts it to meeting participants as the bot's voice.
+        env["PULSE_SOURCE"] = f"{PULSE_MIC_NAME}.monitor"
 
     launch_args = [
         "--no-sandbox",
@@ -1495,7 +1631,7 @@ async def run_browser_bot(
             monitor_task: asyncio.Task | None = None
             if respond_on_mention:
                 monitor_task = asyncio.create_task(
-                    _mention_monitor(page, platform, bot_name)
+                    _mention_monitor(page, platform, bot_name, mention_response_mode)
                 )
 
             exit_reason = await _wait_for_meeting_end(

@@ -57,8 +57,11 @@ class Bot(Base):
     # Analysis mode: "full" (AI summary + chapters) | "transcript_only" (raw text only)
     analysis_mode: Mapped[str] = mapped_column(String(32), default="full")
 
-    # Live in-call: reply in meeting chat when the bot's name is mentioned
+    # Live in-call: reply when the bot's name is mentioned
+    # respond_on_mention: master on/off toggle
+    # mention_response_mode: "text" | "voice" | "both"
     respond_on_mention: Mapped[bool] = mapped_column(Boolean, default=True)
+    mention_response_mode: Mapped[str] = mapped_column(String(16), default="text")
 
     # Arbitrary caller metadata
     extra_metadata: Mapped[dict] = mapped_column(JSON, default=dict)

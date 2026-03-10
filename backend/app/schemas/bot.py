@@ -43,8 +43,17 @@ class BotCreate(BaseModel):
     respond_on_mention: bool = Field(
         default=True,
         description=(
-            "When true, the bot monitors live captions during the call and sends a "
-            "short Gemini-generated reply to the meeting chat whenever its name is mentioned."
+            "When true, the bot monitors live captions during the call and replies "
+            "whenever its name is mentioned."
+        ),
+    )
+    mention_response_mode: Literal["text", "voice", "both"] = Field(
+        default="text",
+        description=(
+            "How the bot responds when its name is mentioned. "
+            "`text` — sends a message in the meeting chat. "
+            "`voice` — speaks the reply aloud via TTS so all participants hear it. "
+            "`both` — does both."
         ),
     )
     extra_metadata: dict[str, Any] = {}
@@ -87,6 +96,7 @@ class BotSummary(BaseModel):
     share_token: str | None = None
     analysis_mode: str = "full"
     respond_on_mention: bool = True
+    mention_response_mode: str = "text"
     extra_metadata: dict[str, Any] = {}
     is_demo_transcript: bool = False
 
@@ -138,7 +148,11 @@ class BotResponse(BaseModel):
     )
     respond_on_mention: bool = Field(
         default=True,
-        description="Whether the bot is configured to reply in chat when its name is mentioned.",
+        description="Whether the bot replies when its name is mentioned.",
+    )
+    mention_response_mode: str = Field(
+        default="text",
+        description="How the bot replies: 'text' (chat), 'voice' (TTS), or 'both'.",
     )
     extra_metadata: dict[str, Any] = {}
     is_demo_transcript: bool = Field(

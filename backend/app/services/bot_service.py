@@ -281,6 +281,7 @@ async def run_bot_lifecycle(bot_id: str, db_factory) -> None:
                         alone_timeout=settings.BOT_ALONE_TIMEOUT,
                         on_admitted=on_admitted,
                         respond_on_mention=getattr(bot, "respond_on_mention", True),
+                        mention_response_mode=getattr(bot, "mention_response_mode", "text"),
                     )
 
                     if bot_result["success"]:

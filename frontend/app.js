@@ -436,6 +436,26 @@ if (_searchInput) {
 
 // ── Create Bot ─────────────────────────────────────────────────────────────
 
+// Respond-on-mention toggle — show/hide the response-mode row
+function _initMentionToggle() {
+  const toggle = document.getElementById("new-bot-respond-mention");
+  const modeRow = document.getElementById("response-mode-row");
+  if (!toggle || !modeRow) return;
+
+  const update = () => { modeRow.style.display = toggle.checked ? "" : "none"; };
+  toggle.addEventListener("change", update);
+  update();
+
+  // Mode pill click — highlight selected pill
+  document.querySelectorAll(".mode-pill").forEach(pill => {
+    pill.addEventListener("click", () => {
+      document.querySelectorAll(".mode-pill").forEach(p => p.classList.remove("mode-pill-active"));
+      pill.classList.add("mode-pill-active");
+      pill.querySelector("input[type=radio]").checked = true;
+    });
+  });
+}
+
 // Analysis mode picker — highlight selected card + show/hide AI options
 function _initModePicker() {
   const picker = document.getElementById("analysis-mode-picker");
@@ -468,6 +488,7 @@ document.getElementById("btn-new-bot").addEventListener("click", async () => {
   if (aiSection) aiSection.classList.remove("hidden");
 
   _initModePicker();
+  _initMentionToggle();
   openModal("modal-new-bot");
   // Populate template dropdown
   try {
@@ -509,11 +530,13 @@ async function submitCreateBot() {
   const vocabulary = vocabRaw ? vocabRaw.split(",").map(s => s.trim()).filter(Boolean) : null;
   const analysisMode = document.querySelector('input[name="analysis_mode"]:checked')?.value || "full";
   const respondOnMention = document.getElementById("new-bot-respond-mention")?.checked ?? true;
+  const mentionResponseMode = document.querySelector('input[name="mention_response_mode"]:checked')?.value || "text";
   const body = {
     meeting_url: url,
     bot_name: name,
     analysis_mode: analysisMode,
     respond_on_mention: respondOnMention,
+    mention_response_mode: mentionResponseMode,
   };
   if (joinAtVal) body.join_at = new Date(joinAtVal).toISOString();
   if (notifyEmail) body.notify_email = notifyEmail;

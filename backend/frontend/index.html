@@ -313,16 +313,37 @@
         <!-- Section: Live Behaviour -->
         <div class="form-section">
           <div class="form-section-label">Live Behaviour</div>
+
+          <!-- Respond-on-mention master toggle -->
           <label class="toggle-row" for="new-bot-respond-mention">
             <div class="toggle-row-body">
               <div class="toggle-label">Respond when mentioned</div>
-              <div class="toggle-desc">Bot monitors live captions and sends a short AI-generated reply to the meeting chat when its name is called out.</div>
+              <div class="toggle-desc">Bot monitors live captions and replies when its name is called out in the meeting.</div>
             </div>
             <div class="toggle-track">
               <input type="checkbox" id="new-bot-respond-mention" class="toggle-input" checked />
               <span class="toggle-switch"></span>
             </div>
           </label>
+
+          <!-- Response mode selector (shown only when toggle is on) -->
+          <div id="response-mode-row" class="response-mode-row">
+            <div class="response-mode-label">Reply via</div>
+            <div class="response-mode-options">
+              <label class="mode-pill mode-pill-active" data-value="text">
+                <input type="radio" name="mention_response_mode" value="text" checked hidden />
+                <span class="mode-pill-icon">💬</span> Text chat
+              </label>
+              <label class="mode-pill" data-value="voice">
+                <input type="radio" name="mention_response_mode" value="voice" hidden />
+                <span class="mode-pill-icon">🔊</span> Voice
+              </label>
+              <label class="mode-pill" data-value="both">
+                <input type="radio" name="mention_response_mode" value="both" hidden />
+                <span class="mode-pill-icon">✦</span> Both
+              </label>
+            </div>
+          </div>
         </div>
 
       </div>

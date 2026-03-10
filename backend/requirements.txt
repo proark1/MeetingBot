@@ -18,3 +18,6 @@ google-generativeai==0.8.3
 # Real browser bot
 playwright==1.49.1
 playwright-stealth==1.0.6
+
+# Text-to-speech for voice responses
+edge-tts>=6.1.9
