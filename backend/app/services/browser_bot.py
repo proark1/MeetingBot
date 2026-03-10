@@ -1284,6 +1284,88 @@ async def _scrape_captions(page: Page, platform: str) -> str:
         return ""
 
 
+async def _scrape_chat_messages(page: Page, platform: str) -> str:
+    """Return all visible incoming chat message text, or '' on failure.
+
+    Only reads the messages list — not the input box.  The chat panel must
+    already be open (call _open_chat first) for this to return anything useful.
+    """
+    try:
+        if platform == "google_meet":
+            text = await page.evaluate("""
+                () => {
+                    // Try known message-list containers first
+                    const listSels = [
+                        "div[jsname='xySENc']",
+                        "div[role='list'][aria-label*='message' i]",
+                        "div[role='list'][aria-label*='chat' i]",
+                        "div[role='log']",
+                        "div[class*='chat'] div[role='list']",
+                    ];
+                    for (const s of listSels) {
+                        const el = document.querySelector(s);
+                        if (el) {
+                            const t = (el.innerText || el.textContent || '').trim();
+                            if (t && t.length > 3) return t;
+                        }
+                    }
+                    // Fallback: whole chat panel minus the input/button elements
+                    const panel = document.querySelector(
+                        "div[aria-label='Chat'], div[aria-label='chat' i][role='region'], " +
+                        "div[aria-label='In-call messages'], div[aria-label*='in-call' i]"
+                    );
+                    if (panel) {
+                        const clone = panel.cloneNode(true);
+                        clone.querySelectorAll(
+                            "div[contenteditable], textarea, input, button, form"
+                        ).forEach(e => e.remove());
+                        const t = (clone.innerText || clone.textContent || '').trim();
+                        if (t && t.length > 3) return t;
+                    }
+                    return '';
+                }
+            """)
+        elif platform == "zoom":
+            text = await page.evaluate("""
+                () => {
+                    const sel = [
+                        ".chat-message-list__scroll-helper",
+                        "div[class*='chat-message-list']",
+                        "ul[class*='chat-list']",
+                        "div[class*='ChatPanel'] div[role='list']",
+                    ];
+                    for (const s of sel) {
+                        const el = document.querySelector(s);
+                        const t = el ? (el.innerText || el.textContent || '').trim() : '';
+                        if (t && t.length > 3) return t;
+                    }
+                    return '';
+                }
+            """)
+        elif platform == "microsoft_teams":
+            text = await page.evaluate("""
+                () => {
+                    const sel = [
+                        "div[data-tid='chat-messages-panel']",
+                        "div[aria-label*='Chat conversation']",
+                        "div[class*='ui-chat__messageList']",
+                        "div[class*='chat-messages-list']",
+                    ];
+                    for (const s of sel) {
+                        const el = document.querySelector(s);
+                        const t = el ? (el.innerText || el.textContent || '').trim() : '';
+                        if (t && t.length > 3) return t;
+                    }
+                    return '';
+                }
+            """)
+        else:
+            return ""
+        return (text or "").strip()
+    except Exception:
+        return ""
+
+
 async def _type_into_chat(page: Page, selectors: list[str], message: str, timeout: int = 4000) -> bool:
     """Click and type a message into a chat input — works for both <textarea> and contenteditable divs.
 
@@ -1496,104 +1578,41 @@ async def _mention_monitor(
     tts_provider: str = "edge",
     gemini_api_key: str | None = None,
 ) -> None:
-    """Coroutine that polls live captions and replies when the bot's name is mentioned.
+    """Coroutine that polls live captions AND chat messages, replying when the
+    bot's name is mentioned in either source.
 
     Designed to run concurrently with _wait_for_meeting_end and be cancelled when
     the meeting ends.
     """
     from app.services import intelligence_service as _intel
 
-    seen_text: str = ""
+    seen_captions: str = ""
+    seen_chat: str = ""
     last_response_at: float = 0.0
-    last_reply_text: str = ""            # the text we last sent — used to suppress self-triggers
-    caption_log: list[str] = []          # rolling buffer — last 40 caption chunks
+    last_reply_text: str = ""        # suppress self-triggers
+    caption_log: list[str] = []      # rolling buffer — last 40 caption chunks
     bot_name_lower = bot_name.lower()
     _poll_count = 0
     _empty_streak = 0
     logger.info("Mention monitor started for bot '%s' on %s", bot_name, platform)
 
-    while True:
-        await asyncio.sleep(1)   # 1 s poll — minimum latency to detect a mention
-        _poll_count += 1
-        try:
-            raw = await _scrape_captions(page, platform)
-        except Exception as exc:
-            logger.debug("Caption scrape error: %s", exc)
-            continue
+    # Open chat panel at startup so incoming messages are visible in the DOM.
+    try:
+        await _open_chat(page, platform)
+        logger.info("Chat panel opened for mention monitoring on %s", platform)
+    except Exception as exc:
+        logger.warning("Could not open chat panel on %s: %s", platform, exc)
 
-        if not raw:
-            _empty_streak += 1
-            if _empty_streak == 30:
-                logger.warning(
-                    "Mention monitor: no caption text in 30 polls — "
-                    "attempting to re-enable captions"
-                )
-                try:
-                    await _enable_captions(page, platform)
-                except Exception as exc:
-                    logger.warning("Caption re-enable failed: %s", exc)
-            continue
-
-        _empty_streak = 0
-
-        # Only process text that appeared since the last poll.
-        # If raw starts the same way as seen_text, the new part is the suffix.
-        # Otherwise the entire caption container was replaced — treat all as new.
-        overlap = min(len(seen_text), 100)
-        if seen_text and raw.startswith(seen_text[:overlap]):
-            new_text = raw[len(seen_text):]
-        else:
-            new_text = raw
-        seen_text = raw
-
-        # Log first caption seen at INFO so it's visible in production logs
-        if _poll_count <= 5:
-            logger.info("Caption sample (poll %d): %r", _poll_count, raw[:200])
-
-        if not new_text.strip():
-            continue
-
-        caption_log.append(new_text.strip())
-        caption_log = caption_log[-40:]
-
-        # Check for bot name in new text
-        if bot_name_lower not in new_text.lower():
-            continue
-
-        # Filter out self-triggers: skip if new_text is (part of) our own last reply
-        if last_reply_text and last_reply_text.lower()[:60] in new_text.lower():
-            logger.debug("Mention monitor: ignoring self-trigger from own TTS output")
-            continue
-
-        # Debounce: don't reply more than once every 15 s
-        if time.monotonic() - last_response_at < 15:
-            logger.debug("Mention detected but debounced (last response < 15s ago)")
-            continue
-
-        context = " ".join(caption_log)[-1500:]
-        uses_voice = mention_response_mode in ("voice", "both")
-        try:
-            reply = await _intel.generate_mention_response(
-                context, bot_name, for_voice=uses_voice
-            )
-        except Exception as exc:
-            logger.warning("generate_mention_response error: %s", exc)
-            reply = ""
-
-        if not reply:
-            continue
-
-        logger.info("Mention detected — responding (mode=%s, tts=%s): %s", mention_response_mode, tts_provider, reply)
-        last_response_at = time.monotonic()  # set early to prevent re-trigger during slow ops
-        last_reply_text = reply
-
-        # Dispatch based on mode (voice and text can run concurrently for "both")
-        # Wrap the entire dispatch in try/except so a single failure doesn't kill the monitor.
+    async def _dispatch_reply(reply: str, source: str) -> None:
+        """Send reply via the configured mode; source is 'caption' or 'chat'."""
+        logger.info(
+            "Mention detected via %s — responding (mode=%s): %s",
+            source, mention_response_mode, reply,
+        )
         try:
             if mention_response_mode == "voice":
                 await _speak_in_meeting(page, platform, reply, tts_provider, gemini_api_key)
             elif mention_response_mode == "both":
-                # return_exceptions=True: one failure doesn't cancel the other
                 results = await asyncio.gather(
                     _speak_in_meeting(page, platform, reply, tts_provider, gemini_api_key),
                     _send_chat_message(page, platform, reply),
@@ -1608,6 +1627,106 @@ async def _mention_monitor(
                     logger.warning("Bot mention chat reply failed — see debug screenshot for DOM state")
         except Exception as exc:
             logger.warning("Mention response dispatch error: %s", exc)
+
+    while True:
+        await asyncio.sleep(1)   # 1 s poll — minimum latency to detect a mention
+        _poll_count += 1
+
+        # ── Caption polling ───────────────────────────────────────────────────
+        try:
+            raw = await _scrape_captions(page, platform)
+        except Exception as exc:
+            logger.debug("Caption scrape error: %s", exc)
+            raw = ""
+
+        if not raw:
+            _empty_streak += 1
+            if _empty_streak == 30:
+                logger.warning(
+                    "Mention monitor: no caption text in 30 polls — "
+                    "attempting to re-enable captions"
+                )
+                try:
+                    await _enable_captions(page, platform)
+                except Exception as exc:
+                    logger.warning("Caption re-enable failed: %s", exc)
+        else:
+            _empty_streak = 0
+
+            # Diff captions: only the text that appeared since the last poll
+            overlap = min(len(seen_captions), 100)
+            if seen_captions and raw.startswith(seen_captions[:overlap]):
+                new_caption_text = raw[len(seen_captions):]
+            else:
+                new_caption_text = raw
+            seen_captions = raw
+
+            # Log first 5 polls at INFO; then every 60 polls (~1 min) as heartbeat
+            if _poll_count <= 5 or _poll_count % 60 == 0:
+                logger.info("Caption sample (poll %d): %r", _poll_count, raw[:200])
+            else:
+                logger.debug("Caption poll %d: %r", _poll_count, raw[:120])
+
+            if new_caption_text.strip():
+                caption_log.append(new_caption_text.strip())
+                caption_log = caption_log[-40:]
+
+                if (
+                    bot_name_lower in new_caption_text.lower()
+                    and not (last_reply_text and last_reply_text.lower()[:60] in new_caption_text.lower())
+                    and time.monotonic() - last_response_at >= 15
+                ):
+                    context = " ".join(caption_log)[-1500:]
+                    uses_voice = mention_response_mode in ("voice", "both")
+                    try:
+                        reply = await _intel.generate_mention_response(
+                            context, bot_name, for_voice=uses_voice
+                        )
+                    except Exception as exc:
+                        logger.warning("generate_mention_response error: %s", exc)
+                        reply = ""
+                    if reply:
+                        last_response_at = time.monotonic()
+                        last_reply_text = reply
+                        await _dispatch_reply(reply, "caption")
+
+        # ── Chat polling (every 2 s — every other caption poll) ──────────────
+        if _poll_count % 2 == 0:
+            try:
+                chat_raw = await _scrape_chat_messages(page, platform)
+            except Exception as exc:
+                logger.debug("Chat scrape error: %s", exc)
+                chat_raw = ""
+
+            if chat_raw and chat_raw != seen_chat:
+                # Diff: extract only new content
+                overlap = min(len(seen_chat), 200)
+                if seen_chat and chat_raw.startswith(seen_chat[:overlap]):
+                    new_chat_text = chat_raw[len(seen_chat):]
+                else:
+                    new_chat_text = chat_raw
+                seen_chat = chat_raw
+
+                if new_chat_text.strip():
+                    logger.debug("Chat update: %r", new_chat_text[:200])
+                    if (
+                        bot_name_lower in new_chat_text.lower()
+                        and not (last_reply_text and last_reply_text.lower()[:60] in new_chat_text.lower())
+                        and time.monotonic() - last_response_at >= 15
+                    ):
+                        context = new_chat_text.strip()[-1500:]
+                        uses_voice = mention_response_mode in ("voice", "both")
+                        try:
+                            reply = await _intel.generate_mention_response(
+                                context, bot_name, for_voice=uses_voice
+                            )
+                        except Exception as exc:
+                            logger.warning("generate_mention_response error: %s", exc)
+                            reply = ""
+                        if reply:
+                            last_response_at = time.monotonic()
+                            last_reply_text = reply
+                            await _dispatch_reply(reply, "chat")
 
 
 async def _wait_for_meeting_end(
