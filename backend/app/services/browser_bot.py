@@ -1291,13 +1291,19 @@ async def _mute_mic(page: Page, platform: str) -> None:
         await _click(page, sels, timeout=2000)
 
 
-async def _speak_in_meeting(page: Page, platform: str, text: str) -> bool:
+async def _speak_in_meeting(
+    page: Page,
+    platform: str,
+    text: str,
+    tts_provider: str = "edge",
+    gemini_api_key: str | None = None,
+) -> bool:
     """Speak *text* aloud in the meeting via TTS → PulseAudio virtual mic.
 
     Flow (fully overlapped for minimum latency):
-      1. Start TTS synthesis (edge-tts → temp MP3)
+      1. Start TTS synthesis (edge-tts or Gemini TTS → temp audio file)
       2. Unmute mic simultaneously (asyncio.gather)
-      3. Play the MP3 into the TTS mic sink
+      3. Play the audio into the TTS mic sink
       4. Mute mic when done
 
     Returns True on success.
@@ -1307,7 +1313,7 @@ async def _speak_in_meeting(page: Page, platform: str, text: str) -> bool:
     try:
         # Step 1+2: synthesize and unmute at the same time
         tts_path, _ = await asyncio.gather(
-            tts_service.synthesize(text),
+            tts_service.synthesize(text, provider=tts_provider, api_key=gemini_api_key),
             _unmute_mic(page, platform),
         )
         if not tts_path:
@@ -1336,6 +1342,8 @@ async def _mention_monitor(
     platform: str,
     bot_name: str,
     mention_response_mode: str = "text",
+    tts_provider: str = "edge",
+    gemini_api_key: str | None = None,
 ) -> None:
     """Coroutine that polls live captions and replies when the bot's name is mentioned.
 
@@ -1381,8 +1389,11 @@ async def _mention_monitor(
             continue
 
         context = " ".join(caption_log)[-1500:]
+        uses_voice = mention_response_mode in ("voice", "both")
         try:
-            reply = await _intel.generate_mention_response(context, bot_name)
+            reply = await _intel.generate_mention_response(
+                context, bot_name, for_voice=uses_voice
+            )
         except Exception as exc:
             logger.warning("generate_mention_response error: %s", exc)
             reply = ""
@@ -1390,15 +1401,15 @@ async def _mention_monitor(
         if not reply:
             continue
 
-        logger.info("Mention detected — responding (mode=%s): %s", mention_response_mode, reply)
+        logger.info("Mention detected — responding (mode=%s, tts=%s): %s", mention_response_mode, tts_provider, reply)
         last_response_at = time.monotonic()  # set early to prevent re-trigger during slow ops
 
         # Dispatch based on mode (voice and text can run concurrently for "both")
         if mention_response_mode == "voice":
-            await _speak_in_meeting(page, platform, reply)
+            await _speak_in_meeting(page, platform, reply, tts_provider, gemini_api_key)
         elif mention_response_mode == "both":
             await asyncio.gather(
-                _speak_in_meeting(page, platform, reply),
+                _speak_in_meeting(page, platform, reply, tts_provider, gemini_api_key),
                 _send_chat_message(page, platform, reply),
             )
         else:  # "text" (default)
@@ -1487,6 +1498,7 @@ async def run_browser_bot(
     on_admitted: Optional[Callable[[], Awaitable[None]]] = None,
     respond_on_mention: bool = True,
     mention_response_mode: str = "text",
+    tts_provider: str = "edge",
 ) -> dict:
     """
     Join a meeting as a named guest, record audio, wait for it to end.
@@ -1630,8 +1642,14 @@ async def run_browser_bot(
             # Run mention monitor concurrently with the meeting-end watcher
             monitor_task: asyncio.Task | None = None
             if respond_on_mention:
+                from app.config import settings as _settings
                 monitor_task = asyncio.create_task(
-                    _mention_monitor(page, platform, bot_name, mention_response_mode)
+                    _mention_monitor(
+                        page, platform, bot_name,
+                        mention_response_mode=mention_response_mode,
+                        tts_provider=tts_provider,
+                        gemini_api_key=_settings.GEMINI_API_KEY or None,
+                    )
                 )
 
             exit_reason = await _wait_for_meeting_end(

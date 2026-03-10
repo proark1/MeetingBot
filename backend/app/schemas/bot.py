@@ -56,6 +56,14 @@ class BotCreate(BaseModel):
             "`both` — does both."
         ),
     )
+    tts_provider: Literal["edge", "gemini"] = Field(
+        default="edge",
+        description=(
+            "TTS engine used for voice responses. "
+            "`edge` (default) — Microsoft Edge TTS: fast (~300 ms), free, no extra key. "
+            "`gemini` — Google Gemini TTS: more natural voice, uses your GEMINI_API_KEY."
+        ),
+    )
     extra_metadata: dict[str, Any] = {}
 
     @field_validator("meeting_url", mode="before")
@@ -97,6 +105,7 @@ class BotSummary(BaseModel):
     analysis_mode: str = "full"
     respond_on_mention: bool = True
     mention_response_mode: str = "text"
+    tts_provider: str = "edge"
     extra_metadata: dict[str, Any] = {}
     is_demo_transcript: bool = False
 
@@ -153,6 +162,10 @@ class BotResponse(BaseModel):
     mention_response_mode: str = Field(
         default="text",
         description="How the bot replies: 'text' (chat), 'voice' (TTS), or 'both'.",
+    )
+    tts_provider: str = Field(
+        default="edge",
+        description="TTS engine: 'edge' (Microsoft Edge TTS) or 'gemini' (Gemini TTS).",
     )
     extra_metadata: dict[str, Any] = {}
     is_demo_transcript: bool = Field(

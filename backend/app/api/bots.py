@@ -145,6 +145,7 @@ async def create_bot(
         analysis_mode=payload.analysis_mode,
         respond_on_mention=payload.respond_on_mention,
         mention_response_mode=payload.mention_response_mode,
+        tts_provider=payload.tts_provider,
         status="scheduled" if is_scheduled else "ready",
         extra_metadata=payload.extra_metadata,
         share_token=secrets.token_urlsafe(12),

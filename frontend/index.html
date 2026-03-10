@@ -344,6 +344,22 @@
               </label>
             </div>
           </div>
+
+          <!-- TTS engine selector (shown only when voice or both is selected) -->
+          <div id="tts-provider-row" class="response-mode-row" style="display:none">
+            <div class="response-mode-label">Voice engine</div>
+            <div class="response-mode-options">
+              <label class="mode-pill mode-pill-active" data-value="edge" id="tts-pill-edge">
+                <input type="radio" name="tts_provider" value="edge" checked hidden />
+                ⚡ Edge TTS
+              </label>
+              <label class="mode-pill" data-value="gemini" id="tts-pill-gemini">
+                <input type="radio" name="tts_provider" value="gemini" hidden />
+                ✦ Gemini TTS
+              </label>
+            </div>
+            <span class="tts-hint" id="tts-hint"></span>
+          </div>
         </div>
 
       </div>

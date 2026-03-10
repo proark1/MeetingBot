@@ -62,6 +62,7 @@ class Bot(Base):
     # mention_response_mode: "text" | "voice" | "both"
     respond_on_mention: Mapped[bool] = mapped_column(Boolean, default=True)
     mention_response_mode: Mapped[str] = mapped_column(String(16), default="text")
+    tts_provider: Mapped[str] = mapped_column(String(16), default="edge")
 
     # Arbitrary caller metadata
     extra_metadata: Mapped[dict] = mapped_column(JSON, default=dict)

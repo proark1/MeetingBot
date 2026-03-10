@@ -128,41 +128,70 @@ async def generate_chapters(transcript: list[dict[str, Any]]) -> list[dict[str, 
         return []
 
 
-async def generate_mention_response(caption_context: str, bot_name: str) -> str:
-    """Generate a short in-meeting chat reply when the bot's name is called.
+async def generate_mention_response(
+    caption_context: str,
+    bot_name: str,
+    for_voice: bool = False,
+) -> str:
+    """Generate an in-meeting reply when the bot's name is called.
+
+    Handles three cases:
+    - Meeting-specific question  → answered using the caption context
+    - General knowledge question → answered from Gemini's own knowledge
+    - Simple greeting / name call → brief acknowledgement + offer to help
 
     Args:
-        caption_context: Recent live-caption text (last ~1 500 chars) scraped from the meeting.
-        bot_name:        The bot's display name, prepended to the reply.
+        caption_context: Recent live-caption text (~1 500 chars) from the meeting.
+        bot_name:        Bot's display name — prepended to the final reply.
+        for_voice:       When True the reply is constrained to 2–3 short spoken
+                         sentences (no markdown, no bullet points).
 
     Returns:
-        A reply string like "MeetingBot: Happy to help! What would you like to know?"
-        Returns an empty string if Gemini is unavailable or returns nothing useful.
+        A reply string like "Judas: The Q3 revenue target was mentioned as $2.4M."
+        Empty string if Gemini is unavailable or the reply is empty.
     """
     from app.config import settings
 
     if not settings.GEMINI_API_KEY:
         return ""
 
+    if for_voice:
+        length_rule = (
+            "Keep the answer to 2–3 short sentences (aim for under 40 words total). "
+            "Write in natural spoken language — no bullet points, no markdown, no lists."
+        )
+        max_tokens = 120
+    else:
+        length_rule = (
+            "Give a helpful, complete answer in up to 4 sentences. "
+            "No markdown formatting."
+        )
+        max_tokens = 256
+
     prompt = (
-        f"You are '{bot_name}', a helpful AI meeting assistant attending this call. "
-        "Someone just addressed you by name in the meeting. "
-        "Write a short, friendly reply (1–2 sentences, under 180 characters) that "
-        "acknowledges them and offers to help — or directly answers any question visible "
-        "in the recent conversation context below. "
-        "Return ONLY the reply text with no quotes, no name prefix, and no markdown.\n\n"
+        f"You are '{bot_name}', an AI assistant attending this meeting as a participant.\n"
+        "Your name was just spoken. Read the recent conversation below and determine what was asked or said.\n\n"
+        "Instructions:\n"
+        "1. If a MEETING-SPECIFIC question was asked (about something discussed in this call, "
+        "e.g. decisions made, action items, who said what), answer it using the context below.\n"
+        "2. If a GENERAL KNOWLEDGE question was asked (e.g. 'What is X?', 'How does Y work?', "
+        "anything not specific to this meeting), answer it from your own knowledge — do not "
+        "claim the answer is in the transcript.\n"
+        "3. If no clear question was asked and you were just greeted or addressed by name, "
+        "briefly acknowledge and offer to help.\n"
+        f"4. {length_rule}\n"
+        "5. Return ONLY the answer text — no name prefix, no quotes, no extra explanation.\n\n"
         f"Recent meeting captions:\n{caption_context}"
     )
     try:
         model = _get_model()
         response = await model.generate_content_async(
             prompt,
-            generation_config={"temperature": 0.4, "max_output_tokens": 128},
+            generation_config={"temperature": 0.4, "max_output_tokens": max_tokens},
         )
         text = response.text.strip().strip('"').strip("'")
         if not text:
             return ""
-        # Prepend bot name so participants know who replied
         return f"{bot_name}: {text}"
     except Exception as exc:
         logger.warning("generate_mention_response error: %s", exc)

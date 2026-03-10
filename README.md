@@ -73,6 +73,8 @@ POST /api/v1/bot
   "vocabulary": ["Acme", "SKU-123"],
   "analysis_mode": "full",
   "respond_on_mention": true,
+  "mention_response_mode": "text",
+  "tts_provider": "edge",
   "extra_metadata": {}
 }
 ```
@@ -85,8 +87,12 @@ POST /api/v1/bot
 
 `mention_response_mode` — controls how the bot replies when mentioned:
 - `"text"` *(default)* — sends a message to the meeting chat.
-- `"voice"` — speaks the reply aloud via TTS (Microsoft Edge TTS, ~300 ms synthesis, no API key required). All participants hear the bot's voice. Requires the PulseAudio virtual mic to be available.
+- `"voice"` — speaks the reply aloud via TTS so all participants hear it. Requires the PulseAudio virtual mic to be available.
 - `"both"` — sends a chat message and speaks simultaneously.
+
+`tts_provider` — TTS engine used for voice responses (only relevant when `mention_response_mode` is `"voice"` or `"both"`):
+- `"edge"` *(default)* — Microsoft Edge TTS: fast (~300 ms), free, no extra API key required.
+- `"gemini"` — Google Gemini TTS (`gemini-2.5-flash-preview-tts`): more natural voice, uses your `GEMINI_API_KEY`.
 
 `template_id` — optional ID of a meeting template (see `/api/v1/templates`). Templates customise the AI analysis prompt.
 `vocabulary` — optional list of domain-specific terms to hint at during transcription.

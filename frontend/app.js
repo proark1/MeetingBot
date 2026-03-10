@@ -436,24 +436,66 @@ if (_searchInput) {
 
 // ── Create Bot ─────────────────────────────────────────────────────────────
 
-// Respond-on-mention toggle — show/hide the response-mode row
+// Respond-on-mention toggle — show/hide the response-mode and TTS-provider rows
 function _initMentionToggle() {
-  const toggle = document.getElementById("new-bot-respond-mention");
-  const modeRow = document.getElementById("response-mode-row");
+  const toggle    = document.getElementById("new-bot-respond-mention");
+  const modeRow   = document.getElementById("response-mode-row");
+  const ttsRow    = document.getElementById("tts-provider-row");
+  const ttsHint   = document.getElementById("tts-hint");
   if (!toggle || !modeRow) return;
 
-  const update = () => { modeRow.style.display = toggle.checked ? "" : "none"; };
+  const updateTtsRow = () => {
+    if (!ttsRow) return;
+    const mode = document.querySelector('input[name="mention_response_mode"]:checked')?.value || "text";
+    ttsRow.style.display = (toggle.checked && mode !== "text") ? "" : "none";
+  };
+
+  const update = () => {
+    modeRow.style.display = toggle.checked ? "" : "none";
+    updateTtsRow();
+  };
   toggle.addEventListener("change", update);
   update();
 
-  // Mode pill click — highlight selected pill
-  document.querySelectorAll(".mode-pill").forEach(pill => {
+  // Response mode pill click
+  const modePills = modeRow.querySelectorAll(".mode-pill");
+  modePills.forEach(pill => {
     pill.addEventListener("click", () => {
-      document.querySelectorAll(".mode-pill").forEach(p => p.classList.remove("mode-pill-active"));
+      modePills.forEach(p => p.classList.remove("mode-pill-active"));
       pill.classList.add("mode-pill-active");
       pill.querySelector("input[type=radio]").checked = true;
+      updateTtsRow();
     });
   });
+
+  // TTS provider pill click
+  if (ttsRow) {
+    const ttsPills = ttsRow.querySelectorAll(".mode-pill");
+    ttsPills.forEach(pill => {
+      pill.addEventListener("click", () => {
+        ttsPills.forEach(p => p.classList.remove("mode-pill-active"));
+        pill.classList.add("mode-pill-active");
+        pill.querySelector("input[type=radio]").checked = true;
+        // Show hint for Gemini
+        if (ttsHint) {
+          ttsHint.textContent = pill.dataset.value === "gemini"
+            ? "Uses your configured Gemini API key. More natural voice."
+            : "Fast, free, no extra key required.";
+        }
+      });
+    });
+  }
+
+  // Reset pills to defaults when modal opens
+  modePills.forEach(p => p.classList.remove("mode-pill-active"));
+  const textPill = modeRow.querySelector('[data-value="text"]');
+  if (textPill) { textPill.classList.add("mode-pill-active"); textPill.querySelector("input").checked = true; }
+  if (ttsRow) {
+    ttsRow.querySelectorAll(".mode-pill").forEach(p => p.classList.remove("mode-pill-active"));
+    const edgePill = ttsRow.querySelector('[data-value="edge"]');
+    if (edgePill) { edgePill.classList.add("mode-pill-active"); edgePill.querySelector("input").checked = true; }
+    if (ttsHint) ttsHint.textContent = "Fast, free, no extra key required.";
+  }
 }
 
 // Analysis mode picker — highlight selected card + show/hide AI options
@@ -531,12 +573,14 @@ async function submitCreateBot() {
   const analysisMode = document.querySelector('input[name="analysis_mode"]:checked')?.value || "full";
   const respondOnMention = document.getElementById("new-bot-respond-mention")?.checked ?? true;
   const mentionResponseMode = document.querySelector('input[name="mention_response_mode"]:checked')?.value || "text";
+  const ttsProvider = document.querySelector('input[name="tts_provider"]:checked')?.value || "edge";
   const body = {
     meeting_url: url,
     bot_name: name,
     analysis_mode: analysisMode,
     respond_on_mention: respondOnMention,
     mention_response_mode: mentionResponseMode,
+    tts_provider: ttsProvider,
   };
   if (joinAtVal) body.join_at = new Date(joinAtVal).toISOString();
   if (notifyEmail) body.notify_email = notifyEmail;
