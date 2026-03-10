@@ -1410,10 +1410,12 @@ async def _mention_monitor(
 
     seen_text: str = ""
     last_response_at: float = 0.0
+    last_reply_text: str = ""            # the text we last sent — used to suppress self-triggers
     caption_log: list[str] = []          # rolling buffer — last 40 caption chunks
     bot_name_lower = bot_name.lower()
     _poll_count = 0
     _empty_streak = 0
+    _speaking_until: float = 0.0         # suppress caption self-triggers while TTS is playing
 
     logger.info("Mention monitor started for bot '%s' on %s", bot_name, platform)
 
@@ -1463,9 +1465,14 @@ async def _mention_monitor(
         if bot_name_lower not in new_text.lower():
             continue
 
-        # Debounce: don't reply more than once every 30 s
-        if time.monotonic() - last_response_at < 30:
-            logger.debug("Mention detected but debounced (last response < 30s ago)")
+        # Filter out self-triggers: skip if new_text is (part of) our own last reply
+        if last_reply_text and last_reply_text.lower()[:60] in new_text.lower():
+            logger.debug("Mention monitor: ignoring self-trigger from own TTS output")
+            continue
+
+        # Debounce: don't reply more than once every 15 s
+        if time.monotonic() - last_response_at < 15:
+            logger.debug("Mention detected but debounced (last response < 15s ago)")
             continue
 
         context = " ".join(caption_log)[-1500:]
@@ -1483,19 +1490,29 @@ async def _mention_monitor(
 
         logger.info("Mention detected — responding (mode=%s, tts=%s): %s", mention_response_mode, tts_provider, reply)
         last_response_at = time.monotonic()  # set early to prevent re-trigger during slow ops
+        last_reply_text = reply
 
         # Dispatch based on mode (voice and text can run concurrently for "both")
-        if mention_response_mode == "voice":
-            await _speak_in_meeting(page, platform, reply, tts_provider, gemini_api_key)
-        elif mention_response_mode == "both":
-            await asyncio.gather(
-                _speak_in_meeting(page, platform, reply, tts_provider, gemini_api_key),
-                _send_chat_message(page, platform, reply),
-            )
-        else:  # "text" (default)
-            success = await _send_chat_message(page, platform, reply)
-            if not success:
-                logger.warning("Bot mention chat reply failed — see debug screenshot for DOM state")
+        # Wrap the entire dispatch in try/except so a single failure doesn't kill the monitor.
+        try:
+            if mention_response_mode == "voice":
+                await _speak_in_meeting(page, platform, reply, tts_provider, gemini_api_key)
+            elif mention_response_mode == "both":
+                # return_exceptions=True: one failure doesn't cancel the other
+                results = await asyncio.gather(
+                    _speak_in_meeting(page, platform, reply, tts_provider, gemini_api_key),
+                    _send_chat_message(page, platform, reply),
+                    return_exceptions=True,
+                )
+                for r in results:
+                    if isinstance(r, Exception):
+                        logger.warning("Mention response dispatch error: %s", r)
+            else:  # "text" (default)
+                success = await _send_chat_message(page, platform, reply)
+                if not success:
+                    logger.warning("Bot mention chat reply failed — see debug screenshot for DOM state")
+        except Exception as exc:
+            logger.warning("Mention response dispatch error: %s", exc)
 
 
 async def _wait_for_meeting_end(

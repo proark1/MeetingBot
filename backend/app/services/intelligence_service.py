@@ -190,9 +190,7 @@ async def generate_mention_response(
             generation_config={"temperature": 0.4, "max_output_tokens": max_tokens},
         )
         text = response.text.strip().strip('"').strip("'")
-        if not text:
-            return ""
-        return f"{bot_name}: {text}"
+        return text
     except Exception as exc:
         logger.warning("generate_mention_response error: %s", exc)
         return ""
