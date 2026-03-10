@@ -89,7 +89,10 @@ async def _synthesize_gemini(text: str, api_key: str, voice: str) -> str | None:
         f"{GEMINI_TTS_MODEL}:generateContent?key={api_key}"
     )
     body = {
-        "contents": [{"parts": [{"text": text}]}],
+        "systemInstruction": {
+            "parts": [{"text": "You are a text-to-speech system. Read the provided text aloud as speech audio exactly as written. Do not add commentary, explanations, or any text response — only produce audio."}]
+        },
+        "contents": [{"role": "user", "parts": [{"text": text}]}],
         "generationConfig": {
             "responseModalities": ["AUDIO"],
             "speechConfig": {

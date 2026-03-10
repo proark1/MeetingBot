@@ -1308,15 +1308,10 @@ async def _send_chat_message(page: Page, platform: str, message: str) -> bool:
     """Type and send a chat message. Returns True on success."""
     try:
         if platform == "google_meet":
-            # Step 1: Open chat panel
-            opened = await _click(page, [
-                "button[aria-label*='chat' i]",
-                "button[aria-label*='message' i]",
-                "button[aria-label*='show chat' i]",
-                "div[role='button'][aria-label*='chat' i]",
-            ], timeout=2000)
-            logger.debug("GMeet open-chat click: %s", opened)
-            # Poll for chat input (up to 2s) instead of a fixed sleep
+            # Step 1: Open chat panel — use _open_chat() which checks visibility
+            # first to avoid accidentally closing the panel if it's already open.
+            await _open_chat(page, platform)
+            # Poll for chat input (up to 2s) to let the panel animate open
             for _ in range(8):
                 if await _chat_input_visible(page, platform):
                     break
