@@ -332,7 +332,10 @@ function renderBotList(bots) {
           <span data-badge-id="${esc(b.id)}">${statusBadge(b.status)}</span>
           ${sentimentChip}
           ${demoChip}
-          <button class="btn btn-danger btn-sm" data-delete-bot="${esc(b.id)}" title="Delete">🗑</button>
+          ${b.status === "in_call"
+            ? `<button class="btn btn-end-meeting btn-sm" data-delete-bot="${esc(b.id)}" data-in-call="1" title="End meeting">⏹ End</button>`
+            : `<button class="btn btn-danger btn-sm" data-delete-bot="${esc(b.id)}" title="Delete">🗑</button>`
+          }
         </div>
       </div>
       <div class="report-url">${esc(b.meeting_url)}</div>
@@ -352,11 +355,15 @@ function renderBotList(bots) {
   listEl.querySelectorAll("[data-delete-bot]").forEach((btn) => {
     btn.addEventListener("click", async (e) => {
       e.stopPropagation();
-      if (!confirm("Delete this report and all its data?")) return;
+      const isInCall = !!btn.dataset.inCall;
+      const msg = isInCall
+        ? "Remove the bot from the meeting? It will leave the call and generate the transcript + summary."
+        : "Delete this report and all its data?";
+      if (!confirm(msg)) return;
       btn.disabled = true;
       try {
         await apiFetch("DELETE", `/bot/${btn.dataset.deleteBot}`);
-        showToast("Report deleted", "success");
+        showToast(isInCall ? "Bot leaving meeting — summary in progress…" : "Report deleted", "success");
         loadBots();
       } catch (err) {
         showToast(err.message, "error");
@@ -390,11 +397,14 @@ function _fmtSecs(s) {
   return h ? `${h}h ${m}m` : m ? `${m}m ${ss}s` : `${ss}s`;
 }
 
-async function cancelBot(botId) {
-  if (!confirm("Cancel this bot and stop the recording?")) return;
+async function cancelBot(botId, isInCall) {
+  const msg = isInCall
+    ? "Remove the bot from the meeting? It will leave the call and generate the transcript + summary."
+    : "Cancel this bot?";
+  if (!confirm(msg)) return;
   try {
     await apiFetch("DELETE", `/bot/${botId}`);
-    showToast("Bot cancelled", "info");
+    showToast(isInCall ? "Bot leaving meeting — summary in progress…" : "Bot cancelled", "info");
     await refreshBotDetail(botId);
     loadBots();
   } catch (e) {
@@ -661,9 +671,11 @@ function renderBotDetail(bot) {
     ${demoBadge}`;
 
   if (["scheduled","joining","in_call","call_ended"].includes(bot.status)) {
+    const isInCall = bot.status === "in_call";
+    const btnLabel = isInCall ? "⏹ End Meeting" : "✕ Cancel";
     badgesEl.insertAdjacentHTML("beforeend",
-      `<button class="btn btn-danger btn-sm" id="btn-cancel-bot">✕ Cancel</button>`);
-    document.getElementById("btn-cancel-bot").addEventListener("click", () => cancelBot(bot.id));
+      `<button class="btn ${isInCall ? "btn-end-meeting" : "btn-danger"} btn-sm" id="btn-cancel-bot">${btnLabel}</button>`);
+    document.getElementById("btn-cancel-bot").addEventListener("click", () => cancelBot(bot.id, isInCall));
   }
 
   // Share link button

@@ -980,6 +980,38 @@ async def _collect_participants(page: Page, platform: str) -> set[str]:
 
 # ── Live-caption & chat helpers (for respond-on-mention) ──────────────────────
 
+async def _leave_meeting(page: Page, platform: str) -> None:
+    """Best-effort: click the Leave / End call button so the bot exits gracefully."""
+    try:
+        if platform == "google_meet":
+            await _click(page, [
+                "button[aria-label*='Leave call' i]",
+                "button[aria-label*='leave' i]",
+                "button[jsname='CQylAd']",
+                "div[role='button'][aria-label*='Leave call' i]",
+            ], timeout=3000)
+        elif platform == "zoom":
+            await _click(page, [
+                "button[aria-label*='Leave' i]",
+                "button[aria-label*='End' i]",
+                ".footer-button__leave-btn",
+            ], timeout=2000)
+            await asyncio.sleep(0.4)
+            # Zoom shows a confirmation dialog — click "Leave Meeting"
+            await _click(page, [
+                "button:has-text('Leave Meeting')",
+                "button[aria-label*='Leave Meeting' i]",
+            ], timeout=2000)
+        elif platform == "microsoft_teams":
+            await _click(page, [
+                "button[aria-label*='Leave' i]",
+                "button[data-tid*='leave' i]",
+                "button:has-text('Leave')",
+            ], timeout=2000)
+    except Exception as exc:
+        logger.debug("_leave_meeting: %s", exc)
+
+
 async def _enable_captions(page: Page, platform: str) -> None:
     """Best-effort: click the live-captions button so caption text appears in DOM."""
     if platform == "google_meet":
@@ -1080,17 +1112,41 @@ async def _scrape_captions(page: Page, platform: str) -> str:
         if platform == "google_meet":
             text = await page.evaluate("""
                 () => {
-                    const sel = [
-                        "div[aria-label*='caption' i]",
-                        "div[class*='caption']",
+                    // Ordered from most-specific to broadest fallback.
+                    // Google Meet obfuscates class names so we try many options.
+                    const specific = [
+                        // Jsname-based — most stable across Meet versions
+                        "div[jsname='tgaKEf']",
+                        "div[jsname='YSxPC']",
+                        "div[jsname='VUpckd']",
                         "div[jsname='z1asCe']",
+                        // Aria-based
+                        "div[aria-live='polite']",
+                        "div[aria-live='assertive']",
+                        "div[aria-label*='caption' i]",
+                        // Class-name fragments (obfuscated but often contain 'caption'/'subtitle')
+                        "div[class*='caption']",
+                        "div[class*='VbkSUe']",
+                        "div[class*='CNusmb']",
                         "div[class*='subtitle']",
+                        "div[class*='lTnCnb']",
+                        "div[class*='bj4p3b']",
                     ];
-                    for (const s of sel) {
+                    for (const s of specific) {
                         const el = document.querySelector(s);
-                        if (el && el.innerText) return el.innerText;
+                        if (el) {
+                            const t = el.innerText || el.textContent;
+                            if (t && t.trim()) return t.trim();
+                        }
                     }
-                    return '';
+                    // Last resort: collect ALL aria-live regions and any element
+                    // whose accessible role suggests caption/transcript text.
+                    const collected = [];
+                    document.querySelectorAll('[aria-live]').forEach(el => {
+                        const t = (el.innerText || el.textContent || '').trim();
+                        if (t && t.length > 3) collected.push(t);
+                    });
+                    return collected.join(' ').trim();
                 }
             """)
         elif platform == "zoom":
@@ -1356,22 +1412,46 @@ async def _mention_monitor(
     last_response_at: float = 0.0
     caption_log: list[str] = []          # rolling buffer — last 40 caption chunks
     bot_name_lower = bot_name.lower()
+    _poll_count = 0
+    _empty_streak = 0
 
     logger.info("Mention monitor started for bot '%s' on %s", bot_name, platform)
 
     while True:
         await asyncio.sleep(1)   # 1 s poll — minimum latency to detect a mention
+        _poll_count += 1
         try:
             raw = await _scrape_captions(page, platform)
-        except Exception:
+        except Exception as exc:
+            logger.debug("Caption scrape error: %s", exc)
             continue
 
         if not raw:
+            _empty_streak += 1
+            # Log every 30s when no captions detected — helps diagnose selector issues
+            if _empty_streak % 30 == 0:
+                logger.debug(
+                    "Mention monitor: no caption text in %d polls — "
+                    "captions may be disabled or DOM selectors need updating",
+                    _empty_streak,
+                )
             continue
 
-        # Only process text that appeared since the last poll
-        new_text = raw[len(seen_text):] if raw.startswith(seen_text[:50]) else raw
+        _empty_streak = 0
+
+        # Only process text that appeared since the last poll.
+        # If raw starts the same way as seen_text, the new part is the suffix.
+        # Otherwise the entire caption container was replaced — treat all as new.
+        overlap = min(len(seen_text), 100)
+        if seen_text and raw.startswith(seen_text[:overlap]):
+            new_text = raw[len(seen_text):]
+        else:
+            new_text = raw
         seen_text = raw
+
+        # Log first caption seen and every 60s thereafter for diagnostics
+        if _poll_count <= 3 or _poll_count % 60 == 0:
+            logger.debug("Caption sample (poll %d): %r", _poll_count, raw[:120])
 
         if not new_text.strip():
             continue
@@ -1661,6 +1741,12 @@ async def run_browser_bot(
                 monitor_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await monitor_task
+
+            # Gracefully leave the call (best-effort, bot may already be removed)
+            if exit_reason != "ended":
+                with contextlib.suppress(Exception):
+                    await _leave_meeting(page, platform)
+
             # One final scrape at end of meeting
             try:
                 _participants.update(await _collect_participants(page, platform))
