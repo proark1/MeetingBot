@@ -135,7 +135,11 @@ def _start_pulseaudio() -> bool:
             ["pulseaudio", "--start", "--exit-idle-time=-1", "--log-target=stderr"],
             env=env, capture_output=True, timeout=10,
         )
-        time.sleep(2)
+        # Poll up to 3 s in 200 ms steps — return as soon as PulseAudio is ready
+        for _ in range(15):
+            time.sleep(0.2)
+            if _pulse_ok():
+                return True
         return _pulse_ok()
     except Exception as exc:
         logger.warning("PulseAudio start failed: %s", exc)
@@ -198,7 +202,11 @@ def _start_xvfb(display: str = ":99") -> Optional[subprocess.Popen]:
             ["Xvfb", display, "-screen", "0", "1280x720x24", "-ac", "+extension", "RANDR"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
-        time.sleep(1.5)
+        # Poll instead of a fixed sleep — Xvfb is usually ready in <0.5 s
+        for _ in range(20):
+            time.sleep(0.1)
+            if proc.poll() is not None:
+                break  # exited early — failure path below handles it
         if proc.poll() is None:
             _register_proc(proc)
             logger.info("Xvfb started on display %s", display)
@@ -475,7 +483,17 @@ async def _join_zoom(page: Page, url: str, bot_name: str) -> None:
         web_url = f"https://app.zoom.us/wc/{meeting_id}/join?prefer=1{pwd}"
 
     await page.goto(web_url, wait_until="domcontentloaded", timeout=30_000)
-    await asyncio.sleep(3)
+    # Wait for either the "join from browser" link or the name field — whichever
+    # appears first (avoids a fixed 3 s sleep).
+    try:
+        await page.wait_for_selector(
+            "a:has-text('join from your browser'), #btnJoinByBrowser, "
+            "button:has-text('Join from Browser'), "
+            "input#inputname, input[name='inputname'], input[placeholder*='name' i]",
+            timeout=8000,
+        )
+    except Exception:
+        pass
 
     # "Join from browser" link — short timeout, page may skip this step
     clicked = await _click(page, [
@@ -488,7 +506,14 @@ async def _join_zoom(page: Page, url: str, bot_name: str) -> None:
         "button:has-text('join from your browser')",
     ], timeout=3000)
     if clicked:
-        await asyncio.sleep(3)
+        # Wait for the name input to appear rather than sleeping a fixed 3 s
+        try:
+            await page.wait_for_selector(
+                "input#inputname, input[name='inputname'], input[placeholder*='name' i]",
+                timeout=6000,
+            )
+        except Exception:
+            await asyncio.sleep(1)
 
     # Name input — use force=True to bypass Zoom web client's actionability quirks
     ok = False
@@ -570,8 +595,25 @@ async def _join_zoom(page: Page, url: str, bot_name: str) -> None:
 
 async def _join_teams(page: Page, url: str, bot_name: str) -> None:
     await page.goto(url, wait_until="domcontentloaded", timeout=30_000)
-    # New Teams React app needs extra time to render (may also redirect to teams.live.com)
-    await asyncio.sleep(5)
+    # Wait for the Teams SPA to render a recognisable element instead of a
+    # fixed 5 s sleep.  We accept either a gate button OR the pre-join name
+    # input (light-experience meetings skip the gate entirely).
+    try:
+        await page.wait_for_selector(
+            "button:has-text('Join anonymously'), "
+            "button[data-tid='anonymous-join-button'], "
+            "button[data-tid='joinAsGuestButton'], "
+            "button:has-text('Continue without signing in'), "
+            "button:has-text('Join as a guest'), "
+            "button:has-text('Continue on this browser'), "
+            "button:has-text('Join on the web instead'), "
+            "button:has-text('Join without Teams'), "
+            "input[data-tid='prejoin-display-name-input'], "
+            "input[placeholder*='name' i]",
+            timeout=10000,
+        )
+    except Exception:
+        pass
     logger.info("Teams: landed on %s", page.url)
 
     # Step 1: Click through any gate button (short per-selector timeout to avoid long waits)
@@ -592,12 +634,25 @@ async def _join_teams(page: Page, url: str, bot_name: str) -> None:
         "a:has-text('Continue on this browser')",
         "button:has-text('Join without Teams')",
     ], timeout=2000)
+    # After clicking the gate (or if none was found), wait for the pre-join
+    # name field instead of sleeping a fixed 3 s.
+    _prejoin_name_sel = (
+        "input[data-tid='prejoin-display-name-input'], "
+        "input[data-tid='anonymous-join-name-input'], "
+        "input[placeholder*='name' i], input[type='text']"
+    )
     if ok:
-        await asyncio.sleep(3)
+        try:
+            await page.wait_for_selector(_prejoin_name_sel, timeout=6000)
+        except Exception:
+            await asyncio.sleep(0.5)
     else:
         # No gate button found — light experience lands directly on pre-join screen
         await _screenshot(page, "teams_no_continue_button")
-        await asyncio.sleep(3)  # give the SPA time to render the pre-join UI
+        try:
+            await page.wait_for_selector(_prejoin_name_sel, timeout=6000)
+        except Exception:
+            await asyncio.sleep(0.5)
 
     # Step 1b: Dismiss "Continue without audio or video" dialog.
     # Teams shows this when the browser denies camera/mic permissions.
@@ -807,7 +862,7 @@ async def _wait_for_admission(
         except Exception:
             pass
 
-        await asyncio.sleep(3)
+        await asyncio.sleep(1.5)
 
     return False
 
@@ -1079,7 +1134,6 @@ async def run_browser_bot(
             else:
                 raise MeetingBotError(f"Unsupported platform: {platform}")
 
-            await asyncio.sleep(2)
             await _screenshot(page, f"{platform}_after_join")
 
             logger.info("Waiting for admission (timeout=%ds)…", admission_timeout)
