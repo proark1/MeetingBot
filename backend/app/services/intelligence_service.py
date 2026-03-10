@@ -112,7 +112,7 @@ async def generate_chapters(transcript: list[dict[str, Any]]) -> list[dict[str, 
         return []
 
     lines = "\n".join(
-        f"[{e.get('timestamp', 0):.1f}s] {e['speaker']}: {e['text']}"
+        f"[{e.get('timestamp', 0):.1f}s] {e.get('speaker', '?')}: {e.get('text', '')}"
         for e in transcript
     )
 
@@ -192,7 +192,12 @@ async def generate_mention_response(
             prompt,
             generation_config={"temperature": 0.4, "max_output_tokens": max_tokens},
         )
-        text = response.text.strip().strip('"').strip("'")
+        text = response.text.strip()
+        # Strip any stray JSON brace artifacts (model sometimes wraps reply in
+        # {…} despite being instructed to return plain text).
+        if text.startswith("{") or text.endswith("}"):
+            text = text.strip("{}").strip()
+        text = text.strip('"').strip("'")
         return text
     except Exception as exc:
         logger.warning("generate_mention_response error: %s", exc)
@@ -209,7 +214,7 @@ async def ask_about_transcript(transcript: list[dict[str, Any]], question: str) 
         return "No transcript available to answer questions about."
 
     lines = "\n".join(
-        f"[{e.get('timestamp', 0):.1f}s] {e['speaker']}: {e['text']}"
+        f"[{e.get('timestamp', 0):.1f}s] {e.get('speaker', '?')}: {e.get('text', '')}"
         for e in transcript
     )
 
