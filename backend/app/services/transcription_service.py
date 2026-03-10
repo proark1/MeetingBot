@@ -222,6 +222,9 @@ async def transcribe_audio(audio_path: str, known_participants: list[str] | None
             exc, raw[:500] if "raw" in dir() else "<unavailable>",
         )
         return []
+    except ValueError as exc:
+        logger.warning("Gemini transcription blocked by safety filter: %s", exc)
+        return []
     except Exception as exc:
         logger.error("Transcription error: %s", exc)
         return []

@@ -358,6 +358,9 @@ Returns matching meetings with highlighted snippets.
 GET /api/v1/analytics               # sentiment, topics, platform breakdown, participant stats
 ```
 
+Returns: `total_meetings`, `avg_duration_s`, `avg_duration_fmt`, `sentiment_distribution`,
+`meetings_per_day` (last 30 days), `top_topics`, `top_participants`, `platform_breakdown`.
+
 ---
 
 ### Highlights
