@@ -54,6 +54,9 @@ class Bot(Base):
     template_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     vocabulary: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
+    # Analysis mode: "full" (AI summary + chapters) | "transcript_only" (raw text only)
+    analysis_mode: Mapped[str] = mapped_column(String(32), default="full")
+
     # Arbitrary caller metadata
     extra_metadata: Mapped[dict] = mapped_column(JSON, default=dict)
 

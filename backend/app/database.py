@@ -51,6 +51,7 @@ async def init_db():
             "ALTER TABLE bots ADD COLUMN notify_email TEXT",
             "ALTER TABLE bots ADD COLUMN template_id TEXT",
             "ALTER TABLE bots ADD COLUMN vocabulary JSON",
+            "ALTER TABLE bots ADD COLUMN analysis_mode TEXT DEFAULT 'full'",
         ]:
             try:
                 await conn.execute(text(stmt))

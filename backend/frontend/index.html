@@ -233,48 +233,89 @@
 
   <!-- New Bot Modal -->
   <div class="modal-backdrop hidden" id="modal-new-bot">
-    <div class="modal">
+    <div class="modal modal-wide">
       <div class="modal-header">
-        <h2>Create Bot</h2>
+        <div class="modal-title-group">
+          <h2>Deploy Meeting Bot</h2>
+          <p class="modal-subtitle">Configure your bot and choose how to process the recording.</p>
+        </div>
         <button class="modal-close" data-close="modal-new-bot">✕</button>
       </div>
       <div class="modal-body">
-        <label>
-          Meeting URL <span class="required">*</span>
-          <input class="input" id="new-bot-url"
-            placeholder="https://zoom.us/j/123… or meet.google.com/…" />
-          <span class="field-error hidden" id="new-bot-url-error"></span>
-        </label>
-        <label>
-          Bot Name
-          <input class="input" id="new-bot-name" placeholder="MeetingBot" value="MeetingBot" />
-        </label>
-        <label>
-          Schedule for <span class="optional">(optional — leave blank to join now)</span>
-          <input class="input" id="new-bot-join-at" type="datetime-local" />
-        </label>
-        <label>
-          Email Summary <span class="optional">(optional — receive summary after meeting)</span>
-          <input class="input" id="new-bot-email" type="email" placeholder="you@example.com" />
-        </label>
-        <label>
-          Meeting Template <span class="optional">(optional — customise AI analysis)</span>
-          <select class="input" id="new-bot-template">
-            <option value="">Default analysis</option>
-          </select>
-        </label>
-        <label>
-          Custom Vocabulary <span class="optional">(optional — comma-separated terms for better transcription)</span>
-          <input class="input" id="new-bot-vocab" placeholder="Acme, SKU-123, Project Phoenix" />
-        </label>
-        <p class="hint">
-          The bot will join, generate a transcript, then produce an AI-powered analysis —
-          all automatically. Supported: Zoom, Google Meet, Teams, Webex, Whereby.
-        </p>
+
+        <!-- Section: Meeting -->
+        <div class="form-section">
+          <div class="form-section-label">Meeting</div>
+          <label>
+            URL <span class="required">*</span>
+            <input class="input" id="new-bot-url"
+              placeholder="https://zoom.us/j/… · meet.google.com/… · teams.microsoft.com/…" />
+            <span class="field-error hidden" id="new-bot-url-error"></span>
+          </label>
+          <div class="form-row">
+            <label style="flex:1">
+              Bot Display Name
+              <input class="input" id="new-bot-name" placeholder="MeetingBot" value="MeetingBot" />
+            </label>
+            <label style="flex:1">
+              Schedule <span class="optional">optional</span>
+              <input class="input" id="new-bot-join-at" type="datetime-local" />
+            </label>
+          </div>
+        </div>
+
+        <!-- Section: Analysis Mode -->
+        <div class="form-section">
+          <div class="form-section-label">Post-Meeting Processing</div>
+          <div class="mode-picker" id="analysis-mode-picker">
+            <label class="mode-card mode-card-active" data-value="full">
+              <input type="radio" name="analysis_mode" value="full" checked hidden />
+              <div class="mode-card-icon">✦</div>
+              <div class="mode-card-body">
+                <div class="mode-card-title">Full AI Analysis</div>
+                <div class="mode-card-desc">Summary, key points, action items, smart chapters, sentiment &amp; speaker stats — powered by Gemini.</div>
+              </div>
+              <div class="mode-card-check">✓</div>
+            </label>
+            <label class="mode-card" data-value="transcript_only">
+              <input type="radio" name="analysis_mode" value="transcript_only" hidden />
+              <div class="mode-card-icon">📄</div>
+              <div class="mode-card-body">
+                <div class="mode-card-title">Transcript Only</div>
+                <div class="mode-card-desc">Raw speaker-labelled text, no AI processing. Faster completion, full privacy, lower cost.</div>
+              </div>
+              <div class="mode-card-check">✓</div>
+            </label>
+          </div>
+        </div>
+
+        <!-- Section: AI Options (shown only in full mode) -->
+        <div class="form-section" id="ai-options-section">
+          <div class="form-section-label">AI Options</div>
+          <div class="form-row">
+            <label style="flex:1">
+              Meeting Template <span class="optional">optional</span>
+              <select class="input" id="new-bot-template">
+                <option value="">Default analysis</option>
+              </select>
+            </label>
+            <label style="flex:1">
+              Notify Email <span class="optional">optional</span>
+              <input class="input" id="new-bot-email" type="email" placeholder="you@example.com" />
+            </label>
+          </div>
+          <label>
+            Custom Vocabulary <span class="optional">optional</span>
+            <input class="input" id="new-bot-vocab" placeholder="Acme Corp, SKU-1234, Project Phoenix — improves transcription accuracy" />
+          </label>
+        </div>
+
       </div>
       <div class="modal-footer">
         <button class="btn btn-ghost" data-close="modal-new-bot">Cancel</button>
-        <button class="btn btn-primary" id="btn-create-bot">Create Bot</button>
+        <button class="btn btn-primary" id="btn-create-bot">
+          <span class="btn-create-icon">▶</span> Deploy Bot
+        </button>
       </div>
     </div>
   </div>

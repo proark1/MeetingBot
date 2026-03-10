@@ -436,7 +436,38 @@ if (_searchInput) {
 
 // ── Create Bot ─────────────────────────────────────────────────────────────
 
+// Analysis mode picker — highlight selected card + show/hide AI options
+function _initModePicker() {
+  const picker = document.getElementById("analysis-mode-picker");
+  if (!picker) return;
+  picker.querySelectorAll(".mode-card").forEach(card => {
+    card.addEventListener("click", () => {
+      picker.querySelectorAll(".mode-card").forEach(c => c.classList.remove("mode-card-active"));
+      card.classList.add("mode-card-active");
+      card.querySelector("input[type=radio]").checked = true;
+      const aiSection = document.getElementById("ai-options-section");
+      if (aiSection) {
+        aiSection.classList.toggle("hidden", card.dataset.value === "transcript_only");
+      }
+    });
+  });
+}
+
 document.getElementById("btn-new-bot").addEventListener("click", async () => {
+  // Reset mode picker to "full" each time the modal opens
+  const picker = document.getElementById("analysis-mode-picker");
+  if (picker) {
+    picker.querySelectorAll(".mode-card").forEach(c => c.classList.remove("mode-card-active"));
+    const fullCard = picker.querySelector('[data-value="full"]');
+    if (fullCard) {
+      fullCard.classList.add("mode-card-active");
+      fullCard.querySelector("input[type=radio]").checked = true;
+    }
+  }
+  const aiSection = document.getElementById("ai-options-section");
+  if (aiSection) aiSection.classList.remove("hidden");
+
+  _initModePicker();
   openModal("modal-new-bot");
   // Populate template dropdown
   try {
@@ -476,19 +507,23 @@ async function submitCreateBot() {
   const templateId = (document.getElementById("new-bot-template")?.value || "").trim();
   const vocabRaw = (document.getElementById("new-bot-vocab")?.value || "").trim();
   const vocabulary = vocabRaw ? vocabRaw.split(",").map(s => s.trim()).filter(Boolean) : null;
-  const body = { meeting_url: url, bot_name: name };
+  const analysisMode = document.querySelector('input[name="analysis_mode"]:checked')?.value || "full";
+  const body = { meeting_url: url, bot_name: name, analysis_mode: analysisMode };
   if (joinAtVal) body.join_at = new Date(joinAtVal).toISOString();
   if (notifyEmail) body.notify_email = notifyEmail;
-  if (templateId) body.template_id = templateId;
-  if (vocabulary) body.vocabulary = vocabulary;
+  if (analysisMode === "full") {
+    if (templateId) body.template_id = templateId;
+    if (vocabulary) body.vocabulary = vocabulary;
+  }
 
   try {
     const bot = await apiFetch("POST", "/bot", body);
     closeModal("modal-new-bot");
+    const modeLabel = analysisMode === "transcript_only" ? "transcript only" : "full AI analysis";
     if (joinAtVal) {
-      showToast(`Bot scheduled for ${new Date(joinAtVal).toLocaleString()}`, "success");
+      showToast(`Bot scheduled for ${new Date(joinAtVal).toLocaleString()} · ${modeLabel}`, "success");
     } else {
-      showToast("Bot created — joining now", "success");
+      showToast(`Bot deployed · ${modeLabel}`, "success");
     }
     showBotDetail(bot.id);
     loadBots();
@@ -591,6 +626,7 @@ function renderBotDetail(bot) {
       <div class="meta-item"><div class="meta-label">Created</div><div class="meta-value">${fmtDate(bot.created_at)}</div></div>
       <div class="meta-item"><div class="meta-label">Participants</div><div class="meta-value">${(bot.participants || []).length || "—"}</div></div>
       <div class="meta-item"><div class="meta-label">Transcript</div><div class="meta-value">${(bot.transcript || []).length} entries</div></div>
+      <div class="meta-item"><div class="meta-label">Analysis Mode</div><div class="meta-value">${bot.analysis_mode === "transcript_only" ? '<span style="color:var(--text-muted);font-weight:500">Transcript Only</span>' : '<span style="color:var(--accent);font-weight:600">✦ Full AI</span>'}</div></div>
       <div class="meta-item"><div class="meta-label">Meeting URL</div><div class="meta-value" style="font-family:var(--font-mono);font-size:0.75rem;color:var(--text-muted)">${esc(bot.meeting_url.slice(0, 40))}${bot.meeting_url.length > 40 ? "…" : ""}</div></div>
     </div>
 
@@ -662,13 +698,27 @@ function renderBotDetail(bot) {
     </div>
 
     <!-- Analysis section -->
-    <div class="section-card" id="analysis-section">
-      <div class="section-header">
-        <h3>AI Analysis</h3>
-        ${bot.analysis ? `<span class="sentiment-badge sentiment-${esc(bot.analysis.sentiment || 'neutral')}">${esc(bot.analysis.sentiment || 'neutral')}</span>` : ""}
-      </div>
-      ${renderAnalysis(bot.analysis)}
-    </div>
+    ${bot.analysis_mode === "transcript_only"
+      ? `<div class="section-card" id="analysis-section">
+           <div class="section-header">
+             <h3>AI Analysis</h3>
+             <span class="badge badge-ready" style="text-transform:none;font-size:0.75rem">Transcript-only mode</span>
+           </div>
+           <div class="empty" style="padding:1.25rem 0">
+             This bot was configured to deliver transcript only — AI analysis was skipped.
+             <div class="empty-action">
+               <button class="btn btn-primary btn-sm" id="btn-run-analysis">Run AI Analysis Now</button>
+             </div>
+           </div>
+         </div>`
+      : `<div class="section-card" id="analysis-section">
+           <div class="section-header">
+             <h3>AI Analysis</h3>
+             ${bot.analysis ? `<span class="sentiment-badge sentiment-${esc(bot.analysis.sentiment || 'neutral')}">${esc(bot.analysis.sentiment || 'neutral')}</span>` : ""}
+           </div>
+           ${renderAnalysis(bot.analysis)}
+         </div>`
+    }
 
     <!-- Ask Anything -->
     ${bot.transcript?.length ? `
@@ -702,6 +752,10 @@ function renderBotDetail(bot) {
 
   const analyseBtn = document.getElementById("btn-reanalyse");
   if (analyseBtn) analyseBtn.addEventListener("click", () => reanalyse(bot.id));
+
+  // "Run AI Analysis Now" button shown when bot was created in transcript_only mode
+  const runAnalysisBtn = document.getElementById("btn-run-analysis");
+  if (runAnalysisBtn) runAnalysisBtn.addEventListener("click", () => reanalyse(bot.id));
 
   // Transcript filter + search
   function _filterTranscript() {

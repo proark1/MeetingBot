@@ -71,9 +71,14 @@ POST /api/v1/bot
   "notify_email": "you@example.com",
   "template_id": "seed-sales",
   "vocabulary": ["Acme", "SKU-123"],
+  "analysis_mode": "full",
   "extra_metadata": {}
 }
 ```
+
+`analysis_mode` — controls post-meeting processing:
+- `"full"` *(default)* — runs full AI analysis: summary, key points, action items, smart chapters, sentiment, speaker stats, and all post-meeting notifications (email, Slack, Notion, Linear).
+- `"transcript_only"` — skips all AI processing and returns only the raw speaker-labelled transcript. Faster completion, lower cost, full privacy. Speaker stats are still computed locally.
 
 `template_id` — optional ID of a meeting template (see `/api/v1/templates`). Templates customise the AI analysis prompt.
 `vocabulary` — optional list of domain-specific terms to hint at during transcription.

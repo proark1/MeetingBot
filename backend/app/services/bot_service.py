@@ -355,83 +355,96 @@ async def run_bot_lifecycle(bot_id: str, db_factory) -> None:
             })
 
             # ── 4. Analyse + chapters + speaker stats ─────────────────────
-            logger.info("Bot %s analysing transcript…", bot_id)
-            prompt_override = None
-            if bot.template_id:
-                try:
-                    from app.models.template import MeetingTemplate
-                    tmpl_row = (await db.execute(
-                        select(MeetingTemplate).where(MeetingTemplate.id == bot.template_id)
-                    )).scalar_one_or_none()
-                    if tmpl_row and tmpl_row.prompt_override:
-                        prompt_override = tmpl_row.prompt_override
-                except Exception as exc:
-                    logger.warning("Template lookup failed for bot %s: %s", bot_id, exc)
-            try:
-                analysis = await intelligence_service.analyze_transcript(
-                    transcript,
-                    prompt_override=prompt_override,
-                    vocabulary=bot.vocabulary or [],
-                )
-                bot.analysis = analysis
-            except Exception as exc:
-                logger.error("Analysis failed for bot %s: %s", bot_id, exc)
-                bot.analysis = {
-                    "summary": "Analysis unavailable — an error occurred during processing.",
-                    "key_points": [], "action_items": [], "decisions": [],
-                    "next_steps": [], "sentiment": "neutral", "topics": [],
-                }
-                bot.error_message = (bot.error_message or "") + f" [analysis error: {exc}]"
-
+            # Speaker stats are always computed (fast, local, no AI needed).
             bot.speaker_stats = _compute_speaker_stats(transcript)
 
-            try:
-                bot.chapters = await intelligence_service.generate_chapters(transcript)
-            except Exception as exc:
-                logger.warning("Chapter generation failed for bot %s: %s", bot_id, exc)
-                bot.chapters = []
-
-            # Persist recording path if audio was captured
+            # Persist recording path if audio was captured (regardless of mode).
             if use_real_bot and os.path.exists(audio_path) and os.path.getsize(audio_path) > 0:
                 bot.recording_path = audio_path
 
-            bot.updated_at = _now()
-            await db.commit()
-            await webhook_service.dispatch_event(db, "bot.analysis_ready", {"bot_id": bot_id})
+            analysis_mode = getattr(bot, "analysis_mode", "full") or "full"
 
-            # ── 5. Persist action items to DB ─────────────────────────────
-            if bot.analysis:
-                await _persist_action_items(db, bot)
+            if analysis_mode == "transcript_only":
+                # Skip all AI processing — deliver only the raw transcript.
+                logger.info("Bot %s analysis_mode=transcript_only — skipping AI analysis", bot_id)
+                bot.analysis = None
+                bot.chapters = []
+                bot.updated_at = _now()
+                await db.commit()
 
-            # ── 6. Post-meeting notifications ─────────────────────────────
-            if bot.notify_email:
+            else:
+                # ── full mode: AI analysis + chapters + action items ───────
+                logger.info("Bot %s analysing transcript…", bot_id)
+                prompt_override = None
+                if bot.template_id:
+                    try:
+                        from app.models.template import MeetingTemplate
+                        tmpl_row = (await db.execute(
+                            select(MeetingTemplate).where(MeetingTemplate.id == bot.template_id)
+                        )).scalar_one_or_none()
+                        if tmpl_row and tmpl_row.prompt_override:
+                            prompt_override = tmpl_row.prompt_override
+                    except Exception as exc:
+                        logger.warning("Template lookup failed for bot %s: %s", bot_id, exc)
                 try:
-                    from app.services import email_service
-                    await email_service.send_meeting_summary(bot)
+                    analysis = await intelligence_service.analyze_transcript(
+                        transcript,
+                        prompt_override=prompt_override,
+                        vocabulary=bot.vocabulary or [],
+                    )
+                    bot.analysis = analysis
                 except Exception as exc:
-                    logger.warning("Email summary failed for bot %s: %s", bot_id, exc)
+                    logger.error("Analysis failed for bot %s: %s", bot_id, exc)
+                    bot.analysis = {
+                        "summary": "Analysis unavailable — an error occurred during processing.",
+                        "key_points": [], "action_items": [], "decisions": [],
+                        "next_steps": [], "sentiment": "neutral", "topics": [],
+                    }
+                    bot.error_message = (bot.error_message or "") + f" [analysis error: {exc}]"
 
-            if settings.SLACK_WEBHOOK_URL or (bot.extra_metadata or {}).get("slack_webhook_url"):
-                webhook_url = (bot.extra_metadata or {}).get("slack_webhook_url") or settings.SLACK_WEBHOOK_URL
                 try:
-                    from app.services import slack_service
-                    await slack_service.send_meeting_summary(bot, webhook_url)
+                    bot.chapters = await intelligence_service.generate_chapters(transcript)
                 except Exception as exc:
-                    logger.warning("Slack summary failed for bot %s: %s", bot_id, exc)
+                    logger.warning("Chapter generation failed for bot %s: %s", bot_id, exc)
+                    bot.chapters = []
 
-            if settings.NOTION_API_KEY and settings.NOTION_DATABASE_ID:
-                try:
-                    from app.services import notion_service
-                    await notion_service.push_meeting(bot)
-                except Exception as exc:
-                    logger.warning("Notion push failed for bot %s: %s", bot_id, exc)
+                bot.updated_at = _now()
+                await db.commit()
+                await webhook_service.dispatch_event(db, "bot.analysis_ready", {"bot_id": bot_id})
 
-            if settings.LINEAR_API_KEY and settings.LINEAR_TEAM_ID:
-                try:
-                    from app.services import linear_service
-                    await linear_service.push_action_items(bot)
-                except Exception as exc:
-                    logger.warning("Linear push failed for bot %s: %s", bot_id, exc)
+                # ── 5. Persist action items to DB ──────────────────────────
+                if bot.analysis:
+                    await _persist_action_items(db, bot)
+
+                # ── 6. Post-meeting notifications ──────────────────────────
+                if bot.notify_email:
+                    try:
+                        from app.services import email_service
+                        await email_service.send_meeting_summary(bot)
+                    except Exception as exc:
+                        logger.warning("Email summary failed for bot %s: %s", bot_id, exc)
+
+                if settings.SLACK_WEBHOOK_URL or (bot.extra_metadata or {}).get("slack_webhook_url"):
+                    webhook_url = (bot.extra_metadata or {}).get("slack_webhook_url") or settings.SLACK_WEBHOOK_URL
+                    try:
+                        from app.services import slack_service
+                        await slack_service.send_meeting_summary(bot, webhook_url)
+                    except Exception as exc:
+                        logger.warning("Slack summary failed for bot %s: %s", bot_id, exc)
+
+                if settings.NOTION_API_KEY and settings.NOTION_DATABASE_ID:
+                    try:
+                        from app.services import notion_service
+                        await notion_service.push_meeting(bot)
+                    except Exception as exc:
+                        logger.warning("Notion push failed for bot %s: %s", bot_id, exc)
+
+                if settings.LINEAR_API_KEY and settings.LINEAR_TEAM_ID:
+                    try:
+                        from app.services import linear_service
+                        await linear_service.push_action_items(bot)
+                    except Exception as exc:
+                        logger.warning("Linear push failed for bot %s: %s", bot_id, exc)
 
             # ── 7. done ───────────────────────────────────────────────────
             await _set_status(db, bot, "done")

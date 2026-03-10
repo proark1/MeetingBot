@@ -1,6 +1,6 @@
 import ipaddress
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, AnyHttpUrl
 
@@ -32,6 +32,14 @@ class BotCreate(BaseModel):
     notify_email: str | None = None
     template_id: str | None = None
     vocabulary: list[str] | None = None
+    analysis_mode: Literal["full", "transcript_only"] = Field(
+        default="full",
+        description=(
+            "Controls post-meeting processing. "
+            "`full` (default) runs AI analysis, smart chapters, and action-item extraction. "
+            "`transcript_only` skips all AI processing and returns only the raw transcript."
+        ),
+    )
     extra_metadata: dict[str, Any] = {}
 
     @field_validator("meeting_url", mode="before")
@@ -70,6 +78,7 @@ class BotSummary(BaseModel):
     participants: list[str] = []
     recording_url: str | None = None
     share_token: str | None = None
+    analysis_mode: str = "full"
     extra_metadata: dict[str, Any] = {}
     is_demo_transcript: bool = False
 
@@ -115,6 +124,10 @@ class BotResponse(BaseModel):
     share_token: str | None = None
     chapters: list[dict] | None = None
     speaker_stats: list[dict] | None = None
+    analysis_mode: str = Field(
+        default="full",
+        description="Whether AI analysis was run (`full`) or skipped (`transcript_only`).",
+    )
     extra_metadata: dict[str, Any] = {}
     is_demo_transcript: bool = Field(
         default=False,

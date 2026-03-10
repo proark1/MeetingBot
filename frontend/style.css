@@ -601,6 +601,107 @@ code {
   margin-bottom: 1rem;
 }
 
+/* ── Modal wide + title group ───────────────────────────────────────────── */
+.modal-wide { max-width: 580px; }
+.modal-title-group { display: flex; flex-direction: column; gap: 0.15rem; }
+.modal-subtitle { font-size: 0.82rem; color: var(--text-muted); font-weight: 400; }
+
+/* ── Form sections ──────────────────────────────────────────────────────── */
+.form-section { margin-bottom: 1.4rem; }
+.form-section:last-child { margin-bottom: 0; }
+.form-section-label {
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--text-dim);
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--border);
+}
+.form-row {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.form-row label { flex: 1; min-width: 180px; }
+
+/* ── Analysis mode picker ───────────────────────────────────────────────── */
+.mode-picker {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.65rem;
+}
+
+.mode-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.9rem 1rem;
+  border: 1.5px solid var(--border);
+  border-radius: 11px;
+  cursor: pointer;
+  background: var(--surface);
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+  user-select: none;
+  position: relative;
+}
+.mode-card:hover {
+  border-color: var(--border2);
+  background: var(--surface2);
+}
+.mode-card-active {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+  box-shadow: 0 0 0 3px rgba(91,92,246,0.1);
+}
+
+.mode-card-icon {
+  font-size: 1.25rem;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.mode-card-body { flex: 1; }
+.mode-card-title {
+  font-weight: 700;
+  font-size: 0.875rem;
+  color: var(--text);
+  margin-bottom: 0.2rem;
+}
+.mode-card-active .mode-card-title { color: var(--accent); }
+.mode-card-desc {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+  font-weight: 400;
+}
+
+.mode-card-check {
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border2);
+  background: var(--surface);
+  flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.6rem;
+  color: transparent;
+  transition: all 0.15s;
+  margin-top: 1px;
+}
+.mode-card-active .mode-card-check {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+/* AI options section collapse */
+#ai-options-section {
+  transition: opacity 0.2s;
+}
+#ai-options-section.hidden {
+  display: none;
+}
+
 /* ── Transcript ────────────────────────────────────────────────────────────── */
 .transcript-list {
   display: flex; flex-direction: column; gap: 0.25rem;
