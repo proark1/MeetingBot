@@ -99,6 +99,9 @@ async def analyze_transcript(
     except json.JSONDecodeError as exc:
         logger.error("Gemini returned invalid JSON for analysis: %s", exc)
         return _stub_analysis(transcript)
+    except ValueError as exc:
+        logger.warning("Gemini analysis blocked by safety filter: %s", exc)
+        return _stub_analysis(transcript)
     except Exception as exc:
         logger.error("Gemini analysis error: %s", exc)
         return _stub_analysis(transcript)
@@ -125,6 +128,9 @@ async def generate_chapters(transcript: list[dict[str, Any]]) -> list[dict[str, 
         return json.loads(_strip_fences(response.text))
     except json.JSONDecodeError as exc:
         logger.error("Gemini chapters: invalid JSON — %s", exc)
+        return []
+    except ValueError as exc:
+        logger.warning("Gemini chapters blocked by safety filter: %s", exc)
         return []
     except Exception as exc:
         logger.warning("Chapter generation failed: %s", exc)
@@ -199,6 +205,9 @@ async def generate_mention_response(
             text = text.strip("{}").strip()
         text = text.strip('"').strip("'")
         return text
+    except ValueError as exc:
+        logger.warning("Gemini mention response blocked by safety filter: %s", exc)
+        return ""
     except Exception as exc:
         logger.warning("generate_mention_response error: %s", exc)
         return ""
@@ -227,6 +236,9 @@ async def ask_about_transcript(transcript: list[dict[str, Any]], question: str) 
             generation_config={"temperature": 0.3, "max_output_tokens": 1024},
         )
         return response.text.strip()
+    except ValueError as exc:
+        logger.warning("Gemini answer blocked by safety filter: %s", exc)
+        return "The answer could not be generated — the content was flagged by the safety filter."
     except Exception as exc:
         logger.error("ask_about_transcript error: %s", exc)
         return f"Error generating answer: {exc}"
@@ -249,6 +261,9 @@ async def generate_demo_transcript(meeting_url: str) -> list[dict[str, Any]]:
         )
         return json.loads(_strip_fences(response.text))
 
+    except ValueError as exc:
+        logger.warning("Gemini demo transcript blocked by safety filter: %s", exc)
+        return _hardcoded_demo_transcript()
     except Exception as exc:
         logger.error("Failed to generate demo transcript: %s", exc)
         return _hardcoded_demo_transcript()

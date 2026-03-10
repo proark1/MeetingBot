@@ -66,5 +66,9 @@ async def init_db():
             "CREATE INDEX IF NOT EXISTS ix_bot_status      ON bots (status)",
             "CREATE INDEX IF NOT EXISTS ix_bot_created_at  ON bots (created_at)",
             "CREATE INDEX IF NOT EXISTS ix_bot_meeting_url ON bots (meeting_url)",
+            # share_token added via ALTER TABLE which doesn't carry the ORM unique
+            # constraint — create the unique index explicitly so existing databases
+            # also enforce it (NULL values are excluded so un-shared bots don't clash).
+            "CREATE UNIQUE INDEX IF NOT EXISTS ix_bot_share_token ON bots (share_token) WHERE share_token IS NOT NULL",
         ]:
             await conn.execute(text(stmt))
