@@ -1523,14 +1523,20 @@ async def _unmute_mic(page: Page, platform: str) -> None:
     """Best-effort: unmute the bot's microphone in the meeting UI."""
     sels = _MIC_UNMUTE_SELS.get(platform, [])
     if sels:
-        await _click(page, sels, timeout=2000)
+        ok = await _click(page, sels, timeout=2000)
+        if ok:
+            logger.info("Mic unmuted on %s", platform)
+        else:
+            logger.warning("_unmute_mic: no button matched on %s — mic may stay muted", platform)
 
 
 async def _mute_mic(page: Page, platform: str) -> None:
     """Best-effort: mute the bot's microphone in the meeting UI."""
     sels = _MIC_MUTE_SELS.get(platform, [])
     if sels:
-        await _click(page, sels, timeout=2000)
+        ok = await _click(page, sels, timeout=2000)
+        if not ok:
+            logger.debug("_mute_mic: no button matched on %s (may already be muted)", platform)
 
 
 async def _speak_in_meeting(
@@ -1553,15 +1559,18 @@ async def _speak_in_meeting(
     from app.services import tts_service
 
     try:
-        # Step 1+2: synthesize and unmute at the same time
-        tts_path, _ = await asyncio.gather(
-            tts_service.synthesize(text, provider=tts_provider, api_key=gemini_api_key),
-            _unmute_mic(page, platform),
+        # Step 1: synthesize audio first (async HTTP — doesn't touch the browser)
+        tts_path = await tts_service.synthesize(
+            text, provider=tts_provider, api_key=gemini_api_key
         )
         if not tts_path:
             logger.warning("TTS synthesis returned no file — skipping voice response")
-            await _mute_mic(page, platform)
             return False
+
+        # Step 2: unmute mic just before playback (browser click — now safe, no
+        # chat typing is in flight at this point because _dispatch_reply runs us
+        # sequentially after _send_chat_message).
+        await _unmute_mic(page, platform)
 
         # Step 3: play into the TTS mic sink (Chrome hears it as microphone input)
         await tts_service.play_audio(tts_path, PULSE_MIC_NAME)
@@ -1622,14 +1631,13 @@ async def _mention_monitor(
             if mention_response_mode == "voice":
                 await _speak_in_meeting(page, platform, reply, tts_provider, gemini_api_key)
             elif mention_response_mode == "both":
-                results = await asyncio.gather(
-                    _speak_in_meeting(page, platform, reply, tts_provider, gemini_api_key),
-                    _send_chat_message(page, platform, reply),
-                    return_exceptions=True,
-                )
-                for r in results:
-                    if isinstance(r, Exception):
-                        logger.warning("Mention response dispatch error: %s", r)
+                # Chat first (keyboard typing), then voice (button clicks).
+                # Running them in parallel causes _unmute_mic's button click to
+                # steal keyboard focus mid-type, resulting in truncated messages.
+                chat_ok = await _send_chat_message(page, platform, reply)
+                if not chat_ok:
+                    logger.warning("Bot mention chat reply failed (both mode)")
+                await _speak_in_meeting(page, platform, reply, tts_provider, gemini_api_key)
             else:  # "text" (default)
                 success = await _send_chat_message(page, platform, reply)
                 if not success:
