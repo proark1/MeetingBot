@@ -480,6 +480,10 @@ async def _join_google_meet(page: Page, url: str, bot_name: str, start_muted: bo
         logger.info("Google Meet: mic muted before joining")
     else:
         logger.info("Google Meet: joining with mic ON (start_muted=False)")
+        # Google Meet can auto-mute on join regardless of our action — unmute
+        # explicitly after the page settles so TTS is always audible.
+        await asyncio.sleep(1.5)
+        await _unmute_mic(page, "google_meet")
     # Turn off camera if currently on
     await _click(page, [
         "button[aria-label*='Turn off camera' i]",
@@ -1607,14 +1611,15 @@ async def _speak_in_meeting(
             logger.warning("TTS synthesis returned no file — skipping voice response")
             return False
 
-        # Step 2: unmute if we started muted (skip if mic is already on)
-        if start_muted:
-            await _unmute_mic(page, platform)
+        # Step 2: always ensure mic is unmuted before playing TTS — idempotent,
+        # safe even if mic is already on.  Google Meet may auto-mute on join even
+        # when start_muted=False, so we can't assume the mic state here.
+        await _unmute_mic(page, platform)
 
         # Step 3: play into the TTS mic sink (Chrome hears it as microphone input)
         await tts_service.play_audio(tts_path, PULSE_MIC_NAME)
 
-        # Step 4: mute again (only if we started muted — otherwise leave mic on)
+        # Step 4: mute again only if the bot is supposed to stay muted between replies
         if start_muted:
             await _mute_mic(page, platform)
         return True
@@ -1629,6 +1634,9 @@ async def _speak_in_meeting(
         return False
 
 
+_LEAVE_KEYWORDS = frozenset({"leave", "bye", "goodbye", "exit", "stop", "quit"})
+
+
 async def _mention_monitor(
     page: Page,
     platform: str,
@@ -1637,6 +1645,7 @@ async def _mention_monitor(
     tts_provider: str = "edge",
     gemini_api_key: str | None = None,
     start_muted: bool = True,
+    leave_event: asyncio.Event | None = None,
 ) -> None:
     """Coroutine that polls live captions AND chat messages, replying when the
     bot's name is mentioned in either source.
@@ -1738,14 +1747,23 @@ async def _mention_monitor(
                     # if it were a question — we focus on what was actually asked.
                     mention_pos = new_caption_text.lower().find(bot_name_lower)
                     after_mention = new_caption_text[mention_pos + len(bot_name_lower):].lstrip(" ,:!?-").strip()
+
+                    # Leave command detection (before AI call)
+                    if leave_event and any(kw in after_mention.lower() for kw in _LEAVE_KEYWORDS):
+                        logger.info("Leave command detected via captions: %r", after_mention)
+                        await _dispatch_reply("Understood, leaving the meeting now. Goodbye!", "caption")
+                        await asyncio.sleep(2)
+                        leave_event.set()
+                        return
+
                     if after_mention:
-                        background = " ".join(caption_log[:-1])[-800:]
+                        background = " ".join(caption_log[:-1])[-3000:]
                         context = (
                             (background + "\n" if background else "") +
                             f"[Direct request to {bot_name}]: {after_mention}"
                         )
                     else:
-                        context = " ".join(caption_log)[-1500:]
+                        context = " ".join(caption_log)[-3000:]
                     uses_voice = mention_response_mode in ("voice", "both")
                     try:
                         reply = await _intel.generate_mention_response(
@@ -1784,10 +1802,26 @@ async def _mention_monitor(
                         # Extract text after the bot name in the chat message
                         mention_pos = new_chat_text.lower().find(bot_name_lower)
                         after_mention = new_chat_text[mention_pos + len(bot_name_lower):].lstrip(" ,:!?-").strip()
-                        context = (
-                            f"[Direct chat message to {bot_name}]: {after_mention}"
-                            if after_mention else new_chat_text.strip()[-1500:]
-                        )
+
+                        # Leave command detection (before AI call)
+                        if leave_event and any(kw in after_mention.lower() for kw in _LEAVE_KEYWORDS):
+                            logger.info("Leave command detected via chat: %r", after_mention)
+                            await _dispatch_reply("Understood, leaving the meeting now. Goodbye!", "chat")
+                            await asyncio.sleep(2)
+                            leave_event.set()
+                            return
+
+                        meeting_history = " ".join(caption_log)[-2000:]
+                        if after_mention:
+                            context = (
+                                (f"Meeting so far (live captions):\n{meeting_history}\n\n" if meeting_history else "") +
+                                f"[Direct chat message to {bot_name}]: {after_mention}"
+                            )
+                        else:
+                            context = (
+                                (f"Meeting so far (live captions):\n{meeting_history}\n\n" if meeting_history else "") +
+                                new_chat_text.strip()[-1500:]
+                            )
                         uses_voice = mention_response_mode in ("voice", "both")
                         try:
                             reply = await _intel.generate_mention_response(
@@ -1882,7 +1916,7 @@ async def run_browser_bot(
     respond_on_mention: bool = True,
     mention_response_mode: str = "text",
     tts_provider: str = "edge",
-    start_muted: bool = True,
+    start_muted: bool = False,
 ) -> dict:
     """
     Join a meeting as a named guest, record audio, wait for it to end.
@@ -2025,6 +2059,7 @@ async def run_browser_bot(
 
             # Run mention monitor concurrently with the meeting-end watcher
             monitor_task: asyncio.Task | None = None
+            leave_event = asyncio.Event()
             if respond_on_mention:
                 from app.config import settings as _settings
                 monitor_task = asyncio.create_task(
@@ -2034,12 +2069,29 @@ async def run_browser_bot(
                         tts_provider=tts_provider,
                         gemini_api_key=_settings.GEMINI_API_KEY or None,
                         start_muted=start_muted,
+                        leave_event=leave_event,
                     )
                 )
 
-            exit_reason = await _wait_for_meeting_end(
-                page, platform, max_duration, alone_timeout, _participants
+            # Race: natural meeting end vs explicit leave command from a participant
+            end_task   = asyncio.create_task(
+                _wait_for_meeting_end(page, platform, max_duration, alone_timeout, _participants)
             )
+            leave_task = asyncio.create_task(leave_event.wait())
+            done, pending = await asyncio.wait(
+                {end_task, leave_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for t in pending:
+                t.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await t
+
+            if leave_task in done:
+                exit_reason = "leave_command"
+                logger.info("Bot leaving meeting on participant command")
+            else:
+                exit_reason = end_task.result()
 
             # Cancel the monitor cleanly when the meeting ends
             if monitor_task is not None:
@@ -2048,7 +2100,7 @@ async def run_browser_bot(
                     await monitor_task
 
             # Gracefully leave the call (best-effort, bot may already be removed)
-            if exit_reason != "ended":
+            if exit_reason not in ("ended",):
                 with contextlib.suppress(Exception):
                     await _leave_meeting(page, platform)
 

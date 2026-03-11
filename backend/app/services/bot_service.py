@@ -288,7 +288,7 @@ async def run_bot_lifecycle(bot_id: str, db_factory) -> None:
                         respond_on_mention=getattr(bot, "respond_on_mention", True),
                         mention_response_mode=getattr(bot, "mention_response_mode", "text"),
                         tts_provider=getattr(bot, "tts_provider", "edge"),
-                        start_muted=getattr(bot, "start_muted", True),
+                        start_muted=getattr(bot, "start_muted", False),
                     )
 
                     if bot_result["success"]:
