@@ -1255,7 +1255,7 @@ async def _scrape_captions(page: Page, platform: str) -> str:
                     // the call", "Your microphone is on", etc.) which are NOT
                     // speech captions and would break mention detection.
                     const selectors = [
-                        // jsname attrs — caption-specific, most stable
+                        // jsname attrs — caption-specific (may be stale in 2026)
                         "div[jsname='tgaKEf']",
                         "div[jsname='YSxPC']",
                         "div[jsname='VUpckd']",
@@ -1270,6 +1270,12 @@ async def _scrape_captions(page: Page, platform: str) -> str:
                         "div[class*='bj4p3b']",
                         "div[class*='lTnCnb']",
                         "div[class*='subtitle']",
+                        // 2026 broader fallbacks
+                        "[data-caption-text]",
+                        "div[class*='transcript' i] span",
+                        "div[class*='Transcript' i] span",
+                        "span[class*='caption' i]",
+                        "span[class*='Caption' i]",
                     ];
                     // Known accessibility-announcement prefixes to skip
                     const skipPrefixes = [
@@ -1284,16 +1290,27 @@ async def _scrape_captions(page: Page, platform: str) -> str:
                     // Also skip strings that look like a Material icon name only
                     // (all lowercase/underscores, no spaces) — these are never speech.
                     const materialIconRe = /^[a-z][a-z_]+$/;
+                    const isValid = t => t && t.length > 3 &&
+                        !skipPrefixes.some(p => t.startsWith(p)) &&
+                        !t.includes('Jump to bottom') &&
+                        !materialIconRe.test(t.split('\n')[0]);
                     for (const s of selectors) {
                         const el = document.querySelector(s);
                         if (el) {
                             const t = (el.innerText || el.textContent || '').trim();
-                            if (t && t.length > 3 &&
-                                !skipPrefixes.some(p => t.startsWith(p)) &&
-                                !t.includes('Jump to bottom') &&
-                                !materialIconRe.test(t.split('\n')[0])) {
-                                return t;
-                            }
+                            if (isValid(t)) return t;
+                        }
+                    }
+                    // Last resort: scan all aria-live="polite" regions; pick the one
+                    // with the longest text (likely the caption box, not short announcements).
+                    // Filter out short system messages (< 20 chars) to reduce noise.
+                    const liveEls = Array.from(document.querySelectorAll('[aria-live="polite"]'));
+                    if (liveEls.length) {
+                        const candidates = liveEls
+                            .map(el => (el.innerText || el.textContent || '').trim())
+                            .filter(t => t.length >= 20 && isValid(t));
+                        if (candidates.length) {
+                            return candidates.reduce((a, b) => a.length >= b.length ? a : b);
                         }
                     }
                     return '';
@@ -1574,11 +1591,28 @@ async def _unmute_mic(page: Page, platform: str) -> None:
         if ok:
             logger.info("Mic unmuted on %s", platform)
             return
-        logger.warning("_unmute_mic: button click failed on %s — trying Ctrl+D shortcut", platform)
+        logger.debug("_unmute_mic: unmute button not found on %s (mic may already be on)", platform)
     if platform == "google_meet":
-        # Ctrl+D toggles mic in Google Meet; bot always joins muted so this unmutes
-        await page.keyboard.press("Control+d")
-        logger.info("Mic toggled via Ctrl+D on google_meet")
+        # Ctrl+D TOGGLES — only use it when mic is confirmed muted
+        try:
+            muted = await page.evaluate("""
+                () => {
+                    const unmute = document.querySelector('button[aria-label*="Turn on microphone" i]');
+                    if (unmute) return true;
+                    const mute = document.querySelector('button[aria-label*="Turn off microphone" i]');
+                    if (mute) return false;
+                    return null;
+                }
+            """)
+        except Exception:
+            muted = None
+        if muted is True:
+            await page.keyboard.press("Control+d")
+            logger.info("Mic unmuted via Ctrl+D (confirmed muted state)")
+        elif muted is False:
+            logger.debug("_unmute_mic: mic already on — skipping Ctrl+D")
+        else:
+            logger.debug("_unmute_mic: mic state unknown — skipping Ctrl+D to avoid toggle")
 
 
 async def _mute_mic(page: Page, platform: str) -> None:
@@ -1616,10 +1650,11 @@ async def _speak_in_meeting(
             logger.warning("TTS synthesis returned no file — skipping voice response")
             return False
 
-        # Step 2: always ensure mic is unmuted before playing TTS — idempotent,
-        # safe even if mic is already on.  Google Meet may auto-mute on join even
-        # when start_muted=False, so we can't assume the mic state here.
-        await _unmute_mic(page, platform)
+        # Step 2: unmute before speaking only when the bot is configured to stay muted.
+        # When start_muted=False the mic is already on — calling _unmute_mic risks
+        # Ctrl+D toggling it OFF (since Ctrl+D is a toggle, not a set-unmute command).
+        if start_muted:
+            await _unmute_mic(page, platform)
 
         # Step 3: play into the TTS mic sink (Chrome hears it as microphone input)
         await tts_service.play_audio(tts_path, PULSE_MIC_NAME)
@@ -1715,9 +1750,13 @@ async def _live_transcription_loop(
             if len(pcm) < MIN_BYTES:
                 continue
 
-            wav_b64  = base64.b64encode(_pcm_to_wav(pcm)).decode()
+            import google.generativeai.types as genai_types
+            audio_part = genai_types.Part.from_bytes(
+                data=_pcm_to_wav(pcm),
+                mime_type="audio/wav",
+            )
             response = await model.generate_content_async(
-                [{"mime_type": "audio/wav", "data": wav_b64}, prompt],
+                [audio_part, prompt],
                 generation_config={"temperature": 0.0, "max_output_tokens": 1024},
             )
             text = (response.text or "").strip()
@@ -1729,7 +1768,7 @@ async def _live_transcription_loop(
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            logger.debug("Live transcription chunk error: %s", exc)
+            logger.warning("Live transcription chunk error (%s): %s", type(exc).__name__, exc)
 
 
 async def _mention_monitor(
