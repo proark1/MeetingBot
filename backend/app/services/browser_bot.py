@@ -1968,7 +1968,7 @@ async def _live_transcription_loop(
     try:
         import google.generativeai as genai
         genai.configure(api_key=_cfg.GEMINI_API_KEY)
-        model = genai.GenerativeModel("gemini-2.0-flash")
+        model = genai.GenerativeModel("gemini-2.5-flash")
     except ImportError:
         logger.warning("Live transcription: google-generativeai not installed")
         return
