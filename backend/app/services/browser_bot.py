@@ -179,14 +179,19 @@ def _create_pulse_sink(name: str = PULSE_SINK_NAME) -> Optional[str]:
         return None
 
 
-def _create_pulse_mic(name: str = PULSE_MIC_NAME) -> Optional[str]:
-    """Create a named null sink for TTS playback.
+def _create_pulse_mic(name: str = PULSE_MIC_NAME) -> tuple[Optional[str], Optional[str], str]:
+    """Create a null sink + virtual source for TTS mic injection.
 
-    Chrome will use its monitor as a virtual microphone: playing TTS audio
-    into this sink lets all meeting participants hear the bot speak.
-    Returns the PulseAudio module index, or None on failure.
+    Returns (sink_module_idx, virt_module_idx_or_None, pulse_source_name).
+
+    The null sink receives TTS audio played by ffplay/ffmpeg.  Chrome records
+    from the virtual source (module-virtual-source) which is backed by the
+    sink's monitor.  Chrome's WebRTC getUserMedia enumerates virtual sources
+    as real microphones but filters out raw .monitor sources, so the virtual
+    source is required for Google Meet's microphone check to pass.
     """
     try:
+        # Step 1: null sink where TTS audio is played into
         r = _run([
             "pactl", "load-module", "module-null-sink",
             f"sink_name={name}",
@@ -194,17 +199,39 @@ def _create_pulse_mic(name: str = PULSE_MIC_NAME) -> Optional[str]:
         ])
         if r.returncode != 0:
             logger.warning("Could not create TTS mic sink %s: %s", name, r.stderr)
-            return None
-        idx = r.stdout.strip()
-        # Make the monitor the default SOURCE so Chrome uses it as its microphone.
-        # When TTS audio is played into this sink, Chrome captures it via
-        # the monitor and transmits it to meeting participants.
-        _run(["pactl", "set-default-source", f"{name}.monitor"])
-        logger.info("PulseAudio TTS mic sink ready: %s (module %s)", name, idx)
-        return idx
+            return None, None, f"{name}.monitor"
+        sink_idx = r.stdout.strip()
+
+        # Step 2: virtual source backed by the monitor — Chrome enumerates this
+        # as a real microphone device instead of filtering it out as a monitor.
+        virt_name = f"{name}_virt"
+        rv = _run([
+            "pactl", "load-module", "module-virtual-source",
+            f"source_name={virt_name}",
+            f"master={name}.monitor",
+            f"source_properties=device.description={virt_name}",
+        ])
+        if rv.returncode == 0:
+            virt_idx = rv.stdout.strip()
+            _run(["pactl", "set-default-source", virt_name])
+            logger.info(
+                "PulseAudio TTS mic ready: sink=%s (mod %s), virt-source=%s (mod %s)",
+                name, sink_idx, virt_name, virt_idx,
+            )
+            return sink_idx, virt_idx, virt_name
+        else:
+            # module-virtual-source not available — fall back to monitor directly
+            logger.warning(
+                "module-virtual-source unavailable (%s) — Chrome may show 'no mic'; "
+                "falling back to monitor source",
+                rv.stderr.decode(errors="replace").strip() if isinstance(rv.stderr, bytes) else rv.stderr.strip(),
+            )
+            _run(["pactl", "set-default-source", f"{name}.monitor"])
+            logger.info("PulseAudio TTS mic sink ready: %s (module %s)", name, sink_idx)
+            return sink_idx, None, f"{name}.monitor"
     except Exception as exc:
         logger.warning("PulseAudio mic sink setup failed: %s", exc)
-        return None
+        return None, None, f"{name}.monitor"
 
 
 def _unload_pulse_sink(idx: str) -> None:
@@ -346,15 +373,22 @@ def _move_chrome_source_output(source: str = f"{PULSE_MIC_NAME}.monitor") -> Non
 def _sync_chrome_audio_routing(
     pulse_sink: str = PULSE_SINK_NAME,
     pulse_mic: str = PULSE_MIC_NAME,
+    pulse_source: str | None = None,
 ) -> None:
     """Route Chrome's audio output to the recording sink and its mic to the TTS source.
 
     Call this once immediately after Chrome joins the meeting, then periodically
-    throughout the call to handle WebRTC stream restarts (e.g. after network
-    reconnects or device changes in Google Meet).
+    throughout the call to handle WebRTC stream restarts.
+
+    pulse_source: the PulseAudio source name to route Chrome's mic capture to.
+    Defaults to the virtual source name (pulse_mic + '_virt') if not supplied,
+    falling back to the monitor if the virtual source doesn't exist.
     """
     _move_chrome_audio(pulse_sink)
-    _move_chrome_source_output(f"{pulse_mic}.monitor")
+    # Prefer the virtual source (proper mic device Chrome enumerates), fall
+    # back to the raw monitor if not available.
+    target = pulse_source or f"{pulse_mic}_virt"
+    _move_chrome_source_output(target)
 
 
 # ── Xvfb & ffmpeg ─────────────────────────────────────────────────────────────
@@ -2208,6 +2242,7 @@ async def _wait_for_meeting_end(
     participants: set | None = None,
     pulse_sink: str = PULSE_SINK_NAME,
     pulse_mic: str = PULSE_MIC_NAME,
+    pulse_source: str | None = None,
 ) -> str:
     """
     Wait until the meeting ends, the max duration is reached, or the bot has
@@ -2241,7 +2276,7 @@ async def _wait_for_meeting_end(
         if now - _last_audio_routing_sync >= 15:
             _last_audio_routing_sync = now
             await asyncio.get_event_loop().run_in_executor(
-                None, functools.partial(_sync_chrome_audio_routing, pulse_sink, pulse_mic)
+                None, functools.partial(_sync_chrome_audio_routing, pulse_sink, pulse_mic, pulse_source)
             )
 
         # ── Participant name scraping (every 30s) ─────────────────────────
@@ -2312,8 +2347,9 @@ async def run_browser_bot(
     Returns:
         {"success", "audio_path", "error", "admitted", "duration_seconds", "exit_reason", "participants"}
     """
-    pulse_idx:     Optional[str] = None
-    pulse_mic_idx: Optional[str] = None
+    pulse_idx:          Optional[str] = None
+    pulse_mic_idx:      Optional[str] = None   # null-sink module index
+    pulse_mic_virt_idx: Optional[str] = None   # virtual-source module index
     ffmpeg_proc:   Optional[subprocess.Popen] = None
     xvfb_proc:     Optional[subprocess.Popen] = None
     t0 = time.monotonic()
@@ -2324,6 +2360,8 @@ async def run_browser_bot(
     _short_id = Path(audio_path).stem.replace("-", "")[:10]
     pulse_sink = f"mbot_{_short_id}"
     pulse_mic  = f"mbot_mic_{_short_id}"
+    # Will be set to the virtual source name after _create_pulse_mic() succeeds
+    pulse_source_name: str = f"{pulse_mic}.monitor"
 
     # ── Infrastructure ──────────────────────────────────────────────────────
     pulse_ok = _start_pulseaudio()
@@ -2331,9 +2369,9 @@ async def run_browser_bot(
         pulse_idx = _create_pulse_sink(pulse_sink)
         if pulse_idx:
             ffmpeg_proc = _start_ffmpeg(audio_path, pulse_sink)
-        # Create the TTS mic sink so the bot can speak in the meeting.
+        # Create the TTS mic sink + virtual source so the bot can speak.
         # Must be created before Chrome launches so PULSE_SOURCE takes effect.
-        pulse_mic_idx = _create_pulse_mic(pulse_mic)
+        pulse_mic_idx, pulse_mic_virt_idx, pulse_source_name = _create_pulse_mic(pulse_mic)
 
     xvfb_proc, xvfb_display = _start_xvfb()
     headless = xvfb_proc is None   # fall back to headless if no Xvfb
@@ -2354,10 +2392,11 @@ async def run_browser_bot(
         default_pulse = f"unix:{rt}/pulse/native"
         env["PULSE_SERVER"] = os.environ.get("PULSE_SERVER", default_pulse)
         env["PULSE_SINK"]   = pulse_sink
-        # Point Chrome's microphone at this bot's TTS sink monitor.
-        # When we play TTS audio into pulse_mic, Chrome captures it
-        # and broadcasts it to meeting participants as the bot's voice.
-        env["PULSE_SOURCE"] = f"{pulse_mic}.monitor"
+        # Point Chrome's microphone at the virtual source (backed by the TTS
+        # null-sink monitor).  module-virtual-source exposes it as a real input
+        # device so Chrome's getUserMedia succeeds and Google Meet shows the mic
+        # as available.  Falls back to the monitor name if virt source failed.
+        env["PULSE_SOURCE"] = pulse_source_name
         # Disable PipeWire so Chrome uses PulseAudio directly.
         # On systems with both installed, Chrome may prefer PipeWire which
         # ignores PULSE_SINK/PULSE_SOURCE env vars, causing silent recording.
@@ -2476,7 +2515,7 @@ async def run_browser_bot(
             # The periodic sync in _wait_for_meeting_end handles subsequent drifts.
             await asyncio.sleep(2.0)  # let Chrome's WebRTC streams fully start
             await asyncio.get_event_loop().run_in_executor(
-                None, functools.partial(_sync_chrome_audio_routing, pulse_sink, pulse_mic)
+                None, functools.partial(_sync_chrome_audio_routing, pulse_sink, pulse_mic, pulse_source)
             )
 
             # Enable live captions so the mention monitor can read them
@@ -2521,7 +2560,7 @@ async def run_browser_bot(
             end_task   = asyncio.create_task(
                 _wait_for_meeting_end(
                     page, platform, max_duration, alone_timeout, _participants,
-                    pulse_sink=pulse_sink, pulse_mic=pulse_mic,
+                    pulse_sink=pulse_sink, pulse_mic=pulse_mic, pulse_source=pulse_source_name,
                 )
             )
             leave_task = asyncio.create_task(leave_event.wait())
@@ -2605,6 +2644,8 @@ async def run_browser_bot(
                 _stop_ffmpeg(ffmpeg_proc)
             if pulse_idx:
                 _unload_pulse_sink(pulse_idx)
+            if pulse_mic_virt_idx:
+                _unload_pulse_sink(pulse_mic_virt_idx)
             if pulse_mic_idx:
                 _unload_pulse_sink(pulse_mic_idx)
             if xvfb_proc:
