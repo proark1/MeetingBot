@@ -69,6 +69,11 @@ class Bot(Base):
     # True — bot joins muted and toggles mic only while speaking TTS.
     start_muted: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    # Whether to run live audio transcription every 15 s during the call.
+    # Enables real-time meeting context and voice bot-name detection.
+    # If False, audio is only transcribed after the meeting ends (default).
+    live_transcription: Mapped[bool] = mapped_column(Boolean, default=False)
+
     # Arbitrary caller metadata
     extra_metadata: Mapped[dict] = mapped_column(JSON, default=dict)
 

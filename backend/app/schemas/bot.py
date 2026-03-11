@@ -72,6 +72,15 @@ class BotCreate(BaseModel):
             "True — bot joins muted and unmutes briefly only while speaking TTS."
         ),
     )
+    live_transcription: bool = Field(
+        default=False,
+        description=(
+            "When true, the bot transcribes audio in 15-second live chunks during the call. "
+            "This enables real-time meeting context (bot can answer 'what did we just discuss?') "
+            "and voice-based bot-name detection without relying on DOM captions. "
+            "When false (default), audio is only transcribed after the meeting ends."
+        ),
+    )
     extra_metadata: dict[str, Any] = {}
 
     @field_validator("meeting_url", mode="before")
@@ -115,6 +124,7 @@ class BotSummary(BaseModel):
     mention_response_mode: str = "text"
     tts_provider: str = "edge"
     start_muted: bool = False
+    live_transcription: bool = False
     extra_metadata: dict[str, Any] = {}
     is_demo_transcript: bool = False
 
@@ -179,6 +189,10 @@ class BotResponse(BaseModel):
     start_muted: bool = Field(
         default=False,
         description="Whether the bot joined with its microphone muted.",
+    )
+    live_transcription: bool = Field(
+        default=False,
+        description="Whether live 15-second audio transcription was enabled during the call.",
     )
     extra_metadata: dict[str, Any] = {}
     is_demo_transcript: bool = Field(

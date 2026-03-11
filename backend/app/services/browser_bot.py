@@ -485,10 +485,38 @@ async def _join_google_meet(page: Page, url: str, bot_name: str, start_muted: bo
         logger.info("Google Meet: mic muted before joining")
     else:
         logger.info("Google Meet: joining with mic ON (start_muted=False)")
-        # Google Meet can auto-mute on join regardless of our action — unmute
-        # explicitly after the page settles so TTS is always audible.
+        # Google Meet frequently auto-mutes on join. Unmute by clicking the
+        # "Turn on microphone" button if visible; if not visible (mic already on
+        # or button not yet rendered), use Ctrl+D which is safe here because we
+        # know we want the mic ON — worst case it toggles an already-on mic off,
+        # so we retry once more with a button click.
         await asyncio.sleep(1.5)
-        await _unmute_mic(page, "google_meet")
+        unmuted = await _click(page, [
+            "button[aria-label*='Turn on microphone' i]",
+            "button[aria-label*='unmute' i]",
+            "button[data-is-muted='true'][aria-label*='microphone' i]",
+        ], timeout=1500)
+        if not unmuted:
+            # Button not found: mic is either already on, or not rendered yet.
+            # Check state; use Ctrl+D only if confirmed muted or still unknown
+            # (pre-join state where the in-call toolbar isn't visible yet).
+            try:
+                muted = await page.evaluate("""
+                    () => {
+                        const off = document.querySelector('button[aria-label*="Turn on microphone" i]');
+                        if (off) return true;
+                        const on = document.querySelector('button[aria-label*="Turn off microphone" i]');
+                        if (on) return false;
+                        return null;
+                    }
+                """)
+            except Exception:
+                muted = None
+            if muted is not False:  # True (muted) or None (unknown) → try Ctrl+D
+                await page.keyboard.press("Control+d")
+                logger.info("Google Meet: mic unmuted via Ctrl+D on join (state=%s)", muted)
+            else:
+                logger.info("Google Meet: mic already on at join time — no action needed")
     # Turn off camera if currently on
     await _click(page, [
         "button[aria-label*='Turn off camera' i]",
@@ -2101,6 +2129,7 @@ async def run_browser_bot(
     mention_response_mode: str = "text",
     tts_provider: str = "edge",
     start_muted: bool = False,
+    live_transcription: bool = False,
 ) -> dict:
     """
     Join a meeting as a named guest, record audio, wait for it to end.
@@ -2231,6 +2260,31 @@ async def run_browser_bot(
             await _screenshot(page, f"{platform}_in_meeting")
             logger.info("Bot is in the meeting — monitoring for end…")
 
+            # Post-admission mic check: Google Meet sometimes auto-mutes on admit.
+            # When start_muted=False, ensure the mic is actually on now that the
+            # in-call toolbar is fully rendered.
+            if not start_muted and platform == "google_meet":
+                try:
+                    await asyncio.sleep(1.0)  # let the toolbar settle
+                    muted = await page.evaluate("""
+                        () => {
+                            const off = document.querySelector('button[aria-label*="Turn on microphone" i]');
+                            if (off) return true;
+                            const on = document.querySelector('button[aria-label*="Turn off microphone" i]');
+                            if (on) return false;
+                            return null;
+                        }
+                    """)
+                    if muted is True:
+                        await page.keyboard.press("Control+d")
+                        logger.info("Google Meet: post-admit Ctrl+D to unmute (was muted after admit)")
+                    elif muted is False:
+                        logger.info("Google Meet: mic confirmed ON after admit")
+                    else:
+                        logger.debug("Google Meet: mic state unknown post-admit")
+                except Exception as exc:
+                    logger.debug("Post-admit mic check failed: %s", exc)
+
             # Enable live captions so the mention monitor can read them
             if respond_on_mention:
                 try:
@@ -2241,11 +2295,12 @@ async def run_browser_bot(
 
             _participants: set[str] = set()
 
-            # Shared live transcript: filled by _live_transcription_loop,
-            # consumed by _mention_monitor for context and voice name detection.
+            # Shared live transcript: filled by _live_transcription_loop (when
+            # live_transcription=True), consumed by _mention_monitor for context
+            # and voice-based bot-name detection.
             live_transcript: list = []
             transcription_task: asyncio.Task | None = None
-            if ffmpeg_proc is not None:
+            if live_transcription and ffmpeg_proc is not None:
                 transcription_task = asyncio.create_task(
                     _live_transcription_loop(audio_path, live_transcript, chunk_interval=15)
                 )

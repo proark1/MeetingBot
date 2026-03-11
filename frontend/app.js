@@ -547,6 +547,9 @@ document.getElementById("btn-new-bot").addEventListener("click", async () => {
 
   _initModePicker();
   _initMentionToggle();
+  // Reset live transcription to off each time the modal opens
+  const liveTranscCheck = document.getElementById("new-bot-live-transcription");
+  if (liveTranscCheck) liveTranscCheck.checked = false;
   openModal("modal-new-bot");
   // Populate template dropdown
   try {
@@ -590,6 +593,7 @@ async function submitCreateBot() {
   const respondOnMention = document.getElementById("new-bot-respond-mention")?.checked ?? true;
   const mentionResponseMode = document.querySelector('input[name="mention_response_mode"]:checked')?.value || "text";
   const ttsProvider = document.querySelector('input[name="tts_provider"]:checked')?.value || "edge";
+  const liveTranscription = document.getElementById("new-bot-live-transcription")?.checked ?? false;
   const body = {
     meeting_url: url,
     bot_name: name,
@@ -597,6 +601,7 @@ async function submitCreateBot() {
     respond_on_mention: respondOnMention,
     mention_response_mode: mentionResponseMode,
     tts_provider: ttsProvider,
+    live_transcription: liveTranscription,
   };
   if (joinAtVal) body.join_at = new Date(joinAtVal).toISOString();
   if (notifyEmail) body.notify_email = notifyEmail;

@@ -76,6 +76,7 @@ POST /api/v1/bot
   "mention_response_mode": "text",
   "tts_provider": "edge",
   "start_muted": true,
+  "live_transcription": false,
   "extra_metadata": {}
 }
 ```
@@ -96,6 +97,8 @@ POST /api/v1/bot
 `tts_provider` — TTS engine used for voice responses (only relevant when `mention_response_mode` is `"voice"` or `"both"`):
 - `"edge"` *(default)* — Microsoft Edge TTS: fast (~300 ms), free, no extra API key required.
 - `"gemini"` — Google Gemini TTS (`gemini-2.5-flash-preview-tts`): more natural voice, uses your `GEMINI_API_KEY`.
+
+`live_transcription` — when `true`, the bot transcribes audio in 15-second rolling chunks **during** the call using Gemini inline audio. This gives the bot real-time meeting context (it can answer "what did we just discuss?") and enables voice-based bot-name detection without relying on DOM captions. Requires `GEMINI_API_KEY`. Default `false` — audio is only transcribed after the meeting ends.
 
 `template_id` — optional ID of a meeting template (see `/api/v1/templates`). Templates customise the AI analysis prompt.
 `vocabulary` — optional list of domain-specific terms to hint at during transcription.
