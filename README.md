@@ -83,7 +83,9 @@ POST /api/v1/bot
 
 `analysis_mode` — controls post-meeting processing:
 - `"full"` *(default)* — runs full AI analysis: summary, key points, action items, smart chapters, sentiment, speaker stats, and all post-meeting notifications (email, Slack, Notion, Linear).
-- `"transcript_only"` — skips all AI processing and returns only the raw speaker-labelled transcript. Faster completion, lower cost, full privacy. Speaker stats are still computed locally.
+- `"transcript_only"` — skips all AI processing and returns only the raw speaker-labelled transcript. Faster completion, lower cost, full privacy. Speaker stats are still computed locally. This setting is respected on all exit paths, including cancel and error.
+
+`meeting_url` — must be a publicly reachable URL. Requests resolving to private, loopback, or link-local addresses are rejected to prevent SSRF.
 
 `start_muted` — whether the bot joins with its microphone muted (default `false`). With the default of `false` the bot joins with the mic already on, so TTS voice replies play immediately without toggling the mic. Set to `true` if you want the bot to join muted and only unmute briefly while it speaks.
 

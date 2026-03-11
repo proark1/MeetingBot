@@ -183,7 +183,8 @@ async def _salvage_and_finish(
         })
 
     # ── analysis + chapters + speaker stats ────────────────────────────────
-    if not bot.analysis and bot.transcript:
+    analysis_mode = getattr(bot, "analysis_mode", "full") or "full"
+    if not bot.analysis and bot.transcript and analysis_mode != "transcript_only":
         try:
             analysis = await intelligence_service.analyze_transcript(bot.transcript)
             bot.analysis = analysis
@@ -208,6 +209,12 @@ async def _salvage_and_finish(
         bot.updated_at = _now()
         await db.commit()
         await webhook_service.dispatch_event(db, "bot.analysis_ready", {"bot_id": bot_id})
+    elif analysis_mode == "transcript_only":
+        logger.info("Bot %s analysis_mode=transcript_only — skipping AI analysis", bot_id)
+        if use_real_bot and os.path.exists(audio_path) and os.path.getsize(audio_path) > 0:
+            bot.recording_path = audio_path
+        bot.updated_at = _now()
+        await db.commit()
 
     # ── final status ───────────────────────────────────────────────────────
     await _set_status(db, bot, final_status, ended_at=bot.ended_at or _now(), **status_kwargs)

@@ -86,9 +86,7 @@ class BotCreate(BaseModel):
     @field_validator("meeting_url", mode="before")
     @classmethod
     def validate_meeting_url(cls, v: Any) -> Any:
-        # AnyHttpUrl handles basic URL validation; we just return the value here
-        # so Pydantic can coerce it. The AnyHttpUrl type enforces http/https.
-        return v
+        return _reject_private_url(v)
 
 
 class MeetingAnalysis(BaseModel):
