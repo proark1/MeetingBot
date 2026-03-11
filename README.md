@@ -75,6 +75,7 @@ POST /api/v1/bot
   "respond_on_mention": true,
   "mention_response_mode": "text",
   "tts_provider": "edge",
+  "start_muted": true,
   "extra_metadata": {}
 }
 ```
@@ -83,7 +84,9 @@ POST /api/v1/bot
 - `"full"` *(default)* — runs full AI analysis: summary, key points, action items, smart chapters, sentiment, speaker stats, and all post-meeting notifications (email, Slack, Notion, Linear).
 - `"transcript_only"` — skips all AI processing and returns only the raw speaker-labelled transcript. Faster completion, lower cost, full privacy. Speaker stats are still computed locally.
 
-`respond_on_mention` — when `true` (default), the bot monitors live captions during the call and replies whenever its name is mentioned. Responses are debounced to once every 30 seconds.
+`start_muted` — whether the bot joins with its microphone muted (default `true`). Set to `false` to join with the mic already on — useful when `mention_response_mode` is `"voice"` or `"both"` so TTS plays without toggling the mic each time.
+
+`respond_on_mention` — when `true` (default), the bot monitors live captions during the call and replies whenever its name is mentioned. Responses are debounced to once every 8 seconds.
 
 `mention_response_mode` — controls how the bot replies when mentioned:
 - `"text"` *(default)* — sends a message to the meeting chat.

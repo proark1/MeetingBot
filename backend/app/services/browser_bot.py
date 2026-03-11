@@ -426,7 +426,7 @@ async def _gmeet_wait_ready(page: Page) -> None:
         pass  # best-effort — proceed even if still loading
 
 
-async def _join_google_meet(page: Page, url: str, bot_name: str) -> None:
+async def _join_google_meet(page: Page, url: str, bot_name: str, start_muted: bool = True) -> None:
     await page.goto(url, wait_until="domcontentloaded", timeout=30_000)
     await _gmeet_wait_ready(page)
 
@@ -472,16 +472,20 @@ async def _join_google_meet(page: Page, url: str, bot_name: str) -> None:
         raise MeetingBotError("Could not find name input on Google Meet")
 
     # Mute mic if currently on (aria-pressed="true" = active/on → click to mute)
-    await _click(page, [
-        "button[aria-label*='Turn off microphone' i]",
-        "button[aria-label*='microphone' i][aria-pressed='true']",
-    ], timeout=2000)
+    if start_muted:
+        await _click(page, [
+            "button[aria-label*='Turn off microphone' i]",
+            "button[aria-label*='microphone' i][aria-pressed='true']",
+        ], timeout=2000)
+        logger.info("Google Meet: mic muted before joining")
+    else:
+        logger.info("Google Meet: joining with mic ON (start_muted=False)")
     # Turn off camera if currently on
     await _click(page, [
         "button[aria-label*='Turn off camera' i]",
         "button[aria-label*='camera' i][aria-pressed='true']",
     ], timeout=2000)
-    logger.info("Google Meet: mic and camera muted before joining")
+    logger.info("Google Meet: camera muted before joining")
 
     # Ask to join / Join now
     logger.info("Clicking join button…")
@@ -502,7 +506,7 @@ async def _join_google_meet(page: Page, url: str, bot_name: str) -> None:
     logger.info("Google Meet join button clicked")
 
 
-async def _join_zoom(page: Page, url: str, bot_name: str) -> None:
+async def _join_zoom(page: Page, url: str, bot_name: str, start_muted: bool = True) -> None:
     # Convert to Zoom web-client URL
     web_url = url
     if "/j/" in url and "/wc/" not in url:
@@ -594,20 +598,24 @@ async def _join_zoom(page: Page, url: str, bot_name: str) -> None:
         raise MeetingBotError("Could not find name input on Zoom")
 
     # Mute mic & camera on pre-join screen
-    await _click(page, [
-        "button.preview-audio-control",
-        "button[aria-label*='mute microphone' i]",
-        "button[aria-label*='mute audio' i]",
-        "button[aria-label*='microphone' i]",
-        ".join-audio-by-voip__mute-btn",
-    ], timeout=2000)
+    if start_muted:
+        await _click(page, [
+            "button.preview-audio-control",
+            "button[aria-label*='mute microphone' i]",
+            "button[aria-label*='mute audio' i]",
+            "button[aria-label*='microphone' i]",
+            ".join-audio-by-voip__mute-btn",
+        ], timeout=2000)
+        logger.info("Zoom: mic muted before joining")
+    else:
+        logger.info("Zoom: joining with mic ON (start_muted=False)")
     await _click(page, [
         "button.preview-video-control",
         "button[aria-label*='stop video' i]",
         "button[aria-label*='turn off camera' i]",
         "button[aria-label*='camera' i]",
     ], timeout=2000)
-    logger.info("Zoom: mic and camera muted before joining")
+    logger.info("Zoom: camera muted before joining")
 
     # Join button
     ok = await _click(page, [
@@ -621,7 +629,7 @@ async def _join_zoom(page: Page, url: str, bot_name: str) -> None:
     logger.info("Zoom join button clicked")
 
 
-async def _join_teams(page: Page, url: str, bot_name: str) -> None:
+async def _join_teams(page: Page, url: str, bot_name: str, start_muted: bool = True) -> None:
     await page.goto(url, wait_until="domcontentloaded", timeout=30_000)
     # Wait for the Teams SPA to render a recognisable element instead of a
     # fixed 5 s sleep.  We accept either a gate button OR the pre-join name
@@ -750,12 +758,16 @@ async def _join_teams(page: Page, url: str, bot_name: str) -> None:
         raise MeetingBotError("Could not find name input on Teams")
 
     # Mute mic if on (aria-pressed="true" = active/unmuted → click to mute)
-    await _click(page, [
-        "button[aria-label*='Mute' i][aria-pressed='true']",
-        "button[aria-label*='Mute microphone' i]",
-        "button[aria-label*='microphone' i][aria-pressed='true']",
-        "div[role='button'][aria-label*='Mute' i]",
-    ], timeout=2000)
+    if start_muted:
+        await _click(page, [
+            "button[aria-label*='Mute' i][aria-pressed='true']",
+            "button[aria-label*='Mute microphone' i]",
+            "button[aria-label*='microphone' i][aria-pressed='true']",
+            "div[role='button'][aria-label*='Mute' i]",
+        ], timeout=2000)
+        logger.info("Teams: mic muted before joining")
+    else:
+        logger.info("Teams: joining with mic ON (start_muted=False)")
     # Turn off camera if on
     await _click(page, [
         "button[aria-label*='Turn off camera' i]",
@@ -763,7 +775,7 @@ async def _join_teams(page: Page, url: str, bot_name: str) -> None:
         "button[aria-label*='Stop video' i]",
         "div[role='button'][aria-label*='Turn off camera' i]",
     ], timeout=2000)
-    logger.info("Teams: mic and camera muted before joining")
+    logger.info("Teams: camera muted before joining")
 
     # Step 3: Join
     ok = await _click(page, [
@@ -1549,14 +1561,12 @@ async def _speak_in_meeting(
     text: str,
     tts_provider: str = "edge",
     gemini_api_key: str | None = None,
+    start_muted: bool = True,
 ) -> bool:
     """Speak *text* aloud in the meeting via TTS → PulseAudio virtual mic.
 
-    Flow (fully overlapped for minimum latency):
-      1. Start TTS synthesis (edge-tts or Gemini TTS → temp audio file)
-      2. Unmute mic simultaneously (asyncio.gather)
-      3. Play the audio into the TTS mic sink
-      4. Mute mic when done
+    When start_muted=True (default): unmute before speaking, mute again after.
+    When start_muted=False: mic is already on — just play the audio.
 
     Returns True on success.
     """
@@ -1571,24 +1581,25 @@ async def _speak_in_meeting(
             logger.warning("TTS synthesis returned no file — skipping voice response")
             return False
 
-        # Step 2: unmute mic just before playback (browser click — now safe, no
-        # chat typing is in flight at this point because _dispatch_reply runs us
-        # sequentially after _send_chat_message).
-        await _unmute_mic(page, platform)
+        # Step 2: unmute if we started muted (skip if mic is already on)
+        if start_muted:
+            await _unmute_mic(page, platform)
 
         # Step 3: play into the TTS mic sink (Chrome hears it as microphone input)
         await tts_service.play_audio(tts_path, PULSE_MIC_NAME)
 
-        # Step 4: mute again
-        await _mute_mic(page, platform)
+        # Step 4: mute again (only if we started muted — otherwise leave mic on)
+        if start_muted:
+            await _mute_mic(page, platform)
         return True
 
     except Exception as exc:
         logger.warning("_speak_in_meeting failed: %s", exc)
-        try:
-            await _mute_mic(page, platform)
-        except Exception:
-            pass
+        if start_muted:
+            try:
+                await _mute_mic(page, platform)
+            except Exception:
+                pass
         return False
 
 
@@ -1599,6 +1610,7 @@ async def _mention_monitor(
     mention_response_mode: str = "text",
     tts_provider: str = "edge",
     gemini_api_key: str | None = None,
+    start_muted: bool = True,
 ) -> None:
     """Coroutine that polls live captions AND chat messages, replying when the
     bot's name is mentioned in either source.
@@ -1611,7 +1623,6 @@ async def _mention_monitor(
     seen_captions: str = ""
     seen_chat: str = ""
     last_response_at: float = 0.0
-    last_reply_text: str = ""        # suppress self-triggers
     caption_log: list[str] = []      # rolling buffer — last 40 caption chunks
     bot_name_lower = bot_name.lower()
     _poll_count = 0
@@ -1633,7 +1644,7 @@ async def _mention_monitor(
         )
         try:
             if mention_response_mode == "voice":
-                await _speak_in_meeting(page, platform, reply, tts_provider, gemini_api_key)
+                await _speak_in_meeting(page, platform, reply, tts_provider, gemini_api_key, start_muted)
             elif mention_response_mode == "both":
                 # Chat first (keyboard typing), then voice (button clicks).
                 # Running them in parallel causes _unmute_mic's button click to
@@ -1641,7 +1652,7 @@ async def _mention_monitor(
                 chat_ok = await _send_chat_message(page, platform, reply)
                 if not chat_ok:
                     logger.warning("Bot mention chat reply failed (both mode)")
-                await _speak_in_meeting(page, platform, reply, tts_provider, gemini_api_key)
+                await _speak_in_meeting(page, platform, reply, tts_provider, gemini_api_key, start_muted)
             else:  # "text" (default)
                 success = await _send_chat_message(page, platform, reply)
                 if not success:
@@ -1694,8 +1705,7 @@ async def _mention_monitor(
 
                 if (
                     bot_name_lower in new_caption_text.lower()
-                    and not (last_reply_text and last_reply_text.lower()[:60] in new_caption_text.lower())
-                    and time.monotonic() - last_response_at >= 15
+                    and time.monotonic() - last_response_at >= 8
                 ):
                     context = " ".join(caption_log)[-1500:]
                     uses_voice = mention_response_mode in ("voice", "both")
@@ -1708,7 +1718,6 @@ async def _mention_monitor(
                         reply = ""
                     if reply:
                         last_response_at = time.monotonic()
-                        last_reply_text = reply
                         await _dispatch_reply(reply, "caption")
 
         # ── Chat polling (every 2 s — every other caption poll) ──────────────
@@ -1732,8 +1741,7 @@ async def _mention_monitor(
                     logger.debug("Chat update: %r", new_chat_text[:200])
                     if (
                         bot_name_lower in new_chat_text.lower()
-                        and not (last_reply_text and last_reply_text.lower()[:60] in new_chat_text.lower())
-                        and time.monotonic() - last_response_at >= 15
+                        and time.monotonic() - last_response_at >= 8
                     ):
                         context = new_chat_text.strip()[-1500:]
                         uses_voice = mention_response_mode in ("voice", "both")
@@ -1746,7 +1754,6 @@ async def _mention_monitor(
                             reply = ""
                         if reply:
                             last_response_at = time.monotonic()
-                            last_reply_text = reply
                             await _dispatch_reply(reply, "chat")
 
 
@@ -1831,6 +1838,7 @@ async def run_browser_bot(
     respond_on_mention: bool = True,
     mention_response_mode: str = "text",
     tts_provider: str = "edge",
+    start_muted: bool = True,
 ) -> dict:
     """
     Join a meeting as a named guest, record audio, wait for it to end.
@@ -1936,11 +1944,11 @@ async def run_browser_bot(
             )
 
             if platform == "google_meet":
-                await _join_google_meet(page, meeting_url, bot_name)
+                await _join_google_meet(page, meeting_url, bot_name, start_muted=start_muted)
             elif platform == "zoom":
-                await _join_zoom(page, meeting_url, bot_name)
+                await _join_zoom(page, meeting_url, bot_name, start_muted=start_muted)
             elif platform == "microsoft_teams":
-                await _join_teams(page, meeting_url, bot_name)
+                await _join_teams(page, meeting_url, bot_name, start_muted=start_muted)
             else:
                 raise MeetingBotError(f"Unsupported platform: {platform}")
 
@@ -1981,6 +1989,7 @@ async def run_browser_bot(
                         mention_response_mode=mention_response_mode,
                         tts_provider=tts_provider,
                         gemini_api_key=_settings.GEMINI_API_KEY or None,
+                        start_muted=start_muted,
                     )
                 )
 

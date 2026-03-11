@@ -35,6 +35,8 @@ Rules:
 - Split long monologues into natural sentence-level entries.
 - Omit silences, background noise, and unintelligible segments.
 - Do not add commentary, summaries, or any text outside the JSON array.
+- IMPORTANT: If the audio is silent, contains only background noise, or has no
+  recognisable speech at all, return an empty array: []
 """.strip()
 
 
@@ -126,8 +128,9 @@ async def transcribe_audio(audio_path: str, known_participants: list[str] | None
 
     size = os.path.getsize(audio_path)
     logger.info("Audio file size: %d bytes (%s)", size, audio_path)
-    if size < 8192:
-        logger.warning("Audio file is too small (%d bytes) — likely no audio captured", size)
+    # 32 000 bytes/s for 16 kHz mono PCM — reject anything shorter than ~1 second
+    if size < 32_000:
+        logger.warning("Audio file is too small (%d bytes, < 1 s) — skipping transcription", size)
         return []
 
     # For long recordings, split into chunks and transcribe sequentially

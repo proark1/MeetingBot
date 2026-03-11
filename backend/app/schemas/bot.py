@@ -64,6 +64,14 @@ class BotCreate(BaseModel):
             "`gemini` — Google Gemini TTS: more natural voice, uses your GEMINI_API_KEY."
         ),
     )
+    start_muted: bool = Field(
+        default=True,
+        description=(
+            "Whether the bot joins with its microphone muted. "
+            "True (default) — bot joins muted and only unmutes briefly when speaking TTS. "
+            "False — bot joins with mic on (useful when you always want voice output active)."
+        ),
+    )
     extra_metadata: dict[str, Any] = {}
 
     @field_validator("meeting_url", mode="before")
@@ -106,6 +114,7 @@ class BotSummary(BaseModel):
     respond_on_mention: bool = True
     mention_response_mode: str = "text"
     tts_provider: str = "edge"
+    start_muted: bool = True
     extra_metadata: dict[str, Any] = {}
     is_demo_transcript: bool = False
 
@@ -166,6 +175,10 @@ class BotResponse(BaseModel):
     tts_provider: str = Field(
         default="edge",
         description="TTS engine: 'edge' (Microsoft Edge TTS) or 'gemini' (Gemini TTS).",
+    )
+    start_muted: bool = Field(
+        default=True,
+        description="Whether the bot joined with its microphone muted.",
     )
     extra_metadata: dict[str, Any] = {}
     is_demo_transcript: bool = Field(

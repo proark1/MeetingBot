@@ -44,6 +44,11 @@ def _bot_to_summary(bot: Bot) -> BotSummary:
         participants=bot.participants or [],
         recording_url=bot.recording_url,
         share_token=bot.share_token,
+        analysis_mode=bot.analysis_mode or "full",
+        respond_on_mention=bool(bot.respond_on_mention),
+        mention_response_mode=bot.mention_response_mode or "text",
+        tts_provider=bot.tts_provider or "edge",
+        start_muted=bool(getattr(bot, "start_muted", True)),
         extra_metadata=bot.extra_metadata or {},
         is_demo_transcript=_is_demo(bot),
     )
@@ -69,6 +74,11 @@ def _bot_to_response(bot: Bot) -> BotResponse:
         recording_url=bot.recording_url,
         recording_path=bot.recording_path,
         share_token=bot.share_token,
+        analysis_mode=bot.analysis_mode or "full",
+        respond_on_mention=bool(bot.respond_on_mention),
+        mention_response_mode=bot.mention_response_mode or "text",
+        tts_provider=bot.tts_provider or "edge",
+        start_muted=bool(getattr(bot, "start_muted", True)),
         extra_metadata=bot.extra_metadata or {},
         is_demo_transcript=_is_demo(bot),
     )
