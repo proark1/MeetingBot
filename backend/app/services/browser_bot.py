@@ -1750,10 +1750,11 @@ async def _live_transcription_loop(
             if len(pcm) < MIN_BYTES:
                 continue
 
-            import google.generativeai.types as genai_types
-            audio_part = genai_types.Part.from_bytes(
-                data=_pcm_to_wav(pcm),
-                mime_type="audio/wav",
+            audio_part = genai.protos.Part(
+                inline_data=genai.protos.Blob(
+                    mime_type="audio/wav",
+                    data=_pcm_to_wav(pcm),
+                )
             )
             response = await model.generate_content_async(
                 [audio_part, prompt],
