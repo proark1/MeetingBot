@@ -13,6 +13,8 @@ Strategy:
 import asyncio
 import base64
 import contextlib
+import functools
+import itertools
 import logging
 import os
 import struct
@@ -27,6 +29,10 @@ logger = logging.getLogger(__name__)
 
 PULSE_SINK_NAME = "meetingbot_sink"
 PULSE_MIC_NAME  = "meetingbot_mic"   # TTS audio plays here; Chrome captures it as mic input
+
+# Each concurrent bot gets a unique virtual X display so they don't collide.
+# Counter starts at 99 and increments; the OS will reject duplicates gracefully.
+_xvfb_display_counter: itertools.count = itertools.count(99)
 
 _WAV_HEADER_SIZE = 44          # standard WAV header length (bytes)
 _PCM_BYTES_PER_S = 32_000      # 16 kHz, mono, s16le = 32 000 bytes/s
@@ -153,49 +159,48 @@ def _start_pulseaudio() -> bool:
         return False
 
 
-def _create_pulse_sink() -> Optional[str]:
-    """Create a null sink and make it the system default. Returns module index."""
+def _create_pulse_sink(name: str = PULSE_SINK_NAME) -> Optional[str]:
+    """Create a named null sink and make it the default output. Returns module index."""
     try:
         r = _run([
             "pactl", "load-module", "module-null-sink",
-            f"sink_name={PULSE_SINK_NAME}",
-            "sink_properties=device.description=MeetingBotSink",
+            f"sink_name={name}",
+            f"sink_properties=device.description={name}",
         ])
         if r.returncode != 0:
-            logger.warning("Could not create null sink: %s", r.stderr)
+            logger.warning("Could not create null sink %s: %s", name, r.stderr)
             return None
         idx = r.stdout.strip()
-        # Make it the default so Chromium uses it for audio output automatically
-        _run(["pactl", "set-default-sink", PULSE_SINK_NAME])
-        logger.info("PulseAudio null sink ready (module %s)", idx)
+        _run(["pactl", "set-default-sink", name])
+        logger.info("PulseAudio null sink ready: %s (module %s)", name, idx)
         return idx
     except Exception as exc:
         logger.warning("PulseAudio sink setup failed: %s", exc)
         return None
 
 
-def _create_pulse_mic() -> Optional[str]:
-    """Create a second null sink for TTS playback.
+def _create_pulse_mic(name: str = PULSE_MIC_NAME) -> Optional[str]:
+    """Create a named null sink for TTS playback.
 
-    Chrome will use its monitor as a virtual microphone, so when we play
-    TTS audio into this sink all meeting participants hear the bot speak.
+    Chrome will use its monitor as a virtual microphone: playing TTS audio
+    into this sink lets all meeting participants hear the bot speak.
     Returns the PulseAudio module index, or None on failure.
     """
     try:
         r = _run([
             "pactl", "load-module", "module-null-sink",
-            f"sink_name={PULSE_MIC_NAME}",
-            "sink_properties=device.description=MeetingBotMic",
+            f"sink_name={name}",
+            f"sink_properties=device.description={name}",
         ])
         if r.returncode != 0:
-            logger.warning("Could not create TTS mic sink: %s", r.stderr)
+            logger.warning("Could not create TTS mic sink %s: %s", name, r.stderr)
             return None
         idx = r.stdout.strip()
         # Make the monitor the default SOURCE so Chrome uses it as its microphone.
-        # When TTS audio is played into PULSE_MIC_NAME, Chrome captures it via
-        # this monitor and transmits it to meeting participants.
-        _run(["pactl", "set-default-source", f"{PULSE_MIC_NAME}.monitor"])
-        logger.info("PulseAudio TTS mic sink ready (module %s)", idx)
+        # When TTS audio is played into this sink, Chrome captures it via
+        # the monitor and transmits it to meeting participants.
+        _run(["pactl", "set-default-source", f"{name}.monitor"])
+        logger.info("PulseAudio TTS mic sink ready: %s (module %s)", name, idx)
         return idx
     except Exception as exc:
         logger.warning("PulseAudio mic sink setup failed: %s", exc)
@@ -306,47 +311,63 @@ def _move_chrome_source_output(source: str = f"{PULSE_MIC_NAME}.monitor") -> Non
                 logger.info("Moved Chrome source-output %s → %s", current_id, source)
 
         if moved == 0:
-            logger.debug("_move_chrome_source_output: no Chrome source-outputs found")
+            logger.info("_move_chrome_source_output: no Chrome source-outputs active (mic not yet open or already routed)")
     except Exception as exc:
         logger.debug("_move_chrome_source_output failed: %s", exc)
 
 
-def _sync_chrome_audio_routing() -> None:
+def _sync_chrome_audio_routing(
+    pulse_sink: str = PULSE_SINK_NAME,
+    pulse_mic: str = PULSE_MIC_NAME,
+) -> None:
     """Route Chrome's audio output to the recording sink and its mic to the TTS source.
 
     Call this once immediately after Chrome joins the meeting, then periodically
     throughout the call to handle WebRTC stream restarts (e.g. after network
     reconnects or device changes in Google Meet).
     """
-    _move_chrome_audio()
-    _move_chrome_source_output()
+    _move_chrome_audio(pulse_sink)
+    _move_chrome_source_output(f"{pulse_mic}.monitor")
 
 
 # ── Xvfb & ffmpeg ─────────────────────────────────────────────────────────────
 
-def _start_xvfb(display: str = ":99") -> Optional[subprocess.Popen]:
-    try:
-        proc = subprocess.Popen(
-            ["Xvfb", display, "-screen", "0", "1280x720x24", "-ac", "+extension", "RANDR"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        )
-        # Poll instead of a fixed sleep — Xvfb is usually ready in <0.5 s
-        for _ in range(20):
-            time.sleep(0.1)
-            if proc.poll() is not None:
-                break  # exited early — failure path below handles it
-        if proc.poll() is None:
-            _register_proc(proc)
-            logger.info("Xvfb started on display %s", display)
-            return proc
-        logger.warning("Xvfb exited immediately")
-        return None
-    except FileNotFoundError:
-        logger.warning("Xvfb not available — falling back to headless mode")
-        return None
+def _start_xvfb() -> tuple[Optional[subprocess.Popen], str]:
+    """Start Xvfb on the next available virtual display.
+
+    Each concurrent bot gets its own display number so they don't collide.
+    Returns (proc, display_string) — e.g. (proc, ":99").
+    If Xvfb is unavailable, returns (None, ":99") and the caller falls back
+    to headless Chromium.
+    """
+    for _ in range(50):  # try up to 50 display numbers
+        display = f":{next(_xvfb_display_counter)}"
+        try:
+            proc = subprocess.Popen(
+                ["Xvfb", display, "-screen", "0", "1280x720x24", "-ac", "+extension", "RANDR"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            # Poll up to 2 s; Xvfb usually binds in <0.5 s
+            for _ in range(20):
+                time.sleep(0.1)
+                if proc.poll() is not None:
+                    break  # display already taken or other error — try next
+            if proc.poll() is None:
+                _register_proc(proc)
+                logger.info("Xvfb started on display %s", display)
+                return proc, display
+            # Process exited; try the next display number
+        except FileNotFoundError:
+            logger.warning("Xvfb not available — falling back to headless mode")
+            return None, display
+        except Exception as exc:
+            logger.debug("Xvfb attempt on %s failed: %s", display, exc)
+
+    logger.warning("Could not start Xvfb on any display — falling back to headless mode")
+    return None, ":99"
 
 
-def _start_ffmpeg(audio_path: str) -> Optional[subprocess.Popen]:
+def _start_ffmpeg(audio_path: str, pulse_sink: str = PULSE_SINK_NAME) -> Optional[subprocess.Popen]:
     try:
         # Carry PulseAudio server address explicitly so ffmpeg connects to the
         # same server even if XDG_RUNTIME_DIR is not set in the child env.
@@ -357,7 +378,7 @@ def _start_ffmpeg(audio_path: str) -> Optional[subprocess.Popen]:
         proc = subprocess.Popen(
             [
                 "ffmpeg", "-y",
-                "-f", "pulse", "-i", f"{PULSE_SINK_NAME}.monitor",
+                "-f", "pulse", "-i", f"{pulse_sink}.monitor",
                 "-ar", "16000", "-ac", "1", "-acodec", "pcm_s16le",
                 audio_path,
             ],
@@ -368,9 +389,9 @@ def _start_ffmpeg(audio_path: str) -> Optional[subprocess.Popen]:
         time.sleep(0.5)
         if proc.poll() is None:
             _register_proc(proc)
-            logger.info("ffmpeg recording → %s", audio_path)
+            logger.info("ffmpeg recording %s → %s", pulse_sink, audio_path)
             return proc
-        logger.warning("ffmpeg exited immediately — PulseAudio sink may not be ready")
+        logger.warning("ffmpeg exited immediately — PulseAudio sink %s may not be ready", pulse_sink)
         return None
     except FileNotFoundError:
         logger.warning("ffmpeg not found — audio recording disabled")
@@ -1762,6 +1783,7 @@ async def _speak_in_meeting(
     tts_provider: str = "edge",
     gemini_api_key: str | None = None,
     start_muted: bool = True,
+    pulse_mic: str = PULSE_MIC_NAME,
 ) -> bool:
     """Speak *text* aloud in the meeting via TTS → PulseAudio virtual mic.
 
@@ -1787,8 +1809,8 @@ async def _speak_in_meeting(
         if start_muted:
             await _unmute_mic(page, platform)
 
-        # Step 3: play into the TTS mic sink (Chrome hears it as microphone input)
-        await tts_service.play_audio(tts_path, PULSE_MIC_NAME)
+        # Step 3: play into this bot's TTS mic sink (Chrome hears it as mic input)
+        await tts_service.play_audio(tts_path, pulse_mic)
 
         # Step 4: mute again only if the bot is supposed to stay muted between replies
         if start_muted:
@@ -1913,6 +1935,7 @@ async def _mention_monitor(
     start_muted: bool = True,
     leave_event: asyncio.Event | None = None,
     live_transcript: list | None = None,
+    pulse_mic: str = PULSE_MIC_NAME,
 ) -> None:
     """Coroutine that polls live captions AND chat messages, replying when the
     bot's name is mentioned in either source.
@@ -1947,7 +1970,7 @@ async def _mention_monitor(
         )
         try:
             if mention_response_mode == "voice":
-                await _speak_in_meeting(page, platform, reply, tts_provider, gemini_api_key, start_muted)
+                await _speak_in_meeting(page, platform, reply, tts_provider, gemini_api_key, start_muted, pulse_mic)
             elif mention_response_mode == "both":
                 # Chat first (keyboard typing), then voice (button clicks).
                 # Running them in parallel causes _unmute_mic's button click to
@@ -1955,7 +1978,7 @@ async def _mention_monitor(
                 chat_ok = await _send_chat_message(page, platform, reply)
                 if not chat_ok:
                     logger.warning("Bot mention chat reply failed (both mode)")
-                await _speak_in_meeting(page, platform, reply, tts_provider, gemini_api_key, start_muted)
+                await _speak_in_meeting(page, platform, reply, tts_provider, gemini_api_key, start_muted, pulse_mic)
             else:  # "text" (default)
                 success = await _send_chat_message(page, platform, reply)
                 if not success:
@@ -2156,6 +2179,8 @@ async def _wait_for_meeting_end(
     max_s: int,
     alone_timeout_s: int = 300,
     participants: set | None = None,
+    pulse_sink: str = PULSE_SINK_NAME,
+    pulse_mic: str = PULSE_MIC_NAME,
 ) -> str:
     """
     Wait until the meeting ends, the max duration is reached, or the bot has
@@ -2188,7 +2213,9 @@ async def _wait_for_meeting_end(
         # sync pactl calls don't block the asyncio event loop.
         if now - _last_audio_routing_sync >= 15:
             _last_audio_routing_sync = now
-            await asyncio.get_event_loop().run_in_executor(None, _sync_chrome_audio_routing)
+            await asyncio.get_event_loop().run_in_executor(
+                None, functools.partial(_sync_chrome_audio_routing, pulse_sink, pulse_mic)
+            )
 
         # ── Participant name scraping (every 30s) ─────────────────────────
         if participants is not None and now - _last_participant_scrape >= 30:
@@ -2258,29 +2285,37 @@ async def run_browser_bot(
     Returns:
         {"success", "audio_path", "error", "admitted", "duration_seconds", "exit_reason", "participants"}
     """
-    pulse_idx: Optional[str] = None
-    ffmpeg_proc: Optional[subprocess.Popen] = None
-    xvfb_proc:   Optional[subprocess.Popen] = None
+    pulse_idx:     Optional[str] = None
+    pulse_mic_idx: Optional[str] = None
+    ffmpeg_proc:   Optional[subprocess.Popen] = None
+    xvfb_proc:     Optional[subprocess.Popen] = None
     t0 = time.monotonic()
+
+    # ── Per-bot unique PulseAudio sink names ────────────────────────────────
+    # Each concurrent bot gets its own named sinks so they don't interfere with
+    # each other's recording or TTS mic streams.
+    _short_id = Path(audio_path).stem.replace("-", "")[:10]
+    pulse_sink = f"mbot_{_short_id}"
+    pulse_mic  = f"mbot_mic_{_short_id}"
 
     # ── Infrastructure ──────────────────────────────────────────────────────
     pulse_ok = _start_pulseaudio()
     if pulse_ok:
-        pulse_idx = _create_pulse_sink()
+        pulse_idx = _create_pulse_sink(pulse_sink)
         if pulse_idx:
-            ffmpeg_proc = _start_ffmpeg(audio_path)
+            ffmpeg_proc = _start_ffmpeg(audio_path, pulse_sink)
         # Create the TTS mic sink so the bot can speak in the meeting.
         # Must be created before Chrome launches so PULSE_SOURCE takes effect.
-        _create_pulse_mic()
+        pulse_mic_idx = _create_pulse_mic(pulse_mic)
 
-    xvfb_proc = _start_xvfb(":99")
-    headless  = xvfb_proc is None   # fall back to headless if no Xvfb
+    xvfb_proc, xvfb_display = _start_xvfb()
+    headless = xvfb_proc is None   # fall back to headless if no Xvfb
 
     # Start with the full current process environment so Chrome inherits PATH,
     # HOME, XDG_RUNTIME_DIR, etc.  We then overlay our PulseAudio overrides.
     env: dict = dict(os.environ)
     if xvfb_proc:
-        env["DISPLAY"] = ":99"
+        env["DISPLAY"] = xvfb_display
     if pulse_ok:
         env["PULSE_LATENCY_MSEC"] = "30"
         # Explicitly point Chrome at the PulseAudio server so it does not
@@ -2291,11 +2326,11 @@ async def run_browser_bot(
         rt = os.environ.get("XDG_RUNTIME_DIR", "/tmp/runtime-meetingbot")
         default_pulse = f"unix:{rt}/pulse/native"
         env["PULSE_SERVER"] = os.environ.get("PULSE_SERVER", default_pulse)
-        env["PULSE_SINK"]   = PULSE_SINK_NAME
-        # Point Chrome's microphone at the TTS sink monitor.
-        # When we play TTS audio into PULSE_MIC_NAME, Chrome captures it
+        env["PULSE_SINK"]   = pulse_sink
+        # Point Chrome's microphone at this bot's TTS sink monitor.
+        # When we play TTS audio into pulse_mic, Chrome captures it
         # and broadcasts it to meeting participants as the bot's voice.
-        env["PULSE_SOURCE"] = f"{PULSE_MIC_NAME}.monitor"
+        env["PULSE_SOURCE"] = f"{pulse_mic}.monitor"
         # Disable PipeWire so Chrome uses PulseAudio directly.
         # On systems with both installed, Chrome may prefer PipeWire which
         # ignores PULSE_SINK/PULSE_SOURCE env vars, causing silent recording.
@@ -2409,7 +2444,9 @@ async def run_browser_bot(
             # input to meetingbot_mic.monitor (so TTS is heard by participants).
             # The periodic sync in _wait_for_meeting_end handles subsequent drifts.
             await asyncio.sleep(2.0)  # let Chrome's WebRTC streams fully start
-            await asyncio.get_event_loop().run_in_executor(None, _sync_chrome_audio_routing)
+            await asyncio.get_event_loop().run_in_executor(
+                None, functools.partial(_sync_chrome_audio_routing, pulse_sink, pulse_mic)
+            )
 
             # Enable live captions so the mention monitor can read them
             if respond_on_mention:
@@ -2445,12 +2482,16 @@ async def run_browser_bot(
                         start_muted=start_muted,
                         leave_event=leave_event,
                         live_transcript=live_transcript,
+                        pulse_mic=pulse_mic,
                     )
                 )
 
             # Race: natural meeting end vs explicit leave command from a participant
             end_task   = asyncio.create_task(
-                _wait_for_meeting_end(page, platform, max_duration, alone_timeout, _participants)
+                _wait_for_meeting_end(
+                    page, platform, max_duration, alone_timeout, _participants,
+                    pulse_sink=pulse_sink, pulse_mic=pulse_mic,
+                )
             )
             leave_task = asyncio.create_task(leave_event.wait())
             done, pending = await asyncio.wait(
@@ -2533,6 +2574,8 @@ async def run_browser_bot(
                 _stop_ffmpeg(ffmpeg_proc)
             if pulse_idx:
                 _unload_pulse_sink(pulse_idx)
+            if pulse_mic_idx:
+                _unload_pulse_sink(pulse_mic_idx)
             if xvfb_proc:
                 _unregister_proc(xvfb_proc)
                 try:
