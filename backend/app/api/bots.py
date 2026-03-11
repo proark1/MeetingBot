@@ -48,7 +48,8 @@ def _bot_to_summary(bot: Bot) -> BotSummary:
         respond_on_mention=bool(bot.respond_on_mention),
         mention_response_mode=bot.mention_response_mode or "text",
         tts_provider=bot.tts_provider or "edge",
-        start_muted=bool(getattr(bot, "start_muted", True)),
+        start_muted=bool(getattr(bot, "start_muted", False)),
+        live_transcription=bool(getattr(bot, "live_transcription", False)),
         extra_metadata=bot.extra_metadata or {},
         is_demo_transcript=_is_demo(bot),
     )
@@ -78,7 +79,8 @@ def _bot_to_response(bot: Bot) -> BotResponse:
         respond_on_mention=bool(bot.respond_on_mention),
         mention_response_mode=bot.mention_response_mode or "text",
         tts_provider=bot.tts_provider or "edge",
-        start_muted=bool(getattr(bot, "start_muted", True)),
+        start_muted=bool(getattr(bot, "start_muted", False)),
+        live_transcription=bool(getattr(bot, "live_transcription", False)),
         extra_metadata=bot.extra_metadata or {},
         is_demo_transcript=_is_demo(bot),
     )
@@ -156,6 +158,8 @@ async def create_bot(
         respond_on_mention=payload.respond_on_mention,
         mention_response_mode=payload.mention_response_mode,
         tts_provider=payload.tts_provider,
+        start_muted=payload.start_muted,
+        live_transcription=payload.live_transcription,
         status="scheduled" if is_scheduled else "ready",
         extra_metadata=payload.extra_metadata,
         share_token=secrets.token_urlsafe(12),

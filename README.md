@@ -102,6 +102,7 @@ POST /api/v1/bot
 
 `template_id` — optional ID of a meeting template (see `/api/v1/templates`). Templates customise the AI analysis prompt.
 `vocabulary` — optional list of domain-specific terms to hint at during transcription.
+`extra_metadata` — arbitrary JSON object stored with the bot record and returned in all responses.
 
 
 **Supported platforms** (auto-detected from URL):

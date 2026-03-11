@@ -49,10 +49,14 @@ async def list_action_items(
             "due_date": i.due_date,
             "done": i.done,
             "created_at": i.created_at.isoformat(),
-            "meeting_url": bots.get(i.bot_id, {}) and bots[i.bot_id].meeting_url,
-            "meeting_platform": bots.get(i.bot_id, {}) and bots[i.bot_id].meeting_platform,
-            "bot_name": bots.get(i.bot_id, {}) and bots[i.bot_id].bot_name,
-            "started_at": bots.get(i.bot_id) and bots[i.bot_id].started_at and bots[i.bot_id].started_at.isoformat(),
+            "meeting_url": bots[i.bot_id].meeting_url if i.bot_id in bots else None,
+            "meeting_platform": bots[i.bot_id].meeting_platform if i.bot_id in bots else None,
+            "bot_name": bots[i.bot_id].bot_name if i.bot_id in bots else None,
+            "started_at": (
+                bots[i.bot_id].started_at.isoformat()
+                if i.bot_id in bots and bots[i.bot_id].started_at
+                else None
+            ),
         }
         for i in items
     ]
