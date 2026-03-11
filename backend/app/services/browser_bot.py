@@ -11,9 +11,11 @@ Strategy:
 """
 
 import asyncio
+import base64
 import contextlib
 import logging
 import os
+import struct
 import subprocess
 import time
 from pathlib import Path
@@ -25,6 +27,9 @@ logger = logging.getLogger(__name__)
 
 PULSE_SINK_NAME = "meetingbot_sink"
 PULSE_MIC_NAME  = "meetingbot_mic"   # TTS audio plays here; Chrome captures it as mic input
+
+_WAV_HEADER_SIZE = 44          # standard WAV header length (bytes)
+_PCM_BYTES_PER_S = 32_000      # 16 kHz, mono, s16le = 32 000 bytes/s
 SCREENSHOT_DIR = Path("/app/data/screenshots")
 _SCREENSHOT_MAX_AGE_S = 7 * 86_400  # 7 days
 
@@ -1637,6 +1642,96 @@ async def _speak_in_meeting(
 _LEAVE_KEYWORDS = frozenset({"leave", "bye", "goodbye", "exit", "stop", "quit"})
 
 
+def _pcm_to_wav(pcm: bytes) -> bytes:
+    """Wrap raw s16le PCM (16 kHz, mono) in a valid WAV container."""
+    n = len(pcm)
+    return struct.pack(
+        '<4sI4s4sIHHIIHH4sI',
+        b'RIFF', 36 + n, b'WAVE',
+        b'fmt ', 16, 1, 1,   # PCM, mono
+        16000,               # sample rate
+        32000,               # byte rate (16000 * 1 ch * 2 bytes)
+        2,                   # block align
+        16,                  # bits per sample
+        b'data', n,
+    ) + pcm
+
+
+async def _live_transcription_loop(
+    audio_path: str,
+    live_transcript: list,
+    chunk_interval: int = 15,
+) -> None:
+    """Periodically read new PCM data from the recording WAV, transcribe it
+    inline with Gemini, and append plain text to *live_transcript*.
+
+    Runs concurrently with _mention_monitor.  The shared list provides:
+    - Live meeting context for answering questions about the meeting
+    - Audio-based bot-name detection when DOM captions are unavailable
+    """
+    from app.config import settings as _cfg
+    if not _cfg.GEMINI_API_KEY:
+        logger.warning("Live transcription: GEMINI_API_KEY not set — disabled")
+        return
+    try:
+        import google.generativeai as genai
+        genai.configure(api_key=_cfg.GEMINI_API_KEY)
+        model = genai.GenerativeModel("gemini-2.0-flash")
+    except ImportError:
+        logger.warning("Live transcription: google-generativeai not installed")
+        return
+
+    file_pos  = _WAV_HEADER_SIZE        # skip WAV header on first read
+    MIN_BYTES = _PCM_BYTES_PER_S * 2    # need at least 2 s of new audio
+    GUARD     = _PCM_BYTES_PER_S        # 1-s safety margin at end (avoid partial writes)
+    MAX_READ  = _PCM_BYTES_PER_S * 20   # cap each chunk at 20 s
+
+    prompt = (
+        "Transcribe this meeting audio clip. Return ONLY the spoken words as plain "
+        "text — no timestamps, no speaker labels, no markdown. "
+        "If the clip is completely silent or contains only background noise, return nothing."
+    )
+    logger.info("Live transcription loop started (interval=%ds)", chunk_interval)
+
+    while True:
+        await asyncio.sleep(chunk_interval)
+        try:
+            if not os.path.exists(audio_path):
+                continue
+            file_size = os.path.getsize(audio_path)
+            # Leave a 1-s guard to avoid reading bytes still being written by ffmpeg
+            safe_end  = max(_WAV_HEADER_SIZE, file_size - GUARD)
+            new_bytes = safe_end - file_pos
+            if new_bytes < MIN_BYTES:
+                continue
+
+            read_bytes = min(new_bytes, MAX_READ)
+            read_from  = safe_end - read_bytes   # always the most recent audio
+            with open(audio_path, 'rb') as f:
+                f.seek(max(read_from, _WAV_HEADER_SIZE))
+                pcm = f.read(read_bytes)
+            file_pos = safe_end   # advance cursor
+
+            if len(pcm) < MIN_BYTES:
+                continue
+
+            wav_b64  = base64.b64encode(_pcm_to_wav(pcm)).decode()
+            response = await model.generate_content_async(
+                [{"mime_type": "audio/wav", "data": wav_b64}, prompt],
+                generation_config={"temperature": 0.0, "max_output_tokens": 1024},
+            )
+            text = (response.text or "").strip()
+            if text:
+                live_transcript.append(text)
+                del live_transcript[:-60]   # keep ~15 min at 15-s intervals
+                logger.info("Live transcript chunk (%d chars): %r…", len(text), text[:120])
+
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.debug("Live transcription chunk error: %s", exc)
+
+
 async def _mention_monitor(
     page: Page,
     platform: str,
@@ -1646,6 +1741,7 @@ async def _mention_monitor(
     gemini_api_key: str | None = None,
     start_muted: bool = True,
     leave_event: asyncio.Event | None = None,
+    live_transcript: list | None = None,
 ) -> None:
     """Coroutine that polls live captions AND chat messages, replying when the
     bot's name is mentioned in either source.
@@ -1662,6 +1758,7 @@ async def _mention_monitor(
     bot_name_lower = bot_name.lower()
     _poll_count = 0
     _empty_streak = 0
+    last_audio_idx: int = 0   # tracks which live_transcript entries we've already checked
     logger.info("Mention monitor started for bot '%s' on %s", bot_name, platform)
 
     # Open chat panel at startup so incoming messages are visible in the DOM.
@@ -1833,6 +1930,53 @@ async def _mention_monitor(
                         if reply:
                             last_response_at = time.monotonic()
                             await _dispatch_reply(reply, "chat")
+
+        # ── Audio transcript polling (from _live_transcription_loop) ─────────
+        # Provides voice bot-name detection and meeting context when DOM captions
+        # are unavailable (e.g. Google Meet 2026 UI changes).
+        if live_transcript is not None:
+            new_chunks = live_transcript[last_audio_idx:]
+            if new_chunks:
+                last_audio_idx = len(live_transcript)
+                # Merge into caption_log so all context-building paths benefit
+                caption_log.extend(new_chunks)
+                caption_log = caption_log[-60:]
+                new_audio_text = " ".join(new_chunks)
+
+                if (
+                    bot_name_lower in new_audio_text.lower()
+                    and time.monotonic() - last_response_at >= 8
+                ):
+                    mention_pos   = new_audio_text.lower().find(bot_name_lower)
+                    after_mention = new_audio_text[mention_pos + len(bot_name_lower):].lstrip(" ,:!?-").strip()
+
+                    # Leave command check
+                    if leave_event and any(kw in after_mention.lower() for kw in _LEAVE_KEYWORDS):
+                        logger.info("Leave command detected via audio: %r", after_mention)
+                        await _dispatch_reply("Understood, leaving the meeting now. Goodbye!", "audio")
+                        await asyncio.sleep(2)
+                        leave_event.set()
+                        return
+
+                    meeting_ctx = " ".join(caption_log[:-1])[-3000:]
+                    if after_mention:
+                        context = (
+                            (meeting_ctx + "\n" if meeting_ctx else "") +
+                            f"[Voice request to {bot_name}]: {after_mention}"
+                        )
+                    else:
+                        context = " ".join(caption_log)[-3000:]
+                    uses_voice = mention_response_mode in ("voice", "both")
+                    try:
+                        reply = await _intel.generate_mention_response(
+                            context, bot_name, for_voice=uses_voice, source="caption"
+                        )
+                    except Exception as exc:
+                        logger.warning("generate_mention_response error: %s", exc)
+                        reply = ""
+                    if reply:
+                        last_response_at = time.monotonic()
+                        await _dispatch_reply(reply, "audio")
 
 
 async def _wait_for_meeting_end(
@@ -2057,6 +2201,15 @@ async def run_browser_bot(
 
             _participants: set[str] = set()
 
+            # Shared live transcript: filled by _live_transcription_loop,
+            # consumed by _mention_monitor for context and voice name detection.
+            live_transcript: list = []
+            transcription_task: asyncio.Task | None = None
+            if ffmpeg_proc is not None:
+                transcription_task = asyncio.create_task(
+                    _live_transcription_loop(audio_path, live_transcript, chunk_interval=15)
+                )
+
             # Run mention monitor concurrently with the meeting-end watcher
             monitor_task: asyncio.Task | None = None
             leave_event = asyncio.Event()
@@ -2070,6 +2223,7 @@ async def run_browser_bot(
                         gemini_api_key=_settings.GEMINI_API_KEY or None,
                         start_muted=start_muted,
                         leave_event=leave_event,
+                        live_transcript=live_transcript,
                     )
                 )
 
@@ -2093,7 +2247,11 @@ async def run_browser_bot(
             else:
                 exit_reason = end_task.result()
 
-            # Cancel the monitor cleanly when the meeting ends
+            # Cancel background tasks cleanly when the meeting ends
+            if transcription_task is not None:
+                transcription_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await transcription_task
             if monitor_task is not None:
                 monitor_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
@@ -2140,7 +2298,11 @@ async def run_browser_bot(
             }
 
         finally:
-            # Always cancel the monitor task (handles external cancellation of run_browser_bot)
+            # Always cancel background tasks (handles external cancellation of run_browser_bot)
+            if transcription_task is not None and not transcription_task.done():
+                transcription_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await transcription_task
             if monitor_task is not None and not monitor_task.done():
                 monitor_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError, Exception):
