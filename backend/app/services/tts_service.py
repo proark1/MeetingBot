@@ -187,19 +187,33 @@ async def play_audio(path: str, sink: str) -> None:
     Blocks until playback is complete, then deletes the temp file.
     Uses ffmpeg which is already present in the recording pipeline.
     """
+    import subprocess as _sp
     try:
+        # Inherit current process env but explicitly carry PulseAudio vars so
+        # the ffmpeg subprocess connects to the same PulseAudio server as the
+        # bot process even when launched from within an asyncio executor.
+        pulse_env = {**os.environ}
+        rt = os.environ.get("XDG_RUNTIME_DIR", "/tmp/runtime-meetingbot")
+        pulse_env.setdefault("PULSE_SERVER", f"unix:{rt}/pulse/native")
+
         proc = await asyncio.create_subprocess_exec(
             "ffmpeg", "-y", "-i", path,
             "-f", "pulse", sink,
             stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+            env=pulse_env,
         )
         try:
-            await asyncio.wait_for(proc.wait(), timeout=15.0)
+            _, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=15.0)
         except asyncio.TimeoutError:
             proc.kill()
             logger.warning("TTS playback timed out — killed ffmpeg")
-        logger.debug("TTS playback complete: %s", path)
+            return
+        if proc.returncode != 0:
+            stderr_text = (stderr_bytes or b"").decode(errors="replace").strip()
+            logger.warning("TTS playback ffmpeg error (rc=%d): %s", proc.returncode, stderr_text[-300:])
+        else:
+            logger.debug("TTS playback complete: %s", path)
     except Exception as exc:
         logger.warning("TTS playback failed: %s", exc)
     finally:

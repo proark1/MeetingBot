@@ -165,8 +165,8 @@ def _create_pulse_sink() -> Optional[str]:
             logger.warning("Could not create null sink: %s", r.stderr)
             return None
         idx = r.stdout.strip()
-        # Make it the default so Chromium uses it automatically
-        _run(["pacmd", "set-default-sink", PULSE_SINK_NAME])
+        # Make it the default so Chromium uses it for audio output automatically
+        _run(["pactl", "set-default-sink", PULSE_SINK_NAME])
         logger.info("PulseAudio null sink ready (module %s)", idx)
         return idx
     except Exception as exc:
@@ -191,8 +191,10 @@ def _create_pulse_mic() -> Optional[str]:
             logger.warning("Could not create TTS mic sink: %s", r.stderr)
             return None
         idx = r.stdout.strip()
-        # Make the monitor the default SOURCE so Chrome uses it as its microphone
-        _run(["pacmd", "set-default-source", f"{PULSE_MIC_NAME}.monitor"])
+        # Make the monitor the default SOURCE so Chrome uses it as its microphone.
+        # When TTS audio is played into PULSE_MIC_NAME, Chrome captures it via
+        # this monitor and transmits it to meeting participants.
+        _run(["pactl", "set-default-source", f"{PULSE_MIC_NAME}.monitor"])
         logger.info("PulseAudio TTS mic sink ready (module %s)", idx)
         return idx
     except Exception as exc:
@@ -208,23 +210,116 @@ def _unload_pulse_sink(idx: str) -> None:
 
 
 def _move_chrome_audio(sink: str = PULSE_SINK_NAME) -> None:
-    """Belt-and-suspenders: move any Chrome sink-inputs to our virtual sink."""
+    """Move Chrome's audio output (sink-inputs) to our virtual recording sink.
+
+    This ensures ffmpeg captures Google Meet audio.  Uses the long-form
+    'pactl list sink-inputs' so we can match the application name per-entry
+    rather than checking if *any* entry belongs to Chrome.
+    """
     try:
-        r = _run(["pactl", "list", "short", "sink-inputs"])
-        for line in r.stdout.splitlines():
-            parts = line.split()
-            if not parts:
-                continue
-            sink_input_id = parts[0]
-            # Check whether this input belongs to Chromium
-            detail = _run(["pactl", "list", "sink-inputs"])
-            if "chromium" in detail.stdout.lower() or "chrome" in detail.stdout.lower():
-                subprocess.run(
-                    ["pactl", "move-sink-input", sink_input_id, sink],
-                    capture_output=True, timeout=5,
-                )
+        detail = _run(["pactl", "list", "sink-inputs"])
+        if detail.returncode != 0:
+            return
+
+        moved = 0
+        current_id: str | None = None
+        is_chrome = False
+        for raw_line in detail.stdout.splitlines():
+            line = raw_line.strip()
+            if line.startswith("Sink Input #"):
+                # Process previous entry
+                if current_id and is_chrome:
+                    r = subprocess.run(
+                        ["pactl", "move-sink-input", current_id, sink],
+                        capture_output=True, timeout=5,
+                    )
+                    if r.returncode == 0:
+                        moved += 1
+                        logger.info("Moved Chrome sink-input %s → %s", current_id, sink)
+                    else:
+                        logger.debug("move-sink-input %s failed: %s", current_id, r.stderr.strip())
+                current_id = line.split("#", 1)[1].strip()
+                is_chrome = False
+            elif current_id and ("application.name" in line or "application.process.binary" in line):
+                val = line.lower()
+                if "chromium" in val or "chrome" in val:
+                    is_chrome = True
+
+        # Handle last entry
+        if current_id and is_chrome:
+            r = subprocess.run(
+                ["pactl", "move-sink-input", current_id, sink],
+                capture_output=True, timeout=5,
+            )
+            if r.returncode == 0:
+                moved += 1
+                logger.info("Moved Chrome sink-input %s → %s", current_id, sink)
+
+        if moved == 0:
+            logger.debug("_move_chrome_audio: no Chrome sink-inputs found to move")
     except Exception as exc:
-        logger.debug("move-sink-input: %s", exc)
+        logger.debug("_move_chrome_audio failed: %s", exc)
+
+
+def _move_chrome_source_output(source: str = f"{PULSE_MIC_NAME}.monitor") -> None:
+    """Move Chrome's microphone capture (source-outputs) to meetingbot_mic.monitor.
+
+    This ensures that when TTS audio is played into meetingbot_mic, Chrome
+    picks it up and transmits it to Google Meet as the bot's voice.
+    """
+    try:
+        detail = _run(["pactl", "list", "source-outputs"])
+        if detail.returncode != 0:
+            return
+
+        moved = 0
+        current_id: str | None = None
+        is_chrome = False
+        for raw_line in detail.stdout.splitlines():
+            line = raw_line.strip()
+            if line.startswith("Source Output #"):
+                if current_id and is_chrome:
+                    r = subprocess.run(
+                        ["pactl", "move-source-output", current_id, source],
+                        capture_output=True, timeout=5,
+                    )
+                    if r.returncode == 0:
+                        moved += 1
+                        logger.info("Moved Chrome source-output %s → %s", current_id, source)
+                    else:
+                        logger.debug("move-source-output %s failed: %s", current_id, r.stderr.strip())
+                current_id = line.split("#", 1)[1].strip()
+                is_chrome = False
+            elif current_id and ("application.name" in line or "application.process.binary" in line):
+                val = line.lower()
+                if "chromium" in val or "chrome" in val:
+                    is_chrome = True
+
+        # Handle last entry
+        if current_id and is_chrome:
+            r = subprocess.run(
+                ["pactl", "move-source-output", current_id, source],
+                capture_output=True, timeout=5,
+            )
+            if r.returncode == 0:
+                moved += 1
+                logger.info("Moved Chrome source-output %s → %s", current_id, source)
+
+        if moved == 0:
+            logger.debug("_move_chrome_source_output: no Chrome source-outputs found")
+    except Exception as exc:
+        logger.debug("_move_chrome_source_output failed: %s", exc)
+
+
+def _sync_chrome_audio_routing() -> None:
+    """Route Chrome's audio output to the recording sink and its mic to the TTS source.
+
+    Call this once immediately after Chrome joins the meeting, then periodically
+    throughout the call to handle WebRTC stream restarts (e.g. after network
+    reconnects or device changes in Google Meet).
+    """
+    _move_chrome_audio()
+    _move_chrome_source_output()
 
 
 # ── Xvfb & ffmpeg ─────────────────────────────────────────────────────────────
@@ -253,6 +348,12 @@ def _start_xvfb(display: str = ":99") -> Optional[subprocess.Popen]:
 
 def _start_ffmpeg(audio_path: str) -> Optional[subprocess.Popen]:
     try:
+        # Carry PulseAudio server address explicitly so ffmpeg connects to the
+        # same server even if XDG_RUNTIME_DIR is not set in the child env.
+        pulse_env = {**os.environ}
+        rt = os.environ.get("XDG_RUNTIME_DIR", "/tmp/runtime-meetingbot")
+        pulse_env.setdefault("PULSE_SERVER", f"unix:{rt}/pulse/native")
+
         proc = subprocess.Popen(
             [
                 "ffmpeg", "-y",
@@ -260,7 +361,9 @@ def _start_ffmpeg(audio_path: str) -> Optional[subprocess.Popen]:
                 "-ar", "16000", "-ac", "1", "-acodec", "pcm_s16le",
                 audio_path,
             ],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env=pulse_env,
         )
         time.sleep(0.5)
         if proc.poll() is None:
@@ -2063,12 +2166,9 @@ async def _wait_for_meeting_end(
     end_texts = _END_TEXTS.get(platform, [])
     deadline  = time.monotonic() + max_s
 
-    # After a few seconds in the meeting, move Chrome audio to our sink
-    # (belt-and-suspenders in case the default-sink setting wasn't picked up)
-    asyncio.get_event_loop().call_later(5, _move_chrome_audio)
-
     alone_since: Optional[float] = None
     _last_participant_scrape = 0.0
+    _last_audio_routing_sync = 0.0   # tracks last PulseAudio re-routing
 
     while time.monotonic() < deadline:
         try:
@@ -2080,8 +2180,17 @@ async def _wait_for_meeting_end(
             logger.info("Page inaccessible — meeting likely ended")
             return "ended"
 
-        # ── Participant name scraping (every 30s) ─────────────────────────
         now = time.monotonic()
+
+        # ── PulseAudio routing sync (every 15s) ───────────────────────────
+        # Re-route Chrome's audio output to our recording sink and its
+        # microphone to our TTS virtual source.  Run in a thread so the
+        # sync pactl calls don't block the asyncio event loop.
+        if now - _last_audio_routing_sync >= 15:
+            _last_audio_routing_sync = now
+            await asyncio.get_event_loop().run_in_executor(None, _sync_chrome_audio_routing)
+
+        # ── Participant name scraping (every 30s) ─────────────────────────
         if participants is not None and now - _last_participant_scrape >= 30:
             _last_participant_scrape = now
             found = await _collect_participants(page, platform)
@@ -2167,7 +2276,9 @@ async def run_browser_bot(
     xvfb_proc = _start_xvfb(":99")
     headless  = xvfb_proc is None   # fall back to headless if no Xvfb
 
-    env: dict = {}
+    # Start with the full current process environment so Chrome inherits PATH,
+    # HOME, XDG_RUNTIME_DIR, etc.  We then overlay our PulseAudio overrides.
+    env: dict = dict(os.environ)
     if xvfb_proc:
         env["DISPLAY"] = ":99"
     if pulse_ok:
@@ -2185,6 +2296,11 @@ async def run_browser_bot(
         # When we play TTS audio into PULSE_MIC_NAME, Chrome captures it
         # and broadcasts it to meeting participants as the bot's voice.
         env["PULSE_SOURCE"] = f"{PULSE_MIC_NAME}.monitor"
+        # Disable PipeWire so Chrome uses PulseAudio directly.
+        # On systems with both installed, Chrome may prefer PipeWire which
+        # ignores PULSE_SINK/PULSE_SOURCE env vars, causing silent recording.
+        env["PIPEWIRE_RUNTIME_DIR"] = ""
+        env["DISABLE_RTKIT"] = "1"
 
     launch_args = [
         "--no-sandbox",
@@ -2205,6 +2321,9 @@ async def run_browser_bot(
         # default device; Chrome will use it for both output and mic input.
         "--use-fake-ui-for-media-stream",
         "--autoplay-policy=no-user-gesture-required",
+        # Ensure Chrome's WebRTC uses ALSA/PulseAudio, not a fake device
+        "--disable-features=WebRtcHideLocalIpsWithMdns",
+        "--enforce-webrtc-ip-permission-check=false",
         # Performance
         "--disable-background-timer-throttling",
         "--disable-backgrounding-occluded-windows",
@@ -2216,7 +2335,7 @@ async def run_browser_bot(
         browser: Browser = await pw.chromium.launch(
             headless=headless,
             args=launch_args,
-            env=env or None,
+            env=env,
         )
         ctx: BrowserContext = await browser.new_context(
             user_agent=_USER_AGENT,
@@ -2260,9 +2379,9 @@ async def run_browser_bot(
             await _screenshot(page, f"{platform}_in_meeting")
             logger.info("Bot is in the meeting — monitoring for end…")
 
-            # Post-admission mic check: Google Meet sometimes auto-mutes on admit.
-            # When start_muted=False, ensure the mic is actually on now that the
-            # in-call toolbar is fully rendered.
+            # Post-admission mic check: meeting platforms sometimes auto-mute on
+            # admit. When start_muted=False, ensure the mic is actually on now
+            # that the in-call toolbar is fully rendered.
             if not start_muted and platform == "google_meet":
                 try:
                     await asyncio.sleep(1.0)  # let the toolbar settle
@@ -2284,6 +2403,13 @@ async def run_browser_bot(
                         logger.debug("Google Meet: mic state unknown post-admit")
                 except Exception as exc:
                     logger.debug("Post-admit mic check failed: %s", exc)
+
+            # Immediately sync PulseAudio routing: move Chrome's audio output to
+            # meetingbot_sink (so ffmpeg captures meeting audio) and Chrome's mic
+            # input to meetingbot_mic.monitor (so TTS is heard by participants).
+            # The periodic sync in _wait_for_meeting_end handles subsequent drifts.
+            await asyncio.sleep(2.0)  # let Chrome's WebRTC streams fully start
+            await asyncio.get_event_loop().run_in_executor(None, _sync_chrome_audio_routing)
 
             # Enable live captions so the mention monitor can read them
             if respond_on_mention:
