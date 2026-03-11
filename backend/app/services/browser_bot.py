@@ -1514,16 +1514,32 @@ async def _scrape_captions(page: Page, platform: str) -> str:
                             if (isValid(t)) return t;
                         }
                     }
-                    // Last resort: scan all aria-live="polite" regions; pick the one
-                    // with the longest text (likely the caption box, not short announcements).
-                    // Filter out short system messages (< 20 chars) to reduce noise.
+                    // Scan aria-live="assertive" regions — Google Meet 2026 uses
+                    // assertive for caption overlays so screen readers read them immediately.
+                    const assertiveEls = Array.from(document.querySelectorAll('[aria-live="assertive"]'));
+                    for (const el of assertiveEls) {
+                        const t = (el.innerText || el.textContent || '').trim();
+                        if (isValid(t)) return t;
+                    }
+
+                    // Scan aria-live="polite" regions.
                     const liveEls = Array.from(document.querySelectorAll('[aria-live="polite"]'));
                     if (liveEls.length) {
                         const candidates = liveEls
                             .map(el => (el.innerText || el.textContent || '').trim())
-                            .filter(t => t.length >= 20 && isValid(t));
+                            .filter(t => t.length >= 10 && isValid(t));
                         if (candidates.length) {
                             return candidates.reduce((a, b) => a.length >= b.length ? a : b);
+                        }
+                    }
+
+                    // Very broad fallback: any element whose class contains "caption"
+                    // or "transcript" case-insensitively.
+                    const broadRe = /caption|transcript|subtitle/i;
+                    for (const el of document.querySelectorAll('div, span')) {
+                        if (broadRe.test(el.className || '') || broadRe.test(el.getAttribute('data-type') || '')) {
+                            const t = (el.innerText || el.textContent || '').trim();
+                            if (isValid(t) && t.length > 10) return t;
                         }
                     }
                     return '';
@@ -1580,33 +1596,60 @@ async def _scrape_chat_messages(page: Page, platform: str) -> str:
         if platform == "google_meet":
             text = await page.evaluate("""
                 () => {
-                    // Try known message-list containers first
+                    const tryText = el => (el ? (el.innerText || el.textContent || '').trim() : '');
+                    const good    = t  => t && t.length > 3;
+
+                    // 1. Known message-list containers (ordered by specificity)
                     const listSels = [
-                        "div[jsname='xySENc']",
+                        "div[jsname='xySENc']",                        // historical jsname
                         "div[role='list'][aria-label*='message' i]",
                         "div[role='list'][aria-label*='chat' i]",
-                        "div[role='log']",
+                        "div[role='log']",                             // ARIA log region
                         "div[class*='chat'] div[role='list']",
+                        "div[class*='GDhqjd']",                       // 2024-2025 class
+                        "div[class*='oIy2qc']",                       // 2026 variant
+                        "c-wiz div[role='list']",                     // generic CWiz list
                     ];
                     for (const s of listSels) {
                         const el = document.querySelector(s);
-                        if (el) {
-                            const t = (el.innerText || el.textContent || '').trim();
-                            if (t && t.length > 3) return t;
-                        }
+                        const t  = tryText(el);
+                        if (good(t)) return t;
                     }
-                    // Fallback: whole chat panel minus the input/button elements
-                    const panel = document.querySelector(
-                        "div[aria-label='Chat'], div[aria-label='chat' i][role='region'], " +
-                        "div[aria-label='In-call messages'], div[aria-label*='in-call' i]"
-                    );
-                    if (panel) {
-                        const clone = panel.cloneNode(true);
+
+                    // 2. Chat panel containers — strip editable/button children
+                    const panelSels = [
+                        "div[aria-label='In-call messages']",
+                        "div[aria-label*='in-call' i]",
+                        "div[aria-label='Chat']",
+                        "div[aria-label*='chat' i][role='region']",
+                        "div[aria-label*='chat' i][role='dialog']",
+                        "div[data-panel-id='3']",                     // Meet side-panel id
+                        "div[data-panel-id='chat']",
+                    ];
+                    for (const s of panelSels) {
+                        const el = document.querySelector(s);
+                        if (!el) continue;
+                        const clone = el.cloneNode(true);
                         clone.querySelectorAll(
-                            "div[contenteditable], textarea, input, button, form"
+                            "div[contenteditable], textarea, input, button, form, [aria-label*='send' i]"
                         ).forEach(e => e.remove());
-                        const t = (clone.innerText || clone.textContent || '').trim();
-                        if (t && t.length > 3) return t;
+                        const t = tryText(clone);
+                        if (good(t)) return t;
+                    }
+
+                    // 3. Broad sweep: any aside/section with 'chat' in aria-label
+                    for (const el of document.querySelectorAll(
+                        "aside, section, div[role='complementary']"
+                    )) {
+                        const lbl = (el.getAttribute('aria-label') || '').toLowerCase();
+                        if (lbl.includes('chat') || lbl.includes('message')) {
+                            const clone = el.cloneNode(true);
+                            clone.querySelectorAll(
+                                "div[contenteditable], textarea, input, button, form"
+                            ).forEach(e => e.remove());
+                            const t = tryText(clone);
+                            if (good(t)) return t;
+                        }
                     }
                     return '';
                 }
@@ -2060,7 +2103,7 @@ async def _mention_monitor(
 
         if not raw:
             _empty_streak += 1
-            if _empty_streak == 30:
+            if _empty_streak == 30 or (_empty_streak > 30 and _empty_streak % 60 == 0):
                 logger.warning(
                     "Mention monitor: no caption text in 30 polls — "
                     "attempting to re-enable captions"
@@ -2069,6 +2112,38 @@ async def _mention_monitor(
                     await _enable_captions(page, platform)
                 except Exception as exc:
                     logger.warning("Caption re-enable failed: %s", exc)
+                # Dump DOM clues so we can diagnose stale selectors
+                try:
+                    dom_clues = await page.evaluate("""
+                        () => {
+                            const info = {};
+                            // All aria-live regions with their text
+                            info.ariaLive = Array.from(
+                                document.querySelectorAll('[aria-live]')
+                            ).map(el => ({
+                                live: el.getAttribute('aria-live'),
+                                tag:  el.tagName,
+                                cls:  (el.className||'').slice(0,80),
+                                text: (el.innerText||el.textContent||'').trim().slice(0,120),
+                            })).filter(e => e.text);
+                            // Elements with 'caption' in class/aria-label
+                            info.captionEls = Array.from(
+                                document.querySelectorAll(
+                                    '[class*="caption" i],[aria-label*="caption" i],[jsname]'
+                                )
+                            ).slice(0, 20).map(el => ({
+                                tag:     el.tagName,
+                                jsname:  el.getAttribute('jsname'),
+                                cls:     (el.className||'').slice(0,60),
+                                lbl:     el.getAttribute('aria-label'),
+                                text:    (el.innerText||'').trim().slice(0,80),
+                            }));
+                            return info;
+                        }
+                    """)
+                    logger.info("Caption DOM clues: %s", dom_clues)
+                except Exception as exc:
+                    logger.debug("DOM clue dump failed: %s", exc)
         else:
             _empty_streak = 0
 
@@ -2531,13 +2606,27 @@ async def run_browser_bot(
 
             _participants: set[str] = set()
 
-            # Shared live transcript: filled by _live_transcription_loop (when
-            # live_transcription=True), consumed by _mention_monitor for context
-            # and voice-based bot-name detection.
+            # Shared live transcript: filled by _live_transcription_loop,
+            # consumed by _mention_monitor for voice mention detection.
+            # Always start when respond_on_mention=True so the bot can detect
+            # its name being called even when DOM caption selectors are stale.
+            # The live_transcription flag only controls whether a visible
+            # real-time transcript is surfaced to the user (15 s chunks vs
+            # the shorter 8 s chunks used for mention detection only).
             live_transcript: list = []
-            if live_transcription and ffmpeg_proc is not None:
+            from app.config import settings as _s_cfg
+            _gemini_available = bool(_s_cfg.GEMINI_API_KEY) and ffmpeg_proc is not None
+            if live_transcription and _gemini_available:
                 transcription_task = asyncio.create_task(
                     _live_transcription_loop(audio_path, live_transcript, chunk_interval=15)
+                )
+            elif respond_on_mention and _gemini_available:
+                # Lightweight mention-detection-only transcription.
+                # 8 s chunks → ~8 s latency from speech to response.
+                # Results go into live_transcript for _mention_monitor only;
+                # they are NOT stored in the final per-meeting transcript.
+                transcription_task = asyncio.create_task(
+                    _live_transcription_loop(audio_path, live_transcript, chunk_interval=8)
                 )
 
             # Run mention monitor concurrently with the meeting-end watcher
