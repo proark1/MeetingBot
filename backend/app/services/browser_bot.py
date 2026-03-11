@@ -1106,24 +1106,50 @@ async def _enable_captions(page: Page, platform: str) -> None:
         if await _captions_already_active(page, platform):
             logger.debug("Google Meet captions already active — skipping toggle click")
             return
-        await _click(page, [
+        # Use short per-selector timeout (500 ms) so we don't waste 15+ seconds
+        # when none of the selectors match the 2026 Google Meet UI.
+        clicked = await _click(page, [
+            # 2026 exact aria-labels (most reliable)
+            "button[aria-label='Turn on captions']",
+            "button[aria-label='Turn off captions']",
+            # jsname-based (stable internal identifiers)
+            "button[jsname='r8qRAd']",
+            # Partial aria-label matches (older Meet versions)
             "button[aria-label*='caption' i]",
             "button[aria-label*='captions' i]",
             "button[aria-label*='live caption' i]",
             "button[aria-label*='subtitles' i]",
             "div[role='button'][aria-label*='caption' i]",
-        ], timeout=3000)
+        ], timeout=500)
+
+        if not clicked:
+            # Fallback: captions may be hidden inside the ⋮ "More options" menu
+            logger.debug("Google Meet: captions button not found directly — trying ⋮ menu")
+            opened = await _click(page, [
+                "button[aria-label='More options']",
+                "button[aria-label*='More' i][aria-haspopup]",
+                "div[role='button'][aria-label*='More' i]",
+            ], timeout=2000)
+            if opened:
+                await asyncio.sleep(0.5)
+                await _click(page, [
+                    "li[aria-label*='caption' i]",
+                    "div[role='menuitem'][aria-label*='caption' i]",
+                    "li:has-text('captions')",
+                    "span:has-text('captions')",
+                ], timeout=2000)
+
         # Brief wait then verify: if we accidentally toggled OFF, click again
         await asyncio.sleep(1.5)
         if not await _captions_already_active(page, platform):
-            # May have been on already (so we turned them off) — click once more
             await _click(page, [
+                "button[aria-label='Turn on captions']",
                 "button[aria-label*='caption' i]",
                 "button[aria-label*='captions' i]",
                 "button[aria-label*='live caption' i]",
                 "button[aria-label*='subtitles' i]",
                 "div[role='button'][aria-label*='caption' i]",
-            ], timeout=2000)
+            ], timeout=500)
     elif platform == "zoom":
         # Captions may live inside a "More" overflow menu
         await _click(page, [

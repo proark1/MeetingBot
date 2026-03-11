@@ -172,13 +172,13 @@ async def generate_mention_response(
             "Keep the answer to 2–3 short sentences (aim for under 50 words total). "
             "Write in natural spoken language — no bullet points, no markdown, no lists."
         )
-        max_tokens = 200
-    else:
+        max_tokens = 2048  # gemini-2.5-flash uses thinking tokens internally; large
+    else:                  # budget ensures the visible reply is never truncated
         length_rule = (
             "Give a helpful, complete answer in up to 5 sentences. "
             "No markdown formatting."
         )
-        max_tokens = 400
+        max_tokens = 4096
 
     # Label the context correctly so the model treats it as input to answer,
     # not as ongoing speech to continue (which caused "It's currently…" completions).
