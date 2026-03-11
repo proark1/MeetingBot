@@ -1707,7 +1707,19 @@ async def _mention_monitor(
                     bot_name_lower in new_caption_text.lower()
                     and time.monotonic() - last_response_at >= 8
                 ):
-                    context = " ".join(caption_log)[-1500:]
+                    # Extract the specific request made AFTER the bot's name.
+                    # This avoids feeding the model the full caption history as
+                    # if it were a question — we focus on what was actually asked.
+                    mention_pos = new_caption_text.lower().find(bot_name_lower)
+                    after_mention = new_caption_text[mention_pos + len(bot_name_lower):].lstrip(" ,:!?-").strip()
+                    if after_mention:
+                        background = " ".join(caption_log[:-1])[-800:]
+                        context = (
+                            (background + "\n" if background else "") +
+                            f"[Direct request to {bot_name}]: {after_mention}"
+                        )
+                    else:
+                        context = " ".join(caption_log)[-1500:]
                     uses_voice = mention_response_mode in ("voice", "both")
                     try:
                         reply = await _intel.generate_mention_response(
@@ -1743,7 +1755,13 @@ async def _mention_monitor(
                         bot_name_lower in new_chat_text.lower()
                         and time.monotonic() - last_response_at >= 8
                     ):
-                        context = new_chat_text.strip()[-1500:]
+                        # Extract text after the bot name in the chat message
+                        mention_pos = new_chat_text.lower().find(bot_name_lower)
+                        after_mention = new_chat_text[mention_pos + len(bot_name_lower):].lstrip(" ,:!?-").strip()
+                        context = (
+                            f"[Direct chat message to {bot_name}]: {after_mention}"
+                            if after_mention else new_chat_text.strip()[-1500:]
+                        )
                         uses_voice = mention_response_mode in ("voice", "both")
                         try:
                             reply = await _intel.generate_mention_response(

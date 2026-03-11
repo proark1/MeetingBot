@@ -64,9 +64,10 @@ class Bot(Base):
     mention_response_mode: Mapped[str] = mapped_column(String(16), default="text")
     tts_provider: Mapped[str] = mapped_column(String(16), default="edge")
 
-    # Whether the bot joins with its microphone muted (True = muted, the default)
-    # Set to False to join with mic on (e.g. for TTS-only bots that always speak)
-    start_muted: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Whether the bot joins with its microphone muted.
+    # False (default) — mic is on so voice responses play immediately.
+    # True — bot joins muted and toggles mic only while speaking TTS.
+    start_muted: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Arbitrary caller metadata
     extra_metadata: Mapped[dict] = mapped_column(JSON, default=dict)

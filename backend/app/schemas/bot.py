@@ -65,11 +65,11 @@ class BotCreate(BaseModel):
         ),
     )
     start_muted: bool = Field(
-        default=True,
+        default=False,
         description=(
             "Whether the bot joins with its microphone muted. "
-            "True (default) — bot joins muted and only unmutes briefly when speaking TTS. "
-            "False — bot joins with mic on (useful when you always want voice output active)."
+            "False (default) — bot joins with mic on so TTS plays immediately. "
+            "True — bot joins muted and unmutes briefly only while speaking TTS."
         ),
     )
     extra_metadata: dict[str, Any] = {}
@@ -114,7 +114,7 @@ class BotSummary(BaseModel):
     respond_on_mention: bool = True
     mention_response_mode: str = "text"
     tts_provider: str = "edge"
-    start_muted: bool = True
+    start_muted: bool = False
     extra_metadata: dict[str, Any] = {}
     is_demo_transcript: bool = False
 
@@ -177,7 +177,7 @@ class BotResponse(BaseModel):
         description="TTS engine: 'edge' (Microsoft Edge TTS) or 'gemini' (Gemini TTS).",
     )
     start_muted: bool = Field(
-        default=True,
+        default=False,
         description="Whether the bot joined with its microphone muted.",
     )
     extra_metadata: dict[str, Any] = {}
