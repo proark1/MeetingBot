@@ -2452,6 +2452,9 @@ async def run_browser_bot(
         page = await ctx.new_page()
         await _apply_stealth(page)
 
+        transcription_task: asyncio.Task | None = None
+        monitor_task:       asyncio.Task | None = None
+
         try:
             logger.info(
                 "Browser bot starting: %s  platform=%s  name='%s'",
@@ -2515,7 +2518,7 @@ async def run_browser_bot(
             # The periodic sync in _wait_for_meeting_end handles subsequent drifts.
             await asyncio.sleep(2.0)  # let Chrome's WebRTC streams fully start
             await asyncio.get_event_loop().run_in_executor(
-                None, functools.partial(_sync_chrome_audio_routing, pulse_sink, pulse_mic, pulse_source)
+                None, functools.partial(_sync_chrome_audio_routing, pulse_sink, pulse_mic, pulse_source_name)
             )
 
             # Enable live captions so the mention monitor can read them
@@ -2532,14 +2535,12 @@ async def run_browser_bot(
             # live_transcription=True), consumed by _mention_monitor for context
             # and voice-based bot-name detection.
             live_transcript: list = []
-            transcription_task: asyncio.Task | None = None
             if live_transcription and ffmpeg_proc is not None:
                 transcription_task = asyncio.create_task(
                     _live_transcription_loop(audio_path, live_transcript, chunk_interval=15)
                 )
 
             # Run mention monitor concurrently with the meeting-end watcher
-            monitor_task: asyncio.Task | None = None
             leave_event = asyncio.Event()
             if respond_on_mention:
                 from app.config import settings as _settings
