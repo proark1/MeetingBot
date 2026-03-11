@@ -271,47 +271,74 @@ def _move_chrome_source_output(source: str = f"{PULSE_MIC_NAME}.monitor") -> Non
 
     This ensures that when TTS audio is played into meetingbot_mic, Chrome
     picks it up and transmits it to Google Meet as the bot's voice.
+
+    Strategy: move ALL source-outputs that are NOT ffmpeg/arecord/parecord.
+    This is belt-and-suspenders — Chrome's WebRTC stream may use an app name
+    other than "chromium" (e.g. "chrome", "Chromium", or just the binary name),
+    and after disabling WebRtcPipeWireCapture it will appear as a PulseAudio
+    source-output.  We skip only known recorder processes.
     """
+    SKIP_APPS = {"ffmpeg", "ffmpeg-static", "arecord", "parecord", "parec"}
     try:
         detail = _run(["pactl", "list", "source-outputs"])
         if detail.returncode != 0:
             return
 
-        moved = 0
-        current_id: str | None = None
-        is_chrome = False
+        # Parse long-form output into per-entry dicts
+        entries: list[dict] = []
+        current: dict | None = None
         for raw_line in detail.stdout.splitlines():
             line = raw_line.strip()
             if line.startswith("Source Output #"):
-                if current_id and is_chrome:
-                    r = subprocess.run(
-                        ["pactl", "move-source-output", current_id, source],
-                        capture_output=True, timeout=5,
-                    )
-                    if r.returncode == 0:
-                        moved += 1
-                        logger.info("Moved Chrome source-output %s → %s", current_id, source)
-                    else:
-                        logger.debug("move-source-output %s failed: %s", current_id, r.stderr.strip())
-                current_id = line.split("#", 1)[1].strip()
-                is_chrome = False
-            elif current_id and ("application.name" in line or "application.process.binary" in line):
-                val = line.lower()
-                if "chromium" in val or "chrome" in val:
-                    is_chrome = True
+                if current is not None:
+                    entries.append(current)
+                current = {"id": line.split("#", 1)[1].strip(), "app": ""}
+            elif current is not None and ("application.name" in line or "application.process.binary" in line):
+                # e.g.  application.name = "Chromium"
+                val = line.split("=", 1)[-1].strip().strip('"').lower()
+                if val:
+                    current["app"] = val
+        if current is not None:
+            entries.append(current)
 
-        # Handle last entry
-        if current_id and is_chrome:
+        if not entries:
+            logger.debug("_move_chrome_source_output: no source-outputs found at all")
+            return
+
+        logger.debug(
+            "_move_chrome_source_output: found %d source-output(s): %s",
+            len(entries),
+            [(e["id"], e["app"]) for e in entries],
+        )
+
+        moved = 0
+        for entry in entries:
+            if entry["app"] in SKIP_APPS:
+                logger.debug("Skipping source-output %s (app=%s)", entry["id"], entry["app"])
+                continue
             r = subprocess.run(
-                ["pactl", "move-source-output", current_id, source],
+                ["pactl", "move-source-output", entry["id"], source],
                 capture_output=True, timeout=5,
             )
             if r.returncode == 0:
                 moved += 1
-                logger.info("Moved Chrome source-output %s → %s", current_id, source)
+                logger.info(
+                    "Moved source-output %s (app=%s) → %s",
+                    entry["id"], entry["app"], source,
+                )
+            else:
+                logger.debug(
+                    "move-source-output %s failed: %s",
+                    entry["id"], r.stderr.decode(errors="replace").strip(),
+                )
 
         if moved == 0:
-            logger.info("_move_chrome_source_output: no Chrome source-outputs active (mic not yet open or already routed)")
+            logger.info(
+                "_move_chrome_source_output: no source-outputs moved to %s "
+                "(Chrome mic not yet open, already routed, or using PipeWire — "
+                "check --disable-features=WebRtcPipeWireCapture is in launch args)",
+                source,
+            )
     except Exception as exc:
         logger.debug("_move_chrome_source_output failed: %s", exc)
 
@@ -2356,8 +2383,12 @@ async def run_browser_bot(
         # default device; Chrome will use it for both output and mic input.
         "--use-fake-ui-for-media-stream",
         "--autoplay-policy=no-user-gesture-required",
-        # Ensure Chrome's WebRTC uses ALSA/PulseAudio, not a fake device
-        "--disable-features=WebRtcHideLocalIpsWithMdns",
+        # Ensure Chrome's WebRTC uses ALSA/PulseAudio, not a fake device.
+        # WebRtcPipeWireCapture: force PulseAudio for mic capture — prevents
+        # Chrome from using PipeWire (which bypasses our virtual null-sink mic)
+        # so that source-outputs appear in `pactl list source-outputs` and TTS
+        # audio routed into meetingbot_mic is captured by WebRTC.
+        "--disable-features=WebRtcHideLocalIpsWithMdns,WebRtcPipeWireCapture",
         "--enforce-webrtc-ip-permission-check=false",
         # Performance
         "--disable-background-timer-throttling",
