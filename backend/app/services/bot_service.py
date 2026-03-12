@@ -322,6 +322,7 @@ async def run_bot_lifecycle(bot_id: str, db_factory) -> None:
                         start_muted=getattr(bot, "start_muted", False),
                         live_transcription=getattr(bot, "live_transcription", False),
                         on_live_transcript_entry=on_live_entry,
+                        gemini_api_key=settings.GEMINI_API_KEY or "",
                     )
 
                     if bot_result["success"]:

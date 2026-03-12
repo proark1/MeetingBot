@@ -2204,6 +2204,271 @@ async def _streaming_transcription_loop(
             logger.warning("Streaming transcription frame error (%s): %s", type(exc).__name__, exc)
 
 
+# ── Gemini Live API loop ──────────────────────────────────────────────────────
+
+_LIVE_MODEL      = "gemini-2.5-flash-native-audio"
+_LIVE_CHUNK_MS   = 100                                   # send 100 ms of PCM per frame
+_LIVE_CHUNK_BYTES = _PCM_BYTES_PER_S * _LIVE_CHUNK_MS // 1000   # bytes per 100 ms frame
+_LIVE_GUARD_BYTES = _PCM_BYTES_PER_S                     # 1-s guard against partial writes
+_LIVE_SESSION_S   = 600                                  # reconnect every 10 min to refresh context
+
+
+def _build_live_system_instruction(
+    bot_name: str,
+    structured_transcript: list,
+) -> str:
+    """Build the system instruction injected into each Gemini Live session."""
+    if structured_transcript:
+        ctx_lines = "\n".join(
+            f"[{e.get('timestamp', 0):.0f}s] {e.get('speaker','?')}: {e.get('text','')}"
+            for e in structured_transcript[-40:]   # last 40 entries ≈ ~10 min
+        )
+        context_block = f"\nMeeting transcript so far (for context only — do not re-read or repeat this):\n{ctx_lines}\n"
+    else:
+        context_block = ""
+
+    return (
+        f"You are '{bot_name}', an AI assistant attending a meeting as a silent observer.\n"
+        f"You are LISTENING to the live meeting audio.\n\n"
+        f"Your two jobs:\n"
+        f"1. TRANSCRIBE what participants say (you will see the transcription appear automatically).\n"
+        f"2. RESPOND in voice ONLY when a participant addresses you by name '{bot_name}'.\n"
+        f"   - When addressed, answer helpfully in 2-3 natural spoken sentences.\n"
+        f"   - Use the meeting context provided below to answer questions about this meeting.\n"
+        f"   - For general knowledge questions, use your own knowledge.\n"
+        f"   - If you were just greeted or your name was called without a question, "
+        f"briefly acknowledge and offer to help.\n"
+        f"   - Do NOT respond to speech not directed at you.\n"
+        f"   - Do NOT comment on the meeting unless asked.\n"
+        f"   - Speak naturally — no bullet points, no markdown.\n"
+        f"{context_block}"
+    )
+
+
+async def _gemini_live_loop(
+    audio_path: str,
+    bot_name: str,
+    live_transcript: list,
+    structured_transcript: list,
+    on_transcript_entry=None,
+    mention_response_mode: str = "both",
+    page=None,
+    platform: str = "google_meet",
+    start_muted: bool = True,
+    pulse_mic: str = PULSE_MIC_NAME,
+    gemini_api_key: str = "",
+) -> None:
+    """Real-time Gemini Live audio loop.
+
+    Streams the meeting audio into a Gemini Live session:
+    - Text responses  → live_transcript + structured_transcript + on_transcript_entry
+    - Audio responses → played back into the meeting via pulse_mic when the bot is addressed
+
+    Reconnects every _LIVE_SESSION_S seconds to refresh the system instruction with
+    updated meeting context.
+    """
+    try:
+        import google.genai as genai_live
+        from google.genai import types as genai_types
+    except ImportError:
+        logger.warning(
+            "google-genai not installed — Gemini Live unavailable. "
+            "Run: pip install 'google-genai>=1.0.0'. "
+            "Falling back to VAD streaming loop."
+        )
+        return  # caller will start _streaming_transcription_loop as fallback
+
+    if not gemini_api_key:
+        logger.warning("Gemini Live: no API key — disabled")
+        return
+
+    client = genai_live.Client(api_key=gemini_api_key)
+    file_pos = _WAV_HEADER_SIZE   # cursor into growing WAV; skip WAV header on first read
+    session_start = time.monotonic()
+    session_count = 0
+
+    logger.info("Gemini Live loop started for bot '%s'", bot_name)
+
+    while True:
+        session_count += 1
+        system_instruction = _build_live_system_instruction(bot_name, structured_transcript)
+        config = genai_types.LiveConnectConfig(
+            response_modalities=["AUDIO", "TEXT"],
+            system_instruction=system_instruction,
+            speech_config=genai_types.SpeechConfig(
+                voice_config=genai_types.VoiceConfig(
+                    prebuilt_voice_config=genai_types.PrebuiltVoiceConfig(voice_name="Aoede")
+                )
+            ),
+        )
+
+        try:
+            logger.info("Gemini Live: opening session #%d", session_count)
+            async with client.aio.live.connect(model=_LIVE_MODEL, config=config) as session:
+                session_start = time.monotonic()
+                audio_buffer: bytearray = bytearray()
+                transcript_buffer: list[str] = []
+                turn_start_ts: float = (file_pos - _WAV_HEADER_SIZE) / _PCM_BYTES_PER_S
+
+                async def _sender() -> None:
+                    """Stream PCM chunks from the growing WAV file into the session."""
+                    nonlocal file_pos
+                    while True:
+                        await asyncio.sleep(_LIVE_CHUNK_MS / 1000)
+                        try:
+                            if not os.path.exists(audio_path):
+                                continue
+                            file_size = os.path.getsize(audio_path)
+                            safe_end = max(_WAV_HEADER_SIZE, file_size - _LIVE_GUARD_BYTES)
+                            if safe_end <= file_pos:
+                                continue
+                            with open(audio_path, "rb") as f:
+                                f.seek(file_pos)
+                                chunk = f.read(min(safe_end - file_pos, _LIVE_CHUNK_BYTES * 4))
+                            if not chunk:
+                                continue
+                            file_pos += len(chunk)
+                            import base64
+                            await session.send_realtime_input(
+                                media=genai_types.Blob(
+                                    data=base64.b64encode(chunk).decode(),
+                                    mime_type="audio/pcm;rate=16000",
+                                )
+                            )
+                        except asyncio.CancelledError:
+                            raise
+                        except Exception as exc:
+                            logger.debug("Live sender error: %s", exc)
+
+                async def _receiver() -> None:
+                    """Consume responses: text → transcript, audio → playback."""
+                    nonlocal audio_buffer, transcript_buffer, turn_start_ts
+                    import base64, io, wave
+
+                    async for response in session.receive():
+                        try:
+                            sc = getattr(response, "server_content", None)
+                            if sc is None:
+                                continue
+
+                            # Collect text transcription parts
+                            mt = getattr(sc, "model_turn", None)
+                            if mt:
+                                for part in (mt.parts or []):
+                                    # Text: transcription or bot text reply
+                                    if getattr(part, "text", None):
+                                        txt = part.text.strip()
+                                        if txt:
+                                            transcript_buffer.append(txt)
+
+                                    # Audio: bot voice response
+                                    inl = getattr(part, "inline_data", None)
+                                    if inl and getattr(inl, "data", None):
+                                        raw = base64.b64decode(inl.data)
+                                        audio_buffer.extend(raw)
+
+                            # Turn complete: flush text + play audio if any
+                            if getattr(sc, "turn_complete", False):
+                                # Flush text entries
+                                if transcript_buffer:
+                                    full_text = " ".join(transcript_buffer).strip()
+                                    transcript_buffer.clear()
+                                    if full_text:
+                                        ts = round(turn_start_ts, 2)
+                                        entry = {
+                                            "speaker": "Unknown",
+                                            "text": full_text,
+                                            "timestamp": ts,
+                                        }
+                                        live_transcript.append(full_text)
+                                        del live_transcript[:-60]
+                                        structured_transcript.append(entry)
+                                        logger.info(
+                                            "Live transcript (t=%.1fs): %r…",
+                                            ts, full_text[:120],
+                                        )
+                                        if on_transcript_entry:
+                                            try:
+                                                await on_transcript_entry(entry)
+                                            except Exception as cb_exc:
+                                                logger.warning("on_transcript_entry error: %s", cb_exc)
+
+                                # Update timestamp for next turn
+                                turn_start_ts = (file_pos - _WAV_HEADER_SIZE) / _PCM_BYTES_PER_S
+
+                                # Play audio response if bot was addressed
+                                if audio_buffer:
+                                    pcm_bytes = bytes(audio_buffer)
+                                    audio_buffer = bytearray()
+                                    if page is not None and mention_response_mode in ("voice", "both"):
+                                        # Wrap PCM (24 kHz, 16-bit, mono) in WAV
+                                        buf = io.BytesIO()
+                                        with wave.open(buf, "wb") as wf:
+                                            wf.setnchannels(1)
+                                            wf.setsampwidth(2)
+                                            wf.setframerate(24000)
+                                            wf.writeframes(pcm_bytes)
+                                        wav_bytes = buf.getvalue()
+                                        import tempfile
+                                        fd, tmp_path = tempfile.mkstemp(suffix=".wav", prefix="bot_live_")
+                                        os.close(fd)
+                                        with open(tmp_path, "wb") as fh:
+                                            fh.write(wav_bytes)
+                                        logger.info(
+                                            "Live: playing bot response (%d bytes PCM)", len(pcm_bytes)
+                                        )
+                                        # Run in background so receiver doesn't block
+                                        asyncio.ensure_future(
+                                            _speak_in_meeting(
+                                                page, platform, "",
+                                                start_muted=start_muted,
+                                                pulse_mic=pulse_mic,
+                                                pre_synthesized_path=tmp_path,
+                                            )
+                                        )
+                                    else:
+                                        audio_buffer = bytearray()
+
+                        except asyncio.CancelledError:
+                            raise
+                        except Exception as exc:
+                            logger.debug("Live receiver message error: %s", exc)
+
+                sender_task   = asyncio.create_task(_sender())
+                receiver_task = asyncio.create_task(_receiver())
+
+                # Run until session refresh time or task failure
+                session_deadline = _LIVE_SESSION_S
+                try:
+                    done, pending = await asyncio.wait(
+                        {sender_task, receiver_task},
+                        timeout=session_deadline,
+                        return_when=asyncio.FIRST_EXCEPTION,
+                    )
+                    for t in done:
+                        exc = t.exception()
+                        if exc:
+                            logger.warning("Live task exception: %s", exc)
+                finally:
+                    sender_task.cancel()
+                    receiver_task.cancel()
+                    for t in (sender_task, receiver_task):
+                        with contextlib.suppress(Exception):
+                            await t
+
+                logger.info(
+                    "Gemini Live session #%d closed after %.0f s — refreshing context",
+                    session_count, time.monotonic() - session_start,
+                )
+
+        except asyncio.CancelledError:
+            logger.info("Gemini Live loop cancelled")
+            raise
+        except Exception as exc:
+            logger.warning("Gemini Live session error: %s — retrying in 5 s", exc)
+            await asyncio.sleep(5)
+
+
 async def _mention_monitor(
     page: Page,
     platform: str,
@@ -2215,9 +2480,14 @@ async def _mention_monitor(
     leave_event: asyncio.Event | None = None,
     live_transcript: list | None = None,
     pulse_mic: str = PULSE_MIC_NAME,
+    live_handles_audio: bool = False,
 ) -> None:
     """Coroutine that polls live captions AND chat messages, replying when the
     bot's name is mentioned in either source.
+
+    When live_handles_audio=True (Gemini Live session is active), the audio
+    transcript polling block is skipped — Gemini Live already handles voice
+    detection and responses.  Only chat message polling remains active.
 
     Designed to run concurrently with _wait_for_meeting_end and be cancelled when
     the meeting ends.
@@ -2472,10 +2742,11 @@ async def _mention_monitor(
                             last_response_at = time.monotonic()
                             await _dispatch_reply(reply, "chat")
 
-        # ── Audio transcript polling (from _live_transcription_loop) ─────────
+        # ── Audio transcript polling (from _streaming_transcription_loop) ──────
         # Provides voice bot-name detection and meeting context when DOM captions
-        # are unavailable (e.g. Google Meet 2026 UI changes).
-        if live_transcript is not None:
+        # are unavailable.  Skipped when Gemini Live is active (it handles voice
+        # detection and responses directly).
+        if live_transcript is not None and not live_handles_audio:
             new_chunks = live_transcript[last_audio_idx:]
             if new_chunks:
                 last_audio_idx = len(live_transcript)
@@ -2615,6 +2886,7 @@ async def run_browser_bot(
     start_muted: bool = False,
     live_transcription: bool = False,
     on_live_transcript_entry=None,
+    gemini_api_key: str = "",
 ) -> dict:
     """
     Join a meeting as a named guest, record audio, wait for it to end.
@@ -2892,13 +3164,56 @@ async def run_browser_bot(
             # Shared live transcript lists:
             #   live_transcript       — plain-text chunks for _mention_monitor
             #   structured_transcript — {speaker, text, timestamp} dicts for DB
-            # The VAD-based streaming loop feeds both lists with <1 s latency.
-            # It runs whenever respond_on_mention=True OR live_transcription=True.
             live_transcript: list = []
             structured_transcript: list = []
+
             from app.config import settings as _s_cfg
-            _gemini_available = bool(_s_cfg.GEMINI_API_KEY) and ffmpeg_proc is not None
-            if (live_transcription or respond_on_mention) and _gemini_available:
+            _key = gemini_api_key or _s_cfg.GEMINI_API_KEY or ""
+            _gemini_available = bool(_key) and ffmpeg_proc is not None
+
+            # Decide whether to use Gemini Live (real-time bidirectional stream)
+            # or the VAD chunk approach (_streaming_transcription_loop).
+            #
+            # Gemini Live is used when:
+            #   - respond_on_mention=True AND mention_response_mode is voice/both
+            #   - Gemini key is available
+            #   - google-genai SDK is installed
+            # Otherwise fall back to _streaming_transcription_loop.
+            _use_live = (
+                _gemini_available
+                and respond_on_mention
+                and mention_response_mode in ("voice", "both")
+            )
+            # Confirm google-genai is actually importable before committing
+            if _use_live:
+                try:
+                    import google.genai  # noqa: F401
+                except ImportError:
+                    logger.warning(
+                        "google-genai not installed — falling back to VAD streaming. "
+                        "Run: pip install 'google-genai>=1.0.0'"
+                    )
+                    _use_live = False
+
+            if _use_live:
+                logger.info("Starting Gemini Live loop for bot '%s' (mode=%s)", bot_name, mention_response_mode)
+                transcription_task = asyncio.create_task(
+                    _gemini_live_loop(
+                        audio_path=audio_path,
+                        bot_name=bot_name,
+                        live_transcript=live_transcript,
+                        structured_transcript=structured_transcript,
+                        on_transcript_entry=on_live_transcript_entry,
+                        mention_response_mode=mention_response_mode,
+                        page=page,
+                        platform=platform,
+                        start_muted=start_muted,
+                        pulse_mic=pulse_mic,
+                        gemini_api_key=_key,
+                    )
+                )
+            elif (live_transcription or respond_on_mention) and _gemini_available:
+                logger.info("Starting VAD streaming transcription loop (Gemini Live not used)")
                 transcription_task = asyncio.create_task(
                     _streaming_transcription_loop(
                         audio_path,
@@ -2908,20 +3223,22 @@ async def run_browser_bot(
                     )
                 )
 
-            # Run mention monitor concurrently with the meeting-end watcher
+            # Run mention monitor concurrently with the meeting-end watcher.
+            # When Gemini Live is active, the monitor only needs to watch chat
+            # (voice detection is handled by the Live session).
             leave_event = asyncio.Event()
             if respond_on_mention:
-                from app.config import settings as _settings
                 monitor_task = asyncio.create_task(
                     _mention_monitor(
                         page, platform, bot_name,
                         mention_response_mode=mention_response_mode,
                         tts_provider=tts_provider,
-                        gemini_api_key=_settings.GEMINI_API_KEY or None,
+                        gemini_api_key=_key or None,
                         start_muted=start_muted,
                         leave_event=leave_event,
                         live_transcript=live_transcript,
                         pulse_mic=pulse_mic,
+                        live_handles_audio=_use_live,
                     )
                 )
 
