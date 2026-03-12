@@ -4,7 +4,7 @@ import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -86,7 +86,12 @@ async def update_action_item(
 @router.get("/stats")
 async def action_item_stats(db: Annotated[AsyncSession, Depends(get_db)]):
     """Count total / done / pending action items."""
-    all_items = (await db.execute(select(ActionItem))).scalars().all()
-    total = len(all_items)
-    done = sum(1 for i in all_items if i.done)
+    row = (await db.execute(
+        select(
+            func.count(ActionItem.id),
+            func.sum(case((ActionItem.done == True, 1), else_=0)),  # noqa: E712
+        )
+    )).one()
+    total = row[0] or 0
+    done = row[1] or 0
     return {"total": total, "done": done, "pending": total - done}

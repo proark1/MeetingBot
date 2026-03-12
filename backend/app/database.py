@@ -72,5 +72,8 @@ async def init_db():
             # constraint — create the unique index explicitly so existing databases
             # also enforce it (NULL values are excluded so un-shared bots don't clash).
             "CREATE UNIQUE INDEX IF NOT EXISTS ix_bot_share_token ON bots (share_token) WHERE share_token IS NOT NULL",
+            # Foreign-key indexes so queries filtering by bot_id don't full-scan
+            "CREATE INDEX IF NOT EXISTS ix_action_item_bot_id ON action_items (bot_id)",
+            "CREATE INDEX IF NOT EXISTS ix_highlight_bot_id    ON highlights   (bot_id)",
         ]:
             await conn.execute(text(stmt))

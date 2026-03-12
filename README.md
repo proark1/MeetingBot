@@ -461,7 +461,7 @@ Cross-meeting action item tracking. Action items extracted by AI from each meeti
 ```
 GET  /api/v1/action-items?done=false&assignee=Alice&limit=100
 PATCH /api/v1/action-items/{id}   — toggle done, update assignee/due_date
-GET  /api/v1/action-items/stats   — {total, done, pending}
+GET  /api/v1/action-items/stats   — {total, done, pending} (SQL-aggregated, O(1))
 ```
 
 ---
