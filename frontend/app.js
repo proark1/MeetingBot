@@ -522,29 +522,33 @@ function _initMentionToggle() {
     toggle.addEventListener("change", updateModeRow);
 
     // Response mode pill click.
-    // The pills are <label> elements wrapping <input type="radio">.  When the
-    // label is clicked the browser fires click on the label AND then dispatches
-    // a synthetic click on the radio which bubbles back up to the label — so the
-    // handler would fire twice.  Guard against the second firing by checking that
-    // the event target is not the radio input itself.
+    // Use preventDefault() to stop the browser from synthesising a second
+    // click on the wrapped radio (which would bubble back and fire this
+    // handler again).  We then manage the radio group state manually.
     const modePills = modeRow.querySelectorAll(".mode-pill");
     modePills.forEach(pill => {
       pill.addEventListener("click", (e) => {
-        if (e.target.tagName === "INPUT") return; // skip the bubbled synthetic click
-        modePills.forEach(p => p.classList.remove("mode-pill-active"));
+        e.preventDefault();
+        modePills.forEach(p => {
+          p.classList.remove("mode-pill-active");
+          p.querySelector("input[type=radio]").checked = false;
+        });
         pill.classList.add("mode-pill-active");
         pill.querySelector("input[type=radio]").checked = true;
         updateTtsRow();
       });
     });
 
-    // TTS provider pill click (same double-fire guard)
+    // TTS provider pill click (same pattern)
     if (ttsRow) {
       const ttsPills = ttsRow.querySelectorAll(".mode-pill");
       ttsPills.forEach(pill => {
         pill.addEventListener("click", (e) => {
-          if (e.target.tagName === "INPUT") return;
-          ttsPills.forEach(p => p.classList.remove("mode-pill-active"));
+          e.preventDefault();
+          ttsPills.forEach(p => {
+            p.classList.remove("mode-pill-active");
+            p.querySelector("input[type=radio]").checked = false;
+          });
           pill.classList.add("mode-pill-active");
           pill.querySelector("input[type=radio]").checked = true;
           if (ttsHint) {
