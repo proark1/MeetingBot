@@ -505,9 +505,12 @@ function _initMentionToggle() {
   const ttsHint   = document.getElementById("tts-hint");
   if (!toggle || !modeRow) return;
 
+  // Reads the currently-checked pill radio to decide TTS row visibility.
   const updateTtsRow = () => {
     if (!ttsRow) return;
-    const mode = document.querySelector('input[name="mention_response_mode"]:checked')?.value || "text";
+    const checkedPill = modeRow.querySelector('input[name="mention_response_mode"][data-checked="1"]')
+      || modeRow.querySelector('input[name="mention_response_mode"]:checked');
+    const mode = checkedPill?.value || "text";
     ttsRow.style.display = (toggle.checked && mode !== "text") ? "" : "none";
   };
 
@@ -521,15 +524,22 @@ function _initMentionToggle() {
 
     toggle.addEventListener("change", updateModeRow);
 
-    // Listen to 'change' on the radio inputs rather than 'click' on the label
-    // wrappers.  The browser fires exactly one 'change' event when the user
-    // selects a radio (via its label or directly), with no bubbling surprises.
+    // Use click on the pill labels (not change on the hidden radio) so the
+    // handler fires reliably in all browsers regardless of how the radio is
+    // visually hidden.  preventDefault stops the browser from also activating
+    // the radio, so we manage the checked state ourselves.
     const modePills = modeRow.querySelectorAll(".mode-pill");
-    modeRow.querySelectorAll('input[name="mention_response_mode"]').forEach(radio => {
-      radio.addEventListener("change", () => {
-        modePills.forEach(p => p.classList.remove("mode-pill-active"));
-        const active = modeRow.querySelector(`.mode-pill[data-value="${radio.value}"]`);
-        if (active) active.classList.add("mode-pill-active");
+    modePills.forEach(pill => {
+      pill.addEventListener("click", (e) => {
+        e.preventDefault();
+        modePills.forEach(p => {
+          p.classList.remove("mode-pill-active");
+          const r = p.querySelector("input[type=radio]");
+          if (r) { r.checked = false; r.removeAttribute("data-checked"); }
+        });
+        pill.classList.add("mode-pill-active");
+        const radio = pill.querySelector("input[type=radio]");
+        if (radio) { radio.checked = true; radio.setAttribute("data-checked", "1"); }
         updateTtsRow();
       });
     });
@@ -537,13 +547,19 @@ function _initMentionToggle() {
     // TTS provider pills — same pattern
     if (ttsRow) {
       const ttsPills = ttsRow.querySelectorAll(".mode-pill");
-      ttsRow.querySelectorAll('input[name="tts_provider"]').forEach(radio => {
-        radio.addEventListener("change", () => {
-          ttsPills.forEach(p => p.classList.remove("mode-pill-active"));
-          const active = ttsRow.querySelector(`.mode-pill[data-value="${radio.value}"]`);
-          if (active) active.classList.add("mode-pill-active");
+      ttsPills.forEach(pill => {
+        pill.addEventListener("click", (e) => {
+          e.preventDefault();
+          ttsPills.forEach(p => {
+            p.classList.remove("mode-pill-active");
+            const r = p.querySelector("input[type=radio]");
+            if (r) { r.checked = false; r.removeAttribute("data-checked"); }
+          });
+          pill.classList.add("mode-pill-active");
+          const radio = pill.querySelector("input[type=radio]");
+          if (radio) { radio.checked = true; radio.setAttribute("data-checked", "1"); }
           if (ttsHint) {
-            ttsHint.textContent = radio.value === "gemini"
+            ttsHint.textContent = pill.dataset.value === "gemini"
               ? "Uses your configured Gemini API key. More natural voice."
               : "Fast, free, no extra key required.";
           }
@@ -554,34 +570,66 @@ function _initMentionToggle() {
 
   // Reset pills to defaults every time the modal opens
   const modePills = modeRow.querySelectorAll(".mode-pill");
-  modePills.forEach(p => p.classList.remove("mode-pill-active"));
+  modePills.forEach(p => {
+    p.classList.remove("mode-pill-active");
+    const r = p.querySelector("input[type=radio]");
+    if (r) { r.checked = false; r.removeAttribute("data-checked"); }
+  });
   const textPill = modeRow.querySelector('[data-value="text"]');
-  if (textPill) { textPill.classList.add("mode-pill-active"); textPill.querySelector("input").checked = true; }
+  if (textPill) {
+    textPill.classList.add("mode-pill-active");
+    const r = textPill.querySelector("input");
+    if (r) { r.checked = true; r.setAttribute("data-checked", "1"); }
+  }
   if (ttsRow) {
-    ttsRow.querySelectorAll(".mode-pill").forEach(p => p.classList.remove("mode-pill-active"));
+    ttsRow.querySelectorAll(".mode-pill").forEach(p => {
+      p.classList.remove("mode-pill-active");
+      const r = p.querySelector("input[type=radio]");
+      if (r) { r.checked = false; r.removeAttribute("data-checked"); }
+    });
     const edgePill = ttsRow.querySelector('[data-value="edge"]');
-    if (edgePill) { edgePill.classList.add("mode-pill-active"); edgePill.querySelector("input").checked = true; }
+    if (edgePill) {
+      edgePill.classList.add("mode-pill-active");
+      const r = edgePill.querySelector("input");
+      if (r) { r.checked = true; r.setAttribute("data-checked", "1"); }
+    }
     if (ttsHint) ttsHint.textContent = "Fast, free, no extra key required.";
   }
   updateModeRow();
 }
 
-// Analysis mode picker — highlight selected card + show/hide AI options
+// Analysis mode picker — highlight selected card + show/hide AI options.
+// Listeners are attached once; guard prevents stacking on re-open.
+let _modepickerInited = false;
 function _initModePicker() {
   const picker = document.getElementById("analysis-mode-picker");
   if (!picker) return;
-  const cards = picker.querySelectorAll(".mode-card");
-  picker.querySelectorAll('input[name="analysis_mode"]').forEach(radio => {
-    radio.addEventListener("change", () => {
-      cards.forEach(c => c.classList.remove("mode-card-active"));
-      const active = picker.querySelector(`.mode-card[data-value="${radio.value}"]`);
-      if (active) active.classList.add("mode-card-active");
-      const aiSection = document.getElementById("ai-options-section");
-      if (aiSection) {
-        aiSection.classList.toggle("hidden", radio.value === "transcript_only");
-      }
+
+  if (!_modepickerInited) {
+    _modepickerInited = true;
+    const cards = picker.querySelectorAll(".mode-card");
+    const aiSection = document.getElementById("ai-options-section");
+
+    // Use click on card labels (not change on hidden radio) for cross-browser
+    // reliability.  preventDefault prevents the browser from also activating
+    // the radio so we manage checked state manually.
+    cards.forEach(card => {
+      card.addEventListener("click", (e) => {
+        e.preventDefault();
+        cards.forEach(c => {
+          c.classList.remove("mode-card-active");
+          const r = c.querySelector("input[type=radio]");
+          if (r) r.checked = false;
+        });
+        card.classList.add("mode-card-active");
+        const radio = card.querySelector("input[type=radio]");
+        if (radio) radio.checked = true;
+        if (aiSection) {
+          aiSection.classList.toggle("hidden", card.dataset.value === "transcript_only");
+        }
+      });
     });
-  });
+  }
 }
 
 document.getElementById("btn-new-bot").addEventListener("click", async () => {
@@ -599,10 +647,12 @@ document.getElementById("btn-new-bot").addEventListener("click", async () => {
   if (aiSection) aiSection.classList.remove("hidden");
 
   _initModePicker();
-  _initMentionToggle();
-  // Reset live transcription to off each time the modal opens
+  // Reset respond-on-mention to on, live transcription to off each time the modal opens
+  const respondCheck = document.getElementById("new-bot-respond-mention");
+  if (respondCheck) respondCheck.checked = true;
   const liveTranscCheck = document.getElementById("new-bot-live-transcription");
   if (liveTranscCheck) liveTranscCheck.checked = false;
+  _initMentionToggle();
   openModal("modal-new-bot");
   // Populate template dropdown
   try {
@@ -633,7 +683,7 @@ async function submitCreateBot() {
 
   const btn = document.getElementById("btn-create-bot");
   btn.disabled = true;
-  btn.textContent = "Creating…";
+  btn.innerHTML = "Deploying…";
 
   const joinAtInput = document.getElementById("new-bot-join-at");
   const joinAtVal = joinAtInput ? joinAtInput.value : "";
@@ -644,8 +694,8 @@ async function submitCreateBot() {
   const vocabulary = vocabRaw ? vocabRaw.split(",").map(s => s.trim()).filter(Boolean) : null;
   const analysisMode = document.querySelector('input[name="analysis_mode"]:checked')?.value || "full";
   const respondOnMention = document.getElementById("new-bot-respond-mention")?.checked ?? true;
-  const mentionResponseMode = document.querySelector('input[name="mention_response_mode"]:checked')?.value || "text";
-  const ttsProvider = document.querySelector('input[name="tts_provider"]:checked')?.value || "edge";
+  const mentionResponseMode = (document.querySelector('input[name="mention_response_mode"][data-checked="1"]') || document.querySelector('input[name="mention_response_mode"]:checked'))?.value || "text";
+  const ttsProvider = (document.querySelector('input[name="tts_provider"][data-checked="1"]') || document.querySelector('input[name="tts_provider"]:checked'))?.value || "edge";
   const liveTranscription = document.getElementById("new-bot-live-transcription")?.checked ?? false;
   const body = {
     meeting_url: url,
@@ -678,7 +728,7 @@ async function submitCreateBot() {
     showToast(e.message, "error");
   } finally {
     btn.disabled = false;
-    btn.textContent = "Create Bot";
+    btn.innerHTML = '<span class="btn-create-icon">▶</span> Deploy Bot';
   }
 }
 
