@@ -2206,7 +2206,7 @@ async def _streaming_transcription_loop(
 
 # ── Gemini Live API loop ──────────────────────────────────────────────────────
 
-_LIVE_MODEL      = "gemini-2.5-flash-native-audio"
+_LIVE_MODEL      = "gemini-2.5-flash-native-audio-preview-12-2025"
 _LIVE_CHUNK_MS   = 100                                   # send 100 ms of PCM per frame
 _LIVE_CHUNK_BYTES = _PCM_BYTES_PER_S * _LIVE_CHUNK_MS // 1000   # bytes per 100 ms frame
 _LIVE_GUARD_BYTES = _PCM_BYTES_PER_S                     # 1-s guard against partial writes
@@ -2286,6 +2286,8 @@ async def _gemini_live_loop(
     file_pos = _WAV_HEADER_SIZE   # cursor into growing WAV; skip WAV header on first read
     session_start = time.monotonic()
     session_count = 0
+    consecutive_failures = 0
+    MAX_CONSECUTIVE_FAILURES = 3
 
     logger.info("Gemini Live loop started for bot '%s'", bot_name)
 
@@ -2305,6 +2307,7 @@ async def _gemini_live_loop(
         try:
             logger.info("Gemini Live: opening session #%d", session_count)
             async with client.aio.live.connect(model=_LIVE_MODEL, config=config) as session:
+                consecutive_failures = 0   # reset on any successful open
                 session_start = time.monotonic()
                 audio_buffer: bytearray = bytearray()
                 transcript_buffer: list[str] = []
@@ -2465,6 +2468,18 @@ async def _gemini_live_loop(
             logger.info("Gemini Live loop cancelled")
             raise
         except Exception as exc:
+            consecutive_failures += 1
+            if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+                logger.error(
+                    "Gemini Live: %d consecutive session failures — "
+                    "falling back to VAD streaming transcription. Last error: %s",
+                    MAX_CONSECUTIVE_FAILURES, exc,
+                )
+                await _streaming_transcription_loop(
+                    audio_path, live_transcript, structured_transcript,
+                    on_transcript_entry=on_transcript_entry,
+                )
+                return
             logger.warning("Gemini Live session error: %s — retrying in 5 s", exc)
             await asyncio.sleep(5)
 
