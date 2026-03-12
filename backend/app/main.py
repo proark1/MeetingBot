@@ -159,6 +159,15 @@ if FRONTEND_DIR.exists():
     @app.get("/", include_in_schema=False)
     @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_frontend(full_path: str = ""):
+        # Do not swallow requests that look like API calls — return a proper 404
+        # instead of serving index.html, which would give API clients a 200 HTML
+        # response and make endpoint typos extremely hard to debug.
+        if full_path.startswith("api/"):
+            from fastapi.responses import JSONResponse
+            return JSONResponse(
+                status_code=404,
+                content={"detail": f"API endpoint not found: /{full_path}"},
+            )
         index = FRONTEND_DIR / "index.html"
         if index.exists():
             return FileResponse(str(index))

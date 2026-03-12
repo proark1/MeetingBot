@@ -211,6 +211,8 @@ async def _salvage_and_finish(
         await webhook_service.dispatch_event(db, "bot.analysis_ready", {"bot_id": bot_id})
     elif analysis_mode == "transcript_only":
         logger.info("Bot %s analysis_mode=transcript_only — skipping AI analysis", bot_id)
+        # Speaker stats are fast/local and independent of AI analysis — always compute them.
+        bot.speaker_stats = _compute_speaker_stats(bot.transcript)
         if use_real_bot and os.path.exists(audio_path) and os.path.getsize(audio_path) > 0:
             bot.recording_path = audio_path
         bot.updated_at = _now()

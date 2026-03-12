@@ -164,7 +164,9 @@ class BotResponse(BaseModel):
         description="AI-generated meeting analysis. Populated once status is `done`.",
     )
     recording_url: str | None = None
-    recording_path: str | None = None
+    # Internal filesystem path — never exposed to API consumers; the recording
+    # is served through GET /api/v1/bot/{id}/recording instead.
+    recording_path: str | None = Field(default=None, exclude=True)
     share_token: str | None = None
     chapters: list[dict] | None = None
     speaker_stats: list[dict] | None = None

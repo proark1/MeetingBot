@@ -52,7 +52,7 @@ Set these in a `.env` file or as environment variables:
 
 ## API Reference
 
-All endpoints are prefixed with `/api/v1`.
+All endpoints are prefixed with `/api/v1`. Requests to unknown `/api/v1/…` paths return a JSON `404` response — not the frontend HTML page.
 
 ### Bots
 
