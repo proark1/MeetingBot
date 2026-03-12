@@ -242,53 +242,64 @@ def _unload_pulse_sink(idx: str) -> None:
 
 
 def _move_chrome_audio(sink: str = PULSE_SINK_NAME) -> None:
-    """Move Chrome's audio output (sink-inputs) to our virtual recording sink.
+    """Move all browser/meeting audio sink-inputs to our virtual recording sink.
 
-    This ensures ffmpeg captures Google Meet audio.  Uses the long-form
-    'pactl list sink-inputs' so we can match the application name per-entry
-    rather than checking if *any* entry belongs to Chrome.
+    Chrome's WebRTC audio renderer may appear under a different application name
+    than "chrome"/"chromium" (e.g. the renderer process uses a distinct PA
+    client).  To avoid missing the WebRTC audio stream we route ALL sink-inputs
+    except known non-meeting processes (TTS ffmpeg, arecord, etc.).
+
+    In a containerised bot environment the only sink-inputs are:
+      • Chrome browser + renderer audio  → move to recording sink
+      • TTS playback ffmpeg              → stays on the mic sink (skip)
     """
+    # Processes whose sink-inputs we must NOT redirect to the recording sink.
+    # ffmpeg is the TTS playback process; it outputs to the mic null-sink and
+    # must not be rerouted or TTS will feed back into the recording.
+    SKIP_APPS = {"ffmpeg", "ffmpeg-static", "arecord", "parecord", "parec"}
     try:
         detail = _run(["pactl", "list", "sink-inputs"])
         if detail.returncode != 0:
             return
 
-        moved = 0
-        current_id: str | None = None
-        is_chrome = False
+        # Parse into per-entry dicts {id, app, current_sink}
+        entries: list[dict] = []
+        current: dict | None = None
         for raw_line in detail.stdout.splitlines():
             line = raw_line.strip()
             if line.startswith("Sink Input #"):
-                # Process previous entry
-                if current_id and is_chrome:
-                    r = subprocess.run(
-                        ["pactl", "move-sink-input", current_id, sink],
-                        capture_output=True, timeout=5,
-                    )
-                    if r.returncode == 0:
-                        moved += 1
-                        logger.info("Moved Chrome sink-input %s → %s", current_id, sink)
-                    else:
-                        logger.debug("move-sink-input %s failed: %s", current_id, r.stderr.strip())
-                current_id = line.split("#", 1)[1].strip()
-                is_chrome = False
-            elif current_id and ("application.name" in line or "application.process.binary" in line):
-                val = line.lower()
-                if "chromium" in val or "chrome" in val:
-                    is_chrome = True
+                if current is not None:
+                    entries.append(current)
+                current = {"id": line.split("#", 1)[1].strip(), "app": "", "sink": ""}
+            elif current is not None:
+                if "application.name" in line or "application.process.binary" in line:
+                    val = line.split("=", 1)[-1].strip().strip('"').lower()
+                    if val:
+                        current["app"] = val
+                elif line.startswith("Sink:"):
+                    # e.g. "Sink: 3"  or  "Sink: mbot_1ea088adc2"
+                    current["sink"] = line.split(":", 1)[-1].strip()
+        if current is not None:
+            entries.append(current)
 
-        # Handle last entry
-        if current_id and is_chrome:
+        moved = 0
+        for entry in entries:
+            app = entry["app"]
+            if app in SKIP_APPS:
+                logger.debug("Skipping sink-input %s (app=%s)", entry["id"], app)
+                continue
             r = subprocess.run(
-                ["pactl", "move-sink-input", current_id, sink],
+                ["pactl", "move-sink-input", entry["id"], sink],
                 capture_output=True, timeout=5,
             )
             if r.returncode == 0:
                 moved += 1
-                logger.info("Moved Chrome sink-input %s → %s", current_id, sink)
+                logger.info("Moved sink-input %s (app=%s) → %s", entry["id"], app or "?", sink)
+            else:
+                logger.debug("move-sink-input %s failed: %s", entry["id"], r.stderr.strip())
 
         if moved == 0:
-            logger.debug("_move_chrome_audio: no Chrome sink-inputs found to move")
+            logger.debug("_move_chrome_audio: no sink-inputs found to move")
     except Exception as exc:
         logger.debug("_move_chrome_audio failed: %s", exc)
 
@@ -1512,8 +1523,11 @@ async def _scrape_captions(page: Page, platform: str) -> str:
                         !t.includes('Jump to bottom') &&
                         !materialIconRe.test(t.split('\n')[0]);
                     for (const s of selectors) {
-                        const el = document.querySelector(s);
-                        if (el) {
+                        // querySelectorAll so we check ALL matches — the first
+                        // match may be an empty container; a later one may have
+                        // the actual caption text.
+                        const els = document.querySelectorAll(s);
+                        for (const el of els) {
                             const t = (el.innerText || el.textContent || '').trim();
                             if (isValid(t)) return t;
                         }
