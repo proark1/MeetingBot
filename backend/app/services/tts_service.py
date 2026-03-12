@@ -195,7 +195,11 @@ async def play_audio(path: str, sink: str) -> None:
         pulse_env = {**os.environ}
         rt = os.environ.get("XDG_RUNTIME_DIR", "/tmp/runtime-meetingbot")
         pulse_env.setdefault("PULSE_SERVER", f"unix:{rt}/pulse/native")
+        # Set PULSE_SINK so ffmpeg routes to the correct null-sink even if the
+        # explicit device-name argument is ignored by some PulseAudio versions.
+        pulse_env["PULSE_SINK"] = sink
 
+        logger.info("TTS playback starting → %s (%s)", sink, path)
         proc = await asyncio.create_subprocess_exec(
             "ffmpeg", "-y", "-i", path,
             "-f", "pulse", sink,
@@ -213,7 +217,7 @@ async def play_audio(path: str, sink: str) -> None:
             stderr_text = (stderr_bytes or b"").decode(errors="replace").strip()
             logger.warning("TTS playback ffmpeg error (rc=%d): %s", proc.returncode, stderr_text[-300:])
         else:
-            logger.debug("TTS playback complete: %s", path)
+            logger.info("TTS playback complete → %s", sink)
     except Exception as exc:
         logger.warning("TTS playback failed: %s", exc)
     finally:

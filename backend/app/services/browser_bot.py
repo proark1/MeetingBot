@@ -1913,10 +1913,18 @@ async def _speak_in_meeting(
         if start_muted:
             await _unmute_mic(page, platform)
 
-        # Step 3: play into this bot's TTS mic sink (Chrome hears it as mic input)
+        # Step 3: re-sync Chrome's mic capture to the TTS virtual source right before
+        # playback — the periodic sync may be up to 20 s stale, so doing it here
+        # guarantees Chrome is reading from the correct source when audio starts.
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None, lambda: _move_chrome_source_output(f"{pulse_mic}_virt")
+        )
+
+        # Step 4: play into this bot's TTS mic sink (Chrome hears it as mic input)
         await tts_service.play_audio(tts_path, pulse_mic)
 
-        # Step 4: mute again only if the bot is supposed to stay muted between replies
+        # Step 5: mute again only if the bot is supposed to stay muted between replies
         if start_muted:
             await _mute_mic(page, platform)
         return True
@@ -2017,7 +2025,12 @@ async def _live_transcription_loop(
                 [audio_part, prompt],
                 generation_config={"temperature": 0.0, "max_output_tokens": 1024},
             )
-            text = (response.text or "").strip()
+            # response.text throws ValueError when the model returned no text
+            # (e.g. silent audio clip with finish_reason=STOP but empty parts)
+            try:
+                text = (response.text or "").strip()
+            except ValueError:
+                text = ""
             if text:
                 live_transcript.append(text)
                 del live_transcript[:-60]   # keep ~15 min at 15-s intervals
