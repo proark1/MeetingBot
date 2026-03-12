@@ -172,7 +172,7 @@ async def generate_mention_response(
             "Keep the answer to 2–3 short sentences (aim for under 50 words total). "
             "Write in natural spoken language — no bullet points, no markdown, no lists."
         )
-        max_tokens = 800   # enough for thinking + a 2–3 sentence spoken reply
+        max_tokens = 500   # matches 2–3 sentence spoken reply; avoids over-generation
     else:                  # (~50 words visible output + ~750 thinking tokens max)
         length_rule = (
             "Give a helpful, complete answer in up to 5 sentences. "
