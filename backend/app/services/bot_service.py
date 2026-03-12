@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.models.action_item import ActionItem
 from app.models.bot import Bot
+from app.api.ws import manager as ws_manager
 from app.services import intelligence_service, webhook_service
 from app.services.browser_bot import run_browser_bot
 from app.services.transcription_service import transcribe_audio
@@ -283,6 +284,11 @@ async def run_bot_lifecycle(bot_id: str, db_factory) -> None:
                 async def on_live_entry(entry: dict) -> None:
                     nonlocal _last_flush
                     _live_buffer.append(entry)
+                    # Push entry immediately to connected WebSocket clients for live display
+                    await ws_manager.broadcast(
+                        "bot.live_transcript",
+                        {"bot_id": bot_id, "entry": entry},
+                    )
                     if len(_live_buffer) >= 10 or time.monotonic() - _last_flush >= 30:
                         bot.transcript = list(_live_buffer)
                         bot.updated_at = _now()

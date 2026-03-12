@@ -186,7 +186,16 @@ function setWsStatus(connected) {
 }
 
 function handleServerEvent(event, data) {
-  // Update stats bar on any bot event
+  // Live transcript entry — append in-place without a full page reload
+  if (event === "bot.live_transcript") {
+    const detailPage = document.getElementById("page-bot-detail");
+    if (detailPage.classList.contains("active") && _currentBotId === data.bot_id) {
+      _appendLiveTranscriptEntry(data.entry);
+    }
+    return;
+  }
+
+  // Update stats bar on any other bot event
   if (event.startsWith("bot.")) {
     loadStats();
 
@@ -201,6 +210,39 @@ function handleServerEvent(event, data) {
       refreshBotDetail(data.bot_id);
     }
   }
+}
+
+function _appendLiveTranscriptEntry(entry) {
+  const body = document.getElementById("transcript-body");
+  if (!body) return;
+
+  // If showing the "no transcript yet" empty state, replace it with a list
+  let list = body.querySelector(".transcript-list");
+  if (!list) {
+    body.innerHTML = '<div class="transcript-list"></div>';
+    list = body.querySelector(".transcript-list");
+  }
+
+  // Append the new entry
+  const div = document.createElement("div");
+  div.className = "transcript-entry";
+  div.dataset.ts = entry.timestamp || 0;
+  div.innerHTML =
+    `<span class="t-speaker">${esc(entry.speaker)}</span>` +
+    `<span class="t-ts">${fmtTs(entry.timestamp)}</span>` +
+    `<span class="t-text">${esc(entry.text)}</span>`;
+  list.appendChild(div);
+
+  // Update the transcript count heading
+  const count = list.querySelectorAll(".transcript-entry").length;
+  const heading = document.querySelector("#page-bot-detail h3");
+  if (heading && heading.textContent.includes("Transcript")) {
+    const span = heading.querySelector("span");
+    if (span) span.textContent = `(${count} entries)`;
+  }
+
+  // Scroll the new entry into view
+  div.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
 // ── Stats ──────────────────────────────────────────────────────────────────

@@ -2190,7 +2190,7 @@ async def _streaming_transcription_loop(
                             pcm_copy = bytes(utterance_pcm)
                             start_copy = utterance_start_byte
                             utterance_pcm = bytearray()
-                            asyncio.ensure_future(_transcribe_utterance(pcm_copy, start_copy))
+                            asyncio.create_task(_transcribe_utterance(pcm_copy, start_copy))
                         else:
                             utterance_pcm = bytearray()
 
@@ -2312,6 +2312,7 @@ async def _gemini_live_loop(
                 audio_buffer: bytearray = bytearray()
                 transcript_buffer: list[str] = []
                 turn_start_ts: float = (file_pos - _WAV_HEADER_SIZE) / _PCM_BYTES_PER_S
+                _speak_task: asyncio.Task | None = None  # track active voice-response task
 
                 async def _sender() -> None:
                     """Stream PCM chunks from the growing WAV file into the session."""
@@ -2345,7 +2346,7 @@ async def _gemini_live_loop(
 
                 async def _receiver() -> None:
                     """Consume responses: text → transcript, audio → playback."""
-                    nonlocal audio_buffer, transcript_buffer, turn_start_ts
+                    nonlocal audio_buffer, transcript_buffer, turn_start_ts, _speak_task
                     import base64, io, wave
 
                     async for response in session.receive():
@@ -2420,15 +2421,25 @@ async def _gemini_live_loop(
                                         logger.info(
                                             "Live: playing bot response (%d bytes PCM)", len(pcm_bytes)
                                         )
-                                        # Run in background so receiver doesn't block
-                                        asyncio.ensure_future(
-                                            _speak_in_meeting(
-                                                page, platform, "",
-                                                start_muted=start_muted,
-                                                pulse_mic=pulse_mic,
-                                                pre_synthesized_path=tmp_path,
+                                        # Skip if previous voice response is still playing
+                                        if _speak_task is not None and not _speak_task.done():
+                                            logger.warning(
+                                                "Live: previous voice response still playing — "
+                                                "discarding overlapping response"
                                             )
-                                        )
+                                            try:
+                                                os.unlink(tmp_path)
+                                            except OSError:
+                                                pass
+                                        else:
+                                            _speak_task = asyncio.create_task(
+                                                _speak_in_meeting(
+                                                    page, platform, "",
+                                                    start_muted=start_muted,
+                                                    pulse_mic=pulse_mic,
+                                                    pre_synthesized_path=tmp_path,
+                                                )
+                                            )
                                     else:
                                         audio_buffer = bytearray()
 
