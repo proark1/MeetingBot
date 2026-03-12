@@ -521,38 +521,29 @@ function _initMentionToggle() {
 
     toggle.addEventListener("change", updateModeRow);
 
-    // Response mode pill click.
-    // Use preventDefault() to stop the browser from synthesising a second
-    // click on the wrapped radio (which would bubble back and fire this
-    // handler again).  We then manage the radio group state manually.
+    // Listen to 'change' on the radio inputs rather than 'click' on the label
+    // wrappers.  The browser fires exactly one 'change' event when the user
+    // selects a radio (via its label or directly), with no bubbling surprises.
     const modePills = modeRow.querySelectorAll(".mode-pill");
-    modePills.forEach(pill => {
-      pill.addEventListener("click", (e) => {
-        e.preventDefault();
-        modePills.forEach(p => {
-          p.classList.remove("mode-pill-active");
-          p.querySelector("input[type=radio]").checked = false;
-        });
-        pill.classList.add("mode-pill-active");
-        pill.querySelector("input[type=radio]").checked = true;
+    modeRow.querySelectorAll('input[name="mention_response_mode"]').forEach(radio => {
+      radio.addEventListener("change", () => {
+        modePills.forEach(p => p.classList.remove("mode-pill-active"));
+        const active = modeRow.querySelector(`.mode-pill[data-value="${radio.value}"]`);
+        if (active) active.classList.add("mode-pill-active");
         updateTtsRow();
       });
     });
 
-    // TTS provider pill click (same pattern)
+    // TTS provider pills — same pattern
     if (ttsRow) {
       const ttsPills = ttsRow.querySelectorAll(".mode-pill");
-      ttsPills.forEach(pill => {
-        pill.addEventListener("click", (e) => {
-          e.preventDefault();
-          ttsPills.forEach(p => {
-            p.classList.remove("mode-pill-active");
-            p.querySelector("input[type=radio]").checked = false;
-          });
-          pill.classList.add("mode-pill-active");
-          pill.querySelector("input[type=radio]").checked = true;
+      ttsRow.querySelectorAll('input[name="tts_provider"]').forEach(radio => {
+        radio.addEventListener("change", () => {
+          ttsPills.forEach(p => p.classList.remove("mode-pill-active"));
+          const active = ttsRow.querySelector(`.mode-pill[data-value="${radio.value}"]`);
+          if (active) active.classList.add("mode-pill-active");
           if (ttsHint) {
-            ttsHint.textContent = pill.dataset.value === "gemini"
+            ttsHint.textContent = radio.value === "gemini"
               ? "Uses your configured Gemini API key. More natural voice."
               : "Fast, free, no extra key required.";
           }
