@@ -452,7 +452,10 @@ if (_searchInput) {
 
 // ── Create Bot ─────────────────────────────────────────────────────────────
 
-// Respond-on-mention toggle — show/hide the response-mode and TTS-provider rows
+// Respond-on-mention toggle — show/hide the response-mode and TTS-provider rows.
+// Listeners are attached once; subsequent calls (from re-opening the modal) only
+// reset the visual state back to defaults.
+let _mentionToggleInited = false;
 function _initMentionToggle() {
   const toggle    = document.getElementById("new-bot-respond-mention");
   const modeRow   = document.getElementById("response-mode-row");
@@ -466,43 +469,54 @@ function _initMentionToggle() {
     ttsRow.style.display = (toggle.checked && mode !== "text") ? "" : "none";
   };
 
-  const update = () => {
+  const updateModeRow = () => {
     modeRow.style.display = toggle.checked ? "" : "none";
     updateTtsRow();
   };
-  toggle.addEventListener("change", update);
-  update();
 
-  // Response mode pill click
-  const modePills = modeRow.querySelectorAll(".mode-pill");
-  modePills.forEach(pill => {
-    pill.addEventListener("click", () => {
-      modePills.forEach(p => p.classList.remove("mode-pill-active"));
-      pill.classList.add("mode-pill-active");
-      pill.querySelector("input[type=radio]").checked = true;
-      updateTtsRow();
-    });
-  });
+  if (!_mentionToggleInited) {
+    _mentionToggleInited = true;
 
-  // TTS provider pill click
-  if (ttsRow) {
-    const ttsPills = ttsRow.querySelectorAll(".mode-pill");
-    ttsPills.forEach(pill => {
-      pill.addEventListener("click", () => {
-        ttsPills.forEach(p => p.classList.remove("mode-pill-active"));
+    toggle.addEventListener("change", updateModeRow);
+
+    // Response mode pill click.
+    // The pills are <label> elements wrapping <input type="radio">.  When the
+    // label is clicked the browser fires click on the label AND then dispatches
+    // a synthetic click on the radio which bubbles back up to the label — so the
+    // handler would fire twice.  Guard against the second firing by checking that
+    // the event target is not the radio input itself.
+    const modePills = modeRow.querySelectorAll(".mode-pill");
+    modePills.forEach(pill => {
+      pill.addEventListener("click", (e) => {
+        if (e.target.tagName === "INPUT") return; // skip the bubbled synthetic click
+        modePills.forEach(p => p.classList.remove("mode-pill-active"));
         pill.classList.add("mode-pill-active");
         pill.querySelector("input[type=radio]").checked = true;
-        // Show hint for Gemini
-        if (ttsHint) {
-          ttsHint.textContent = pill.dataset.value === "gemini"
-            ? "Uses your configured Gemini API key. More natural voice."
-            : "Fast, free, no extra key required.";
-        }
+        updateTtsRow();
       });
     });
+
+    // TTS provider pill click (same double-fire guard)
+    if (ttsRow) {
+      const ttsPills = ttsRow.querySelectorAll(".mode-pill");
+      ttsPills.forEach(pill => {
+        pill.addEventListener("click", (e) => {
+          if (e.target.tagName === "INPUT") return;
+          ttsPills.forEach(p => p.classList.remove("mode-pill-active"));
+          pill.classList.add("mode-pill-active");
+          pill.querySelector("input[type=radio]").checked = true;
+          if (ttsHint) {
+            ttsHint.textContent = pill.dataset.value === "gemini"
+              ? "Uses your configured Gemini API key. More natural voice."
+              : "Fast, free, no extra key required.";
+          }
+        });
+      });
+    }
   }
 
-  // Reset pills to defaults when modal opens
+  // Reset pills to defaults every time the modal opens
+  const modePills = modeRow.querySelectorAll(".mode-pill");
   modePills.forEach(p => p.classList.remove("mode-pill-active"));
   const textPill = modeRow.querySelector('[data-value="text"]');
   if (textPill) { textPill.classList.add("mode-pill-active"); textPill.querySelector("input").checked = true; }
@@ -512,6 +526,7 @@ function _initMentionToggle() {
     if (edgePill) { edgePill.classList.add("mode-pill-active"); edgePill.querySelector("input").checked = true; }
     if (ttsHint) ttsHint.textContent = "Fast, free, no extra key required.";
   }
+  updateModeRow();
 }
 
 // Analysis mode picker — highlight selected card + show/hide AI options
