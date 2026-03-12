@@ -174,8 +174,16 @@ async def transcribe_audio(audio_path: str, known_participants: list[str] | None
         model = genai.GenerativeModel("gemini-2.5-flash")
         response = await model.generate_content_async(
             [prompt, uploaded],
-            generation_config={"temperature": 0, "max_output_tokens": 8192},
+            generation_config={"temperature": 0, "max_output_tokens": 65536},
         )
+
+        # Warn if the model stopped due to token limit (truncated JSON)
+        try:
+            finish_reason = response.candidates[0].finish_reason.name
+            if finish_reason not in ("STOP", "1"):
+                logger.warning("Gemini stopped with finish_reason=%s — output may be truncated", finish_reason)
+        except Exception:
+            pass
 
         raw = response.text.strip()
 
@@ -202,6 +210,19 @@ async def transcribe_audio(audio_path: str, known_participants: list[str] | None
                     transcript = json.loads(m.group(0))
                 except json.JSONDecodeError:
                     pass
+        # 4. Truncated response recovery — extract all complete {...} objects
+        if transcript is None:
+            objects = re.findall(r'\{[^{}]*"speaker"[^{}]*"text"[^{}]*"timestamp"[^{}]*\}', raw)
+            if objects:
+                recovered = []
+                for obj in objects:
+                    try:
+                        recovered.append(json.loads(obj))
+                    except json.JSONDecodeError:
+                        pass
+                if recovered:
+                    logger.warning("Recovered %d entries from truncated Gemini response", len(recovered))
+                    transcript = recovered
         if transcript is None:
             logger.error(
                 "Gemini response could not be parsed as JSON array. First 500 chars: %s",
