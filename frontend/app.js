@@ -570,14 +570,15 @@ function _initMentionToggle() {
 function _initModePicker() {
   const picker = document.getElementById("analysis-mode-picker");
   if (!picker) return;
-  picker.querySelectorAll(".mode-card").forEach(card => {
-    card.addEventListener("click", () => {
-      picker.querySelectorAll(".mode-card").forEach(c => c.classList.remove("mode-card-active"));
-      card.classList.add("mode-card-active");
-      card.querySelector("input[type=radio]").checked = true;
+  const cards = picker.querySelectorAll(".mode-card");
+  picker.querySelectorAll('input[name="analysis_mode"]').forEach(radio => {
+    radio.addEventListener("change", () => {
+      cards.forEach(c => c.classList.remove("mode-card-active"));
+      const active = picker.querySelector(`.mode-card[data-value="${radio.value}"]`);
+      if (active) active.classList.add("mode-card-active");
       const aiSection = document.getElementById("ai-options-section");
       if (aiSection) {
-        aiSection.classList.toggle("hidden", card.dataset.value === "transcript_only");
+        aiSection.classList.toggle("hidden", radio.value === "transcript_only");
       }
     });
   });

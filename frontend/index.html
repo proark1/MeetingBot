@@ -269,7 +269,7 @@
           <div class="form-section-label">Post-Meeting Processing</div>
           <div class="mode-picker" id="analysis-mode-picker">
             <label class="mode-card mode-card-active" data-value="full">
-              <input type="radio" name="analysis_mode" value="full" checked hidden />
+              <input type="radio" name="analysis_mode" value="full" checked style="position:absolute;opacity:0;width:0;height:0" />
               <div class="mode-card-icon">✦</div>
               <div class="mode-card-body">
                 <div class="mode-card-title">Full AI Analysis</div>
@@ -278,7 +278,7 @@
               <div class="mode-card-check">✓</div>
             </label>
             <label class="mode-card" data-value="transcript_only">
-              <input type="radio" name="analysis_mode" value="transcript_only" hidden />
+              <input type="radio" name="analysis_mode" value="transcript_only" style="position:absolute;opacity:0;width:0;height:0" />
               <div class="mode-card-icon">📄</div>
               <div class="mode-card-body">
                 <div class="mode-card-title">Transcript Only</div>
@@ -331,15 +331,15 @@
             <div class="response-mode-label">Reply via</div>
             <div class="response-mode-options">
               <label class="mode-pill mode-pill-active" data-value="text">
-                <input type="radio" name="mention_response_mode" value="text" checked style="position:absolute;opacity:0;pointer-events:none;width:0;height:0" />
+                <input type="radio" name="mention_response_mode" value="text" checked style="position:absolute;opacity:0;width:0;height:0" />
                 <span class="mode-pill-icon">💬</span> Text chat
               </label>
               <label class="mode-pill" data-value="voice">
-                <input type="radio" name="mention_response_mode" value="voice" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0" />
+                <input type="radio" name="mention_response_mode" value="voice" style="position:absolute;opacity:0;width:0;height:0" />
                 <span class="mode-pill-icon">🔊</span> Voice
               </label>
               <label class="mode-pill" data-value="both">
-                <input type="radio" name="mention_response_mode" value="both" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0" />
+                <input type="radio" name="mention_response_mode" value="both" style="position:absolute;opacity:0;width:0;height:0" />
                 <span class="mode-pill-icon">✦</span> Both
               </label>
             </div>
@@ -350,11 +350,11 @@
             <div class="response-mode-label">Voice engine</div>
             <div class="response-mode-options">
               <label class="mode-pill mode-pill-active" data-value="edge" id="tts-pill-edge">
-                <input type="radio" name="tts_provider" value="edge" checked style="position:absolute;opacity:0;pointer-events:none;width:0;height:0" />
+                <input type="radio" name="tts_provider" value="edge" checked style="position:absolute;opacity:0;width:0;height:0" />
                 ⚡ Edge TTS
               </label>
               <label class="mode-pill" data-value="gemini" id="tts-pill-gemini">
-                <input type="radio" name="tts_provider" value="gemini" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0" />
+                <input type="radio" name="tts_provider" value="gemini" style="position:absolute;opacity:0;width:0;height:0" />
                 ✦ Gemini TTS
               </label>
             </div>
