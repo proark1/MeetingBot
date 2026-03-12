@@ -295,6 +295,12 @@ def _move_chrome_audio(sink: str = PULSE_SINK_NAME) -> None:
             if r.returncode == 0:
                 moved += 1
                 logger.info("Moved sink-input %s (app=%s) → %s", entry["id"], app or "?", sink)
+                # Force full volume and unmute — Chrome may set volume to 0%
+                # or cork the sink-input when running headless/automated.
+                subprocess.run(["pactl", "set-sink-input-volume", entry["id"], "100%"],
+                               capture_output=True, timeout=5)
+                subprocess.run(["pactl", "set-sink-input-mute",   entry["id"], "0"],
+                               capture_output=True, timeout=5)
             else:
                 logger.debug("move-sink-input %s failed: %s", entry["id"], r.stderr.strip())
 
@@ -1483,6 +1489,10 @@ async def _scrape_captions(page: Page, platform: str) -> str:
                     // the call", "Your microphone is on", etc.) which are NOT
                     // speech captions and would break mention detection.
                     const selectors = [
+                        // Google Meet 2026 class names confirmed via live DOM inspection
+                        "div[class*='ygicle']",    // pure caption text (no speaker name)
+                        "div[class*='nMcdL']",     // full caption row: speaker + text
+                        "div[class*='vNKgIf']",    // outer caption container
                         // jsname attrs — caption-specific (may be stale in 2026)
                         "div[jsname='tgaKEf']",
                         "div[jsname='YSxPC']",
@@ -1561,43 +1571,23 @@ async def _scrape_captions(page: Page, platform: str) -> str:
                         }
                     }
 
-                    // Last-resort: sweep visible text in the bottom 40% of the
-                    // viewport.  Google Meet renders the caption overlay at the
-                    // bottom-centre of the screen regardless of DOM class names.
-                    // UI chrome buttons are filtered by the isValid / skipPrefixes
-                    // rules above; this catches caption text even when all named
-                    // selectors are stale.
+                    // Last-resort: element-based viewport sweep.
+                    // Iterates ALL div/span elements in document order, keeps only
+                    // those whose top edge is in the bottom 40% of the viewport
+                    // with visible dimensions, and returns the first with valid text.
+                    // This mirrors the diagnostic DOM dump approach which is confirmed
+                    // to find the caption overlay regardless of class names.
                     try {
-                        const bottomY = window.innerHeight * 0.60;
-                        const seen    = new Set();
-                        const frags   = [];
-                        // Short UI-only strings to skip in this fallback
-                        const uiWords = new Set([
-                            'chat','people','more','pin','mute','mic','camera',
-                            'leave','call','end','stop','start','share','present',
-                            'raise hand','emoji','effects','settings','activities',
-                            'whiteboard','poll','q&a','breakout','captions',
-                        ]);
-                        const walker = document.createTreeWalker(
-                            document.body, NodeFilter.SHOW_TEXT, null);
-                        while (walker.nextNode()) {
-                            const n = walker.currentNode;
-                            const p = n.parentElement;
-                            if (!p) continue;
-                            const rect = p.getBoundingClientRect();
-                            // Must be in the bottom 40% AND have visible size
-                            if (rect.top < bottomY) continue;
-                            if (rect.width < 30 || rect.height < 8) continue;
-                            const t = n.textContent.trim();
-                            if (!t || t.length < 5 || t.length > 400) continue;
-                            if (seen.has(t)) continue;
-                            seen.add(t);
-                            const tl = t.toLowerCase();
-                            if (uiWords.has(tl)) continue;
-                            if (!isValid(t)) continue;
-                            frags.push(t);
+                        const vpY = window.innerHeight * 0.60;
+                        const vpEls = Array.from(document.querySelectorAll('div,span'))
+                            .filter(el => {
+                                const r = el.getBoundingClientRect();
+                                return r.top >= vpY && r.width >= 30 && r.height >= 8;
+                            });
+                        for (const el of vpEls) {
+                            const t = (el.innerText || el.textContent || '').trim();
+                            if (t && t.length >= 8 && t.length <= 600 && isValid(t)) return t;
                         }
-                        if (frags.length) return frags.join(' ');
                     } catch(_) {}
 
                     return '';
@@ -2731,6 +2721,25 @@ async def run_browser_bot(
             await asyncio.get_event_loop().run_in_executor(
                 None, functools.partial(_sync_chrome_audio_routing, pulse_sink, pulse_mic, pulse_source_name)
             )
+
+            # Unmute all audio/video elements in the page.  In headless/automated
+            # Chrome, Google Meet may leave its WebRTC audio output element muted
+            # (or at zero volume), causing the PulseAudio sink-input to carry
+            # silence even though WebRTC packets are received.  Force-playing with
+            # volume=1 ensures Chrome actually pushes PCM samples to PulseAudio.
+            try:
+                await page.evaluate("""
+                    () => {
+                        document.querySelectorAll('audio, video').forEach(el => {
+                            el.muted  = false;
+                            el.volume = 1.0;
+                            el.play().catch(() => {});
+                        });
+                    }
+                """)
+                logger.info("Audio elements unmuted in page")
+            except Exception as exc:
+                logger.debug("Audio unmute injection failed: %s", exc)
 
             # Enable live captions so the mention monitor can read them
             if respond_on_mention:
