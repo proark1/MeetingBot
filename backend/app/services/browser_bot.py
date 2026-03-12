@@ -2019,74 +2019,84 @@ def _pcm_to_wav(pcm: bytes) -> bytes:
     ) + pcm
 
 
-async def _live_transcription_loop(
+async def _streaming_transcription_loop(
     audio_path: str,
     live_transcript: list,
-    chunk_interval: int = 15,
+    structured_transcript: list,
+    on_transcript_entry=None,
 ) -> None:
-    """Periodically read new PCM data from the recording WAV, transcribe it
-    inline with Gemini, and append plain text to *live_transcript*.
+    """VAD-based streaming transcription loop.
 
-    Runs concurrently with _mention_monitor.  The shared list provides:
-    - Live meeting context for answering questions about the meeting
-    - Audio-based bot-name detection when DOM captions are unavailable
+    Reads the growing WAV file continuously in 100 ms frames, uses an
+    energy-based Voice Activity Detector to detect utterance boundaries, and
+    sends each complete utterance to Gemini inline for transcription.  Results
+    are available in <1 s from end-of-speech.
+
+    Populates two shared lists:
+    - live_transcript: plain-text chunks consumed by _mention_monitor for
+      wake-word detection and meeting context (unchanged interface).
+    - structured_transcript: {speaker, text, timestamp} dicts persisted to DB.
+
+    on_transcript_entry: optional async callable(entry) invoked immediately
+    after each entry is created, for real-time DB saves.
     """
     from app.config import settings as _cfg
     if not _cfg.GEMINI_API_KEY:
-        logger.warning("Live transcription: GEMINI_API_KEY not set — disabled")
+        logger.warning("Streaming transcription: GEMINI_API_KEY not set — disabled")
         return
     try:
         import google.generativeai as genai
         genai.configure(api_key=_cfg.GEMINI_API_KEY)
         model = genai.GenerativeModel("gemini-2.5-flash")
     except ImportError:
-        logger.warning("Live transcription: google-generativeai not installed")
+        logger.warning("Streaming transcription: google-generativeai not installed")
         return
 
-    file_pos  = _WAV_HEADER_SIZE        # skip WAV header on first read
-    MIN_BYTES = _PCM_BYTES_PER_S * 2    # need at least 2 s of new audio
-    GUARD     = _PCM_BYTES_PER_S        # 1-s safety margin at end (avoid partial writes)
-    MAX_READ  = _PCM_BYTES_PER_S * 20   # cap each chunk at 20 s
+    FRAME_MS        = 100                             # poll every 100 ms
+    FRAME_BYTES     = _PCM_BYTES_PER_S * FRAME_MS // 1000  # bytes per 100 ms frame
+    GUARD_BYTES     = _PCM_BYTES_PER_S               # 1-s guard against partial writes
+    # VAD thresholds
+    SPEECH_ENERGY_THRESHOLD = 0.05   # fraction of non-zero samples to count as speech
+    SPEECH_START_FRAMES  = 2         # consecutive speech frames to open an utterance
+    TRAILING_SILENCE_MS  = 400       # ms of silence to close an utterance
+    TRAILING_SILENCE_FRAMES = TRAILING_SILENCE_MS // FRAME_MS
+    MIN_UTTERANCE_MS    = 300        # ignore utterances shorter than this
+    MIN_UTTERANCE_BYTES = _PCM_BYTES_PER_S * MIN_UTTERANCE_MS // 1000
+    MAX_UTTERANCE_BYTES = _PCM_BYTES_PER_S * 30     # cap at 30 s to bound API latency
 
     prompt = (
-        "Transcribe this meeting audio clip. Return ONLY the spoken words as plain "
+        "Transcribe this speech segment. Return ONLY the spoken words as plain "
         "text — no timestamps, no speaker labels, no markdown. "
-        "If the clip is completely silent or contains only background noise, return nothing."
+        "If there is no intelligible speech, return nothing."
     )
-    logger.info("Live transcription loop started (interval=%ds)", chunk_interval)
 
-    while True:
-        await asyncio.sleep(chunk_interval)
+    file_pos = _WAV_HEADER_SIZE  # cursor into the growing WAV file (skips header)
+
+    # VAD state machine
+    speech_frames    = 0    # consecutive speech frames seen
+    silence_frames   = 0    # consecutive silence frames after speech started
+    in_utterance     = False
+    utterance_pcm    = bytearray()
+    utterance_start_byte = 0  # file offset where current utterance began
+
+    logger.info("Streaming transcription loop started")
+
+    def _is_speech_frame(pcm_frame: bytes) -> bool:
+        """Energy-based VAD: true when >5% of s16le samples are non-zero."""
+        sample = pcm_frame[::20]   # sample every 10th s16 sample (20 bytes apart)
+        if not sample:
+            return False
+        nonzero = sum(1 for b in sample if b != 0)
+        return nonzero / len(sample) > SPEECH_ENERGY_THRESHOLD
+
+    async def _transcribe_utterance(pcm: bytes, start_byte: int) -> None:
+        """Send PCM utterance to Gemini, append result to shared lists."""
+        timestamp_s = max(0.0, (start_byte - _WAV_HEADER_SIZE) / _PCM_BYTES_PER_S)
+        logger.info(
+            "Streaming transcription: utterance %.1f s at t=%.1f s",
+            len(pcm) / _PCM_BYTES_PER_S, timestamp_s,
+        )
         try:
-            if not os.path.exists(audio_path):
-                continue
-            file_size = os.path.getsize(audio_path)
-            # Leave a 1-s guard to avoid reading bytes still being written by ffmpeg
-            safe_end  = max(_WAV_HEADER_SIZE, file_size - GUARD)
-            new_bytes = safe_end - file_pos
-            if new_bytes < MIN_BYTES:
-                continue
-
-            read_bytes = min(new_bytes, MAX_READ)
-            read_from  = safe_end - read_bytes   # always the most recent audio
-            with open(audio_path, 'rb') as f:
-                f.seek(max(read_from, _WAV_HEADER_SIZE))
-                pcm = f.read(read_bytes)
-            file_pos = safe_end   # advance cursor
-
-            if len(pcm) < MIN_BYTES:
-                continue
-
-            # Silence diagnostic: sample 1 in every 200 bytes; if >95% are
-            # zero the chunk is likely silence (bad routing / no meeting audio).
-            _sample = pcm[::200]
-            _nonzero = sum(1 for b in _sample if b != 0)
-            _silent = _nonzero < max(1, len(_sample) * 0.05)
-            logger.info(
-                "Live transcription: sending %.1f s chunk (%d bytes, offset=%d, silent=%s)",
-                len(pcm) / _PCM_BYTES_PER_S, len(pcm), read_from, _silent,
-            )
-
             audio_part = genai.protos.Part(
                 inline_data=genai.protos.Blob(
                     mime_type="audio/wav",
@@ -2097,32 +2107,101 @@ async def _live_transcription_loop(
                 [audio_part, prompt],
                 generation_config={"temperature": 0.0, "max_output_tokens": 1024},
             )
-            # response.text throws ValueError when the model returned no text
-            # (e.g. silent audio clip with finish_reason=STOP but empty parts)
             try:
                 text = (response.text or "").strip()
             except ValueError:
-                # Log finish_reason so we can distinguish "truly silent" from
-                # "API error" or "content filtered".
-                try:
-                    cand   = response.candidates[0] if response.candidates else None
-                    reason = str(cand.finish_reason) if cand else "no_candidates"
-                except Exception:
-                    reason = "unknown"
-                logger.info(
-                    "Live transcription: no speech detected (finish_reason=%s, silent_chunk=%s)",
-                    reason, _silent,
-                )
                 text = ""
-            if text:
-                live_transcript.append(text)
-                del live_transcript[:-60]   # keep ~15 min at 15-s intervals
-                logger.info("Live transcript chunk (%d chars): %r…", len(text), text[:120])
+            if not text:
+                return
+            # Plain-text list for mention monitor
+            live_transcript.append(text)
+            del live_transcript[:-60]
+            logger.info("Streaming transcript (t=%.1f s): %r…", timestamp_s, text[:120])
+            # Structured entry for DB persistence
+            entry = {"speaker": "Unknown", "text": text, "timestamp": round(timestamp_s, 2)}
+            structured_transcript.append(entry)
+            if on_transcript_entry is not None:
+                try:
+                    await on_transcript_entry(entry)
+                except Exception as cb_exc:
+                    logger.warning("on_transcript_entry callback error: %s", cb_exc)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("Streaming transcription utterance error: %s", exc)
+
+    while True:
+        await asyncio.sleep(FRAME_MS / 1000)
+        try:
+            if not os.path.exists(audio_path):
+                continue
+            file_size = os.path.getsize(audio_path)
+            safe_end  = max(_WAV_HEADER_SIZE, file_size - GUARD_BYTES)
+            if safe_end <= file_pos:
+                continue
+
+            # Read all new frames available
+            with open(audio_path, 'rb') as f:
+                f.seek(file_pos)
+                new_data = f.read(safe_end - file_pos)
+
+            if not new_data:
+                continue
+
+            # Process frame by frame
+            offset = 0
+            while offset + FRAME_BYTES <= len(new_data):
+                frame = new_data[offset: offset + FRAME_BYTES]
+                frame_file_pos = file_pos + offset
+                offset += FRAME_BYTES
+                is_speech = _is_speech_frame(frame)
+
+                if not in_utterance:
+                    if is_speech:
+                        speech_frames += 1
+                        if speech_frames >= SPEECH_START_FRAMES:
+                            in_utterance = True
+                            silence_frames = 0
+                            utterance_start_byte = frame_file_pos - (speech_frames - 1) * FRAME_BYTES
+                            utterance_pcm = bytearray()
+                            # backfill the opening speech frames we already read
+                            backfill_start = max(_WAV_HEADER_SIZE, utterance_start_byte)
+                            with open(audio_path, 'rb') as bf:
+                                bf.seek(backfill_start)
+                                utterance_pcm.extend(bf.read(frame_file_pos - backfill_start + FRAME_BYTES))
+                    else:
+                        speech_frames = 0
+                else:
+                    # Inside an utterance
+                    utterance_pcm.extend(frame)
+                    if is_speech:
+                        silence_frames = 0
+                    else:
+                        silence_frames += 1
+
+                    too_long = len(utterance_pcm) >= MAX_UTTERANCE_BYTES
+                    end_of_speech = silence_frames >= TRAILING_SILENCE_FRAMES
+
+                    if end_of_speech or too_long:
+                        in_utterance = False
+                        speech_frames = 0
+                        silence_frames = 0
+                        if len(utterance_pcm) >= MIN_UTTERANCE_BYTES:
+                            pcm_copy = bytes(utterance_pcm)
+                            start_copy = utterance_start_byte
+                            utterance_pcm = bytearray()
+                            asyncio.ensure_future(_transcribe_utterance(pcm_copy, start_copy))
+                        else:
+                            utterance_pcm = bytearray()
+
+            file_pos = file_pos + offset   # advance past fully-processed frames
+
+            # Partial frame left at end — leave in next read (file_pos not advanced past it)
 
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            logger.warning("Live transcription chunk error (%s): %s", type(exc).__name__, exc)
+            logger.warning("Streaming transcription frame error (%s): %s", type(exc).__name__, exc)
 
 
 async def _mention_monitor(
@@ -2535,6 +2614,7 @@ async def run_browser_bot(
     tts_provider: str = "edge",
     start_muted: bool = False,
     live_transcription: bool = False,
+    on_live_transcript_entry=None,
 ) -> dict:
     """
     Join a meeting as a named guest, record audio, wait for it to end.
@@ -2549,10 +2629,16 @@ async def run_browser_bot(
         alone_timeout:     Seconds the bot may be the only participant before
                            it leaves automatically (covers both the empty-room
                            case and the everyone-left case).
-        on_admitted:       Optional async callback fired when the bot is let in.
+        on_admitted:             Optional async callback fired when the bot is let in.
+        on_live_transcript_entry: Optional async callable(entry) invoked after each
+                                  structured transcript entry is created during the
+                                  meeting — use for real-time DB saves.
 
     Returns:
-        {"success", "audio_path", "error", "admitted", "duration_seconds", "exit_reason", "participants"}
+        {"success", "audio_path", "error", "admitted", "duration_seconds",
+         "exit_reason", "participants", "live_transcript"}
+        live_transcript: list of {speaker, text, timestamp} dicts produced by
+        the streaming VAD loop (may be empty if Gemini key is absent).
     """
     pulse_idx:          Optional[str] = None
     pulse_mic_idx:      Optional[str] = None   # null-sink module index
@@ -2803,27 +2889,23 @@ async def run_browser_bot(
 
             _participants: set[str] = set()
 
-            # Shared live transcript: filled by _live_transcription_loop,
-            # consumed by _mention_monitor for voice mention detection.
-            # Always start when respond_on_mention=True so the bot can detect
-            # its name being called even when DOM caption selectors are stale.
-            # The live_transcription flag only controls whether a visible
-            # real-time transcript is surfaced to the user (15 s chunks vs
-            # the shorter 8 s chunks used for mention detection only).
+            # Shared live transcript lists:
+            #   live_transcript       — plain-text chunks for _mention_monitor
+            #   structured_transcript — {speaker, text, timestamp} dicts for DB
+            # The VAD-based streaming loop feeds both lists with <1 s latency.
+            # It runs whenever respond_on_mention=True OR live_transcription=True.
             live_transcript: list = []
+            structured_transcript: list = []
             from app.config import settings as _s_cfg
             _gemini_available = bool(_s_cfg.GEMINI_API_KEY) and ffmpeg_proc is not None
-            if live_transcription and _gemini_available:
+            if (live_transcription or respond_on_mention) and _gemini_available:
                 transcription_task = asyncio.create_task(
-                    _live_transcription_loop(audio_path, live_transcript, chunk_interval=15)
-                )
-            elif respond_on_mention and _gemini_available:
-                # Lightweight mention-detection-only transcription.
-                # 4 s chunks → ~4 s latency from speech to detection.
-                # Results go into live_transcript for _mention_monitor only;
-                # they are NOT stored in the final per-meeting transcript.
-                transcription_task = asyncio.create_task(
-                    _live_transcription_loop(audio_path, live_transcript, chunk_interval=4)
+                    _streaming_transcription_loop(
+                        audio_path,
+                        live_transcript,
+                        structured_transcript,
+                        on_transcript_entry=on_live_transcript_entry,
+                    )
                 )
 
             # Run mention monitor concurrently with the meeting-end watcher
@@ -2901,6 +2983,7 @@ async def run_browser_bot(
                 "duration_seconds": duration,
                 "exit_reason": exit_reason,
                 "participants": sorted(_participants),
+                "live_transcript": list(structured_transcript),
             }
 
         except Exception as exc:

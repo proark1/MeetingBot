@@ -240,7 +240,10 @@ async def play_audio(path: str, sink: str) -> None:
         # samples to PA's buffer; without this sleep the next TTS could
         # start playing before the last few frames of the current one have
         # been rendered, cutting off the end of the sentence.
-        await asyncio.sleep(0.8)
+        # 1.5 s accounts for PulseAudio buffer drain + WebRTC jitter buffer
+        # + network latency so that _mute_mic is never called before the
+        # remote side has received the final audio frames.
+        await asyncio.sleep(1.5)
 
     except Exception as exc:
         logger.warning("TTS playback failed: %s", exc)

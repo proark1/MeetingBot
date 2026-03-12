@@ -4,6 +4,7 @@ import asyncio
 import logging
 import os
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs, unquote
@@ -272,6 +273,26 @@ async def run_bot_lifecycle(bot_id: str, db_factory) -> None:
                     await _set_status(db, bot, "in_call", started_at=_now())
                     logger.info("Bot %s is now in_call", bot_id)
 
+                # ── Live transcript DB-save callback ──────────────────────
+                # Called by _streaming_transcription_loop for each utterance.
+                # Flushes to DB every 10 entries or every 30 s, whichever
+                # comes first, so the transcript builds up in real-time.
+                _live_buffer: list = []
+                _last_flush: float = time.monotonic()
+
+                async def on_live_entry(entry: dict) -> None:
+                    nonlocal _last_flush
+                    _live_buffer.append(entry)
+                    if len(_live_buffer) >= 10 or time.monotonic() - _last_flush >= 30:
+                        bot.transcript = list(_live_buffer)
+                        bot.updated_at = _now()
+                        try:
+                            await db.commit()
+                        except Exception as flush_exc:
+                            logger.warning("Live transcript flush error: %s", flush_exc)
+                            await db.rollback()
+                        _last_flush = time.monotonic()
+
                 max_retries = settings.BOT_JOIN_MAX_RETRIES
                 retry_delay = settings.BOT_JOIN_RETRY_DELAY_S
                 last_error: str = ""
@@ -284,6 +305,7 @@ async def run_bot_lifecycle(bot_id: str, db_factory) -> None:
                         )
                         await asyncio.sleep(retry_delay)
                         admitted = False  # reset for fresh attempt
+                        _live_buffer.clear()
 
                     bot_result = await run_browser_bot(
                         meeting_url=bot.meeting_url,
@@ -299,6 +321,7 @@ async def run_bot_lifecycle(bot_id: str, db_factory) -> None:
                         tts_provider=getattr(bot, "tts_provider", "edge"),
                         start_muted=getattr(bot, "start_muted", False),
                         live_transcription=getattr(bot, "live_transcription", False),
+                        on_live_transcript_entry=on_live_entry,
                     )
 
                     if bot_result["success"]:
@@ -319,10 +342,30 @@ async def run_bot_lifecycle(bot_id: str, db_factory) -> None:
 
                 # ── 2. call_ended → transcribe ────────────────────────────
                 scraped_participants: list[str] = bot_result.get("participants") or []
+                live_transcript_entries: list = bot_result.get("live_transcript") or []
                 await _set_status(db, bot, "call_ended", ended_at=_now())
                 logger.info("Bot %s transcribing audio…", bot_id)
 
                 transcript = await transcribe_audio(audio_path, known_participants=scraped_participants)
+
+                # Merge strategy: prefer the high-quality batch transcript (speaker
+                # labels, accurate timestamps).  If the batch returned fewer than 3
+                # entries, supplement/replace with the VAD streaming entries so the
+                # user always sees something meaningful.
+                if live_transcript_entries:
+                    if len(transcript) < 3:
+                        logger.info(
+                            "Bot %s: batch transcript sparse (%d entries) — "
+                            "using %d live streaming entries instead",
+                            bot_id, len(transcript), len(live_transcript_entries),
+                        )
+                        transcript = live_transcript_entries
+                    else:
+                        logger.info(
+                            "Bot %s: batch transcript has %d entries, "
+                            "live streaming produced %d entries (batch used as primary)",
+                            bot_id, len(transcript), len(live_transcript_entries),
+                        )
 
                 if not transcript:
                     logger.warning(
