@@ -1708,7 +1708,7 @@ async def _type_into_chat(page: Page, selectors: list[str], message: str, timeou
             await el.click()
             # Clear existing content (triple-click selects all, then type replaces)
             await page.keyboard.press("Control+a")
-            await page.keyboard.type(message, delay=20)
+            await page.keyboard.type(message, delay=10)
             return True
         except Exception as exc:
             logger.debug("_type_into_chat selector %r failed: %s", sel, exc)
@@ -1888,21 +1888,29 @@ async def _speak_in_meeting(
     gemini_api_key: str | None = None,
     start_muted: bool = True,
     pulse_mic: str = PULSE_MIC_NAME,
+    pre_synthesized_path: str | None = None,
 ) -> bool:
     """Speak *text* aloud in the meeting via TTS → PulseAudio virtual mic.
 
     When start_muted=True (default): unmute before speaking, mute again after.
     When start_muted=False: mic is already on — just play the audio.
 
+    pre_synthesized_path: if provided, skip TTS synthesis and use this file
+    directly.  Allows the caller to start synthesis concurrently with other
+    work (e.g. sending the chat message) and pass the result in.
+
     Returns True on success.
     """
     from app.services import tts_service
 
     try:
-        # Step 1: synthesize audio first (async HTTP — doesn't touch the browser)
-        tts_path = await tts_service.synthesize(
-            text, provider=tts_provider, api_key=gemini_api_key
-        )
+        # Step 1: use pre-synthesized audio if provided, otherwise synthesize now.
+        if pre_synthesized_path:
+            tts_path = pre_synthesized_path
+        else:
+            tts_path = await tts_service.synthesize(
+                text, provider=tts_provider, api_key=gemini_api_key
+            )
         if not tts_path:
             logger.warning("TTS synthesis returned no file — skipping voice response")
             return False
@@ -2089,13 +2097,22 @@ async def _mention_monitor(
             if mention_response_mode == "voice":
                 await _speak_in_meeting(page, platform, reply, tts_provider, gemini_api_key, start_muted, pulse_mic)
             elif mention_response_mode == "both":
-                # Chat first (keyboard typing), then voice (button clicks).
-                # Running them in parallel causes _unmute_mic's button click to
-                # steal keyboard focus mid-type, resulting in truncated messages.
+                # TTS synthesis (pure HTTP) runs concurrently with chat typing
+                # so that the audio file is ready by the time chat finishes.
+                # We do NOT await here — synthesis happens in the background
+                # while _send_chat_message occupies the browser with keyboard
+                # events.  Only the final _speak_in_meeting call (unmute + play)
+                # needs the browser; that still runs after chat completes, so
+                # there is no keyboard-focus race.
+                from app.services import tts_service as _tts_svc
+                tts_task = asyncio.create_task(
+                    _tts_svc.synthesize(reply, provider=tts_provider, api_key=gemini_api_key)
+                )
                 chat_ok = await _send_chat_message(page, platform, reply)
                 if not chat_ok:
                     logger.warning("Bot mention chat reply failed (both mode)")
-                await _speak_in_meeting(page, platform, reply, tts_provider, gemini_api_key, start_muted, pulse_mic)
+                pre_path = await tts_task   # likely already done while chat was sending
+                await _speak_in_meeting(page, platform, reply, tts_provider, gemini_api_key, start_muted, pulse_mic, pre_synthesized_path=pre_path)
             else:  # "text" (default)
                 success = await _send_chat_message(page, platform, reply)
                 if not success:
@@ -2180,7 +2197,7 @@ async def _mention_monitor(
 
                 if (
                     bot_name_lower in new_caption_text.lower()
-                    and time.monotonic() - last_response_at >= 8
+                    and time.monotonic() - last_response_at >= 5
                 ):
                     # Extract the specific request made AFTER the bot's name.
                     # This avoids feeding the model the full caption history as
@@ -2237,7 +2254,7 @@ async def _mention_monitor(
                     logger.debug("Chat update: %r", new_chat_text[:200])
                     if (
                         bot_name_lower in new_chat_text.lower()
-                        and time.monotonic() - last_response_at >= 8
+                        and time.monotonic() - last_response_at >= 5
                     ):
                         # Extract text after the bot name in the chat message
                         mention_pos = new_chat_text.lower().find(bot_name_lower)
@@ -2288,7 +2305,7 @@ async def _mention_monitor(
 
                 if (
                     bot_name_lower in new_audio_text.lower()
-                    and time.monotonic() - last_response_at >= 8
+                    and time.monotonic() - last_response_at >= 5
                 ):
                     mention_pos   = new_audio_text.lower().find(bot_name_lower)
                     after_mention = new_audio_text[mention_pos + len(bot_name_lower):].lstrip(" ,:!?-").strip()
@@ -2635,11 +2652,11 @@ async def run_browser_bot(
                 )
             elif respond_on_mention and _gemini_available:
                 # Lightweight mention-detection-only transcription.
-                # 8 s chunks → ~8 s latency from speech to response.
+                # 4 s chunks → ~4 s latency from speech to detection.
                 # Results go into live_transcript for _mention_monitor only;
                 # they are NOT stored in the final per-meeting transcript.
                 transcription_task = asyncio.create_task(
-                    _live_transcription_loop(audio_path, live_transcript, chunk_interval=8)
+                    _live_transcription_loop(audio_path, live_transcript, chunk_interval=4)
                 )
 
             # Run mention monitor concurrently with the meeting-end watcher
