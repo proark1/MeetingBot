@@ -27,6 +27,16 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+# Serialise all TTS playback so responses never overlap and the full audio
+# always drains through PulseAudio before the next one starts.
+_tts_play_lock: asyncio.Lock | None = None
+
+def _get_play_lock() -> asyncio.Lock:
+    global _tts_play_lock
+    if _tts_play_lock is None:
+        _tts_play_lock = asyncio.Lock()
+    return _tts_play_lock
+
 # ── Provider defaults ─────────────────────────────────────────────────────────
 
 EDGE_DEFAULT_VOICE   = "en-US-AriaNeural"
@@ -184,19 +194,25 @@ async def synthesize(
 async def play_audio(path: str, sink: str) -> None:
     """Play an audio file (MP3 or WAV) into a PulseAudio sink.
 
-    Blocks until playback is complete, then deletes the temp file.
-    Uses ffmpeg which is already present in the recording pipeline.
+    Serialised by a module-level lock so that concurrent calls (e.g. two
+    mentions detected close together) never overlap — the second waits until
+    the first has fully finished including the PulseAudio buffer drain.
     """
-    import subprocess as _sp
+    lock = _get_play_lock()
     try:
-        # Inherit current process env but explicitly carry PulseAudio vars so
-        # the ffmpeg subprocess connects to the same PulseAudio server as the
-        # bot process even when launched from within an asyncio executor.
+        await asyncio.wait_for(lock.acquire(), timeout=60.0)
+    except asyncio.TimeoutError:
+        logger.warning("TTS play_audio: could not acquire lock in 60 s — skipping")
+        try:
+            os.unlink(path)
+        except Exception:
+            pass
+        return
+
+    try:
         pulse_env = {**os.environ}
         rt = os.environ.get("XDG_RUNTIME_DIR", "/tmp/runtime-meetingbot")
         pulse_env.setdefault("PULSE_SERVER", f"unix:{rt}/pulse/native")
-        # Set PULSE_SINK so ffmpeg routes to the correct null-sink even if the
-        # explicit device-name argument is ignored by some PulseAudio versions.
         pulse_env["PULSE_SINK"] = sink
 
         logger.info("TTS playback starting → %s (%s)", sink, path)
@@ -208,7 +224,7 @@ async def play_audio(path: str, sink: str) -> None:
             env=pulse_env,
         )
         try:
-            _, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=15.0)
+            _, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=30.0)
         except asyncio.TimeoutError:
             proc.kill()
             logger.warning("TTS playback timed out — killed ffmpeg")
@@ -218,9 +234,18 @@ async def play_audio(path: str, sink: str) -> None:
             logger.warning("TTS playback ffmpeg error (rc=%d): %s", proc.returncode, stderr_text[-300:])
         else:
             logger.info("TTS playback complete → %s", sink)
+
+        # Allow PulseAudio time to drain its internal buffer before
+        # releasing the lock.  ffmpeg exits as soon as it has written all
+        # samples to PA's buffer; without this sleep the next TTS could
+        # start playing before the last few frames of the current one have
+        # been rendered, cutting off the end of the sentence.
+        await asyncio.sleep(0.8)
+
     except Exception as exc:
         logger.warning("TTS playback failed: %s", exc)
     finally:
+        lock.release()
         try:
             os.unlink(path)
         except Exception:

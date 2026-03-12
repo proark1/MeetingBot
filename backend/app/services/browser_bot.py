@@ -1532,15 +1532,19 @@ async def _scrape_captions(page: Page, platform: str) -> str:
                         !skipPrefixes.some(p => t.startsWith(p)) &&
                         !t.includes('Jump to bottom') &&
                         !materialIconRe.test(t.split('\n')[0]);
+                    // Google Meet adds captions in DOM order: older utterances
+                    // first, the current / most-recent one last.  We must return
+                    // the LAST valid text across all matches so that we get the
+                    // newest speech, not the bot's own previous TTS response which
+                    // appears earlier in the DOM and would otherwise always win.
                     for (const s of selectors) {
-                        // querySelectorAll so we check ALL matches — the first
-                        // match may be an empty container; a later one may have
-                        // the actual caption text.
                         const els = document.querySelectorAll(s);
+                        let last = '';
                         for (const el of els) {
                             const t = (el.innerText || el.textContent || '').trim();
-                            if (isValid(t)) return t;
+                            if (isValid(t)) last = t;
                         }
+                        if (last) return last;
                     }
                     // Scan aria-live="assertive" regions — Google Meet 2026 uses
                     // assertive for caption overlays so screen readers read them immediately.
@@ -1572,11 +1576,11 @@ async def _scrape_captions(page: Page, platform: str) -> str:
                     }
 
                     // Last-resort: element-based viewport sweep.
-                    // Iterates ALL div/span elements in document order, keeps only
-                    // those whose top edge is in the bottom 40% of the viewport
-                    // with visible dimensions, and returns the first with valid text.
-                    // This mirrors the diagnostic DOM dump approach which is confirmed
-                    // to find the caption overlay regardless of class names.
+                    // Uses the same approach as the diagnostic DOM dump (confirmed
+                    // to work).  Iterates all div/span elements in document order,
+                    // keeps those in the bottom 40% of the viewport, and returns
+                    // the LAST valid one — newer captions appear lower in the DOM
+                    // so taking the last gives us the most recent speech.
                     try {
                         const vpY = window.innerHeight * 0.60;
                         const vpEls = Array.from(document.querySelectorAll('div,span'))
@@ -1584,10 +1588,12 @@ async def _scrape_captions(page: Page, platform: str) -> str:
                                 const r = el.getBoundingClientRect();
                                 return r.top >= vpY && r.width >= 30 && r.height >= 8;
                             });
+                        let lastVp = '';
                         for (const el of vpEls) {
                             const t = (el.innerText || el.textContent || '').trim();
-                            if (t && t.length >= 8 && t.length <= 600 && isValid(t)) return t;
+                            if (t && t.length >= 8 && t.length <= 600 && isValid(t)) lastVp = t;
                         }
+                        if (lastVp) return lastVp;
                     } catch(_) {}
 
                     return '';
@@ -2650,6 +2656,52 @@ async def run_browser_bot(
             locale="en-US",
             timezone_id="America/New_York",
         )
+
+        # Intercept RTCPeerConnection at the page level (before Google Meet
+        # initialises its WebRTC) so that every incoming audio track is
+        # explicitly connected to a Web Audio context.  This forces Chrome to
+        # decode and render the incoming WebRTC audio through its normal audio
+        # output pipeline (→ PulseAudio null-sink) even in an automated/Xvfb
+        # environment where Chrome might otherwise suppress rendering.
+        await ctx.add_init_script("""
+            (function () {
+                if (window._mbRtcAudioForced) return;
+                window._mbRtcAudioForced = true;
+
+                var _AudioCtx = window.AudioContext || window.webkitAudioContext;
+                var _audioCtx = null;
+                function getCtx() {
+                    if (!_audioCtx) {
+                        _audioCtx = new _AudioCtx({ latencyHint: 'playback' });
+                        _audioCtx.resume().catch(function(){});
+                    }
+                    return _audioCtx;
+                }
+
+                var _OrigRTC = window.RTCPeerConnection;
+                function PatchedRTC() {
+                    var pc = new (Function.prototype.bind.apply(
+                        _OrigRTC, [null].concat(Array.prototype.slice.call(arguments))
+                    ))();
+                    pc.addEventListener('track', function (e) {
+                        if (e.track.kind !== 'audio') return;
+                        try {
+                            var stream = (e.streams && e.streams[0])
+                                ? e.streams[0]
+                                : new MediaStream([e.track]);
+                            var ctx = getCtx();
+                            var src = ctx.createMediaStreamSource(stream);
+                            src.connect(ctx.destination);
+                        } catch (_) {}
+                    });
+                    return pc;
+                }
+                PatchedRTC.prototype = _OrigRTC.prototype;
+                Object.setPrototypeOf(PatchedRTC, _OrigRTC);
+                window.RTCPeerConnection = PatchedRTC;
+            })();
+        """)
+
         page = await ctx.new_page()
         await _apply_stealth(page)
 
