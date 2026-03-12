@@ -1264,22 +1264,26 @@ async def _captions_already_active(page: Page, platform: str) -> bool:
                     for (const btn of btns) {
                         const pressed = btn.getAttribute('aria-pressed');
                         const checked = btn.getAttribute('aria-checked');
-                        if (pressed === 'true' || checked === 'true') return true;
+                        if (pressed === 'true' || checked === 'true')
+                            return 'button:aria-pressed=true';
                         // Filled / highlighted icon class (varies by Meet version)
-                        if (btn.className && btn.className.includes('r6xAKc')) return true;
+                        if (btn.className && btn.className.includes('r6xAKc'))
+                            return 'button:class=r6xAKc';
                     }
                     // 2. Caption container present in the DOM
                     const containers = [
                         'div[jsname="tgaKEf"]', 'div[jsname="YSxPC"]',
                         'div[jsname="VUpckd"]', 'div[jsname="z1asCe"]',
-                        'div[class*="a4cQT"]',  // CC overlay class
+                        'div[class*="a4cQT"]',
                     ];
                     for (const s of containers) {
-                        if (document.querySelector(s)) return true;
+                        if (document.querySelector(s)) return 'container:' + s;
                     }
-                    return false;
+                    return '';
                 }
             """)
+            if result:
+                logger.debug("Captions active indicator: %s", result)
             return bool(result)
         elif platform == "zoom":
             result = await page.evaluate("""
@@ -1533,8 +1537,8 @@ async def _scrape_captions(page: Page, platform: str) -> str:
                         }
                     }
 
-                    // Very broad fallback: any element whose class contains "caption"
-                    // or "transcript" case-insensitively.
+                    // Broad class-name fallback: any element whose class contains
+                    // "caption" or "transcript".
                     const broadRe = /caption|transcript|subtitle/i;
                     for (const el of document.querySelectorAll('div, span')) {
                         if (broadRe.test(el.className || '') || broadRe.test(el.getAttribute('data-type') || '')) {
@@ -1542,6 +1546,46 @@ async def _scrape_captions(page: Page, platform: str) -> str:
                             if (isValid(t) && t.length > 10) return t;
                         }
                     }
+
+                    // Last-resort: sweep visible text in the bottom 40% of the
+                    // viewport.  Google Meet renders the caption overlay at the
+                    // bottom-centre of the screen regardless of DOM class names.
+                    // UI chrome buttons are filtered by the isValid / skipPrefixes
+                    // rules above; this catches caption text even when all named
+                    // selectors are stale.
+                    try {
+                        const bottomY = window.innerHeight * 0.60;
+                        const seen    = new Set();
+                        const frags   = [];
+                        // Short UI-only strings to skip in this fallback
+                        const uiWords = new Set([
+                            'chat','people','more','pin','mute','mic','camera',
+                            'leave','call','end','stop','start','share','present',
+                            'raise hand','emoji','effects','settings','activities',
+                            'whiteboard','poll','q&a','breakout','captions',
+                        ]);
+                        const walker = document.createTreeWalker(
+                            document.body, NodeFilter.SHOW_TEXT, null);
+                        while (walker.nextNode()) {
+                            const n = walker.currentNode;
+                            const p = n.parentElement;
+                            if (!p) continue;
+                            const rect = p.getBoundingClientRect();
+                            // Must be in the bottom 40% AND have visible size
+                            if (rect.top < bottomY) continue;
+                            if (rect.width < 30 || rect.height < 8) continue;
+                            const t = n.textContent.trim();
+                            if (!t || t.length < 5 || t.length > 400) continue;
+                            if (seen.has(t)) continue;
+                            seen.add(t);
+                            const tl = t.toLowerCase();
+                            if (uiWords.has(tl)) continue;
+                            if (!isValid(t)) continue;
+                            frags.push(t);
+                        }
+                        if (frags.length) return frags.join(' ');
+                    } catch(_) {}
+
                     return '';
                 }
             """)
@@ -2023,6 +2067,16 @@ async def _live_transcription_loop(
             if len(pcm) < MIN_BYTES:
                 continue
 
+            # Silence diagnostic: sample 1 in every 200 bytes; if >95% are
+            # zero the chunk is likely silence (bad routing / no meeting audio).
+            _sample = pcm[::200]
+            _nonzero = sum(1 for b in _sample if b != 0)
+            _silent = _nonzero < max(1, len(_sample) * 0.05)
+            logger.info(
+                "Live transcription: sending %.1f s chunk (%d bytes, offset=%d, silent=%s)",
+                len(pcm) / _PCM_BYTES_PER_S, len(pcm), read_from, _silent,
+            )
+
             audio_part = genai.protos.Part(
                 inline_data=genai.protos.Blob(
                     mime_type="audio/wav",
@@ -2038,6 +2092,17 @@ async def _live_transcription_loop(
             try:
                 text = (response.text or "").strip()
             except ValueError:
+                # Log finish_reason so we can distinguish "truly silent" from
+                # "API error" or "content filtered".
+                try:
+                    cand   = response.candidates[0] if response.candidates else None
+                    reason = str(cand.finish_reason) if cand else "no_candidates"
+                except Exception:
+                    reason = "unknown"
+                logger.info(
+                    "Live transcription: no speech detected (finish_reason=%s, silent_chunk=%s)",
+                    reason, _silent,
+                )
                 text = ""
             if text:
                 live_transcript.append(text)
@@ -2142,32 +2207,59 @@ async def _mention_monitor(
                     await _enable_captions(page, platform)
                 except Exception as exc:
                     logger.warning("Caption re-enable failed: %s", exc)
-                # Dump DOM clues so we can diagnose stale selectors
+                # Dump targeted DOM clues to diagnose stale selectors
                 try:
                     dom_clues = await page.evaluate("""
                         () => {
                             const info = {};
-                            // All aria-live regions with their text
+                            // Caption-related buttons (regardless of pressed state)
+                            info.captionBtns = Array.from(
+                                document.querySelectorAll(
+                                    'button[aria-label*="caption" i],'
+                                    + 'button[aria-label*="subtitle" i],'
+                                    + 'button[aria-label*="CC" i],'
+                                    + 'button[jsname="r8qRAd"]'
+                                )
+                            ).map(el => ({
+                                lbl:     el.getAttribute('aria-label'),
+                                pressed: el.getAttribute('aria-pressed'),
+                                jsname:  el.getAttribute('jsname'),
+                                cls:     (el.className||'').slice(0,60),
+                            }));
+                            // All aria-live regions that contain text
                             info.ariaLive = Array.from(
                                 document.querySelectorAll('[aria-live]')
                             ).map(el => ({
                                 live: el.getAttribute('aria-live'),
                                 tag:  el.tagName,
                                 cls:  (el.className||'').slice(0,80),
-                                text: (el.innerText||el.textContent||'').trim().slice(0,120),
+                                text: (el.innerText||el.textContent||'').trim().slice(0,200),
                             })).filter(e => e.text);
-                            // Elements with 'caption' in class/aria-label
-                            info.captionEls = Array.from(
-                                document.querySelectorAll(
-                                    '[class*="caption" i],[aria-label*="caption" i],[jsname]'
-                                )
-                            ).slice(0, 20).map(el => ({
-                                tag:     el.tagName,
-                                jsname:  el.getAttribute('jsname'),
-                                cls:     (el.className||'').slice(0,60),
-                                lbl:     el.getAttribute('aria-label'),
-                                text:    (el.innerText||'').trim().slice(0,80),
-                            }));
+                            // Known caption container jsnames
+                            const captionJsnames = [
+                                'tgaKEf','YSxPC','VUpckd','z1asCe','MuzmKe',
+                                'CNusmb','iTTPOb','VbkSUe',
+                            ];
+                            info.knownCaptionEls = captionJsnames.map(jn => {
+                                const el = document.querySelector('[jsname="' + jn + '"]');
+                                return el ? {
+                                    jsname: jn, tag: el.tagName,
+                                    cls: (el.className||'').slice(0,60),
+                                    text: (el.innerText||'').trim().slice(0,120),
+                                } : null;
+                            }).filter(Boolean);
+                            // Elements in the bottom 35% of viewport
+                            const bottomY = window.innerHeight * 0.65;
+                            info.bottomViewport = Array.from(
+                                document.querySelectorAll('div,span,p')
+                            ).filter(el => {
+                                const r = el.getBoundingClientRect();
+                                return r.top >= bottomY && r.width > 30 && r.height > 8;
+                            }).slice(0, 15).map(el => ({
+                                tag:  el.tagName,
+                                cls:  (el.className||'').slice(0,60),
+                                text: (el.innerText||'').trim().slice(0,100),
+                            })).filter(e => e.text);
                             return info;
                         }
                     """)
