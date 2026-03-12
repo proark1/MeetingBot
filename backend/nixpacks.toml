@@ -34,7 +34,7 @@ aptPkgs = [
 ]
 
 [phases.build]
-cmds = ["playwright install chromium"]
+cmds = ["playwright install chromium", "chmod +x start.sh"]
 
 [start]
 cmd = "bash start.sh"
