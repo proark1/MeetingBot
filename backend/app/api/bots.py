@@ -154,6 +154,7 @@ async def create_bot(
         join_at=payload.join_at,
         notify_email=payload.notify_email,
         template_id=payload.template_id,
+        prompt_override=payload.prompt_override,
         vocabulary=payload.vocabulary,
         analysis_mode=payload.analysis_mode,
         respond_on_mention=payload.respond_on_mention,

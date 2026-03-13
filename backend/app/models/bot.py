@@ -52,6 +52,7 @@ class Bot(Base):
 
     # Template / vocabulary
     template_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    prompt_override: Mapped[str | None] = mapped_column(Text, nullable=True)
     vocabulary: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
     # Analysis mode: "full" (AI summary + chapters) | "transcript_only" (raw text only)

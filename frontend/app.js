@@ -661,6 +661,10 @@ document.getElementById("btn-new-bot").addEventListener("click", async () => {
     if (sel) {
       sel.innerHTML = '<option value="">Default analysis</option>' +
         tmpls.map(t => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join("");
+      sel.addEventListener("change", () => {
+        const customRow = document.getElementById("custom-prompt-row");
+        if (customRow) customRow.style.display = sel.value === "seed-customized" ? "" : "none";
+      });
     }
   } catch (_) {}
 });
@@ -690,6 +694,13 @@ async function submitCreateBot() {
   const emailInput = document.getElementById("new-bot-email");
   const notifyEmail = emailInput ? emailInput.value.trim() : "";
   const templateId = (document.getElementById("new-bot-template")?.value || "").trim();
+  const customPrompt = (document.getElementById("new-bot-custom-prompt")?.value || "").trim();
+  if (templateId === "seed-customized" && !customPrompt) {
+    showToast("Please enter your custom prompt before deploying.", "error");
+    btn.disabled = false;
+    btn.innerHTML = '<span class="btn-create-icon">▶</span> Deploy Bot';
+    return;
+  }
   const vocabRaw = (document.getElementById("new-bot-vocab")?.value || "").trim();
   const vocabulary = vocabRaw ? vocabRaw.split(",").map(s => s.trim()).filter(Boolean) : null;
   const analysisMode = document.querySelector('input[name="analysis_mode"]:checked')?.value || "full";
@@ -710,6 +721,7 @@ async function submitCreateBot() {
   if (notifyEmail) body.notify_email = notifyEmail;
   if (analysisMode === "full") {
     if (templateId) body.template_id = templateId;
+    if (templateId === "seed-customized" && customPrompt) body.prompt_override = customPrompt;
     if (vocabulary) body.vocabulary = vocabulary;
   }
 

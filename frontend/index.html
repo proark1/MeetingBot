@@ -316,6 +316,13 @@
               <input class="input" id="new-bot-email" type="email" placeholder="you@example.com" />
             </label>
           </div>
+          <div id="custom-prompt-row" style="display:none">
+            <label>
+              Your Custom Prompt <span style="color:var(--danger,#e55)">required</span>
+              <textarea class="input" id="new-bot-custom-prompt" rows="7" placeholder="Example:&#10;You are a customer success manager. Analyze this meeting transcript and return ONLY valid JSON.&#10;&#10;Required JSON shape:&#10;{&#10;  &quot;summary&quot;: &quot;&lt;2–3 sentence overview&gt;&quot;,&#10;  &quot;key_points&quot;: [&quot;&lt;point&gt;&quot;],&#10;  &quot;action_items&quot;: [{&quot;task&quot;: &quot;...&quot;, &quot;assignee&quot;: &quot;...&quot;, &quot;due_date&quot;: &quot;...&quot;}],&#10;  &quot;decisions&quot;: [&quot;&lt;decision&gt;&quot;],&#10;  &quot;next_steps&quot;: [&quot;&lt;step&gt;&quot;],&#10;  &quot;sentiment&quot;: &quot;positive|neutral|negative&quot;,&#10;  &quot;topics&quot;: [&quot;&lt;topic&gt;&quot;]&#10;}"></textarea>
+              <span class="hint">Start with a role ("You are a …"), tell the AI to return ONLY valid JSON, then define the JSON shape with any fields you need.</span>
+            </label>
+          </div>
           <label>
             Custom Vocabulary <span class="optional">optional</span>
             <input class="input" id="new-bot-vocab" placeholder="Acme Corp, SKU-1234, Project Phoenix — improves transcription accuracy" />

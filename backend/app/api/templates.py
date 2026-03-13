@@ -221,6 +221,16 @@ _SEED_TEMPLATES = [
             '}'
         ),
     },
+    {
+        "id": "seed-customized",
+        "name": "Customized",
+        "description": (
+            "Write your own analysis prompt. When you select this template you must supply a custom prompt "
+            "that tells the AI exactly how to analyse your meeting. Start with a role, include the instruction "
+            "to return ONLY valid JSON, and define the JSON shape with any fields you need."
+        ),
+        "prompt_override": None,
+    },
 ]
 
 

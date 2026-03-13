@@ -31,6 +31,13 @@ class BotCreate(BaseModel):
     join_at: datetime | None = None
     notify_email: str | None = None
     template_id: str | None = None
+    prompt_override: str | None = Field(
+        None,
+        description=(
+            "Custom analysis prompt used when template_id is 'seed-customized'. "
+            "Required when selecting the Customized template; ignored for all other templates."
+        ),
+    )
     vocabulary: list[str] | None = None
     analysis_mode: Literal["full", "transcript_only"] = Field(
         default="full",

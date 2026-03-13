@@ -444,7 +444,10 @@ async def run_bot_lifecycle(bot_id: str, db_factory) -> None:
                 # ── full mode: AI analysis + chapters + action items ───────
                 logger.info("Bot %s analysing transcript…", bot_id)
                 prompt_override = None
-                if bot.template_id:
+                # Inline prompt (used by the "Customized" seed template)
+                if bot.prompt_override:
+                    prompt_override = bot.prompt_override
+                elif bot.template_id:
                     try:
                         from app.models.template import MeetingTemplate
                         tmpl_row = (await db.execute(

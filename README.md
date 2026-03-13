@@ -103,7 +103,8 @@ POST /api/v1/bot
 
 `live_transcription` — when `true`, the bot transcribes audio in 15-second rolling chunks **during** the call using Gemini inline audio. This gives the bot real-time meeting context (it can answer "what did we just discuss?") and enables voice-based bot-name detection without relying on DOM captions. Requires `GEMINI_API_KEY`. Default `false` — audio is only transcribed after the meeting ends.
 
-`template_id` — optional ID of a meeting template (see `/api/v1/templates`). Templates customise the AI analysis prompt.
+`template_id` — optional ID of a meeting template (see `/api/v1/templates`). Templates customise the AI analysis prompt. Use `seed-customized` together with `prompt_override` to supply an inline one-off prompt without creating a saved template.
+`prompt_override` — required when `template_id` is `seed-customized`; ignored for all other templates. A custom AI analysis prompt written inline in the bot-creation request.
 `vocabulary` — optional list of domain-specific terms to hint at during transcription.
 `extra_metadata` — arbitrary JSON object stored with the bot record and returned in all responses.
 
@@ -492,8 +493,19 @@ DELETE /api/v1/templates/{id}           — delete a custom template (built-ins 
 | `seed-postmortem` | Incident Post-Mortem | Timeline, root causes, customer impact, remediation |
 | `seed-interview` | Interview / Hiring Panel | Competency ratings, strengths, concerns, recommendation |
 | `seed-design-review` | Design Review | Design decisions, rejected alternatives, open questions |
+| `seed-customized` | Customized | User-supplied inline prompt — pass `prompt_override` in the bot-creation request |
 
-**Creating a custom template** — write any prompt you like as `prompt_override`:
+**Using the Customized template** — supply your prompt inline in the `POST /api/v1/bot` request body without creating a saved template:
+
+```json
+{
+  "meeting_url": "https://meet.google.com/abc-defg-hij",
+  "template_id": "seed-customized",
+  "prompt_override": "You are a customer success manager. Analyze this meeting and return ONLY valid JSON.\n{\n  \"summary\": \"...\",\n  \"key_points\": [\"...\"]\n}"
+}
+```
+
+**Creating a saved custom template** — write any prompt you like as `prompt_override`:
 
 ```
 1. Start with a role:   "You are a sales coach."

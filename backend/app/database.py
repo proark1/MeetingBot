@@ -57,6 +57,7 @@ async def init_db():
             "ALTER TABLE bots ADD COLUMN tts_provider TEXT DEFAULT 'edge'",
             "ALTER TABLE bots ADD COLUMN start_muted INTEGER DEFAULT 0",
             "ALTER TABLE bots ADD COLUMN live_transcription INTEGER DEFAULT 0",
+            "ALTER TABLE bots ADD COLUMN prompt_override TEXT",
         ]:
             try:
                 await conn.execute(text(stmt))
