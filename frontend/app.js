@@ -1691,8 +1691,14 @@ document.getElementById("btn-create-template")?.addEventListener("click", async 
   const hamburger = document.getElementById("hamburger-btn");
   const overlay = document.getElementById("sidebar-overlay");
 
-  function openSidebar()  { app.classList.add("sidebar-open"); }
-  function closeSidebar() { app.classList.remove("sidebar-open"); }
+  function openSidebar() {
+    app.classList.add("sidebar-open");
+    document.body.classList.add("sidebar-open");
+  }
+  function closeSidebar() {
+    app.classList.remove("sidebar-open");
+    document.body.classList.remove("sidebar-open");
+  }
 
   hamburger?.addEventListener("click", () => {
     app.classList.contains("sidebar-open") ? closeSidebar() : openSidebar();
@@ -1703,7 +1709,7 @@ document.getElementById("btn-create-template")?.addEventListener("click", async 
   // Close sidebar after navigating on mobile
   document.querySelectorAll(".nav-item").forEach((item) => {
     item.addEventListener("click", () => {
-      if (window.innerWidth <= 768) closeSidebar();
+      if (window.innerWidth <= 900) closeSidebar();
     });
   });
 })();
