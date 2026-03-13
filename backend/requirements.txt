@@ -25,3 +25,6 @@ playwright-stealth==1.0.6
 
 # Text-to-speech for voice responses
 edge-tts>=6.1.9
+
+# Scheduled background jobs (weekly digest, recording cleanup)
+apscheduler>=3.10

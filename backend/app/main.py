@@ -17,8 +17,10 @@ from fastapi.responses import FileResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
 from app.config import settings
-from app.database import init_db
+from app.database import init_db, AsyncSessionLocal
 from app.api.action_items import router as action_items_router
 from app.api.analytics import router as analytics_router
 from app.api.bots import router as bots_router, share_router
@@ -82,8 +84,48 @@ async def lifespan(app: FastAPI):
 
     signal.signal(signal.SIGTERM, _handle_sigterm)
 
+    # ── Scheduled background jobs ──────────────────────────────────────────────
+    scheduler = AsyncIOScheduler(timezone="UTC")
+
+    if settings.DIGEST_EMAIL:
+        from app.services.digest_service import send_weekly_digest
+        scheduler.add_job(
+            send_weekly_digest,
+            "cron",
+            day_of_week="mon",
+            hour=9,
+            minute=0,
+            args=[AsyncSessionLocal],
+            id="weekly_digest",
+            replace_existing=True,
+        )
+        logger.info(
+            "Weekly digest scheduled — Mondays 09:00 UTC → %s",
+            settings.DIGEST_EMAIL,
+        )
+
+    if settings.RECORDING_RETENTION_DAYS > 0:
+        from app.services.cleanup_service import purge_old_recordings
+        scheduler.add_job(
+            purge_old_recordings,
+            "cron",
+            hour=3,
+            minute=0,
+            args=[AsyncSessionLocal],
+            id="recording_cleanup",
+            replace_existing=True,
+        )
+        logger.info(
+            "Recording cleanup scheduled — daily 03:00 UTC (retention=%d days)",
+            settings.RECORDING_RETENTION_DAYS,
+        )
+
+    scheduler.start()
+
     logger.info("MeetingBot ready")
     yield
+
+    scheduler.shutdown(wait=False)
 
     # Cancel all running bot tasks so they clean up before the process exits
     from app.api.bots import _running_tasks

@@ -46,7 +46,8 @@ Set these in a `.env` file or as environment variables:
 | `NOTION_DATABASE_ID` | *(empty)* | Notion database ID to write meeting pages into. |
 | `LINEAR_API_KEY` | *(empty)* | Linear API key — push action items as Linear issues. |
 | `LINEAR_TEAM_ID` | *(empty)* | Linear team ID to create issues in. |
-| `DIGEST_EMAIL` | *(empty)* | Comma-separated recipients for the weekly digest email (Mondays 9am). |
+| `DIGEST_EMAIL` | *(empty)* | Comma-separated recipients for the weekly digest email (Mondays 09:00 UTC). Requires `SMTP_HOST`. |
+| `RECORDING_RETENTION_DAYS` | `30` | Auto-delete WAV recordings older than this many days. Set to `0` to keep recordings forever. |
 
 ---
 

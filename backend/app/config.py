@@ -57,6 +57,9 @@ class Settings(BaseSettings):
     # Weekly digest email (optional) — comma-separated recipients
     DIGEST_EMAIL: str = ""
 
+    # Recording retention — delete WAV files older than this many days (0 = keep forever)
+    RECORDING_RETENTION_DAYS: int = 30
+
     model_config = {"env_file": ".env", "extra": "ignore"}
 
 
