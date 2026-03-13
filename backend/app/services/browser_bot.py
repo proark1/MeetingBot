@@ -2113,9 +2113,10 @@ async def _streaming_transcription_loop(
                 text = ""
             if not text:
                 return
-            # Plain-text list for mention monitor
+            # Plain-text list for mention monitor.  Do NOT truncate — the
+            # mention monitor tracks absolute indices (last_audio_idx) so
+            # truncating the list silently breaks voice-mention detection.
             live_transcript.append(text)
-            del live_transcript[:-60]
             logger.info("Streaming transcript (t=%.1f s): %r…", timestamp_s, text[:120])
             # Structured entry for DB persistence
             entry = {"speaker": "Unknown", "text": text, "timestamp": round(timestamp_s, 2)}
@@ -2481,6 +2482,7 @@ async def _mention_monitor(
     start_muted: bool = True,
     leave_event: asyncio.Event | None = None,
     live_transcript: list | None = None,
+    structured_transcript: list | None = None,
     pulse_mic: str = PULSE_MIC_NAME,
     live_handles_audio: bool = False,
     last_live_response_at: list | None = None,
@@ -2492,6 +2494,11 @@ async def _mention_monitor(
     transcript polling block is skipped — Gemini Live already handles voice
     detection and responses.  Only chat message polling remains active.
 
+    structured_transcript is the shared list populated by _streaming_transcription_loop
+    with {speaker, text, timestamp} dicts.  It grows throughout the meeting and is
+    used as full meeting-history context when building mention responses, so the bot
+    can answer questions about anything said since the call began.
+
     Designed to run concurrently with _wait_for_meeting_end and be cancelled when
     the meeting ends.
     """
@@ -2500,12 +2507,43 @@ async def _mention_monitor(
     seen_captions: str = ""
     seen_chat: str = ""
     last_response_at: float = 0.0
-    caption_log: list[str] = []      # rolling buffer — last 40 caption chunks
+    caption_log: list[str] = []      # rolling buffer — last 60 caption chunks
     bot_name_lower = bot_name.lower()
     _poll_count = 0
     _empty_streak = 0
     last_audio_idx: int = 0   # tracks which live_transcript entries we've already checked
     logger.info("Mention monitor started for bot '%s' on %s", bot_name, platform)
+
+    def _build_context(after_mention: str, source_label: str) -> str:
+        """Build context for generate_mention_response using the full meeting
+        transcript so the bot can answer questions about the entire meeting,
+        not just the last few minutes.
+
+        Priority:
+        1. structured_transcript (full history with timestamps, from Session A)
+        2. caption_log (rolling text buffer, fallback when transcription is off)
+        """
+        if structured_transcript:
+            history_lines = [
+                f"[{e.get('timestamp', 0):.0f}s] {e.get('speaker', '?')}: {e.get('text', '')}"
+                for e in structured_transcript
+            ]
+            # Keep up to ~8 000 chars of history (roughly 30-45 min of speech)
+            history = "\n".join(history_lines)
+            if len(history) > 8000:
+                history = "…(earlier content omitted)…\n" + history[-8000:]
+            history_section = f"Full meeting transcript so far:\n{history}"
+        elif caption_log:
+            history_section = "Recent meeting captions:\n" + " ".join(caption_log)[-3000:]
+        else:
+            history_section = ""
+
+        if after_mention:
+            return (
+                (history_section + "\n\n" if history_section else "") +
+                f"[{source_label} to {bot_name}]: {after_mention}"
+            )
+        return history_section or " ".join(caption_log)[-3000:]
 
     # Open chat panel at startup so incoming messages are visible in the DOM.
     try:
@@ -2667,14 +2705,7 @@ async def _mention_monitor(
                         leave_event.set()
                         return
 
-                    if after_mention:
-                        background = " ".join(caption_log[:-1])[-3000:]
-                        context = (
-                            (background + "\n" if background else "") +
-                            f"[Direct request to {bot_name}]: {after_mention}"
-                        )
-                    else:
-                        context = " ".join(caption_log)[-3000:]
+                    context = _build_context(after_mention, "Voice request")
                     uses_voice = mention_response_mode in ("voice", "both")
                     try:
                         reply = await _intel.generate_mention_response(
@@ -2696,13 +2727,24 @@ async def _mention_monitor(
                 chat_raw = ""
 
             if chat_raw and chat_raw != seen_chat:
-                # Diff: extract only new content
-                overlap = min(len(seen_chat), 200)
-                if seen_chat and chat_raw.startswith(seen_chat[:overlap]):
-                    new_chat_text = chat_raw[len(seen_chat):]
+                if not seen_chat:
+                    # First poll — bootstrap without treating existing history as new.
+                    # Without this, any old message that mentions the bot name would
+                    # immediately trigger a false response on join.
+                    seen_chat = chat_raw
+                    logger.debug("Chat bootstrapped (%d chars)", len(chat_raw))
+                    new_chat_text = ""
                 else:
-                    new_chat_text = chat_raw
-                seen_chat = chat_raw
+                    # Diff: extract only new content
+                    overlap = min(len(seen_chat), 200)
+                    if chat_raw.startswith(seen_chat[:overlap]):
+                        new_chat_text = chat_raw[len(seen_chat):]
+                    else:
+                        # Chat panel re-rendered (e.g. scroll, DOM refresh).
+                        # Don't re-process the entire history — skip this cycle.
+                        seen_chat = chat_raw
+                        new_chat_text = ""
+                    seen_chat = chat_raw
 
                 if new_chat_text.strip():
                     logger.debug("Chat update: %r", new_chat_text[:200])
@@ -2722,17 +2764,10 @@ async def _mention_monitor(
                             leave_event.set()
                             return
 
-                        meeting_history = " ".join(caption_log)[-2000:]
-                        if after_mention:
-                            context = (
-                                (f"Meeting so far (live captions):\n{meeting_history}\n\n" if meeting_history else "") +
-                                f"[Direct chat message to {bot_name}]: {after_mention}"
-                            )
-                        else:
-                            context = (
-                                (f"Meeting so far (live captions):\n{meeting_history}\n\n" if meeting_history else "") +
-                                new_chat_text.strip()[-1500:]
-                            )
+                        # Use full meeting transcript as context so the bot can
+                        # answer questions about anything discussed in the meeting.
+                        chat_question = after_mention or new_chat_text.strip()[-1500:]
+                        context = _build_context(chat_question, "Chat message")
                         uses_voice = mention_response_mode in ("voice", "both")
                         try:
                             reply = await _intel.generate_mention_response(
@@ -2787,14 +2822,7 @@ async def _mention_monitor(
                             leave_event.set()
                             return
 
-                        meeting_ctx = " ".join(caption_log[:-1])[-3000:]
-                        if after_mention:
-                            context = (
-                                (meeting_ctx + "\n" if meeting_ctx else "") +
-                                f"[Voice request to {bot_name}]: {after_mention}"
-                            )
-                        else:
-                            context = " ".join(caption_log)[-3000:]
+                        context = _build_context(after_mention, "Voice request")
                         uses_voice = mention_response_mode in ("voice", "both")
                         try:
                             reply = await _intel.generate_mention_response(
@@ -3280,6 +3308,7 @@ async def run_browser_bot(
                         start_muted=start_muted,
                         leave_event=leave_event,
                         live_transcript=live_transcript,
+                        structured_transcript=structured_transcript,
                         pulse_mic=pulse_mic,
                         live_handles_audio=_use_live,
                         last_live_response_at=_last_live_response_at,
