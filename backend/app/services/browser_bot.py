@@ -2257,6 +2257,7 @@ async def _gemini_live_loop(
     start_muted: bool = True,
     pulse_mic: str = PULSE_MIC_NAME,
     gemini_api_key: str = "",
+    last_live_response_at: list | None = None,
 ) -> None:
     """Real-time Gemini Live audio loop.
 
@@ -2413,6 +2414,9 @@ async def _gemini_live_loop(
                                         logger.info(
                                             "Live: playing bot response (%d bytes PCM)", len(pcm_bytes)
                                         )
+                                        # Record timestamp so _mention_monitor can avoid double-responding
+                                        if last_live_response_at is not None:
+                                            last_live_response_at[0] = time.monotonic()
                                         # Skip if previous voice response is still playing
                                         if _speak_task is not None and not _speak_task.done():
                                             logger.warning(
@@ -2499,6 +2503,7 @@ async def _mention_monitor(
     live_transcript: list | None = None,
     pulse_mic: str = PULSE_MIC_NAME,
     live_handles_audio: bool = False,
+    last_live_response_at: list | None = None,
 ) -> None:
     """Coroutine that polls live captions AND chat messages, replying when the
     bot's name is mentioned in either source.
@@ -2762,9 +2767,10 @@ async def _mention_monitor(
 
         # ── Audio transcript polling (from _streaming_transcription_loop) ──────
         # Provides voice bot-name detection and meeting context when DOM captions
-        # are unavailable.  Skipped when Gemini Live is active (it handles voice
-        # detection and responses directly).
-        if live_transcript is not None and not live_handles_audio:
+        # are unavailable.  When Gemini Live is active, this still runs as a
+        # fallback — but only dispatches a reply if Gemini Live hasn't responded
+        # recently (avoids double responses).
+        if live_transcript is not None:
             new_chunks = live_transcript[last_audio_idx:]
             if new_chunks:
                 last_audio_idx = len(live_transcript)
@@ -2777,36 +2783,49 @@ async def _mention_monitor(
                     bot_name_lower in new_audio_text.lower()
                     and time.monotonic() - last_response_at >= 5
                 ):
-                    mention_pos   = new_audio_text.lower().find(bot_name_lower)
-                    after_mention = new_audio_text[mention_pos + len(bot_name_lower):].lstrip(" ,:!?-").strip()
-
-                    # Leave command check
-                    if leave_event and any(kw in after_mention.lower() for kw in _LEAVE_KEYWORDS):
-                        logger.info("Leave command detected via audio: %r", after_mention)
-                        await _dispatch_reply("Understood, leaving the meeting now. Goodbye!", "audio")
-                        await asyncio.sleep(2)
-                        leave_event.set()
-                        return
-
-                    meeting_ctx = " ".join(caption_log[:-1])[-3000:]
-                    if after_mention:
-                        context = (
-                            (meeting_ctx + "\n" if meeting_ctx else "") +
-                            f"[Voice request to {bot_name}]: {after_mention}"
+                    # When Gemini Live is active, skip if it already responded
+                    # recently (within 10 s) to avoid double responses.
+                    _live_resp_ts = (last_live_response_at[0] if last_live_response_at else 0.0)
+                    if live_handles_audio and time.monotonic() - _live_resp_ts < 10:
+                        logger.debug(
+                            "Audio mention detected but Gemini Live responded %.1f s ago — skipping fallback",
+                            time.monotonic() - _live_resp_ts,
                         )
                     else:
-                        context = " ".join(caption_log)[-3000:]
-                    uses_voice = mention_response_mode in ("voice", "both")
-                    try:
-                        reply = await _intel.generate_mention_response(
-                            context, bot_name, for_voice=uses_voice, source="caption"
-                        )
-                    except Exception as exc:
-                        logger.warning("generate_mention_response error: %s", exc)
-                        reply = ""
-                    if reply:
-                        last_response_at = time.monotonic()
-                        await _dispatch_reply(reply, "audio")
+                        if live_handles_audio:
+                            logger.info(
+                                "Audio mention detected — Gemini Live did not respond, using fallback"
+                            )
+                        mention_pos   = new_audio_text.lower().find(bot_name_lower)
+                        after_mention = new_audio_text[mention_pos + len(bot_name_lower):].lstrip(" ,:!?-").strip()
+
+                        # Leave command check
+                        if leave_event and any(kw in after_mention.lower() for kw in _LEAVE_KEYWORDS):
+                            logger.info("Leave command detected via audio: %r", after_mention)
+                            await _dispatch_reply("Understood, leaving the meeting now. Goodbye!", "audio")
+                            await asyncio.sleep(2)
+                            leave_event.set()
+                            return
+
+                        meeting_ctx = " ".join(caption_log[:-1])[-3000:]
+                        if after_mention:
+                            context = (
+                                (meeting_ctx + "\n" if meeting_ctx else "") +
+                                f"[Voice request to {bot_name}]: {after_mention}"
+                            )
+                        else:
+                            context = " ".join(caption_log)[-3000:]
+                        uses_voice = mention_response_mode in ("voice", "both")
+                        try:
+                            reply = await _intel.generate_mention_response(
+                                context, bot_name, for_voice=uses_voice, source="caption"
+                            )
+                        except Exception as exc:
+                            logger.warning("generate_mention_response error: %s", exc)
+                            reply = ""
+                        if reply:
+                            last_response_at = time.monotonic()
+                            await _dispatch_reply(reply, "audio")
 
 
 async def _wait_for_meeting_end(
@@ -3213,6 +3232,11 @@ async def run_browser_bot(
                     )
                     _use_live = False
 
+            # Shared mutable timestamp: [monotonic_time] updated by _gemini_live_loop
+            # when it plays an audio response — used by _mention_monitor to avoid
+            # double-responding when Gemini Live already answered.
+            _last_live_response_at: list = [0.0]
+
             if _use_live:
                 logger.info("Starting Gemini Live loop for bot '%s' (mode=%s)", bot_name, mention_response_mode)
                 transcription_task = asyncio.create_task(
@@ -3228,6 +3252,7 @@ async def run_browser_bot(
                         start_muted=start_muted,
                         pulse_mic=pulse_mic,
                         gemini_api_key=_key,
+                        last_live_response_at=_last_live_response_at,
                     )
                 )
             elif (live_transcription or respond_on_mention) and _gemini_available:
@@ -3242,8 +3267,8 @@ async def run_browser_bot(
                 )
 
             # Run mention monitor concurrently with the meeting-end watcher.
-            # When Gemini Live is active, the monitor only needs to watch chat
-            # (voice detection is handled by the Live session).
+            # When Gemini Live is active, the monitor also checks live_transcript
+            # as a fallback (in case Gemini Live doesn't respond to a mention).
             leave_event = asyncio.Event()
             if respond_on_mention:
                 monitor_task = asyncio.create_task(
@@ -3257,6 +3282,7 @@ async def run_browser_bot(
                         live_transcript=live_transcript,
                         pulse_mic=pulse_mic,
                         live_handles_audio=_use_live,
+                        last_live_response_at=_last_live_response_at,
                     )
                 )
 

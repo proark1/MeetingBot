@@ -350,15 +350,34 @@ async def run_bot_lifecycle(bot_id: str, db_factory) -> None:
                 # ── 2. call_ended → transcribe ────────────────────────────
                 scraped_participants: list[str] = bot_result.get("participants") or []
                 live_transcript_entries: list = bot_result.get("live_transcript") or []
+
+                # Final flush of live transcript buffer so no entries are lost
+                # before the batch transcription overwrites bot.transcript.
+                if _live_buffer:
+                    bot.transcript = list(_live_buffer)
+                    bot.updated_at = _now()
+                    try:
+                        await db.commit()
+                    except Exception as flush_exc:
+                        logger.warning("Final live transcript flush error: %s", flush_exc)
+                        await db.rollback()
+                    logger.info(
+                        "Bot %s: flushed %d live transcript entries before batch processing",
+                        bot_id, len(_live_buffer),
+                    )
+
                 await _set_status(db, bot, "call_ended", ended_at=_now())
                 logger.info("Bot %s transcribing audio…", bot_id)
 
                 transcript = await transcribe_audio(audio_path, known_participants=scraped_participants)
 
-                # Merge strategy: prefer the high-quality batch transcript (speaker
-                # labels, accurate timestamps).  If the batch returned fewer than 3
-                # entries, supplement/replace with the VAD streaming entries so the
-                # user always sees something meaningful.
+                # Merge strategy: the batch transcript has speaker labels and
+                # accurate timestamps, but the live streaming entries capture
+                # speech detected in real-time (which the batch may miss if
+                # audio quality differs or the model behaves differently).
+                #
+                # Use batch as primary when it's rich, but always supplement
+                # with live entries that aren't already covered by the batch.
                 if live_transcript_entries:
                     if len(transcript) < 3:
                         logger.info(
@@ -368,11 +387,30 @@ async def run_bot_lifecycle(bot_id: str, db_factory) -> None:
                         )
                         transcript = live_transcript_entries
                     else:
-                        logger.info(
-                            "Bot %s: batch transcript has %d entries, "
-                            "live streaming produced %d entries (batch used as primary)",
-                            bot_id, len(transcript), len(live_transcript_entries),
-                        )
+                        # Supplement batch with any live entries whose text
+                        # doesn't already appear in the batch transcript.
+                        batch_texts = {e.get("text", "").strip().lower() for e in transcript}
+                        extra = [
+                            e for e in live_transcript_entries
+                            if e.get("text", "").strip().lower() not in batch_texts
+                        ]
+                        if extra:
+                            logger.info(
+                                "Bot %s: batch transcript has %d entries, "
+                                "supplementing with %d unique live entries (out of %d total)",
+                                bot_id, len(transcript), len(extra), len(live_transcript_entries),
+                            )
+                            # Insert live-only entries at appropriate positions by timestamp
+                            transcript = sorted(
+                                transcript + extra,
+                                key=lambda e: e.get("timestamp", 0),
+                            )
+                        else:
+                            logger.info(
+                                "Bot %s: batch transcript has %d entries, "
+                                "live streaming produced %d entries (all covered by batch)",
+                                bot_id, len(transcript), len(live_transcript_entries),
+                            )
 
                 if not transcript:
                     logger.warning(
