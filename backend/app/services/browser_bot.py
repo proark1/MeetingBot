@@ -2250,7 +2250,6 @@ async def _gemini_live_loop(
     bot_name: str,
     live_transcript: list,
     structured_transcript: list,
-    on_transcript_entry=None,
     mention_response_mode: str = "both",
     page=None,
     platform: str = "google_meet",
@@ -2259,25 +2258,26 @@ async def _gemini_live_loop(
     gemini_api_key: str = "",
     last_live_response_at: list | None = None,
 ) -> None:
-    """Real-time Gemini Live audio loop.
+    """Real-time Gemini Live voice-response loop (Session B).
 
-    Streams the meeting audio into a Gemini Live session:
-    - Text responses  → live_transcript + structured_transcript + on_transcript_entry
-    - Audio responses → played back into the meeting via pulse_mic when the bot is addressed
+    Streams raw PCM into a Gemini Live (native audio) session and plays back
+    AUDIO responses when the bot is addressed.  Transcription of participants'
+    speech is handled by the parallel _streaming_transcription_loop (Session A)
+    so this session is dedicated entirely to voice responses.
 
-    Reconnects every _LIVE_SESSION_S seconds to refresh the system instruction with
-    updated meeting context.
+    Uses structured_transcript (populated by Session A) as context when
+    building the system instruction at the start of each 10-minute window.
+    Reconnects every _LIVE_SESSION_S seconds to refresh that context.
     """
     try:
         import google.genai as genai_live
         from google.genai import types as genai_types
     except ImportError:
         logger.warning(
-            "google-genai not installed — Gemini Live unavailable. "
-            "Run: pip install 'google-genai>=1.0.0'. "
-            "Falling back to VAD streaming loop."
+            "google-genai not installed — Gemini Live voice responses unavailable. "
+            "Run: pip install 'google-genai>=1.0.0'."
         )
-        return  # caller will start _streaming_transcription_loop as fallback
+        return
 
     if not gemini_api_key:
         logger.warning("Gemini Live: no API key — disabled")
@@ -2297,7 +2297,9 @@ async def _gemini_live_loop(
         system_instruction = _build_live_system_instruction(bot_name, structured_transcript)
         config = genai_types.LiveConnectConfig(
             response_modalities=["AUDIO"],
-            input_audio_transcription=genai_types.AudioTranscriptionConfig(),
+            # input_audio_transcription intentionally omitted — transcription is
+            # handled by the parallel _streaming_transcription_loop (VAD + Gemini
+            # flash) so this session is dedicated to voice responses only.
             system_instruction=system_instruction,
             speech_config=genai_types.SpeechConfig(
                 voice_config=genai_types.VoiceConfig(
@@ -2345,7 +2347,12 @@ async def _gemini_live_loop(
                             logger.debug("Live sender error: %s", exc)
 
                 async def _receiver() -> None:
-                    """Consume responses: input transcription → transcript, audio → playback."""
+                    """Consume voice responses from the Live model and play them back.
+
+                    Transcription of participants' speech is handled by the separate
+                    _streaming_transcription_loop (VAD + Gemini flash) — this receiver
+                    only processes the model's AUDIO output turns.
+                    """
                     nonlocal audio_buffer, turn_start_ts, _speak_task
                     import base64, io, wave
 
@@ -2354,30 +2361,6 @@ async def _gemini_live_loop(
                             sc = getattr(response, "server_content", None)
                             if sc is None:
                                 continue
-
-                            # Input transcription: what a participant said (via input_audio_transcription)
-                            inp_tr = getattr(sc, "input_transcription", None)
-                            if inp_tr and getattr(inp_tr, "text", None):
-                                txt = inp_tr.text.strip()
-                                if txt:
-                                    ts = round((file_pos - _WAV_HEADER_SIZE) / _PCM_BYTES_PER_S, 2)
-                                    entry = {
-                                        "speaker": "Unknown",
-                                        "text": txt,
-                                        "timestamp": ts,
-                                    }
-                                    live_transcript.append(txt)
-                                    del live_transcript[:-60]
-                                    structured_transcript.append(entry)
-                                    logger.info(
-                                        "Live transcript (t=%.1fs): %r…",
-                                        ts, txt[:120],
-                                    )
-                                    if on_transcript_entry:
-                                        try:
-                                            await on_transcript_entry(entry)
-                                        except Exception as cb_exc:
-                                            logger.warning("on_transcript_entry error: %s", cb_exc)
 
                             # Collect bot audio response from model turn
                             mt = getattr(sc, "model_turn", None)
@@ -2479,14 +2462,11 @@ async def _gemini_live_loop(
             if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
                 logger.error(
                     "Gemini Live: %d consecutive session failures — "
-                    "falling back to VAD streaming transcription. Last error: %s",
+                    "voice responses disabled for the rest of the call. "
+                    "Transcription continues via the parallel VAD loop. Last error: %s",
                     MAX_CONSECUTIVE_FAILURES, exc,
                 )
-                await _streaming_transcription_loop(
-                    audio_path, live_transcript, structured_transcript,
-                    on_transcript_entry=on_transcript_entry,
-                )
-                return
+                return  # VAD streaming transcription loop is always running in parallel
             logger.warning("Gemini Live session error: %s — retrying in 5 s", exc)
             await asyncio.sleep(5)
 
@@ -3100,7 +3080,8 @@ async def run_browser_bot(
         page = await ctx.new_page()
         await _apply_stealth(page)
 
-        transcription_task: asyncio.Task | None = None
+        transcription_task: asyncio.Task | None = None   # VAD streaming transcription
+        voice_task:         asyncio.Task | None = None   # Gemini Live voice responses
         monitor_task:       asyncio.Task | None = None
 
         try:
@@ -3208,27 +3189,53 @@ async def run_browser_bot(
             _key = gemini_api_key or _s_cfg.GEMINI_API_KEY or ""
             _gemini_available = bool(_key) and ffmpeg_proc is not None
 
-            # Decide whether to use Gemini Live (real-time bidirectional stream)
-            # or the VAD chunk approach (_streaming_transcription_loop).
+            # ── Two-session architecture ───────────────────────────────────────
+            # Session A — VAD + Gemini flash transcription  (always, when needed)
+            #   Reads the growing WAV file, detects utterances via energy-based
+            #   VAD, sends each utterance to Gemini 2.5-flash for transcription,
+            #   fires on_live_transcript_entry so entries are persisted to DB and
+            #   broadcast to the frontend in real-time.
             #
-            # Gemini Live is used when:
-            #   - respond_on_mention=True AND mention_response_mode is voice/both
-            #   - Gemini key is available
-            #   - google-genai SDK is installed
-            # Otherwise fall back to _streaming_transcription_loop.
+            # Session B — Gemini Live voice response  (voice/both mode only)
+            #   Streams raw PCM into a Gemini Live session (native audio model).
+            #   The session produces AUDIO-only responses when the bot is addressed.
+            #   Transcription is NOT requested from this session — Session A owns that.
+            #   Because these are two independent API calls, a failure in Session B
+            #   does not affect transcription.
+            #
+            # This avoids the old single-session design where a Live session failure
+            # silently killed transcription for up to 15 s before the fallback ran.
+
+            # ── Session A: VAD streaming transcription ─────────────────────────
+            if (live_transcription or respond_on_mention) and _gemini_available:
+                logger.info(
+                    "Starting VAD streaming transcription loop for bot '%s'", bot_name
+                )
+                transcription_task = asyncio.create_task(
+                    _streaming_transcription_loop(
+                        audio_path,
+                        live_transcript,
+                        structured_transcript,
+                        on_transcript_entry=on_live_transcript_entry,
+                    )
+                )
+
+            # ── Session B: Gemini Live voice responses ─────────────────────────
+            # Only activated when the user chose voice or both response mode AND
+            # respond_on_mention is enabled.
             _use_live = (
                 _gemini_available
                 and respond_on_mention
                 and mention_response_mode in ("voice", "both")
             )
-            # Confirm google-genai is actually importable before committing
             if _use_live:
                 try:
                     import google.genai  # noqa: F401
                 except ImportError:
                     logger.warning(
-                        "google-genai not installed — falling back to VAD streaming. "
-                        "Run: pip install 'google-genai>=1.0.0'"
+                        "google-genai not installed — voice responses disabled. "
+                        "Run: pip install 'google-genai>=1.0.0'. "
+                        "Transcription continues via VAD loop."
                     )
                     _use_live = False
 
@@ -3238,14 +3245,17 @@ async def run_browser_bot(
             _last_live_response_at: list = [0.0]
 
             if _use_live:
-                logger.info("Starting Gemini Live loop for bot '%s' (mode=%s)", bot_name, mention_response_mode)
-                transcription_task = asyncio.create_task(
+                logger.info(
+                    "Starting Gemini Live voice loop for bot '%s' (mode=%s) — "
+                    "transcription handled by parallel VAD loop",
+                    bot_name, mention_response_mode,
+                )
+                voice_task = asyncio.create_task(
                     _gemini_live_loop(
                         audio_path=audio_path,
                         bot_name=bot_name,
                         live_transcript=live_transcript,
                         structured_transcript=structured_transcript,
-                        on_transcript_entry=on_live_transcript_entry,
                         mention_response_mode=mention_response_mode,
                         page=page,
                         platform=platform,
@@ -3253,16 +3263,6 @@ async def run_browser_bot(
                         pulse_mic=pulse_mic,
                         gemini_api_key=_key,
                         last_live_response_at=_last_live_response_at,
-                    )
-                )
-            elif (live_transcription or respond_on_mention) and _gemini_available:
-                logger.info("Starting VAD streaming transcription loop (Gemini Live not used)")
-                transcription_task = asyncio.create_task(
-                    _streaming_transcription_loop(
-                        audio_path,
-                        live_transcript,
-                        structured_transcript,
-                        on_transcript_entry=on_live_transcript_entry,
                     )
                 )
 
@@ -3314,6 +3314,10 @@ async def run_browser_bot(
                 transcription_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await transcription_task
+            if voice_task is not None:
+                voice_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await voice_task
             if monitor_task is not None:
                 monitor_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
@@ -3366,6 +3370,10 @@ async def run_browser_bot(
                 transcription_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError, Exception):
                     await transcription_task
+            if voice_task is not None and not voice_task.done():
+                voice_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await voice_task
             if monitor_task is not None and not monitor_task.done():
                 monitor_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError, Exception):

@@ -828,8 +828,27 @@ function renderBotDetail(bot) {
     ? `<div class="error-banner">⚠ ${esc(bot.error_message)}</div>`
     : "";
 
+  // Status activity banner — tells the user exactly what the bot is doing now
+  const _activeFeatures = [];
+  if (bot.live_transcription) _activeFeatures.push("live transcription");
+  if (bot.respond_on_mention) {
+    const modeLabel = bot.mention_response_mode === "text"  ? "text replies" :
+                      bot.mention_response_mode === "voice" ? "voice replies" : "text + voice replies";
+    _activeFeatures.push(`mention detection (${modeLabel})`);
+  }
+  const _featStr = _activeFeatures.length ? ` · Active: ${_activeFeatures.join(", ")}` : "";
+
+  const statusBanner =
+    bot.status === "ready"      ? `<div class="status-activity-banner banner-ready">⏳ Bot is ready and will join shortly${_featStr}</div>` :
+    bot.status === "joining"    ? `<div class="status-activity-banner banner-joining">🔄 Bot is joining the meeting — waiting to be admitted${_featStr}</div>` :
+    bot.status === "in_call"    ? `<div class="status-activity-banner banner-in-call">🔴 Bot is live in the meeting · Recording audio${_featStr}${bot.started_at ? ` · <span class="live-timer" data-live-start="${bot.started_at}">…</span>` : ""}</div>` :
+    bot.status === "call_ended" ? `<div class="status-activity-banner banner-ending">⏸ Call ended · Processing transcript…</div>` :
+    bot.status === "done"       ? `<div class="status-activity-banner banner-done">✅ Complete — transcript and analysis ready</div>` :
+    "";
+
   contentEl.innerHTML = `
     ${errorBanner}
+    ${statusBanner}
     <div class="detail-meta">
       <div class="meta-item"><div class="meta-label">Platform</div><div class="meta-value">${esc(bot.meeting_platform)}</div></div>
       <div class="meta-item"><div class="meta-label">Started</div><div class="meta-value">${fmtDate(bot.started_at)}</div></div>
@@ -839,6 +858,68 @@ function renderBotDetail(bot) {
       <div class="meta-item"><div class="meta-label">Transcript</div><div class="meta-value">${(bot.transcript || []).length} entries</div></div>
       <div class="meta-item"><div class="meta-label">Analysis Mode</div><div class="meta-value">${bot.analysis_mode === "transcript_only" ? '<span style="color:var(--text-muted);font-weight:500">Transcript Only</span>' : '<span style="color:var(--accent);font-weight:600">✦ Full AI</span>'}</div></div>
       <div class="meta-item"><div class="meta-label">Meeting URL</div><div class="meta-value" style="font-family:var(--font-mono);font-size:0.75rem;color:var(--text-muted)">${esc(bot.meeting_url.slice(0, 40))}${bot.meeting_url.length > 40 ? "…" : ""}</div></div>
+    </div>
+
+    <!-- Session Configuration — what the user chose when deploying the bot -->
+    <div class="section-card">
+      <div class="section-header"><h3>Session Configuration</h3></div>
+      <div class="config-grid">
+
+        <!-- Recording & Transcription -->
+        <div class="config-row">
+          <span class="config-icon">🎙</span>
+          <span class="config-label">Audio Recording</span>
+          <span class="config-value config-on">Always on</span>
+        </div>
+
+        <div class="config-row">
+          <span class="config-icon">📝</span>
+          <span class="config-label">Live Transcription</span>
+          ${bot.live_transcription
+            ? `<span class="config-value config-on">Enabled — transcribed in real-time during call</span>`
+            : `<span class="config-value config-off">Disabled — transcript generated after call ends</span>`
+          }
+        </div>
+
+        <!-- Respond-on-mention -->
+        <div class="config-row">
+          <span class="config-icon">🤖</span>
+          <span class="config-label">Respond when mentioned</span>
+          ${bot.respond_on_mention
+            ? `<span class="config-value config-on">Enabled</span>`
+            : `<span class="config-value config-off">Disabled</span>`
+          }
+        </div>
+
+        ${bot.respond_on_mention ? `
+        <div class="config-row config-indent">
+          <span class="config-icon">💬</span>
+          <span class="config-label">Response mode</span>
+          <span class="config-value">
+            ${bot.mention_response_mode === "text"  ? "Text (chat message)" : ""}
+            ${bot.mention_response_mode === "voice" ? "Voice (speaks in call)" : ""}
+            ${bot.mention_response_mode === "both"  ? "Both (chat + voice)" : ""}
+          </span>
+        </div>` : ""}
+
+        ${bot.respond_on_mention && bot.mention_response_mode !== "text" ? `
+        <div class="config-row config-indent">
+          <span class="config-icon">🔊</span>
+          <span class="config-label">TTS provider</span>
+          <span class="config-value">
+            ${bot.tts_provider === "edge"   ? "Microsoft Edge TTS (free)" : ""}
+            ${bot.tts_provider === "gemini" ? "Gemini TTS (natural voice)" : ""}
+          </span>
+        </div>` : ""}
+
+        <!-- Microphone -->
+        <div class="config-row">
+          <span class="config-icon">${bot.start_muted ? "🔇" : "🔈"}</span>
+          <span class="config-label">Joined</span>
+          <span class="config-value">${bot.start_muted ? "Muted (mic off)" : "With microphone active"}</span>
+        </div>
+
+      </div>
     </div>
 
     <!-- Participants + Speaker Stats -->
@@ -1033,6 +1114,9 @@ function renderBotDetail(bot) {
   // Highlights: add bookmark icon to transcript entries and load existing
   _loadHighlights(bot.id);
   _wireHighlightButtons(bot.id);
+
+  // Start live timer for the in-call status banner (uses data-live-start spans)
+  if (bot.status === "in_call") _startLiveTimers();
 }
 
 async function _loadHighlights(botId) {
