@@ -2295,7 +2295,8 @@ async def _gemini_live_loop(
         session_count += 1
         system_instruction = _build_live_system_instruction(bot_name, structured_transcript)
         config = genai_types.LiveConnectConfig(
-            response_modalities=["AUDIO", "TEXT"],
+            response_modalities=["AUDIO"],
+            input_audio_transcription=genai_types.AudioTranscriptionConfig(),
             system_instruction=system_instruction,
             speech_config=genai_types.SpeechConfig(
                 voice_config=genai_types.VoiceConfig(
@@ -2310,7 +2311,6 @@ async def _gemini_live_loop(
                 consecutive_failures = 0   # reset on any successful open
                 session_start = time.monotonic()
                 audio_buffer: bytearray = bytearray()
-                transcript_buffer: list[str] = []
                 turn_start_ts: float = (file_pos - _WAV_HEADER_SIZE) / _PCM_BYTES_PER_S
                 _speak_task: asyncio.Task | None = None  # track active voice-response task
 
@@ -2332,10 +2332,9 @@ async def _gemini_live_loop(
                             if not chunk:
                                 continue
                             file_pos += len(chunk)
-                            import base64
                             await session.send_realtime_input(
                                 media=genai_types.Blob(
-                                    data=base64.b64encode(chunk).decode(),
+                                    data=chunk,
                                     mime_type="audio/pcm;rate=16000",
                                 )
                             )
@@ -2345,8 +2344,8 @@ async def _gemini_live_loop(
                             logger.debug("Live sender error: %s", exc)
 
                 async def _receiver() -> None:
-                    """Consume responses: text → transcript, audio → playback."""
-                    nonlocal audio_buffer, transcript_buffer, turn_start_ts, _speak_task
+                    """Consume responses: input transcription → transcript, audio → playback."""
+                    nonlocal audio_buffer, turn_start_ts, _speak_task
                     import base64, io, wave
 
                     async for response in session.receive():
@@ -2355,48 +2354,41 @@ async def _gemini_live_loop(
                             if sc is None:
                                 continue
 
-                            # Collect text transcription parts
+                            # Input transcription: what a participant said (via input_audio_transcription)
+                            inp_tr = getattr(sc, "input_transcription", None)
+                            if inp_tr and getattr(inp_tr, "text", None):
+                                txt = inp_tr.text.strip()
+                                if txt:
+                                    ts = round((file_pos - _WAV_HEADER_SIZE) / _PCM_BYTES_PER_S, 2)
+                                    entry = {
+                                        "speaker": "Unknown",
+                                        "text": txt,
+                                        "timestamp": ts,
+                                    }
+                                    live_transcript.append(txt)
+                                    del live_transcript[:-60]
+                                    structured_transcript.append(entry)
+                                    logger.info(
+                                        "Live transcript (t=%.1fs): %r…",
+                                        ts, txt[:120],
+                                    )
+                                    if on_transcript_entry:
+                                        try:
+                                            await on_transcript_entry(entry)
+                                        except Exception as cb_exc:
+                                            logger.warning("on_transcript_entry error: %s", cb_exc)
+
+                            # Collect bot audio response from model turn
                             mt = getattr(sc, "model_turn", None)
                             if mt:
                                 for part in (mt.parts or []):
-                                    # Text: transcription or bot text reply
-                                    if getattr(part, "text", None):
-                                        txt = part.text.strip()
-                                        if txt:
-                                            transcript_buffer.append(txt)
-
-                                    # Audio: bot voice response
                                     inl = getattr(part, "inline_data", None)
                                     if inl and getattr(inl, "data", None):
                                         raw = base64.b64decode(inl.data)
                                         audio_buffer.extend(raw)
 
-                            # Turn complete: flush text + play audio if any
+                            # Turn complete: play bot audio response if any
                             if getattr(sc, "turn_complete", False):
-                                # Flush text entries
-                                if transcript_buffer:
-                                    full_text = " ".join(transcript_buffer).strip()
-                                    transcript_buffer.clear()
-                                    if full_text:
-                                        ts = round(turn_start_ts, 2)
-                                        entry = {
-                                            "speaker": "Unknown",
-                                            "text": full_text,
-                                            "timestamp": ts,
-                                        }
-                                        live_transcript.append(full_text)
-                                        del live_transcript[:-60]
-                                        structured_transcript.append(entry)
-                                        logger.info(
-                                            "Live transcript (t=%.1fs): %r…",
-                                            ts, full_text[:120],
-                                        )
-                                        if on_transcript_entry:
-                                            try:
-                                                await on_transcript_entry(entry)
-                                            except Exception as cb_exc:
-                                                logger.warning("on_transcript_entry error: %s", cb_exc)
-
                                 # Update timestamp for next turn
                                 turn_start_ts = (file_pos - _WAV_HEADER_SIZE) / _PCM_BYTES_PER_S
 
