@@ -27,6 +27,8 @@ async def list_action_items(
     if done is not None:
         q = q.where(ActionItem.done == done)
     if assignee:
+        if len(assignee) > 200:
+            assignee = assignee[:200]
         q = q.where(ActionItem.assignee.ilike(f"%{assignee}%"))
     items = (await db.execute(q.limit(limit))).scalars().all()
 

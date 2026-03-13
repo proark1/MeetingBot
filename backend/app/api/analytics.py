@@ -23,7 +23,7 @@ async def get_analytics(
     """Aggregate analytics across all completed meetings."""
     # Select only the columns this endpoint actually reads — avoids pulling the
     # large `transcript` JSON column (can be hundreds of KB per meeting) for
-    # every completed bot.
+    # every completed bot. Cap at 2000 most-recent meetings for performance.
     rows = (
         await db.execute(
             select(
@@ -33,7 +33,10 @@ async def get_analytics(
                 Bot.analysis,
                 Bot.participants,
                 Bot.meeting_platform,
-            ).where(Bot.status == "done")
+            )
+            .where(Bot.status == "done")
+            .order_by(Bot.created_at.desc())
+            .limit(2000)
         )
     ).all()
 

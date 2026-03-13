@@ -162,7 +162,7 @@ async def create_bot(
         live_transcription=payload.live_transcription,
         status="scheduled" if is_scheduled else "ready",
         extra_metadata=payload.extra_metadata,
-        share_token=secrets.token_urlsafe(12),
+        share_token=secrets.token_urlsafe(24),
     )
     db.add(bot)
     await db.commit()

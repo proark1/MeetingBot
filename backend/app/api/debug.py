@@ -35,11 +35,15 @@ async def list_screenshots():
 @router.get("/screenshots/{filename}", summary="Serve a single screenshot or HTML dump")
 async def get_screenshot(filename: str):
     """Download or view a specific debug file by name."""
-    # Prevent path traversal
-    if "/" in filename or "\\" in filename or ".." in filename:
+    # Prevent path traversal — resolve and verify the file stays within SCREENSHOT_DIR
+    if not SCREENSHOT_DIR.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+    try:
+        path = (SCREENSHOT_DIR / filename).resolve()
+        path.relative_to(SCREENSHOT_DIR.resolve())
+    except (ValueError, OSError):
         raise HTTPException(status_code=400, detail="Invalid filename")
 
-    path = SCREENSHOT_DIR / filename
     if not path.exists():
         raise HTTPException(status_code=404, detail="File not found")
 

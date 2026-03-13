@@ -388,7 +388,7 @@ DELETE /api/v1/bot/highlight/{id}   # remove a highlight
 GET /api/v1/share/{token}           # public read-only meeting report (no auth required)
 ```
 
-Each bot gets a unique `share_token` at creation. Copy the share link from the detail page.
+Each bot gets a unique `share_token` (24-byte URL-safe random token) at creation. Copy the share link from the detail page.
 
 ---
 
