@@ -472,9 +472,23 @@ GET  /api/v1/action-items/stats   — {total, done, pending} (SQL-aggregated, O(
 Templates let you customise the AI analysis prompt per meeting type.
 
 ```
-GET    /api/v1/templates           — list all (includes 3 built-ins: seed-sales, seed-standup, seed-1on1)
+GET    /api/v1/templates           — list all templates (built-ins + custom)
 POST   /api/v1/templates           — create custom template {name, description, prompt_override}
-DELETE /api/v1/templates/{id}      — delete a custom template
+DELETE /api/v1/templates/{id}      — delete a custom template (built-ins cannot be deleted)
 ```
+
+**Built-in templates** (always available, id prefix `seed-`):
+
+| ID | Name | Best for |
+|----|------|----------|
+| `seed-sales` | Sales Call | Buying signals, objections, deal stage |
+| `seed-standup` | Daily Standup | Blockers, yesterday / today items |
+| `seed-1on1` | 1:1 Meeting | Feedback, career growth areas |
+| `seed-retro` | Sprint Retrospective | Went well / poorly, process improvements |
+| `seed-kickoff` | Client Kickoff | Scope, deliverables, risks, success metrics |
+| `seed-allhands` | All-Hands / Town Hall | Announcements, employee Q&A, leadership commitments |
+| `seed-postmortem` | Incident Post-Mortem | Timeline, root causes, customer impact, remediation |
+| `seed-interview` | Interview / Hiring Panel | Competency ratings, strengths, concerns, recommendation |
+| `seed-design-review` | Design Review | Design decisions, rejected alternatives, open questions |
 
 Pass `template_id` when creating a bot to use a template's custom analysis prompt.

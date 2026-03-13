@@ -1651,7 +1651,7 @@ async function loadTemplates() {
           ${t.id.startsWith("seed-") ? '<span class="chip chip-sm">Built-in</span>' : `<button class="btn btn-ghost btn-sm tmpl-del-btn" data-del-tmpl="${esc(t.id)}">Delete</button>`}
         </div>
         ${t.description ? `<p class="template-desc">${esc(t.description)}</p>` : ""}
-        ${t.prompt_override ? `<pre class="template-prompt">${esc(t.prompt_override.slice(0, 200))}${t.prompt_override.length > 200 ? "…" : ""}</pre>` : '<p class="hint">Uses default analysis prompt.</p>'}
+        ${t.prompt_override ? `<pre class="template-prompt">${esc(t.prompt_override)}</pre>` : '<p class="hint">Uses default analysis prompt.</p>'}
       </div>`).join("");
 
     gridEl.querySelectorAll("[data-del-tmpl]").forEach(btn => {

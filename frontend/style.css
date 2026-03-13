@@ -1183,7 +1183,7 @@ code {
   background: var(--surface2); border: 1px solid var(--border);
   border-radius: 7px; padding: 0.55rem 0.65rem;
   color: var(--text-muted); white-space: pre-wrap;
-  overflow: hidden; max-height: 100px;
+  overflow-y: auto; max-height: 220px;
 }
 
 /* ── Live timer ─────────────────────────────────────────────────────────── */
