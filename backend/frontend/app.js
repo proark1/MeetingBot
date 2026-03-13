@@ -508,9 +508,8 @@ function _initMentionToggle() {
   // Reads the currently-checked pill radio to decide TTS row visibility.
   const updateTtsRow = () => {
     if (!ttsRow) return;
-    const checkedPill = modeRow.querySelector('input[name="mention_response_mode"][data-checked="1"]')
-      || modeRow.querySelector('input[name="mention_response_mode"]:checked');
-    const mode = checkedPill?.value || "text";
+    const checked = modeRow.querySelector('input[name="mention_response_mode"]:checked');
+    const mode = checked?.value || "text";
     ttsRow.style.display = (toggle.checked && mode !== "text") ? "" : "none";
   };
 
@@ -524,22 +523,16 @@ function _initMentionToggle() {
 
     toggle.addEventListener("change", updateModeRow);
 
-    // Use click on the pill labels (not change on the hidden radio) so the
-    // handler fires reliably in all browsers regardless of how the radio is
-    // visually hidden.  preventDefault stops the browser from also activating
-    // the radio, so we manage the checked state ourselves.
+    // Listen for native radio change events — fired when a label wrapping a radio
+    // is clicked. This is simpler and more reliable than intercepting clicks with
+    // e.preventDefault() and manually managing the checked state.
     const modePills = modeRow.querySelectorAll(".mode-pill");
-    modePills.forEach(pill => {
-      pill.addEventListener("click", (e) => {
-        e.preventDefault();
-        modePills.forEach(p => {
-          p.classList.remove("mode-pill-active");
-          const r = p.querySelector("input[type=radio]");
-          if (r) { r.checked = false; r.removeAttribute("data-checked"); }
-        });
-        pill.classList.add("mode-pill-active");
-        const radio = pill.querySelector("input[type=radio]");
-        if (radio) { radio.checked = true; radio.setAttribute("data-checked", "1"); }
+    const modeRadios = modeRow.querySelectorAll('input[name="mention_response_mode"]');
+    modeRadios.forEach(radio => {
+      radio.addEventListener("change", () => {
+        modePills.forEach(p => p.classList.remove("mode-pill-active"));
+        const activePill = modeRow.querySelector(`.mode-pill[data-value="${radio.value}"]`);
+        if (activePill) activePill.classList.add("mode-pill-active");
         updateTtsRow();
       });
     });
@@ -547,19 +540,14 @@ function _initMentionToggle() {
     // TTS provider pills — same pattern
     if (ttsRow) {
       const ttsPills = ttsRow.querySelectorAll(".mode-pill");
-      ttsPills.forEach(pill => {
-        pill.addEventListener("click", (e) => {
-          e.preventDefault();
-          ttsPills.forEach(p => {
-            p.classList.remove("mode-pill-active");
-            const r = p.querySelector("input[type=radio]");
-            if (r) { r.checked = false; r.removeAttribute("data-checked"); }
-          });
-          pill.classList.add("mode-pill-active");
-          const radio = pill.querySelector("input[type=radio]");
-          if (radio) { radio.checked = true; radio.setAttribute("data-checked", "1"); }
+      const ttsRadios = ttsRow.querySelectorAll('input[name="tts_provider"]');
+      ttsRadios.forEach(radio => {
+        radio.addEventListener("change", () => {
+          ttsPills.forEach(p => p.classList.remove("mode-pill-active"));
+          const activePill = ttsRow.querySelector(`.mode-pill[data-value="${radio.value}"]`);
+          if (activePill) activePill.classList.add("mode-pill-active");
           if (ttsHint) {
-            ttsHint.textContent = pill.dataset.value === "gemini"
+            ttsHint.textContent = radio.value === "gemini"
               ? "Uses your configured Gemini API key. More natural voice."
               : "Fast, free, no extra key required.";
           }
@@ -570,29 +558,25 @@ function _initMentionToggle() {
 
   // Reset pills to defaults every time the modal opens
   const modePills = modeRow.querySelectorAll(".mode-pill");
-  modePills.forEach(p => {
-    p.classList.remove("mode-pill-active");
-    const r = p.querySelector("input[type=radio]");
-    if (r) { r.checked = false; r.removeAttribute("data-checked"); }
-  });
+  modePills.forEach(p => p.classList.remove("mode-pill-active"));
   const textPill = modeRow.querySelector('[data-value="text"]');
   if (textPill) {
     textPill.classList.add("mode-pill-active");
     const r = textPill.querySelector("input");
-    if (r) { r.checked = true; r.setAttribute("data-checked", "1"); }
+    if (r) r.checked = true;
   }
+  // Uncheck other mode radios
+  modeRow.querySelectorAll('input[name="mention_response_mode"]').forEach(r => {
+    r.checked = (r.value === "text");
+  });
+
   if (ttsRow) {
-    ttsRow.querySelectorAll(".mode-pill").forEach(p => {
-      p.classList.remove("mode-pill-active");
-      const r = p.querySelector("input[type=radio]");
-      if (r) { r.checked = false; r.removeAttribute("data-checked"); }
-    });
+    ttsRow.querySelectorAll(".mode-pill").forEach(p => p.classList.remove("mode-pill-active"));
     const edgePill = ttsRow.querySelector('[data-value="edge"]');
-    if (edgePill) {
-      edgePill.classList.add("mode-pill-active");
-      const r = edgePill.querySelector("input");
-      if (r) { r.checked = true; r.setAttribute("data-checked", "1"); }
-    }
+    if (edgePill) edgePill.classList.add("mode-pill-active");
+    ttsRow.querySelectorAll('input[name="tts_provider"]').forEach(r => {
+      r.checked = (r.value === "edge");
+    });
     if (ttsHint) ttsHint.textContent = "Fast, free, no extra key required.";
   }
   updateModeRow();
@@ -610,24 +594,19 @@ function _initModePicker() {
     const cards = picker.querySelectorAll(".mode-card");
     const aiSection = document.getElementById("ai-options-section");
 
-    // Use click on card labels (not change on hidden radio) for cross-browser
-    // reliability.  preventDefault prevents the browser from also activating
-    // the radio so we manage checked state manually.
+    // Listen for native radio change events — fired reliably when the
+    // wrapping label is clicked. No need for e.preventDefault() hacks.
     cards.forEach(card => {
-      card.addEventListener("click", (e) => {
-        e.preventDefault();
-        cards.forEach(c => {
-          c.classList.remove("mode-card-active");
-          const r = c.querySelector("input[type=radio]");
-          if (r) r.checked = false;
+      const radio = card.querySelector("input[type=radio]");
+      if (radio) {
+        radio.addEventListener("change", () => {
+          cards.forEach(c => c.classList.remove("mode-card-active"));
+          card.classList.add("mode-card-active");
+          if (aiSection) {
+            aiSection.classList.toggle("hidden", card.dataset.value === "transcript_only");
+          }
         });
-        card.classList.add("mode-card-active");
-        const radio = card.querySelector("input[type=radio]");
-        if (radio) radio.checked = true;
-        if (aiSection) {
-          aiSection.classList.toggle("hidden", card.dataset.value === "transcript_only");
-        }
-      });
+      }
     });
   }
 }
@@ -694,8 +673,8 @@ async function submitCreateBot() {
   const vocabulary = vocabRaw ? vocabRaw.split(",").map(s => s.trim()).filter(Boolean) : null;
   const analysisMode = document.querySelector('input[name="analysis_mode"]:checked')?.value || "full";
   const respondOnMention = document.getElementById("new-bot-respond-mention")?.checked ?? true;
-  const mentionResponseMode = (document.querySelector('input[name="mention_response_mode"][data-checked="1"]') || document.querySelector('input[name="mention_response_mode"]:checked'))?.value || "text";
-  const ttsProvider = (document.querySelector('input[name="tts_provider"][data-checked="1"]') || document.querySelector('input[name="tts_provider"]:checked'))?.value || "edge";
+  const mentionResponseMode = document.querySelector('input[name="mention_response_mode"]:checked')?.value || "text";
+  const ttsProvider = document.querySelector('input[name="tts_provider"]:checked')?.value || "edge";
   const liveTranscription = document.getElementById("new-bot-live-transcription")?.checked ?? false;
   const body = {
     meeting_url: url,
