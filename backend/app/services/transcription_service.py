@@ -75,7 +75,7 @@ async def _transcribe_chunked(
     known_participants: list[str] | None,
     estimated_s: float,
 ) -> list[dict[str, Any]]:
-    """Split the audio into 30-min chunks and transcribe them sequentially."""
+    """Split the audio into 30-min chunks and transcribe them in parallel."""
     logger.info(
         "Long recording (~%.0f min) — splitting into chunks of %d s",
         estimated_s / 60, _CHUNK_SIZE_S,
@@ -85,25 +85,33 @@ async def _transcribe_chunked(
         logger.error("Audio split produced no chunks — cannot transcribe")
         return []
 
+    async def _process_chunk(idx: int, chunk_path: str) -> list[dict[str, Any]]:
+        offset_s = idx * _CHUNK_SIZE_S
+        logger.info("Transcribing chunk %d/%d (offset %d s)…", idx + 1, len(chunks), offset_s)
+        entries = await transcribe_audio(chunk_path, known_participants)
+        return [dict(e, timestamp=float(e.get("timestamp", 0)) + offset_s) for e in entries]
+
     all_entries: list[dict[str, Any]] = []
-    chunk_files = list(chunks)
     try:
-        for idx, chunk_path in enumerate(chunk_files):
-            offset_s = idx * _CHUNK_SIZE_S
-            logger.info("Transcribing chunk %d/%d (offset %d s)…", idx + 1, len(chunk_files), offset_s)
-            entries = await transcribe_audio(chunk_path, known_participants)
-            for entry in entries:
-                entry = dict(entry)
-                entry["timestamp"] = float(entry.get("timestamp", 0)) + offset_s
-                all_entries.append(entry)
+        results = await asyncio.gather(
+            *(_process_chunk(i, p) for i, p in enumerate(chunks)),
+            return_exceptions=True,
+        )
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                logger.error("Chunk %d/%d transcription failed: %s", i + 1, len(chunks), result)
+            else:
+                all_entries.extend(result)
+        # Re-sort by timestamp since parallel results may arrive out of order
+        all_entries.sort(key=lambda e: e.get("timestamp", 0))
     finally:
-        for path in chunk_files:
+        for path in chunks:
             try:
                 os.unlink(path)
             except OSError:
                 pass
 
-    logger.info("Chunked transcription complete: %d total entries from %d chunks", len(all_entries), len(chunk_files))
+    logger.info("Chunked transcription complete: %d total entries from %d chunks", len(all_entries), len(chunks))
     return all_entries
 
 

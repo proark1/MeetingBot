@@ -1,6 +1,8 @@
 """Webhook registration API."""
 
+import asyncio
 import ipaddress
+import socket
 from typing import Annotated
 from urllib.parse import urlparse
 
@@ -20,17 +22,40 @@ _PRIVATE_NETS = [ipaddress.ip_network(n) for n in [
 ]]
 
 
-def _block_ssrf(url: str) -> None:
-    """Reject URLs that target localhost or private/internal IP ranges."""
+def _is_private_ip(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    return addr.is_private or addr.is_loopback or addr.is_link_local or any(addr in net for net in _PRIVATE_NETS)
+
+
+async def _block_ssrf(url: str) -> None:
+    """Reject URLs targeting localhost, private IPs, or hostnames that resolve to them."""
     host = urlparse(url).hostname or ""
-    if host in ("localhost", ""):
+    if not host or host.lower() == "localhost":
         raise HTTPException(status_code=400, detail="Webhook URL must not target localhost")
     try:
+        # Direct IP address — check immediately
         addr = ipaddress.ip_address(host)
-        if any(addr in net for net in _PRIVATE_NETS):
+        if _is_private_ip(addr):
             raise HTTPException(status_code=400, detail="Webhook URL must not target a private/internal address")
+        return
     except ValueError:
-        pass  # hostname (not raw IP) — allow
+        pass  # It's a hostname — fall through to DNS check
+
+    # Resolve hostname and validate all returned IPs (mitigates DNS rebinding)
+    try:
+        infos = await asyncio.to_thread(socket.getaddrinfo, host, None)
+        for *_, sockaddr in infos:
+            ip_str = sockaddr[0]
+            try:
+                addr = ipaddress.ip_address(ip_str)
+                if _is_private_ip(addr):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Webhook URL resolves to a private/internal address ({ip_str})",
+                    )
+            except ValueError:
+                pass
+    except socket.gaierror:
+        pass  # DNS resolution failed — allow (delivery will fail gracefully)
 
 
 def _to_response(wh: Webhook) -> WebhookResponse:
@@ -51,7 +76,7 @@ async def create_webhook(
     payload: WebhookCreate,
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    _block_ssrf(payload.url)
+    await _block_ssrf(payload.url)
     wh = Webhook(
         url=payload.url,
         events=",".join(payload.events),
@@ -95,8 +120,12 @@ async def test_webhook(
 ):
     """Send a test delivery to this webhook endpoint and return the HTTP status code."""
     wh = await _get_or_404(db, webhook_id)
+    # Re-validate SSRF at delivery time (URL may have been registered before this check existed)
+    await _block_ssrf(wh.url)
     from app.services.webhook_service import _get_client, _deliver_with_retry
-    import hashlib, hmac, json
+    import hashlib
+    import hmac
+    import json
     from datetime import datetime, timezone
     body = json.dumps({
         "event": "bot.test",

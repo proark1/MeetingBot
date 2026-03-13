@@ -8,6 +8,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from sqlalchemy import select, func
+from sqlalchemy.orm import defer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db, AsyncSessionLocal
@@ -189,7 +190,15 @@ async def list_bots(
     search: str | None = Query(default=None, description="Filter by meeting URL (partial match)"),
 ):
     """List all bots. Returns lightweight summaries (no transcript/analysis)."""
-    query = select(Bot).order_by(Bot.created_at.desc())
+    # Defer large JSON columns that are not needed for list summaries
+    _defer_heavy = [
+        defer(Bot.transcript),
+        defer(Bot.analysis),
+        defer(Bot.chapters),
+        defer(Bot.speaker_stats),
+        defer(Bot.vocabulary),
+    ]
+    query = select(Bot).options(*_defer_heavy).order_by(Bot.created_at.desc())
     count_query = select(func.count()).select_from(Bot)
 
     if status:

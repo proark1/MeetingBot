@@ -67,6 +67,11 @@ async def lifespan(app: FastAPI):
             "⚠ GEMINI_API_KEY is NOT set — transcription and analysis will be "
             "DISABLED.  Set it in Railway variables or your .env file."
         )
+    if settings.SECRET_KEY == "meetingbot-dev-secret-change-in-production":
+        logger.warning(
+            "⚠ SECRET_KEY is using the insecure default value — set a strong random "
+            "SECRET_KEY in your environment variables before deploying to production."
+        )
 
     # Register SIGTERM handler to clean up orphaned browser subprocesses
     # (ffmpeg, Xvfb) that may be left running when Railway redeploys the container.

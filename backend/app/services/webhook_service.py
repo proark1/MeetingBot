@@ -51,7 +51,7 @@ async def dispatch_event(
     # WebSocket — instant, best-effort
     await ws_manager.broadcast(event, payload)
 
-    # HTTP webhooks — with retry
+    # HTTP webhooks — with retry, all delivered in parallel
     result = await db.execute(
         select(Webhook).where(Webhook.is_active == True)  # noqa: E712
     )
@@ -62,21 +62,32 @@ async def dispatch_event(
     body = json.dumps(
         {"event": event, "data": payload, "ts": datetime.now(timezone.utc).isoformat()}
     )
-
     client = _get_client()
-    for wh in webhooks:
+
+    async def _deliver_one(wh: Webhook) -> tuple[Webhook, int | None] | None:
         subscribed = wh.events == "*" or event in wh.events.split(",")
         if not subscribed:
-            continue
-
+            return None
         headers = {"Content-Type": "application/json", "User-Agent": "MeetingBot/1.0"}
         if wh.secret:
             sig = hmac.new(
                 wh.secret.encode(), body.encode(), hashlib.sha256
             ).hexdigest()
             headers["X-MeetingBot-Signature"] = f"sha256={sig}"
-
         status_code = await _deliver_with_retry(client, wh.url, body, headers)
+        return wh, status_code
+
+    results = await asyncio.gather(
+        *(_deliver_one(wh) for wh in webhooks),
+        return_exceptions=True,
+    )
+
+    for result in results:
+        if result is None or isinstance(result, Exception):
+            if isinstance(result, Exception):
+                logger.error("Unexpected error during webhook dispatch: %s", result)
+            continue
+        wh, status_code = result
         wh.delivery_attempts += 1
         wh.last_delivery_at = datetime.now(timezone.utc)
         wh.last_delivery_status = status_code

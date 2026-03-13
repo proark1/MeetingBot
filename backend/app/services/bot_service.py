@@ -484,35 +484,40 @@ async def run_bot_lifecycle(bot_id: str, db_factory) -> None:
                 if bot.analysis:
                     await _persist_action_items(db, bot)
 
-                # ── 6. Post-meeting notifications ──────────────────────────
+                # ── 6. Post-meeting notifications (run in parallel) ────────
+                _notification_coros = []
+
                 if bot.notify_email:
-                    try:
+                    async def _send_email(_bot=bot):
                         from app.services import email_service
-                        await email_service.send_meeting_summary(bot)
-                    except Exception as exc:
-                        logger.warning("Email summary failed for bot %s: %s", bot_id, exc)
+                        await email_service.send_meeting_summary(_bot)
+                    _notification_coros.append(_send_email())
 
                 if settings.SLACK_WEBHOOK_URL or (bot.extra_metadata or {}).get("slack_webhook_url"):
-                    webhook_url = (bot.extra_metadata or {}).get("slack_webhook_url") or settings.SLACK_WEBHOOK_URL
-                    try:
+                    _slack_url = (bot.extra_metadata or {}).get("slack_webhook_url") or settings.SLACK_WEBHOOK_URL
+                    async def _send_slack(_bot=bot, _url=_slack_url):
                         from app.services import slack_service
-                        await slack_service.send_meeting_summary(bot, webhook_url)
-                    except Exception as exc:
-                        logger.warning("Slack summary failed for bot %s: %s", bot_id, exc)
+                        await slack_service.send_meeting_summary(_bot, _url)
+                    _notification_coros.append(_send_slack())
 
                 if settings.NOTION_API_KEY and settings.NOTION_DATABASE_ID:
-                    try:
+                    async def _send_notion(_bot=bot):
                         from app.services import notion_service
-                        await notion_service.push_meeting(bot)
-                    except Exception as exc:
-                        logger.warning("Notion push failed for bot %s: %s", bot_id, exc)
+                        await notion_service.push_meeting(_bot)
+                    _notification_coros.append(_send_notion())
 
                 if settings.LINEAR_API_KEY and settings.LINEAR_TEAM_ID:
-                    try:
+                    async def _send_linear(_bot=bot):
                         from app.services import linear_service
-                        await linear_service.push_action_items(bot)
-                    except Exception as exc:
-                        logger.warning("Linear push failed for bot %s: %s", bot_id, exc)
+                        await linear_service.push_action_items(_bot)
+                    _notification_coros.append(_send_linear())
+
+                if _notification_coros:
+                    _notif_results = await asyncio.gather(*_notification_coros, return_exceptions=True)
+                    _notif_names = ["email", "slack", "notion", "linear"]
+                    for _name, _exc in zip(_notif_names, _notif_results):
+                        if isinstance(_exc, Exception):
+                            logger.warning("%s notification failed for bot %s: %s", _name, bot_id, _exc)
 
             # ── 7. done ───────────────────────────────────────────────────
             await _set_status(db, bot, "done")

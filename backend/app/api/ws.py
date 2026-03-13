@@ -1,5 +1,6 @@
 """WebSocket connection manager — broadcasts bot lifecycle events to all connected clients."""
 
+import asyncio
 import json
 import logging
 
@@ -26,13 +27,18 @@ class ConnectionManager:
         if not self._connections:
             return
         message = json.dumps({"event": event, "data": data})
-        dead: set[WebSocket] = set()
-        for ws in set(self._connections):  # snapshot to avoid mutation mid-loop
+
+        async def _send(ws: WebSocket) -> WebSocket | None:
             try:
                 await ws.send_text(message)
+                return None
             except Exception as exc:
                 logger.debug("WS send failed — dropping connection: %s", exc)
-                dead.add(ws)
+                return ws
+
+        # Send to all clients concurrently; collect dead connections for cleanup
+        results = await asyncio.gather(*(_send(ws) for ws in set(self._connections)))
+        dead = {ws for ws in results if ws is not None}
         self._connections -= dead
 
 

@@ -267,7 +267,7 @@ GET /api/v1/bot/stats
 
 Register a URL to receive push notifications for bot lifecycle events.
 
-> **Security:** Webhook URLs must be publicly reachable. URLs targeting `localhost`, `127.0.0.1`, RFC-1918 private ranges (`10.x`, `172.16.x`, `192.168.x`), or link-local addresses (`169.254.x`) are rejected with HTTP 400 to prevent SSRF attacks.
+> **Security:** Webhook URLs must be publicly reachable. URLs targeting `localhost`, `127.0.0.1`, RFC-1918 private ranges (`10.x`, `172.16.x`, `192.168.x`), link-local addresses (`169.254.x`), or hostnames that resolve to any of these are rejected with HTTP 400 to prevent SSRF attacks.
 
 #### Register a webhook
 

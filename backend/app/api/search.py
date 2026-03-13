@@ -29,16 +29,20 @@ async def search_transcripts(
         raise HTTPException(status_code=422, detail="Query must be at least 2 characters")
 
     q = q.strip()
-    pattern = f"%{q}%"
+    # Escape LIKE special characters so user input is treated as a literal string,
+    # preventing accidental (or intentional) wildcard expansion that could return
+    # massive result sets or leak unintended data.
+    escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    pattern = f"%{escaped}%"
 
     # Use SQLite json_each to scan transcript entries
-    raw_sql = text("""
+    raw_sql = text(r"""
         SELECT DISTINCT b.id, b.meeting_url, b.meeting_platform, b.bot_name,
                b.status, b.started_at, b.ended_at, b.participants, b.transcript
         FROM bots b, json_each(b.transcript) e
         WHERE (
-            json_extract(e.value, '$.text') LIKE :pattern
-            OR json_extract(e.value, '$.speaker') LIKE :pattern
+            json_extract(e.value, '$.text') LIKE :pattern ESCAPE '\'
+            OR json_extract(e.value, '$.speaker') LIKE :pattern ESCAPE '\'
         )
         AND b.status = 'done'
         ORDER BY b.created_at DESC
@@ -54,9 +58,10 @@ async def search_transcripts(
             await db.execute(select(Bot).where(Bot.status == "done").order_by(Bot.created_at.desc()).limit(200))
         ).scalars().all()
         rows_fallback = []
+        q_lower = q.lower()
         for b in all_bots:
             if any(
-                q.lower() in (e.get("text", "") + e.get("speaker", "")).lower()
+                q_lower in (e.get("text", "") + e.get("speaker", "")).lower()
                 for e in (b.transcript or [])
             ):
                 rows_fallback.append(b)
