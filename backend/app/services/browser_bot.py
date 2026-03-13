@@ -692,7 +692,7 @@ async def _join_google_meet(page: Page, url: str, bot_name: str, start_muted: bo
         # or button not yet rendered), use Ctrl+D which is safe here because we
         # know we want the mic ON — worst case it toggles an already-on mic off,
         # so we retry once more with a button click.
-        await asyncio.sleep(1.5)
+        await asyncio.sleep(0.8)
         unmuted = await _click(page, [
             "button[aria-label*='Turn on microphone' i]",
             "button[aria-label*='unmute' i]",
@@ -1141,7 +1141,7 @@ async def _wait_for_admission(
         except Exception:
             pass
 
-        await asyncio.sleep(1.5)
+        await asyncio.sleep(0.5)
 
     return False
 
@@ -1383,7 +1383,7 @@ async def _enable_captions(page: Page, platform: str) -> None:
                 ], timeout=2000)
 
         # Brief wait then verify: if we accidentally toggled OFF, click again
-        await asyncio.sleep(1.5)
+        await asyncio.sleep(0.6)
         if not await _captions_already_active(page, platform):
             await _click(page, [
                 "button[aria-label='Turn on captions']",
@@ -2054,13 +2054,13 @@ async def _streaming_transcription_loop(
 
     FRAME_MS        = 100                             # poll every 100 ms
     FRAME_BYTES     = _PCM_BYTES_PER_S * FRAME_MS // 1000  # bytes per 100 ms frame
-    GUARD_BYTES     = _PCM_BYTES_PER_S               # 1-s guard against partial writes
+    GUARD_BYTES     = _PCM_BYTES_PER_S // 4          # 250 ms guard against partial writes
     # VAD thresholds
     SPEECH_ENERGY_THRESHOLD = 0.05   # fraction of non-zero samples to count as speech
-    SPEECH_START_FRAMES  = 2         # consecutive speech frames to open an utterance
-    TRAILING_SILENCE_MS  = 400       # ms of silence to close an utterance
+    SPEECH_START_FRAMES  = 1         # 1 consecutive speech frame to open an utterance (faster)
+    TRAILING_SILENCE_MS  = 250       # ms of silence to close an utterance (was 400)
     TRAILING_SILENCE_FRAMES = TRAILING_SILENCE_MS // FRAME_MS
-    MIN_UTTERANCE_MS    = 300        # ignore utterances shorter than this
+    MIN_UTTERANCE_MS    = 200        # ignore utterances shorter than this (was 300)
     MIN_UTTERANCE_BYTES = _PCM_BYTES_PER_S * MIN_UTTERANCE_MS // 1000
     MAX_UTTERANCE_BYTES = _PCM_BYTES_PER_S * 30     # cap at 30 s to bound API latency
 
@@ -2210,7 +2210,7 @@ async def _streaming_transcription_loop(
 _LIVE_MODEL      = "gemini-2.5-flash-native-audio-preview-12-2025"
 _LIVE_CHUNK_MS   = 100                                   # send 100 ms of PCM per frame
 _LIVE_CHUNK_BYTES = _PCM_BYTES_PER_S * _LIVE_CHUNK_MS // 1000   # bytes per 100 ms frame
-_LIVE_GUARD_BYTES = _PCM_BYTES_PER_S                     # 1-s guard against partial writes
+_LIVE_GUARD_BYTES = _PCM_BYTES_PER_S // 4                # 250 ms guard against partial writes
 _LIVE_SESSION_S   = 600                                  # reconnect every 10 min to refresh context
 
 
@@ -2586,7 +2586,7 @@ async def _mention_monitor(
             logger.warning("Mention response dispatch error: %s", exc)
 
     while True:
-        await asyncio.sleep(1)   # 1 s poll — minimum latency to detect a mention
+        await asyncio.sleep(0.3)   # 300 ms poll — faster mention detection (was 1 s)
         _poll_count += 1
 
         # ── Caption polling ───────────────────────────────────────────────────
@@ -3149,7 +3149,7 @@ async def run_browser_bot(
             # that the in-call toolbar is fully rendered.
             if not start_muted and platform == "google_meet":
                 try:
-                    await asyncio.sleep(1.0)  # let the toolbar settle
+                    await asyncio.sleep(0.5)  # let the toolbar settle
                     muted = await page.evaluate("""
                         () => {
                             const off = document.querySelector('button[aria-label*="Turn on microphone" i]');
@@ -3173,7 +3173,7 @@ async def run_browser_bot(
             # meetingbot_sink (so ffmpeg captures meeting audio) and Chrome's mic
             # input to meetingbot_mic.monitor (so TTS is heard by participants).
             # The periodic sync in _wait_for_meeting_end handles subsequent drifts.
-            await asyncio.sleep(2.0)  # let Chrome's WebRTC streams fully start
+            await asyncio.sleep(0.8)  # let Chrome's WebRTC streams fully start (was 2.0 s)
             await asyncio.get_event_loop().run_in_executor(
                 None, functools.partial(_sync_chrome_audio_routing, pulse_sink, pulse_mic, pulse_source_name)
             )
