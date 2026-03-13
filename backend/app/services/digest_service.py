@@ -4,6 +4,7 @@ Sends a summary of the past 7 days' meetings to all addresses in DIGEST_EMAIL.
 Triggered every Monday at 09:00 UTC by APScheduler (registered in main.py).
 """
 
+import asyncio
 import html
 import logging
 import smtplib
@@ -187,7 +188,7 @@ async def send_weekly_digest(db_factory) -> None:
     msg["To"] = ", ".join(recipients)
     msg.attach(MIMEText(body_html, "html"))
 
-    try:
+    def _send() -> None:
         with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as smtp:
             smtp.ehlo()
             if settings.SMTP_PORT != 25:
@@ -195,6 +196,9 @@ async def send_weekly_digest(db_factory) -> None:
             if settings.SMTP_USER and settings.SMTP_PASS:
                 smtp.login(settings.SMTP_USER, settings.SMTP_PASS)
             smtp.sendmail(settings.SMTP_FROM, recipients, msg.as_string())
+
+    try:
+        await asyncio.to_thread(_send)
         logger.info(
             "Weekly digest sent to %d recipient(s): %d meetings, %d overdue items",
             len(recipients), total_meetings, len(overdue_rows),

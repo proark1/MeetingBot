@@ -1,5 +1,6 @@
 """Post-meeting email summary via SMTP."""
 
+import asyncio
 import html
 import logging
 import smtplib
@@ -74,7 +75,7 @@ async def send_meeting_summary(bot) -> None:
     msg["To"] = bot.notify_email
     msg.attach(MIMEText(body_html, "html"))
 
-    try:
+    def _send() -> None:
         with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as smtp:
             smtp.ehlo()
             if settings.SMTP_PORT != 25:
@@ -82,6 +83,9 @@ async def send_meeting_summary(bot) -> None:
             if settings.SMTP_USER and settings.SMTP_PASS:
                 smtp.login(settings.SMTP_USER, settings.SMTP_PASS)
             smtp.sendmail(settings.SMTP_FROM, [bot.notify_email], msg.as_string())
+
+    try:
+        await asyncio.to_thread(_send)
         logger.info("Meeting summary sent to %s for bot %s", bot.notify_email, bot.id)
     except Exception as exc:
         logger.error("Failed to send meeting summary email: %s", exc)
