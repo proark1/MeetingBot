@@ -1644,15 +1644,27 @@ async function loadTemplates() {
       gridEl.innerHTML = '<div class="empty-state">No templates yet.</div>';
       return;
     }
-    gridEl.innerHTML = tmpls.map(t => `
-      <div class="template-card${t.id.startsWith("seed-") ? " template-seed" : ""}" data-tmpl-id="${esc(t.id)}">
+    gridEl.innerHTML = tmpls.map(t => {
+      const isSeed = t.id.startsWith("seed-");
+      const actions = isSeed
+        ? `<span class="chip chip-sm">Built-in</span>`
+        : `<button class="btn btn-ghost btn-sm tmpl-del-btn" data-del-tmpl="${esc(t.id)}">Delete</button>`;
+      return `
+      <div class="template-card${isSeed ? " template-seed" : ""}" data-tmpl-id="${esc(t.id)}"
+           data-tmpl-name="${esc(t.name)}" data-tmpl-desc="${esc(t.description || "")}"
+           data-tmpl-prompt="${esc(t.prompt_override || "")}">
         <div class="template-header">
           <span class="template-name">${esc(t.name)}</span>
-          ${t.id.startsWith("seed-") ? '<span class="chip chip-sm">Built-in</span>' : `<button class="btn btn-ghost btn-sm tmpl-del-btn" data-del-tmpl="${esc(t.id)}">Delete</button>`}
+          <div class="template-actions">${actions}</div>
         </div>
         ${t.description ? `<p class="template-desc">${esc(t.description)}</p>` : ""}
         ${t.prompt_override ? `<pre class="template-prompt">${esc(t.prompt_override)}</pre>` : '<p class="hint">Uses default analysis prompt.</p>'}
-      </div>`).join("");
+        <div class="template-card-footer">
+          <button class="btn btn-sm btn-outline tmpl-customize-btn"
+                  data-customize-tmpl="${esc(t.id)}">Customize</button>
+        </div>
+      </div>`;
+    }).join("");
 
     gridEl.querySelectorAll("[data-del-tmpl]").forEach(btn => {
       btn.addEventListener("click", async () => {
@@ -1664,12 +1676,34 @@ async function loadTemplates() {
         } catch (e) { showToast(e.message, "error"); }
       });
     });
+
+    gridEl.querySelectorAll("[data-customize-tmpl]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const card = btn.closest("[data-tmpl-id]");
+        document.getElementById("new-tmpl-name").value = `${card.dataset.tmplName} (Custom)`;
+        document.getElementById("new-tmpl-desc").value = card.dataset.tmplDesc;
+        document.getElementById("new-tmpl-prompt").value = card.dataset.tmplPrompt;
+        openModal("modal-new-template");
+      });
+    });
   } catch (e) {
     gridEl.innerHTML = `<div class="empty-state">Error: ${esc(e.message)}</div>`;
   }
 }
 
-document.getElementById("btn-new-template")?.addEventListener("click", () => openModal("modal-new-template"));
+document.getElementById("btn-new-template")?.addEventListener("click", () => {
+  document.getElementById("new-tmpl-name").value = "";
+  document.getElementById("new-tmpl-desc").value = "";
+  document.getElementById("new-tmpl-prompt").value = "";
+  openModal("modal-new-template");
+});
+
+document.getElementById("btn-load-default-prompt")?.addEventListener("click", async () => {
+  try {
+    const data = await apiFetch("GET", "/templates/default-prompt");
+    document.getElementById("new-tmpl-prompt").value = data.prompt;
+  } catch (e) { showToast("Could not load default prompt", "error"); }
+});
 
 document.getElementById("btn-create-template")?.addEventListener("click", async () => {
   const name = document.getElementById("new-tmpl-name")?.value.trim();

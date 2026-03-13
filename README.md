@@ -472,15 +472,17 @@ GET  /api/v1/action-items/stats   — {total, done, pending} (SQL-aggregated, O(
 Templates let you customise the AI analysis prompt per meeting type.
 
 ```
-GET    /api/v1/templates           — list all templates (built-ins + custom)
-POST   /api/v1/templates           — create custom template {name, description, prompt_override}
-DELETE /api/v1/templates/{id}      — delete a custom template (built-ins cannot be deleted)
+GET    /api/v1/templates                — list all templates (built-ins + custom)
+GET    /api/v1/templates/default-prompt — return the raw default analysis prompt text
+POST   /api/v1/templates                — create custom template {name, description, prompt_override}
+DELETE /api/v1/templates/{id}           — delete a custom template (built-ins cannot be deleted)
 ```
 
 **Built-in templates** (always available, id prefix `seed-`):
 
 | ID | Name | Best for |
 |----|------|----------|
+| `seed-default` | Default (General) | Baseline prompt — use this as a starting point for custom templates |
 | `seed-sales` | Sales Call | Buying signals, objections, deal stage |
 | `seed-standup` | Daily Standup | Blockers, yesterday / today items |
 | `seed-1on1` | 1:1 Meeting | Feedback, career growth areas |
@@ -491,4 +493,16 @@ DELETE /api/v1/templates/{id}      — delete a custom template (built-ins canno
 | `seed-interview` | Interview / Hiring Panel | Competency ratings, strengths, concerns, recommendation |
 | `seed-design-review` | Design Review | Design decisions, rejected alternatives, open questions |
 
-Pass `template_id` when creating a bot to use a template's custom analysis prompt.
+**Creating a custom template** — write any prompt you like as `prompt_override`:
+
+```
+1. Start with a role:   "You are a sales coach."
+2. Add instruction:     "Analyze this meeting transcript and return ONLY valid JSON."
+3. Define JSON shape:   include standard fields + any extras you need
+                        (e.g. buying_signals, blockers, root_causes)
+```
+
+Fetch `GET /api/v1/templates/default-prompt` to get the baseline prompt text as a starting point,
+then modify and POST as a new custom template.
+
+Pass `template_id` when creating a bot to activate its custom analysis prompt.

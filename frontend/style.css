@@ -1185,6 +1185,26 @@ code {
   color: var(--text-muted); white-space: pre-wrap;
   overflow-y: auto; max-height: 220px;
 }
+.template-actions { display: flex; align-items: center; gap: 0.4rem; }
+.template-card-footer { margin-top: 0.75rem; padding-top: 0.6rem; border-top: 1px solid var(--border); }
+.tmpl-prompt-label-row {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 0.3rem;
+}
+.tmpl-prompt-label-row .label-text { font-size: 0.88rem; font-weight: 500; }
+.tmpl-prompt-hint {
+  font-size: 0.78rem; color: var(--text-muted); line-height: 1.55;
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: 6px; padding: 0.5rem 0.7rem; margin-bottom: 0.5rem;
+}
+.tmpl-prompt-hint code { font-family: var(--font-mono); background: var(--border); border-radius: 3px; padding: 0 3px; }
+.tmpl-prompt-textarea { font-family: var(--font-mono); font-size: 0.82rem; resize: vertical; }
+.modal-wide { width: min(700px, 95vw); }
+.btn-xs { padding: 0.2rem 0.55rem; font-size: 0.74rem; }
+.btn-outline {
+  background: transparent; border: 1px solid var(--accent); color: var(--accent);
+}
+.btn-outline:hover { background: var(--accent); color: #fff; }
 
 /* ── Live timer ─────────────────────────────────────────────────────────── */
 .live-timer { color: var(--error); font-weight: 700; animation: blink 1.2s ease-in-out infinite; }

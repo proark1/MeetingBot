@@ -440,26 +440,51 @@
 
   <!-- New Template Modal -->
   <div class="modal-backdrop hidden" id="modal-new-template">
-    <div class="modal">
+    <div class="modal modal-wide">
       <div class="modal-header">
-        <h2>New Template</h2>
+        <h2>New Custom Template</h2>
         <button class="modal-close" data-close="modal-new-template">✕</button>
       </div>
       <div class="modal-body">
         <label>
           Name <span class="required">*</span>
-          <input class="input" id="new-tmpl-name" placeholder="e.g. Sales Call" />
+          <input class="input" id="new-tmpl-name" placeholder="e.g. My Sales Call" />
         </label>
         <label>
           Description <span class="optional">(optional)</span>
-          <input class="input" id="new-tmpl-desc" placeholder="What this template is for" />
+          <input class="input" id="new-tmpl-desc" placeholder="What meeting type this is for" />
         </label>
-        <label>
-          Custom Prompt <span class="optional">(leave blank to use default)</span>
-          <textarea class="input" id="new-tmpl-prompt" rows="6"
-            placeholder="You are analysing a meeting transcript. Extract: buying signals, objections, next steps…"
-            style="resize:vertical;font-family:monospace;font-size:0.85rem"></textarea>
-        </label>
+        <div class="tmpl-prompt-label-row">
+          <span class="label-text">
+            Analysis Prompt <span class="optional">(leave blank to use default)</span>
+          </span>
+          <button class="btn btn-ghost btn-xs" id="btn-load-default-prompt" type="button">
+            Load default prompt
+          </button>
+        </div>
+        <div class="tmpl-prompt-hint">
+          Write any prompt you like. The bot sends this to the AI along with the transcript.
+          <strong>Tips:</strong>
+          start with a role (<em>"You are a sales coach."</em>),
+          add <em>"Analyze this meeting transcript and return ONLY valid JSON."</em>,
+          then define the JSON shape — include any fields you need
+          (e.g. <code>buying_signals</code>, <code>blockers</code>, <code>root_causes</code>).
+          Click <em>Load default prompt</em> to start from the built-in structure.
+        </div>
+        <textarea class="input tmpl-prompt-textarea" id="new-tmpl-prompt" rows="12"
+          placeholder='You are an expert meeting analyst. Analyze this meeting transcript and return ONLY valid JSON.
+
+Required JSON shape:
+{
+  "summary":      "<2–4 sentence overview>",
+  "key_points":   ["<point>"],
+  "action_items": [{"task": "...", "assignee": "...", "due_date": "..."}],
+  "decisions":    ["<decision>"],
+  "next_steps":   ["<step>"],
+  "sentiment":    "positive|neutral|negative",
+  "topics":       ["<topic>"],
+  "your_field":   ["<add any extra fields you need>"]
+}'></textarea>
       </div>
       <div class="modal-footer">
         <button class="btn btn-ghost" data-close="modal-new-template">Cancel</button>

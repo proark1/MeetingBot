@@ -10,12 +10,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.template import MeetingTemplate
+from app.services.intelligence_service import _ANALYSIS_PROMPT as _DEFAULT_PROMPT
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/templates", tags=["Templates"])
 
 # Seed templates available to all users
 _SEED_TEMPLATES = [
+    {
+        "id": "seed-default",
+        "name": "Default (General)",
+        "description": (
+            "The baseline prompt used when no template is selected. Works for any meeting type. "
+            "Produces: summary, key_points, action_items, decisions, next_steps, sentiment, and topics. "
+            "Use this as a starting point when creating a custom template — copy the prompt, "
+            "change the analyst role, and add or remove JSON fields to match your meeting type."
+        ),
+        "prompt_override": _DEFAULT_PROMPT,
+    },
     {
         "id": "seed-sales",
         "name": "Sales Call",
@@ -215,7 +227,21 @@ _SEED_TEMPLATES = [
 class TemplateCreate(BaseModel):
     name: str = Field(..., description="Display name for the template")
     description: str | None = Field(None, description="Human-readable explanation of what meeting type and use-case this template is designed for")
-    prompt_override: str | None = Field(None, description="Custom AI analysis prompt. Must instruct the model to return valid JSON. If omitted the default analysis prompt is used.")
+    prompt_override: str | None = Field(
+        None,
+        description=(
+            "Custom AI analysis prompt that replaces the default when this template is used. "
+            "Write any prompt you like — there are no restrictions. "
+            "Tips for writing a good prompt:\n"
+            "1. Start with a role: 'You are a [sales coach / scrum master / …].'\n"
+            "2. Add the instruction: 'Analyze this meeting transcript and return ONLY valid JSON.'\n"
+            "3. Define the JSON shape — include the standard fields (summary, key_points, "
+            "action_items, decisions, next_steps, sentiment, topics) and any extra fields "
+            "specific to your meeting type (e.g. buying_signals, blockers, root_causes).\n"
+            "If omitted or null, the bot uses the default analysis prompt (visible as the "
+            "'Default (General)' built-in template, id: seed-default, or via GET /templates/default-prompt)."
+        ),
+    )
 
 
 class TemplateOut(BaseModel):
@@ -226,17 +252,44 @@ class TemplateOut(BaseModel):
     created_at: str | None = Field(None, description="ISO-8601 creation timestamp. Null for built-in seed templates.")
 
 
+@router.get("/default-prompt", summary="Get the default analysis prompt")
+async def get_default_prompt():
+    """Return the raw default AI analysis prompt used when no template (or `seed-default`) is selected.
+
+    This is the same text stored in the `prompt_override` field of the `seed-default` built-in
+    template. It is exposed as a standalone endpoint so API consumers can easily fetch the
+    baseline prompt and use it as a starting point when crafting a custom `prompt_override`.
+
+    **How to customise:**
+    1. Fetch this prompt.
+    2. Change the analyst role in the first line to suit your meeting type
+       (e.g. `"You are a sales coach."` or `"You are a scrum master."`).
+    3. Add or remove fields in the `Required JSON shape` block.
+    4. Keep the `Return ONLY valid JSON` instruction — it prevents the model from wrapping
+       output in markdown fences.
+    5. POST your modified prompt as `prompt_override` when creating a template via
+       `POST /templates`.
+    """
+    return {"prompt": _DEFAULT_PROMPT}
+
+
 @router.get("", response_model=list[TemplateOut], summary="List all templates")
 async def list_templates(db: Annotated[AsyncSession, Depends(get_db)]):
     """Return all meeting templates: built-in seed templates followed by user-created custom templates.
 
-    Built-in templates (`id` starts with `seed-`) cover common meeting types out of the box and
-    cannot be deleted. Custom templates can be created via `POST /templates` and deleted via
-    `DELETE /templates/{template_id}`.
+    **Built-in templates** (`id` prefix `seed-`) ship with the service and cannot be deleted:
+
+    - `seed-default` — the **default prompt** used when no template is selected. Start here
+      when creating a custom template.
+    - `seed-sales`, `seed-standup`, `seed-1on1`, `seed-retro`, `seed-kickoff`,
+      `seed-allhands`, `seed-postmortem`, `seed-interview`, `seed-design-review` — meeting-type
+      specific prompts with extra JSON fields.
+
+    **Custom templates** are created via `POST /templates` with any `prompt_override` you like.
+    Pass the template's `id` as `template_id` when creating a bot to activate it.
 
     Every template exposes its full `description` and full `prompt_override` text — nothing is
-    truncated. Clients should render the description to help users choose the right template, and
-    may display the prompt in an expandable or scrollable element.
+    truncated. Clients should render the description to help users choose the right template.
     """
     custom = (await db.execute(
         select(MeetingTemplate).order_by(MeetingTemplate.created_at)
