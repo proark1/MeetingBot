@@ -1684,6 +1684,30 @@ document.getElementById("btn-create-template")?.addEventListener("click", async 
   } catch (e) { showToast(e.message, "error"); }
 });
 
+// ── Mobile sidebar ─────────────────────────────────────────────────────────
+
+(function () {
+  const app = document.getElementById("app");
+  const hamburger = document.getElementById("hamburger-btn");
+  const overlay = document.getElementById("sidebar-overlay");
+
+  function openSidebar()  { app.classList.add("sidebar-open"); }
+  function closeSidebar() { app.classList.remove("sidebar-open"); }
+
+  hamburger?.addEventListener("click", () => {
+    app.classList.contains("sidebar-open") ? closeSidebar() : openSidebar();
+  });
+
+  overlay?.addEventListener("click", closeSidebar);
+
+  // Close sidebar after navigating on mobile
+  document.querySelectorAll(".nav-item").forEach((item) => {
+    item.addEventListener("click", () => {
+      if (window.innerWidth <= 768) closeSidebar();
+    });
+  });
+})();
+
 // ── Init ───────────────────────────────────────────────────────────────────
 
 connectWS();

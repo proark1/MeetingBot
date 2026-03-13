@@ -8,6 +8,18 @@
 </head>
 <body>
   <div id="app">
+    <!-- Mobile header (hidden on desktop) -->
+    <header class="mobile-header">
+      <div class="logo">
+        <span class="logo-icon">🤖</span>
+        <span class="logo-text">MeetingBot</span>
+      </div>
+      <button class="hamburger-btn" id="hamburger-btn" aria-label="Open menu">☰</button>
+    </header>
+
+    <!-- Sidebar overlay (mobile only) -->
+    <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
     <!-- Sidebar -->
     <aside class="sidebar">
       <div class="logo">
@@ -269,7 +281,7 @@
           <div class="form-section-label">Post-Meeting Processing</div>
           <div class="mode-picker" id="analysis-mode-picker">
             <label class="mode-card mode-card-active" data-value="full">
-              <input type="radio" name="analysis_mode" value="full" checked hidden />
+              <input type="radio" name="analysis_mode" value="full" checked style="position:absolute;opacity:0;width:0;height:0" />
               <div class="mode-card-icon">✦</div>
               <div class="mode-card-body">
                 <div class="mode-card-title">Full AI Analysis</div>
@@ -278,7 +290,7 @@
               <div class="mode-card-check">✓</div>
             </label>
             <label class="mode-card" data-value="transcript_only">
-              <input type="radio" name="analysis_mode" value="transcript_only" hidden />
+              <input type="radio" name="analysis_mode" value="transcript_only" style="position:absolute;opacity:0;width:0;height:0" />
               <div class="mode-card-icon">📄</div>
               <div class="mode-card-body">
                 <div class="mode-card-title">Transcript Only</div>
@@ -331,15 +343,15 @@
             <div class="response-mode-label">Reply via</div>
             <div class="response-mode-options">
               <label class="mode-pill mode-pill-active" data-value="text">
-                <input type="radio" name="mention_response_mode" value="text" checked hidden />
+                <input type="radio" name="mention_response_mode" value="text" checked style="position:absolute;opacity:0;width:0;height:0" />
                 <span class="mode-pill-icon">💬</span> Text chat
               </label>
               <label class="mode-pill" data-value="voice">
-                <input type="radio" name="mention_response_mode" value="voice" hidden />
+                <input type="radio" name="mention_response_mode" value="voice" style="position:absolute;opacity:0;width:0;height:0" />
                 <span class="mode-pill-icon">🔊</span> Voice
               </label>
               <label class="mode-pill" data-value="both">
-                <input type="radio" name="mention_response_mode" value="both" hidden />
+                <input type="radio" name="mention_response_mode" value="both" style="position:absolute;opacity:0;width:0;height:0" />
                 <span class="mode-pill-icon">✦</span> Both
               </label>
             </div>
@@ -350,16 +362,28 @@
             <div class="response-mode-label">Voice engine</div>
             <div class="response-mode-options">
               <label class="mode-pill mode-pill-active" data-value="edge" id="tts-pill-edge">
-                <input type="radio" name="tts_provider" value="edge" checked hidden />
+                <input type="radio" name="tts_provider" value="edge" checked style="position:absolute;opacity:0;width:0;height:0" />
                 ⚡ Edge TTS
               </label>
               <label class="mode-pill" data-value="gemini" id="tts-pill-gemini">
-                <input type="radio" name="tts_provider" value="gemini" hidden />
+                <input type="radio" name="tts_provider" value="gemini" style="position:absolute;opacity:0;width:0;height:0" />
                 ✦ Gemini TTS
               </label>
             </div>
             <span class="tts-hint" id="tts-hint"></span>
           </div>
+
+          <!-- Live transcription toggle -->
+          <label class="toggle-row" for="new-bot-live-transcription">
+            <div class="toggle-row-body">
+              <div class="toggle-label">Live transcription</div>
+              <div class="toggle-desc">Transcribes audio every 15 s during the call so the bot can answer questions about the meeting in real time. Requires Gemini API key.</div>
+            </div>
+            <div class="toggle-track">
+              <input type="checkbox" id="new-bot-live-transcription" class="toggle-input" />
+              <span class="toggle-switch"></span>
+            </div>
+          </label>
         </div>
 
       </div>

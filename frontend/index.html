@@ -8,6 +8,18 @@
 </head>
 <body>
   <div id="app">
+    <!-- Mobile header (hidden on desktop) -->
+    <header class="mobile-header">
+      <div class="logo">
+        <span class="logo-icon">🤖</span>
+        <span class="logo-text">MeetingBot</span>
+      </div>
+      <button class="hamburger-btn" id="hamburger-btn" aria-label="Open menu">☰</button>
+    </header>
+
+    <!-- Sidebar overlay (mobile only) -->
+    <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
     <!-- Sidebar -->
     <aside class="sidebar">
       <div class="logo">
