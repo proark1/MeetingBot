@@ -71,10 +71,12 @@ function showToast(msg, type = "info") {
   toast.className = `toast ${type}`;
   toast.innerHTML = `<span class="toast-icon">${icons[type] || "ℹ️"}</span><span class="toast-text">${esc(msg)}</span>`;
   container.appendChild(toast);
+  // Success toasts dismiss faster; errors stay longer
+  const delay = type === "success" ? 2500 : type === "error" ? 5000 : 3500;
   setTimeout(() => {
     toast.classList.add("toast-out");
     toast.addEventListener("animationend", () => toast.remove());
-  }, 3500);
+  }, delay);
 }
 
 // ── Routing ────────────────────────────────────────────────────────────────
@@ -200,14 +202,27 @@ function handleServerEvent(event, data) {
     loadStats();
 
     // If on the bots list page, refresh the affected row
-    if (document.getElementById("page-bots").classList.contains("active")) {
+    const botsPage = document.getElementById("page-bots");
+    if (botsPage.classList.contains("active")) {
       updateBotRow(data.bot_id, data);
+      // On terminal events, do a full list refresh to show final summary/sentiment
+      if (event === "bot.done" || event === "bot.error" || event === "bot.analysis_ready") {
+        loadBots(_currentFilter, _currentSearch, _currentPage);
+      }
     }
 
     // If the detail page is showing the same bot, refresh it
     const detailPage = document.getElementById("page-bot-detail");
     if (detailPage.classList.contains("active") && _currentBotId === data.bot_id) {
-      refreshBotDetail(data.bot_id);
+      // For done/error/analysis_ready: immediate full refresh (data is now complete)
+      // For other events: debounced refresh to avoid excess DB round-trips
+      if (event === "bot.done" || event === "bot.error" || event === "bot.analysis_ready") {
+        _stopDetailPoll();  // WS delivered the final state — stop polling
+        refreshBotDetail(data.bot_id);
+      } else if (event !== "bot.transcript_ready") {
+        // transcript_ready triggers a refresh already via call_ended; skip double-refresh
+        refreshBotDetail(data.bot_id);
+      }
     }
   }
 }
@@ -687,7 +702,7 @@ async function submitCreateBot() {
 
   const btn = document.getElementById("btn-create-bot");
   btn.disabled = true;
-  btn.innerHTML = "Deploying…";
+  btn.innerHTML = `<span class="btn-spinner"></span> Deploying…`;
 
   const joinAtInput = document.getElementById("new-bot-join-at");
   const joinAtVal = joinAtInput ? joinAtInput.value : "";
@@ -752,9 +767,24 @@ document.getElementById("modal-new-bot").addEventListener("keydown", (e) => {
 // ── Bot Detail ─────────────────────────────────────────────────────────────
 
 let _currentBotId = null;
+let _detailPollTimer = null;
+
+// Start polling the detail page every 3 s (used while bot is processing)
+function _startDetailPoll(botId) {
+  _stopDetailPoll();
+  _detailPollTimer = setInterval(async () => {
+    if (_currentBotId !== botId) { _stopDetailPoll(); return; }
+    await refreshBotDetail(botId);
+  }, 3000);
+}
+
+function _stopDetailPoll() {
+  if (_detailPollTimer) { clearInterval(_detailPollTimer); _detailPollTimer = null; }
+}
 
 async function showBotDetail(botId) {
   _currentBotId = botId;
+  _stopDetailPoll();
   showPage("bot-detail");
   renderBotDetailLoading();
   await refreshBotDetail(botId);
@@ -840,11 +870,19 @@ function renderBotDetail(bot) {
 
   const statusBanner =
     bot.status === "ready"      ? `<div class="status-activity-banner banner-ready">⏳ Bot is ready and will join shortly${_featStr}</div>` :
-    bot.status === "joining"    ? `<div class="status-activity-banner banner-joining">🔄 Bot is joining the meeting — waiting to be admitted${_featStr}</div>` :
-    bot.status === "in_call"    ? `<div class="status-activity-banner banner-in-call">🔴 Bot is live in the meeting · Recording audio${_featStr}${bot.started_at ? ` · <span class="live-timer" data-live-start="${bot.started_at}">…</span>` : ""}</div>` :
-    bot.status === "call_ended" ? `<div class="status-activity-banner banner-ending">⏸ Call ended · Processing transcript…</div>` :
-    bot.status === "done"       ? `<div class="status-activity-banner banner-done">✅ Complete — transcript and analysis ready</div>` :
+    bot.status === "joining"    ? `<div class="status-activity-banner banner-joining"><span class="banner-spinner"></span> Joining the meeting — waiting to be admitted${_featStr}</div>` :
+    bot.status === "in_call"    ? `<div class="status-activity-banner banner-in-call"><span class="banner-pulse-dot"></span> Live in meeting · Recording audio${_featStr}${bot.started_at ? ` · <span class="live-timer" data-live-start="${bot.started_at}">…</span>` : ""}</div>` :
+    bot.status === "call_ended" ? `<div class="status-activity-banner banner-ending"><span class="banner-spinner"></span> Processing<span class="processing-dots"></span> — transcribing audio &amp; generating AI analysis</div>` :
+    bot.status === "done"       ? `<div class="status-activity-banner banner-done">✓ Complete — transcript and analysis ready</div>` :
     "";
+
+  // Auto-poll while the bot is actively processing; stop when terminal
+  const _terminalStatuses = ["done", "error", "cancelled"];
+  if (!_terminalStatuses.includes(bot.status)) {
+    _startDetailPoll(bot.id);
+  } else {
+    _stopDetailPoll();
+  }
 
   contentEl.innerHTML = `
     ${errorBanner}
@@ -1090,17 +1128,20 @@ function renderBotDetail(bot) {
       const q = document.getElementById("ask-input")?.value.trim();
       if (!q) return;
       askBtn.disabled = true;
-      askBtn.textContent = "Thinking…";
+      askBtn.innerHTML = `<span class="btn-spinner"></span> Thinking…`;
       const answerEl = document.getElementById("ask-answer");
-      if (answerEl) { answerEl.classList.add("hidden"); answerEl.textContent = ""; }
+      if (answerEl) {
+        answerEl.classList.remove("hidden");
+        answerEl.innerHTML = `<span class="ask-thinking"><span class="thinking-dot"></span><span class="thinking-dot"></span><span class="thinking-dot"></span></span>`;
+      }
       try {
         const res = await apiFetch("POST", `/bot/${bot.id}/ask`, { question: q });
         if (answerEl) {
-          answerEl.textContent = res.answer;
-          answerEl.classList.remove("hidden");
+          answerEl.innerHTML = `<div class="ask-answer-text">${esc(res.answer)}</div>`;
         }
       } catch (e) {
         showToast(e.message, "error");
+        if (answerEl) answerEl.classList.add("hidden");
       } finally {
         askBtn.disabled = false;
         askBtn.textContent = "Ask";
@@ -1344,6 +1385,7 @@ function exportTranscriptMd(bot) {
 
 document.getElementById("btn-back-bots").addEventListener("click", () => {
   _currentBotId = null;
+  _stopDetailPoll();
   showPage("bots");
   loadBots();
 });

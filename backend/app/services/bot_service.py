@@ -187,23 +187,31 @@ async def _salvage_and_finish(
     # ── analysis + chapters + speaker stats ────────────────────────────────
     analysis_mode = getattr(bot, "analysis_mode", "full") or "full"
     if not bot.analysis and bot.transcript and analysis_mode != "transcript_only":
-        try:
-            analysis = await intelligence_service.analyze_transcript(bot.transcript)
-            bot.analysis = analysis
-        except Exception as exc:
-            logger.error("Analysis failed for bot %s: %s", bot_id, exc)
+        # Run analysis and chapter generation in parallel.
+        analysis_result, chapters_result = await asyncio.gather(
+            intelligence_service.analyze_transcript(bot.transcript),
+            intelligence_service.generate_chapters(bot.transcript),
+            return_exceptions=True,
+        )
+
+        if isinstance(analysis_result, Exception):
+            logger.error("Analysis failed for bot %s: %s", bot_id, analysis_result)
             bot.analysis = {
                 "summary": "Analysis unavailable — an error occurred during processing.",
                 "key_points": [], "action_items": [], "decisions": [],
                 "next_steps": [], "sentiment": "neutral", "topics": [],
             }
-            bot.error_message = (bot.error_message or "") + f" [analysis error: {exc}]"
+            bot.error_message = (bot.error_message or "") + f" [analysis error: {analysis_result}]"
+        else:
+            bot.analysis = analysis_result
 
         bot.speaker_stats = _compute_speaker_stats(bot.transcript)
-        try:
-            bot.chapters = await intelligence_service.generate_chapters(bot.transcript)
-        except Exception:
+
+        if isinstance(chapters_result, Exception):
+            logger.warning("Chapter generation failed for bot %s: %s", bot_id, chapters_result)
             bot.chapters = []
+        else:
+            bot.chapters = chapters_result or []
 
         if use_real_bot and os.path.exists(audio_path) and os.path.getsize(audio_path) > 0:
             bot.recording_path = audio_path
@@ -495,27 +503,33 @@ async def run_bot_lifecycle(bot_id: str, db_factory) -> None:
                             prompt_override = tmpl_row.prompt_override
                     except Exception as exc:
                         logger.warning("Template lookup failed for bot %s: %s", bot_id, exc)
-                try:
-                    analysis = await intelligence_service.analyze_transcript(
+                # Run analysis and chapter generation in parallel — saves 2–5 s per meeting.
+                analysis_result, chapters_result = await asyncio.gather(
+                    intelligence_service.analyze_transcript(
                         transcript,
                         prompt_override=prompt_override,
                         vocabulary=bot.vocabulary or [],
-                    )
-                    bot.analysis = analysis
-                except Exception as exc:
-                    logger.error("Analysis failed for bot %s: %s", bot_id, exc)
+                    ),
+                    intelligence_service.generate_chapters(transcript),
+                    return_exceptions=True,
+                )
+
+                if isinstance(analysis_result, Exception):
+                    logger.error("Analysis failed for bot %s: %s", bot_id, analysis_result)
                     bot.analysis = {
                         "summary": "Analysis unavailable — an error occurred during processing.",
                         "key_points": [], "action_items": [], "decisions": [],
                         "next_steps": [], "sentiment": "neutral", "topics": [],
                     }
-                    bot.error_message = (bot.error_message or "") + f" [analysis error: {exc}]"
+                    bot.error_message = (bot.error_message or "") + f" [analysis error: {analysis_result}]"
+                else:
+                    bot.analysis = analysis_result
 
-                try:
-                    bot.chapters = await intelligence_service.generate_chapters(transcript)
-                except Exception as exc:
-                    logger.warning("Chapter generation failed for bot %s: %s", bot_id, exc)
+                if isinstance(chapters_result, Exception):
+                    logger.warning("Chapter generation failed for bot %s: %s", bot_id, chapters_result)
                     bot.chapters = []
+                else:
+                    bot.chapters = chapters_result or []
 
                 bot.updated_at = _now()
                 await db.commit()
