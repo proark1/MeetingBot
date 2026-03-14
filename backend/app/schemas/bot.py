@@ -6,14 +6,14 @@ from pydantic import BaseModel, Field, field_validator, AnyHttpUrl
 
 
 def _reject_private_url(v: Any) -> str:
-    """Raise if the URL targets a private/loopback address (SSRF prevention).
+    """Reject meeting URLs that target localhost or private IP addresses.
 
-    Checks the literal hostname first (fast path for IP addresses and "localhost"),
-    then falls back to a DNS lookup. The DNS lookup is synchronous because Pydantic
-    validators cannot be async; it runs in the FastAPI request thread (handled by
-    uvicorn's thread-pool executor) so the event loop is not blocked.
+    Only checks the literal hostname — no DNS lookup is performed, because:
+    1. Meeting URLs are navigated by a browser, not fetched by the server,
+       so full SSRF prevention (DNS rebinding etc.) is unnecessary here.
+    2. A synchronous DNS lookup blocks the async event loop and fails when
+       the network is unreachable, breaking bot creation entirely.
     """
-    import socket
     from urllib.parse import urlparse
 
     url_str = str(v)
@@ -21,7 +21,7 @@ def _reject_private_url(v: Any) -> str:
         parsed = urlparse(url_str)
         hostname = parsed.hostname or ""
 
-        # Reject "localhost" before DNS to avoid round-trip
+        # Reject "localhost" before anything else
         if hostname.lower() in ("localhost", "localhost."):
             raise ValueError("URL must not target localhost")
 
@@ -30,22 +30,14 @@ def _reject_private_url(v: Any) -> str:
             ip = ipaddress.ip_address(hostname)
             if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
                 raise ValueError(f"URL targets a private/internal address: {hostname}")
-            return url_str  # valid public IP — skip DNS
         except ValueError as ip_exc:
             if "private" in str(ip_exc) or "loopback" in str(ip_exc) or "internal" in str(ip_exc):
                 raise  # re-raise our own rejection
-            # hostname is not an IP literal — continue to DNS resolution
-
-        # Resolve hostname and validate all returned IPs
-        results = socket.getaddrinfo(hostname, None)
-        for _, _, _, _, sockaddr in results:
-            ip = ipaddress.ip_address(sockaddr[0])
-            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
-                raise ValueError(f"URL resolves to a private/internal address: {sockaddr[0]}")
+            # hostname is not an IP literal — that's fine, it's a normal domain
     except ValueError:
         raise
     except Exception:
-        pass  # DNS failure etc. — let the delivery attempt fail naturally
+        pass
     return url_str
 
 
