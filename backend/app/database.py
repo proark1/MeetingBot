@@ -8,17 +8,21 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-engine = create_async_engine(
-    settings.DATABASE_URL,
-    echo=False,
-    # Increase connection timeout and pool size to handle concurrent bots
-    # (3 bots × several DB sessions each = need headroom above the default pool of 5)
-    connect_args={"timeout": 30},
-    pool_pre_ping=True,
-    pool_size=10,
-    max_overflow=20,
-    pool_timeout=30,
-)
+_is_sqlite = settings.DATABASE_URL.startswith("sqlite")
+
+_engine_kwargs: dict = {
+    "echo": False,
+    "connect_args": {"timeout": 30},
+    "pool_pre_ping": True,
+}
+if not _is_sqlite:
+    # Pool sizing only applies to server-based databases (PostgreSQL, MySQL, …).
+    # SQLite uses NullPool and rejects these arguments.
+    _engine_kwargs["pool_size"] = 10
+    _engine_kwargs["max_overflow"] = 20
+    _engine_kwargs["pool_timeout"] = 30
+
+engine = create_async_engine(settings.DATABASE_URL, **_engine_kwargs)
 
 AsyncSessionLocal = async_sessionmaker(
     engine,
