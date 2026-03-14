@@ -124,6 +124,8 @@ No other changes are needed — the app auto-detects:
 
 Tables and indexes are created automatically on first startup.
 
+> **Startup resilience:** If the database is unreachable at startup (wrong credentials, network issue, paused Supabase project), the app still starts and the `/health` endpoint still returns `200 OK`. Database-dependent endpoints will return `500` until the DB becomes reachable on the next deploy. The error is logged clearly so you can diagnose it from Railway logs.
+
 ### 4 — Verify
 
 Watch the Railway logs on the next deploy. You should see:

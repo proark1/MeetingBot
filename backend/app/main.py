@@ -66,7 +66,21 @@ async def require_api_key(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Initialising database…")
-    await init_db()
+    try:
+        await asyncio.wait_for(init_db(), timeout=30)
+    except asyncio.TimeoutError:
+        logger.error(
+            "✖ Database initialisation timed out after 30 s — the app will start but "
+            "all database-dependent endpoints will fail until the DB is reachable. "
+            "Check DATABASE_URL / SUPABASE_* environment variables."
+        )
+    except Exception as exc:
+        logger.error(
+            "✖ Database initialisation failed: %s — the app will start but "
+            "all database-dependent endpoints will fail. "
+            "Check DATABASE_URL / SUPABASE_* environment variables.",
+            exc,
+        )
     if settings.DATABASE_URL.startswith("sqlite"):
         logger.warning(
             "⚠ Using SQLite — data will be LOST on every container restart. "
