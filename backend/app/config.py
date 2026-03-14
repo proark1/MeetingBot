@@ -14,27 +14,36 @@ class Settings(BaseSettings):
 
     # ── Database ──────────────────────────────────────────────────────────────
     # Option A — set DATABASE_URL directly (any SQLAlchemy async URL).
-    # Option B — set the individual SUPABASE_* variables below and leave
-    #            DATABASE_URL empty; the URL is assembled automatically.
+    # Option B — set SUPABASE_URL + SUPABASE_DB_PASSWORD (easiest for Railway).
+    #            The host is derived from SUPABASE_URL automatically.
     # "postgres://" and "postgresql://" are both accepted — rewritten to asyncpg.
     DATABASE_URL: str = "sqlite+aiosqlite:///./meetingbot.db"
 
-    # Supabase individual connection fields (Option B).
-    # Find these in: Supabase dashboard → Project Settings → Database → Connection info
-    SUPABASE_HOST: str = ""      # e.g. db.abcdefghijklm.supabase.co
-    SUPABASE_DB: str = "postgres"
-    SUPABASE_USER: str = "postgres"
-    SUPABASE_PASSWORD: str = ""
-    SUPABASE_PORT: int = 5432    # 5432 = direct / session pooler, 6543 = transaction pooler
+    # Supabase connection via API project URL + database password (Option B).
+    #
+    # SUPABASE_URL  — your project URL from Supabase dashboard → Settings → API
+    #                 e.g. https://abcdefghijklm.supabase.co
+    # SUPABASE_DB_PASSWORD — the Postgres password set when you created the project
+    #                        (Settings → Database → Database password)
+    #
+    # The remaining fields default to Supabase's standard values and rarely need changing.
+    SUPABASE_URL: str = ""           # https://[ref].supabase.co
+    SUPABASE_DB_PASSWORD: str = ""   # database password (NOT the anon/service key)
+    SUPABASE_DB_USER: str = "postgres"
+    SUPABASE_DB_NAME: str = "postgres"
+    SUPABASE_DB_PORT: int = 5432     # 5432 = direct, 6543 = transaction pooler
 
     @model_validator(mode="after")
     def build_database_url(self) -> "Settings":
-        """If SUPABASE_HOST + SUPABASE_PASSWORD are set, assemble DATABASE_URL from parts."""
-        if self.SUPABASE_HOST and self.SUPABASE_PASSWORD:
-            password = quote_plus(self.SUPABASE_PASSWORD)
+        """Build DATABASE_URL from SUPABASE_URL + SUPABASE_DB_PASSWORD if provided."""
+        if self.SUPABASE_URL and self.SUPABASE_DB_PASSWORD:
+            # Extract project ref from https://[ref].supabase.co
+            ref = self.SUPABASE_URL.rstrip("/").removeprefix("https://").split(".")[0]
+            host = f"db.{ref}.supabase.co"
+            password = quote_plus(self.SUPABASE_DB_PASSWORD)
             self.DATABASE_URL = (
-                f"postgresql://{self.SUPABASE_USER}:{password}"
-                f"@{self.SUPABASE_HOST}:{self.SUPABASE_PORT}/{self.SUPABASE_DB}"
+                f"postgresql://{self.SUPABASE_DB_USER}:{password}"
+                f"@{host}:{self.SUPABASE_DB_PORT}/{self.SUPABASE_DB_NAME}"
             )
         return self
     BOT_NAME_DEFAULT: str = "MeetingBot"

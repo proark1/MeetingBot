@@ -93,23 +93,29 @@ Choose the mode that fits your deployment:
 
 ### 3 — Set the Railway variables
 
-Go to your Railway service → **Variables** and add these individually:
+Go to your Railway service → **Variables** and add just these two:
 
-| Variable | Where to find it in Supabase |
-|---|---|
-| `SUPABASE_HOST` | Project Settings → Database → Host (e.g. `db.abcxyz.supabase.co`) |
-| `SUPABASE_PASSWORD` | The password you set when creating the project |
-| `SUPABASE_PORT` | `5432` for direct/session pooler · `6543` for transaction pooler |
-| `SUPABASE_USER` | `postgres` (default, rarely changes) |
-| `SUPABASE_DB` | `postgres` (default, rarely changes) |
+| Variable | Where to find it | Example |
+|---|---|---|
+| `SUPABASE_URL` | Supabase dashboard → **Settings → API → Project URL** | `https://abcdefgh.supabase.co` |
+| `SUPABASE_DB_PASSWORD` | Supabase dashboard → **Settings → Database → Database password** | `your-db-password` |
 
-The app assembles the full connection URL from these at startup — you don't need to set `DATABASE_URL` when using the `SUPABASE_*` variables.
+> **Note:** `SUPABASE_URL` is the project URL (the one that starts with `https://`), not the anon key or publishable key. The database password is separate from the API keys — find it under **Settings → Database**, not Settings → API.
+
+The app derives the database host from the URL automatically. You do **not** need to set `DATABASE_URL`.
+
+**Optional overrides** (defaults work for almost everyone):
+
+| Variable | Default | Change if… |
+|---|---|---|
+| `SUPABASE_DB_PORT` | `5432` | Using the transaction pooler (set to `6543`) |
+| `SUPABASE_DB_USER` | `postgres` | You created a custom DB user |
+| `SUPABASE_DB_NAME` | `postgres` | You created a custom database |
 
 **Local `.env`:**
 ```
-SUPABASE_HOST=db.abcdefghijklm.supabase.co
-SUPABASE_PASSWORD=your-database-password
-SUPABASE_PORT=5432
+SUPABASE_URL=https://abcdefghijklm.supabase.co
+SUPABASE_DB_PASSWORD=your-database-password
 ```
 
 No other changes are needed — the app auto-detects:
