@@ -10,7 +10,9 @@ async function apiFetch(method, path, body) {
   const res = await fetch(API + path, opts);
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || `HTTP ${res.status}`);
+    const error = new Error(err.detail || `HTTP ${res.status}`);
+    error.status = res.status;
+    throw error;
   }
   if (res.status === 204) return null;
   return res.json();
@@ -746,8 +748,23 @@ async function refreshBotDetail(botId) {
     renderBotDetail(bot);
   } catch (e) {
     if (_currentBotId !== botId) return;
-    document.getElementById("bot-detail-content").innerHTML =
-      `<div class="empty">Error loading bot: ${esc(e.message)}</div>`;
+    if (e.status === 404) {
+      // Bot no longer exists (e.g. server was redeployed with a fresh database).
+      // Clear the stale reference so WS events don't re-trigger polls, then
+      // return to the meetings list after a brief message.
+      _currentBotId = null;
+      document.getElementById("bot-detail-badges").innerHTML = "";
+      document.getElementById("bot-detail-content").innerHTML =
+        `<div class="empty">
+          <strong>Meeting not found.</strong><br>
+          This meeting report no longer exists — the server may have been restarted.<br>
+          <button class="btn btn-ghost btn-sm" style="margin-top:.75rem"
+            onclick="showPage('bots');loadBots()">← Back to meetings</button>
+        </div>`;
+    } else {
+      document.getElementById("bot-detail-content").innerHTML =
+        `<div class="empty">Error loading bot: ${esc(e.message)}</div>`;
+    }
   }
 }
 

@@ -8,21 +8,29 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-_is_sqlite = settings.DATABASE_URL.startswith("sqlite")
+# Normalise the DATABASE_URL for the async driver.
+# Railway (and most PaaS) provide "postgresql://" or the legacy "postgres://"
+# alias, but asyncpg requires the "postgresql+asyncpg://" scheme.
+_db_url = settings.DATABASE_URL
+if _db_url.startswith("postgres://"):
+    _db_url = "postgresql+asyncpg://" + _db_url[len("postgres://"):]
+elif _db_url.startswith("postgresql://"):
+    _db_url = "postgresql+asyncpg://" + _db_url[len("postgresql://"):]
 
-_engine_kwargs: dict = {
-    "echo": False,
-    "connect_args": {"timeout": 30},
-    "pool_pre_ping": True,
-}
-if not _is_sqlite:
+_is_sqlite = _db_url.startswith("sqlite")
+
+_engine_kwargs: dict = {"echo": False, "pool_pre_ping": True}
+
+if _is_sqlite:
+    # SQLite needs a per-connection timeout; server-pool args are not applicable.
+    _engine_kwargs["connect_args"] = {"timeout": 30}
+else:
     # Pool sizing only applies to server-based databases (PostgreSQL, MySQL, …).
-    # SQLite uses NullPool and rejects these arguments.
     _engine_kwargs["pool_size"] = 10
     _engine_kwargs["max_overflow"] = 20
     _engine_kwargs["pool_timeout"] = 30
 
-engine = create_async_engine(settings.DATABASE_URL, **_engine_kwargs)
+engine = create_async_engine(_db_url, **_engine_kwargs)
 
 AsyncSessionLocal = async_sessionmaker(
     engine,
@@ -49,46 +57,51 @@ async def init_db():
         from app.models import speaker_profile  # noqa: F401 — registers SpeakerProfile
         await conn.run_sync(Base.metadata.create_all)
 
-        # Enable WAL mode: prevents "database is locked" under concurrent async
-        # access and improves read performance alongside writes.
-        await conn.execute(text("PRAGMA journal_mode=WAL"))
-        await conn.execute(text("PRAGMA synchronous=NORMAL"))
+        if _is_sqlite:
+            # Enable WAL mode: prevents "database is locked" under concurrent async
+            # access and improves read performance alongside writes.
+            await conn.execute(text("PRAGMA journal_mode=WAL"))
+            await conn.execute(text("PRAGMA synchronous=NORMAL"))
 
-        # Migrate existing tables: add columns introduced after initial creation
-        for stmt in [
-            "ALTER TABLE bots ADD COLUMN participants JSON DEFAULT '[]'",
-            "ALTER TABLE webhooks ADD COLUMN consecutive_failures INTEGER DEFAULT 0",
-            "ALTER TABLE bots ADD COLUMN chapters JSON",
-            "ALTER TABLE bots ADD COLUMN speaker_stats JSON",
-            "ALTER TABLE bots ADD COLUMN recording_path TEXT",
-            "ALTER TABLE bots ADD COLUMN share_token TEXT",
-            "ALTER TABLE bots ADD COLUMN notify_email TEXT",
-            "ALTER TABLE bots ADD COLUMN template_id TEXT",
-            "ALTER TABLE bots ADD COLUMN vocabulary JSON",
-            "ALTER TABLE bots ADD COLUMN analysis_mode TEXT DEFAULT 'full'",
-            "ALTER TABLE bots ADD COLUMN respond_on_mention INTEGER DEFAULT 1",
-            "ALTER TABLE bots ADD COLUMN mention_response_mode TEXT DEFAULT 'text'",
-            "ALTER TABLE bots ADD COLUMN tts_provider TEXT DEFAULT 'edge'",
-            "ALTER TABLE bots ADD COLUMN start_muted INTEGER DEFAULT 0",
-            "ALTER TABLE bots ADD COLUMN live_transcription INTEGER DEFAULT 0",
-            "ALTER TABLE bots ADD COLUMN prompt_override TEXT",
-            "ALTER TABLE bots ADD COLUMN ai_usage JSON DEFAULT '[]'",
-            "ALTER TABLE bots ADD COLUMN ai_total_tokens INTEGER DEFAULT 0",
-            "ALTER TABLE bots ADD COLUMN ai_total_cost_usd REAL DEFAULT 0.0",
-            "ALTER TABLE bots ADD COLUMN ai_primary_model TEXT",
-            "ALTER TABLE bots ADD COLUMN meeting_duration_s REAL DEFAULT 0.0",
-        ]:
-            try:
-                await conn.execute(text(stmt))
-            except Exception as mig_exc:
-                # Most failures are benign "column already exists" — log at DEBUG
-                # so genuine schema errors (typos, wrong table names) are visible.
-                logger.debug("Migration skipped (already applied?): %s — %s", stmt, mig_exc)
+        if _is_sqlite:
+            # SQLite-only: migrate existing tables by adding columns that were
+            # introduced after initial schema creation.  On PostgreSQL, SQLAlchemy's
+            # create_all() handles the full schema on first run, so these are unnecessary.
+            for stmt in [
+                "ALTER TABLE bots ADD COLUMN participants JSON DEFAULT '[]'",
+                "ALTER TABLE webhooks ADD COLUMN consecutive_failures INTEGER DEFAULT 0",
+                "ALTER TABLE bots ADD COLUMN chapters JSON",
+                "ALTER TABLE bots ADD COLUMN speaker_stats JSON",
+                "ALTER TABLE bots ADD COLUMN recording_path TEXT",
+                "ALTER TABLE bots ADD COLUMN share_token TEXT",
+                "ALTER TABLE bots ADD COLUMN notify_email TEXT",
+                "ALTER TABLE bots ADD COLUMN template_id TEXT",
+                "ALTER TABLE bots ADD COLUMN vocabulary JSON",
+                "ALTER TABLE bots ADD COLUMN analysis_mode TEXT DEFAULT 'full'",
+                "ALTER TABLE bots ADD COLUMN respond_on_mention INTEGER DEFAULT 1",
+                "ALTER TABLE bots ADD COLUMN mention_response_mode TEXT DEFAULT 'text'",
+                "ALTER TABLE bots ADD COLUMN tts_provider TEXT DEFAULT 'edge'",
+                "ALTER TABLE bots ADD COLUMN start_muted INTEGER DEFAULT 0",
+                "ALTER TABLE bots ADD COLUMN live_transcription INTEGER DEFAULT 0",
+                "ALTER TABLE bots ADD COLUMN prompt_override TEXT",
+                "ALTER TABLE bots ADD COLUMN ai_usage JSON DEFAULT '[]'",
+                "ALTER TABLE bots ADD COLUMN ai_total_tokens INTEGER DEFAULT 0",
+                "ALTER TABLE bots ADD COLUMN ai_total_cost_usd REAL DEFAULT 0.0",
+                "ALTER TABLE bots ADD COLUMN ai_primary_model TEXT",
+                "ALTER TABLE bots ADD COLUMN meeting_duration_s REAL DEFAULT 0.0",
+            ]:
+                try:
+                    await conn.execute(text(stmt))
+                except Exception as mig_exc:
+                    # Most failures are benign "column already exists" — log at DEBUG
+                    # so genuine schema errors (typos, wrong table names) are visible.
+                    logger.debug("Migration skipped (already applied?): %s — %s", stmt, mig_exc)
 
         # speaker_profiles table is created by SQLAlchemy metadata above;
         # no ALTER TABLE needed for it since it's new.
 
-        # Indexes on hot query columns (idempotent)
+        # Indexes on hot query columns — use IF NOT EXISTS (supported by both SQLite
+        # and PostgreSQL) so this is safe to run on every startup.
         for stmt in [
             "CREATE INDEX IF NOT EXISTS ix_bot_status      ON bots (status)",
             "CREATE INDEX IF NOT EXISTS ix_bot_created_at  ON bots (created_at)",
@@ -101,4 +114,7 @@ async def init_db():
             "CREATE INDEX IF NOT EXISTS ix_action_item_bot_id ON action_items (bot_id)",
             "CREATE INDEX IF NOT EXISTS ix_highlight_bot_id    ON highlights   (bot_id)",
         ]:
-            await conn.execute(text(stmt))
+            try:
+                await conn.execute(text(stmt))
+            except Exception as idx_exc:
+                logger.debug("Index creation skipped: %s", idx_exc)
