@@ -22,8 +22,32 @@ router = APIRouter(prefix="/bot", tags=["Bots"])
 # Track running lifecycle tasks so we can cancel them (single-process only)
 _running_tasks: dict[str, asyncio.Task] = {}
 
+# Queue of bot IDs waiting for a slot (FIFO)
+_bot_queue: list[str] = []
+
 # Statuses treated as "active" for stats
 _ACTIVE_STATUSES = ("ready", "scheduled", "joining", "in_call", "call_ended")
+
+
+async def _queue_processor() -> None:
+    """Background loop: start queued bots whenever a slot is free."""
+    from app.config import settings
+
+    while True:
+        await asyncio.sleep(10)
+        if not _bot_queue:
+            continue
+        active = sum(1 for t in _running_tasks.values() if not t.done())
+        if active >= settings.MAX_CONCURRENT_BOTS:
+            continue
+        # Claim a slot for the next queued bot
+        bot_id = _bot_queue.pop(0)
+        task = asyncio.create_task(
+            bot_service.run_bot_lifecycle(bot_id, AsyncSessionLocal)
+        )
+        _running_tasks[bot_id] = task
+        task.add_done_callback(lambda _t, bid=bot_id: _running_tasks.pop(bid, None))
+        logger.info("Queue: started bot %s (queue length now %d)", bot_id, len(_bot_queue))
 
 
 def _is_demo(bot: Bot) -> bool:
@@ -130,16 +154,7 @@ async def create_bot(
     """
     from app.config import settings
 
-    # Rate limit: cap concurrent browser bots to avoid OOM crashes
     active = sum(1 for t in _running_tasks.values() if not t.done())
-    if active >= settings.MAX_CONCURRENT_BOTS:
-        raise HTTPException(
-            status_code=429,
-            detail=(
-                f"Too many bots running ({active}/{settings.MAX_CONCURRENT_BOTS}). "
-                "Wait for a bot to finish before creating another."
-            ),
-        )
 
     from datetime import timezone as _tz
     from datetime import datetime as _dt
@@ -170,13 +185,25 @@ async def create_bot(
     await db.commit()
     await db.refresh(bot)
 
-    task = asyncio.create_task(
-        bot_service.run_bot_lifecycle(bot.id, AsyncSessionLocal)
-    )
-    _running_tasks[bot.id] = task
-    task.add_done_callback(lambda _: _running_tasks.pop(bot.id, None))
+    if active >= settings.MAX_CONCURRENT_BOTS:
+        # Queue the bot instead of rejecting — it will start when a slot opens
+        _bot_queue.append(bot.id)
+        bot.status = "queued"
+        await db.commit()
+        await db.refresh(bot)
+        queue_pos = _bot_queue.index(bot.id) + 1
+        logger.info(
+            "Bot %s queued (position %d) — %d/%d slots busy",
+            bot.id, queue_pos, active, settings.MAX_CONCURRENT_BOTS,
+        )
+    else:
+        task = asyncio.create_task(
+            bot_service.run_bot_lifecycle(bot.id, AsyncSessionLocal)
+        )
+        _running_tasks[bot.id] = task
+        task.add_done_callback(lambda _: _running_tasks.pop(bot.id, None))
 
-    logger.info("Created bot %s for %s", bot.id, bot.meeting_url)
+    logger.info("Created bot %s for %s (status=%s)", bot.id, bot.meeting_url, bot.status)
     return _bot_to_response(bot)
 
 
@@ -353,6 +380,122 @@ async def ask_bot(
         raise HTTPException(status_code=425, detail="No transcript available yet")
     answer = await intelligence_service.ask_about_transcript(bot.transcript, question)
     return {"bot_id": bot_id, "question": question, "answer": answer}
+
+
+# ── POST /api/v1/bot/{id}/followup-email ────────────────────────────────────
+
+@router.post("/{bot_id}/followup-email")
+async def generate_followup_email(
+    bot_id: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Generate a draft follow-up email for the meeting.
+
+    Returns {"subject": "...", "body": "..."} ready to copy-paste or send.
+    """
+    bot = await _get_or_404(db, bot_id)
+    if not bot.transcript and not bot.analysis:
+        raise HTTPException(status_code=425, detail="No transcript or analysis available yet")
+    result = await intelligence_service.generate_followup_email(
+        transcript=bot.transcript or [],
+        analysis=bot.analysis or {},
+        participants=bot.participants or [],
+    )
+    return {"bot_id": bot_id, **result}
+
+
+# ── POST /api/v1/bot/{id}/brief ──────────────────────────────────────────────
+
+@router.post("/{bot_id}/brief")
+async def generate_meeting_brief(
+    bot_id: str,
+    payload: dict,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Generate a pre-meeting preparation brief for the next occurrence of this meeting.
+
+    Optionally pass {"agenda": "..."} in the request body.
+    Looks up previous meetings with similar participants to provide context.
+    """
+    from sqlalchemy import select as _select
+    agenda = (payload.get("agenda") or "").strip()
+    bot = await _get_or_404(db, bot_id)
+
+    # Find previous meetings with the same participants for context
+    previous_summaries: list[str] = []
+    if bot.participants:
+        candidates = (
+            await db.execute(
+                _select(Bot)
+                .where(Bot.status == "done", Bot.id != bot_id)
+                .order_by(Bot.created_at.desc())
+                .limit(20)
+            )
+        ).scalars().all()
+        bot_names = {n.lower() for n in bot.participants}
+        for c in candidates:
+            overlap = sum(1 for p in (c.participants or []) if p.lower() in bot_names)
+            if overlap >= max(1, len(bot.participants) // 2):
+                summary = (c.analysis or {}).get("summary", "")
+                if summary:
+                    previous_summaries.append(summary)
+            if len(previous_summaries) >= 3:
+                break
+
+    result = await intelligence_service.generate_meeting_brief(
+        agenda=agenda,
+        participants=bot.participants or [],
+        previous_summaries=previous_summaries,
+    )
+    return {"bot_id": bot_id, "previous_meetings_used": len(previous_summaries), **result}
+
+
+# ── GET /api/v1/bot/{id}/recurring ───────────────────────────────────────────
+
+@router.get("/{bot_id}/recurring")
+async def get_recurring_intelligence(
+    bot_id: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Analyse the series of recurring meetings with similar participants.
+
+    Returns patterns, unresolved items, and a suggested agenda for the next meeting.
+    """
+    from sqlalchemy import select as _select
+    bot = await _get_or_404(db, bot_id)
+
+    previous_summaries: list[str] = []
+    all_participants: set[str] = set(bot.participants or [])
+
+    if bot.participants:
+        candidates = (
+            await db.execute(
+                _select(Bot)
+                .where(Bot.status == "done", Bot.id != bot_id)
+                .order_by(Bot.created_at.desc())
+                .limit(30)
+            )
+        ).scalars().all()
+        bot_names = {n.lower() for n in bot.participants}
+        for c in candidates:
+            overlap = sum(1 for p in (c.participants or []) if p.lower() in bot_names)
+            if overlap >= max(1, len(bot.participants) // 2):
+                summary = (c.analysis or {}).get("summary", "")
+                if summary:
+                    previous_summaries.append(summary)
+                all_participants.update(c.participants or [])
+            if len(previous_summaries) >= 5:
+                break
+
+    result = await intelligence_service.generate_recurring_intelligence(
+        previous_summaries=previous_summaries,
+        participants=sorted(all_participants),
+    )
+    return {
+        "bot_id": bot_id,
+        "recurring_meetings_analysed": len(previous_summaries),
+        **result,
+    }
 
 
 # ── GET /api/v1/share/{token} ────────────────────────────────────────────────

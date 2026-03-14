@@ -39,6 +39,44 @@ Each entry: {"speaker": "Name", "text": "...", "timestamp": <seconds_float>}.
 Generate 15–25 entries spanning 8–15 minutes.
 Make it a realistic tech-team meeting with concrete discussion."""
 
+_FOLLOWUP_EMAIL_PROMPT = """You are a professional meeting assistant. Write a concise follow-up email
+summarising the meeting. Return ONLY valid JSON — no markdown fences, no prose outside the JSON.
+
+Required JSON shape:
+{
+  "subject": "<concise subject line>",
+  "body": "<full email body as plain text, 150-300 words>"
+}
+
+The email should:
+- Thank participants and briefly summarise 2-3 key discussion points
+- List action items with owners when present
+- State agreed next steps
+- Be warm, professional, and scannable"""
+
+_BRIEF_PROMPT = """You are a meeting preparation assistant. Given context about an upcoming meeting,
+generate a concise preparation brief. Return ONLY valid JSON — no markdown fences.
+
+Required JSON shape:
+{
+  "brief": "<full preparation doc as plain text, 150-250 words>",
+  "talking_points": ["<point 1>", ...],
+  "questions_to_raise": ["<question 1>", ...],
+  "context_summary": "<1-2 sentence summary of relevant background>"
+}"""
+
+_RECURRING_BRIEF_PROMPT = """You are a meeting intelligence assistant. Analyse these summaries from
+previous instances of a recurring meeting and identify patterns, trends, and unresolved items.
+Return ONLY valid JSON — no markdown fences.
+
+Required JSON shape:
+{
+  "recurring_themes": ["<theme 1>", ...],
+  "unresolved_items": ["<item 1>", ...],
+  "trend_summary": "<2-3 sentence overview of how things are progressing>",
+  "suggested_agenda": ["<agenda point 1>", ...]
+}"""
+
 
 # ── Provider helpers ───────────────────────────────────────────────────────────
 
@@ -327,6 +365,135 @@ async def _gemini_demo_transcript(meeting_url: str) -> list[dict[str, Any]]:
     return json.loads(_strip_fences(response.text))
 
 
+# ── Follow-up email + brief (Claude) ─────────────────────────────────────────
+
+async def _claude_followup_email(
+    transcript: list[dict[str, Any]],
+    analysis: dict[str, Any],
+    participants: list[str],
+) -> dict[str, Any]:
+    lines = "\n".join(
+        f"[{e.get('timestamp', 0):.1f}s] {e.get('speaker', '?')}: {e.get('text', '')}"
+        for e in transcript[:80]  # cap to avoid huge prompts
+    )
+    analysis_summary = (
+        f"Summary: {analysis.get('summary', '')}\n"
+        f"Action items: {analysis.get('action_items', [])}\n"
+        f"Decisions: {analysis.get('decisions', [])}\n"
+        f"Next steps: {analysis.get('next_steps', [])}"
+    )
+    text = await _claude_complete(
+        f"{_FOLLOWUP_EMAIL_PROMPT}\n\n"
+        f"Participants: {', '.join(participants)}\n\n"
+        f"Meeting analysis:\n{analysis_summary}\n\n"
+        f"Transcript excerpt:\n{lines}",
+        max_tokens=1024,
+    )
+    return json.loads(_strip_fences(text))
+
+
+async def _claude_meeting_brief(
+    agenda: str,
+    participants: list[str],
+    previous_summaries: list[str],
+) -> dict[str, Any]:
+    context = ""
+    if previous_summaries:
+        context = "Previous meeting summaries (most recent first):\n" + "\n\n".join(
+            f"- {s}" for s in previous_summaries[:3]
+        )
+    text = await _claude_complete(
+        f"{_BRIEF_PROMPT}\n\n"
+        f"Participants: {', '.join(participants)}\n"
+        f"Agenda: {agenda or 'No agenda provided'}\n\n"
+        f"{context}",
+        max_tokens=1024,
+    )
+    return json.loads(_strip_fences(text))
+
+
+async def _claude_recurring_intelligence(
+    previous_summaries: list[str],
+    participants: list[str],
+) -> dict[str, Any]:
+    summaries_text = "\n\n".join(
+        f"Meeting {i + 1}: {s}" for i, s in enumerate(previous_summaries[:5])
+    )
+    text = await _claude_complete(
+        f"{_RECURRING_BRIEF_PROMPT}\n\n"
+        f"Participants (typical): {', '.join(participants)}\n\n"
+        f"Previous summaries:\n{summaries_text}",
+        max_tokens=1024,
+    )
+    return json.loads(_strip_fences(text))
+
+
+# ── Follow-up email + brief (Gemini) ─────────────────────────────────────────
+
+async def _gemini_followup_email(
+    transcript: list[dict[str, Any]],
+    analysis: dict[str, Any],
+    participants: list[str],
+) -> dict[str, Any]:
+    lines = "\n".join(
+        f"[{e.get('timestamp', 0):.1f}s] {e.get('speaker', '?')}: {e.get('text', '')}"
+        for e in transcript[:80]
+    )
+    analysis_summary = (
+        f"Summary: {analysis.get('summary', '')}\n"
+        f"Action items: {analysis.get('action_items', [])}\n"
+        f"Decisions: {analysis.get('decisions', [])}\n"
+        f"Next steps: {analysis.get('next_steps', [])}"
+    )
+    model = _get_gemini_model()
+    response = await model.generate_content_async(
+        f"{_FOLLOWUP_EMAIL_PROMPT}\n\n"
+        f"Participants: {', '.join(participants)}\n\n"
+        f"Meeting analysis:\n{analysis_summary}\n\n"
+        f"Transcript excerpt:\n{lines}",
+        generation_config={"temperature": 0.3, "max_output_tokens": 1024},
+    )
+    return json.loads(_strip_fences(response.text))
+
+
+async def _gemini_meeting_brief(
+    agenda: str,
+    participants: list[str],
+    previous_summaries: list[str],
+) -> dict[str, Any]:
+    context = ""
+    if previous_summaries:
+        context = "Previous meeting summaries:\n" + "\n\n".join(
+            f"- {s}" for s in previous_summaries[:3]
+        )
+    model = _get_gemini_model()
+    response = await model.generate_content_async(
+        f"{_BRIEF_PROMPT}\n\n"
+        f"Participants: {', '.join(participants)}\n"
+        f"Agenda: {agenda or 'No agenda provided'}\n\n"
+        f"{context}",
+        generation_config={"temperature": 0.3, "max_output_tokens": 1024},
+    )
+    return json.loads(_strip_fences(response.text))
+
+
+async def _gemini_recurring_intelligence(
+    previous_summaries: list[str],
+    participants: list[str],
+) -> dict[str, Any]:
+    summaries_text = "\n\n".join(
+        f"Meeting {i + 1}: {s}" for i, s in enumerate(previous_summaries[:5])
+    )
+    model = _get_gemini_model()
+    response = await model.generate_content_async(
+        f"{_RECURRING_BRIEF_PROMPT}\n\n"
+        f"Participants (typical): {', '.join(participants)}\n\n"
+        f"Previous summaries:\n{summaries_text}",
+        generation_config={"temperature": 0.3, "max_output_tokens": 1024},
+    )
+    return json.loads(_strip_fences(response.text))
+
+
 # ── Public API ─────────────────────────────────────────────────────────────────
 
 async def analyze_transcript(
@@ -461,6 +628,98 @@ async def ask_about_transcript(transcript: list[dict[str, Any]], question: str) 
             return f"Error generating answer: {exc}"
 
     return "No AI API key configured."
+
+
+async def generate_followup_email(
+    transcript: list[dict[str, Any]],
+    analysis: dict[str, Any],
+    participants: list[str],
+) -> dict[str, Any]:
+    """Generate a draft follow-up email for the meeting.
+
+    Returns {"subject": "...", "body": "..."}.
+    """
+    if not transcript and not analysis:
+        return {"subject": "Meeting Follow-up", "body": ""}
+
+    if _use_claude():
+        try:
+            return await _claude_followup_email(transcript, analysis, participants)
+        except Exception as exc:
+            logger.error("Claude follow-up email error: %s", exc)
+
+    if _use_gemini():
+        try:
+            return await _gemini_followup_email(transcript, analysis, participants)
+        except Exception as exc:
+            logger.error("Gemini follow-up email error: %s", exc)
+
+    return {"subject": "Meeting Follow-up", "body": "AI provider not configured."}
+
+
+async def generate_meeting_brief(
+    agenda: str,
+    participants: list[str],
+    previous_summaries: list[str],
+) -> dict[str, Any]:
+    """Generate a pre-meeting preparation brief.
+
+    Returns {"brief": "...", "talking_points": [...], "questions_to_raise": [...], "context_summary": "..."}.
+    """
+    if _use_claude():
+        try:
+            return await _claude_meeting_brief(agenda, participants, previous_summaries)
+        except Exception as exc:
+            logger.error("Claude meeting brief error: %s", exc)
+
+    if _use_gemini():
+        try:
+            return await _gemini_meeting_brief(agenda, participants, previous_summaries)
+        except Exception as exc:
+            logger.error("Gemini meeting brief error: %s", exc)
+
+    return {
+        "brief": "AI provider not configured.",
+        "talking_points": [],
+        "questions_to_raise": [],
+        "context_summary": "",
+    }
+
+
+async def generate_recurring_intelligence(
+    previous_summaries: list[str],
+    participants: list[str],
+) -> dict[str, Any]:
+    """Analyse a series of recurring meeting summaries to surface themes and trends.
+
+    Returns {"recurring_themes": [...], "unresolved_items": [...], "trend_summary": "...", "suggested_agenda": [...]}.
+    """
+    if not previous_summaries:
+        return {
+            "recurring_themes": [],
+            "unresolved_items": [],
+            "trend_summary": "No previous meetings to analyse.",
+            "suggested_agenda": [],
+        }
+
+    if _use_claude():
+        try:
+            return await _claude_recurring_intelligence(previous_summaries, participants)
+        except Exception as exc:
+            logger.error("Claude recurring intelligence error: %s", exc)
+
+    if _use_gemini():
+        try:
+            return await _gemini_recurring_intelligence(previous_summaries, participants)
+        except Exception as exc:
+            logger.error("Gemini recurring intelligence error: %s", exc)
+
+    return {
+        "recurring_themes": [],
+        "unresolved_items": [],
+        "trend_summary": "AI provider not configured.",
+        "suggested_agenda": [],
+    }
 
 
 async def generate_demo_transcript(meeting_url: str) -> list[dict[str, Any]]:

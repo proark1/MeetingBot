@@ -42,6 +42,9 @@
         <a class="nav-item" data-page="analytics" href="#">
           <span class="nav-icon">📊</span> Analytics
         </a>
+        <a class="nav-item" data-page="speakers" href="#">
+          <span class="nav-icon">👥</span> Speakers
+        </a>
         <a class="nav-item" data-page="webhooks" href="#">
           <span class="nav-icon">🔔</span> Webhooks
         </a>
@@ -98,6 +101,7 @@
           <div class="card-toolbar">
             <div class="filter-group">
               <button class="filter-btn active" data-status="">All</button>
+              <button class="filter-btn" data-status="queued">Queued</button>
               <button class="filter-btn" data-status="scheduled">Scheduled</button>
               <button class="filter-btn" data-status="joining">Joining</button>
               <button class="filter-btn" data-status="in_call">In Call</button>
@@ -116,7 +120,15 @@
       <section id="page-bot-detail" class="page">
         <div class="page-header">
           <button class="btn btn-ghost" id="btn-back-bots">← Back to Bots</button>
-          <div id="bot-detail-badges" style="display:flex;gap:0.5rem;align-items:center"></div>
+          <div id="bot-detail-badges" style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap"></div>
+        </div>
+        <!-- Action buttons — separate from badges so renderBotDetail doesn't wipe them -->
+        <div id="bot-detail-actions" style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-bottom:0.75rem">
+          <button class="btn btn-ghost btn-sm hidden" id="btn-followup-email" title="Generate follow-up email">✉ Follow-up Email</button>
+          <button class="btn btn-ghost btn-sm hidden" id="btn-meeting-brief" title="Generate pre-meeting brief">📋 Meeting Brief</button>
+          <button class="btn btn-ghost btn-sm hidden" id="btn-recurring" title="Recurring meeting intelligence">🔄 Series Insights</button>
+          <button class="btn btn-ghost btn-sm hidden" id="btn-export-md" title="Export as Markdown">⬇ Export MD</button>
+          <button class="btn btn-ghost btn-sm hidden" id="btn-export-pdf" title="Export as PDF">⬇ Export PDF</button>
         </div>
 
         <!-- Lifecycle progress bar -->
@@ -125,6 +137,21 @@
         </div>
 
         <div id="bot-detail-content"></div>
+      </section>
+
+      <!-- ── SPEAKERS PAGE ── -->
+      <section id="page-speakers" class="page">
+        <div class="page-header">
+          <div>
+            <h1>Speakers</h1>
+            <p class="subtitle">Cross-meeting participant profiles and talk stats</p>
+          </div>
+          <button class="btn btn-ghost btn-sm" id="btn-refresh-speakers">↻ Refresh</button>
+        </div>
+        <div class="card">
+          <input class="input" id="speaker-search" type="search" placeholder="Search speakers…" style="margin-bottom:1rem;max-width:280px" />
+          <div id="speakers-list"></div>
+        </div>
       </section>
 
       <!-- ── SEARCH PAGE ── -->
@@ -464,6 +491,60 @@
       <div class="modal-footer">
         <button class="btn btn-ghost" data-close="modal-new-template">Cancel</button>
         <button class="btn btn-primary" id="btn-create-template">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Follow-up Email Modal -->
+  <div class="modal-backdrop hidden" id="modal-followup-email">
+    <div class="modal modal-wide">
+      <div class="modal-header">
+        <h2>Follow-up Email Draft</h2>
+        <button class="modal-close" data-close="modal-followup-email">✕</button>
+      </div>
+      <div class="modal-body" id="followup-email-body">
+        <p class="loading">Generating draft…</p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" data-close="modal-followup-email">Close</button>
+        <button class="btn btn-primary" id="btn-copy-email">Copy to Clipboard</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Meeting Brief Modal -->
+  <div class="modal-backdrop hidden" id="modal-meeting-brief">
+    <div class="modal modal-wide">
+      <div class="modal-header">
+        <h2>Pre-Meeting Brief</h2>
+        <button class="modal-close" data-close="modal-meeting-brief">✕</button>
+      </div>
+      <div class="modal-body">
+        <label style="margin-bottom:0.75rem;display:block">
+          Agenda <span class="optional">(optional)</span>
+          <textarea class="input" id="brief-agenda" rows="3" placeholder="Enter agenda items…" style="resize:vertical"></textarea>
+        </label>
+        <div id="meeting-brief-body"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" data-close="modal-meeting-brief">Close</button>
+        <button class="btn btn-primary" id="btn-generate-brief">Generate Brief</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Series Insights Modal -->
+  <div class="modal-backdrop hidden" id="modal-recurring">
+    <div class="modal modal-wide">
+      <div class="modal-header">
+        <h2>Recurring Meeting Insights</h2>
+        <button class="modal-close" data-close="modal-recurring">✕</button>
+      </div>
+      <div class="modal-body" id="recurring-body">
+        <p class="loading">Analysing meeting series…</p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" data-close="modal-recurring">Close</button>
       </div>
     </div>
   </div>

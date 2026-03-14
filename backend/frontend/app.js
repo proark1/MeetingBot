@@ -1693,6 +1693,217 @@ document.getElementById("btn-create-template")?.addEventListener("click", async 
   });
 })();
 
+// ── Bot detail action buttons (export, follow-up, brief, recurring) ────────
+
+function _showDetailActionButtons(bot) {
+  const isDone = bot.status === "done" || bot.status === "cancelled";
+  const hasContent = isDone && (bot.transcript || []).length > 0;
+
+  const btnEmail    = document.getElementById("btn-followup-email");
+  const btnBrief    = document.getElementById("btn-meeting-brief");
+  const btnRecurr   = document.getElementById("btn-recurring");
+  const btnMd       = document.getElementById("btn-export-md");
+  const btnPdf      = document.getElementById("btn-export-pdf");
+
+  [btnEmail, btnBrief, btnRecurr, btnMd, btnPdf].forEach(b => {
+    if (b) b.classList.toggle("hidden", !isDone);
+  });
+
+  if (btnMd) {
+    btnMd.onclick = () => {
+      window.location = `${API}/bot/${bot.id}/export/markdown`;
+    };
+  }
+  if (btnPdf) {
+    btnPdf.onclick = () => {
+      window.location = `${API}/bot/${bot.id}/export/pdf`;
+    };
+  }
+  if (btnEmail) {
+    btnEmail.onclick = () => _openFollowupEmail(bot.id);
+  }
+  if (btnBrief) {
+    btnBrief.onclick = () => _openMeetingBrief(bot.id);
+  }
+  if (btnRecurr) {
+    btnRecurr.onclick = () => _openRecurring(bot.id);
+  }
+}
+
+async function _openFollowupEmail(botId) {
+  openModal("modal-followup-email");
+  const body = document.getElementById("followup-email-body");
+  body.innerHTML = '<p class="loading">Generating draft…</p>';
+  try {
+    const data = await apiFetch("POST", `/bot/${botId}/followup-email`);
+    body.innerHTML = `
+      <label style="font-weight:600;display:block;margin-bottom:0.25rem">Subject</label>
+      <input class="input" id="email-subject-out" value="${esc(data.subject)}" style="margin-bottom:1rem" readonly />
+      <label style="font-weight:600;display:block;margin-bottom:0.25rem">Body</label>
+      <textarea class="input" id="email-body-out" rows="12" style="resize:vertical;font-family:var(--font-mono);font-size:0.82rem" readonly>${esc(data.body)}</textarea>`;
+    document.getElementById("btn-copy-email").onclick = () => {
+      const text = `Subject: ${document.getElementById("email-subject-out").value}\n\n${document.getElementById("email-body-out").value}`;
+      navigator.clipboard.writeText(text).then(
+        () => showToast("Copied to clipboard!", "success"),
+        () => showToast("Copy failed", "error"),
+      );
+    };
+  } catch (e) {
+    body.innerHTML = `<div class="empty-state">Error: ${esc(e.message)}</div>`;
+  }
+}
+
+async function _openMeetingBrief(botId) {
+  openModal("modal-meeting-brief");
+  document.getElementById("meeting-brief-body").innerHTML = "";
+  document.getElementById("brief-agenda").value = "";
+
+  document.getElementById("btn-generate-brief").onclick = async () => {
+    const agenda = document.getElementById("brief-agenda").value.trim();
+    const briefBody = document.getElementById("meeting-brief-body");
+    briefBody.innerHTML = '<p class="loading">Generating brief…</p>';
+    try {
+      const data = await apiFetch("POST", `/bot/${botId}/brief`, { agenda });
+      briefBody.innerHTML = `
+        <div style="margin-bottom:1rem">
+          <div style="font-weight:600;margin-bottom:0.5rem">Brief</div>
+          <div style="white-space:pre-wrap;font-size:0.9rem;line-height:1.6;background:var(--surface);padding:0.75rem;border-radius:6px">${esc(data.brief)}</div>
+        </div>
+        ${data.talking_points?.length ? `
+        <div style="margin-bottom:1rem">
+          <div style="font-weight:600;margin-bottom:0.5rem">Talking Points</div>
+          <ul style="margin:0;padding-left:1.5rem">${data.talking_points.map(p => `<li>${esc(p)}</li>`).join("")}</ul>
+        </div>` : ""}
+        ${data.questions_to_raise?.length ? `
+        <div style="margin-bottom:1rem">
+          <div style="font-weight:600;margin-bottom:0.5rem">Questions to Raise</div>
+          <ul style="margin:0;padding-left:1.5rem">${data.questions_to_raise.map(q => `<li>${esc(q)}</li>`).join("")}</ul>
+        </div>` : ""}
+        ${data.context_summary ? `<div class="hint">${esc(data.context_summary)}</div>` : ""}
+        ${data.previous_meetings_used ? `<div class="hint" style="margin-top:0.5rem">Based on ${data.previous_meetings_used} previous meeting(s)</div>` : ""}`;
+    } catch (e) {
+      briefBody.innerHTML = `<div class="empty-state">Error: ${esc(e.message)}</div>`;
+    }
+  };
+}
+
+async function _openRecurring(botId) {
+  openModal("modal-recurring");
+  const body = document.getElementById("recurring-body");
+  body.innerHTML = '<p class="loading">Analysing meeting series…</p>';
+  try {
+    const data = await apiFetch("GET", `/bot/${botId}/recurring`);
+    body.innerHTML = `
+      ${data.trend_summary ? `
+      <div style="margin-bottom:1rem">
+        <div style="font-weight:600;margin-bottom:0.5rem">Trend</div>
+        <div style="font-size:0.9rem;line-height:1.6">${esc(data.trend_summary)}</div>
+      </div>` : ""}
+      ${data.recurring_themes?.length ? `
+      <div style="margin-bottom:1rem">
+        <div style="font-weight:600;margin-bottom:0.5rem">Recurring Themes</div>
+        <ul style="margin:0;padding-left:1.5rem">${data.recurring_themes.map(t => `<li>${esc(t)}</li>`).join("")}</ul>
+      </div>` : ""}
+      ${data.unresolved_items?.length ? `
+      <div style="margin-bottom:1rem">
+        <div style="font-weight:600;margin-bottom:0.5rem">Unresolved Items</div>
+        <ul style="margin:0;padding-left:1.5rem">${data.unresolved_items.map(i => `<li>${esc(i)}</li>`).join("")}</ul>
+      </div>` : ""}
+      ${data.suggested_agenda?.length ? `
+      <div style="margin-bottom:1rem">
+        <div style="font-weight:600;margin-bottom:0.5rem">Suggested Agenda</div>
+        <ol style="margin:0;padding-left:1.5rem">${data.suggested_agenda.map(a => `<li>${esc(a)}</li>`).join("")}</ol>
+      </div>` : ""}
+      <div class="hint">${data.recurring_meetings_analysed} previous meeting(s) analysed</div>`;
+  } catch (e) {
+    body.innerHTML = `<div class="empty-state">Error: ${esc(e.message)}</div>`;
+  }
+}
+
+// Hook into renderBotDetail to show/hide action buttons
+const _origRenderBotDetail = typeof renderBotDetail === "function" ? renderBotDetail : null;
+
+// ── Speakers page ──────────────────────────────────────────────────────────
+
+async function loadSpeakers(search = "") {
+  const listEl = document.getElementById("speakers-list");
+  if (!listEl) return;
+  listEl.innerHTML = '<div class="loading">Loading…</div>';
+  try {
+    const params = new URLSearchParams({ limit: 100 });
+    if (search) params.set("search", search);
+    const data = await apiFetch("GET", `/speakers?${params}`);
+    if (!data.length) {
+      listEl.innerHTML = '<div class="empty-state">No speaker profiles yet. They are created automatically after meetings complete.</div>';
+      return;
+    }
+    listEl.innerHTML = `
+      <table style="width:100%;border-collapse:collapse">
+        <thead>
+          <tr style="text-align:left;border-bottom:1px solid var(--border);font-size:0.82rem;color:var(--text-muted)">
+            <th style="padding:0.5rem 0.75rem">Speaker</th>
+            <th style="padding:0.5rem 0.75rem">Meetings</th>
+            <th style="padding:0.5rem 0.75rem">Total Talk</th>
+            <th style="padding:0.5rem 0.75rem">Avg %</th>
+            <th style="padding:0.5rem 0.75rem">Questions</th>
+            <th style="padding:0.5rem 0.75rem">Last Seen</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${data.map(sp => `
+          <tr style="border-bottom:1px solid var(--border);font-size:0.9rem">
+            <td style="padding:0.6rem 0.75rem">
+              <div style="display:flex;align-items:center;gap:0.5rem">
+                <div style="width:32px;height:32px;border-radius:50%;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-size:0.75rem;font-weight:700;flex-shrink:0">${esc(sp.avatar_initials || sp.canonical_name.slice(0,2).toUpperCase())}</div>
+                <div>
+                  <div style="font-weight:600">${esc(sp.canonical_name)}</div>
+                  ${sp.email ? `<div style="font-size:0.75rem;color:var(--text-muted)">${esc(sp.email)}</div>` : ""}
+                  ${sp.aliases?.length ? `<div style="font-size:0.75rem;color:var(--text-muted)">aka ${sp.aliases.map(a => esc(a)).join(", ")}</div>` : ""}
+                </div>
+              </div>
+            </td>
+            <td style="padding:0.6rem 0.75rem">${sp.meeting_count}</td>
+            <td style="padding:0.6rem 0.75rem">${_fmtSecs(Math.round(sp.total_talk_time_s))}</td>
+            <td style="padding:0.6rem 0.75rem">${sp.avg_talk_pct}%</td>
+            <td style="padding:0.6rem 0.75rem">${sp.total_questions}</td>
+            <td style="padding:0.6rem 0.75rem;font-size:0.82rem;color:var(--text-muted)">${sp.last_seen_at ? fmtDate(sp.last_seen_at) : "—"}</td>
+          </tr>`).join("")}
+        </tbody>
+      </table>`;
+  } catch (e) {
+    listEl.innerHTML = `<div class="empty-state">Error: ${esc(e.message)}</div>`;
+  }
+}
+
+document.getElementById("btn-refresh-speakers")?.addEventListener("click", () => {
+  loadSpeakers(document.getElementById("speaker-search")?.value.trim() || "");
+});
+
+document.getElementById("speaker-search")?.addEventListener("input", _debounce((e) => {
+  loadSpeakers(e.target.value.trim());
+}, 300));
+
+// Wire speakers nav
+document.querySelectorAll(".nav-item[data-page]").forEach((el) => {
+  if (el.dataset.page === "speakers") {
+    el.addEventListener("click", (e) => {
+      e.preventDefault();
+      showPage("speakers");
+      loadSpeakers();
+    });
+  }
+});
+
+// Patch renderBotDetail to also show action buttons
+(function () {
+  const _orig = window.renderBotDetail;
+  if (typeof _orig !== "function") return;
+  window.renderBotDetail = function (bot) {
+    _orig(bot);
+    _showDetailActionButtons(bot);
+  };
+})();
+
 // ── Init ───────────────────────────────────────────────────────────────────
 
 connectWS();

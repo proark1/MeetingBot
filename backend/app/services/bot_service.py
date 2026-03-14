@@ -389,7 +389,11 @@ async def run_bot_lifecycle(bot_id: str, db_factory) -> None:
                 await _set_status(db, bot, "call_ended", ended_at=_now())
                 logger.info("Bot %s transcribing audio…", bot_id)
 
-                transcript = await transcribe_audio(audio_path, known_participants=scraped_participants)
+                transcript = await transcribe_audio(
+                    audio_path,
+                    known_participants=scraped_participants,
+                    language=settings.TRANSCRIPTION_LANGUAGE or None,
+                )
 
                 # Merge strategy: the batch transcript has speaker labels and
                 # accurate timestamps, but the live streaming entries capture
@@ -587,12 +591,32 @@ async def run_bot_lifecycle(bot_id: str, db_factory) -> None:
                         await linear_service.push_action_items(_bot)
                     _notification_coros.append(_send_linear())
 
+                if settings.JIRA_BASE_URL and settings.JIRA_API_TOKEN and settings.JIRA_PROJECT_KEY:
+                    async def _send_jira(_bot=bot):
+                        from app.services import jira_service
+                        await jira_service.push_action_items(_bot)
+                    _notification_coros.append(_send_jira())
+
+                if settings.HUBSPOT_API_KEY:
+                    async def _send_hubspot(_bot=bot):
+                        from app.services import hubspot_service
+                        await hubspot_service.push_meeting_note(_bot)
+                    _notification_coros.append(_send_hubspot())
+
                 if _notification_coros:
                     _notif_results = await asyncio.gather(*_notification_coros, return_exceptions=True)
-                    _notif_names = ["email", "slack", "notion", "linear"]
+                    _notif_names = ["email", "slack", "notion", "linear", "jira", "hubspot"]
                     for _name, _exc in zip(_notif_names, _notif_results):
                         if isinstance(_exc, Exception):
                             logger.warning("%s notification failed for bot %s: %s", _name, bot_id, _exc)
+
+                # ── 6b. Update speaker profiles ────────────────────────────
+                if bot.speaker_stats:
+                    try:
+                        from app.api.speakers import upsert_speaker_profiles
+                        await upsert_speaker_profiles(db, bot)
+                    except Exception as sp_exc:
+                        logger.warning("Speaker profile upsert failed for bot %s: %s", bot_id, sp_exc)
 
             # ── 7. done ───────────────────────────────────────────────────
             await _set_status(db, bot, "done")

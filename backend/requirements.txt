@@ -31,3 +31,9 @@ edge-tts>=6.1.9
 
 # Scheduled background jobs (weekly digest, recording cleanup)
 apscheduler>=3.10
+
+# PDF export
+reportlab>=4.0.0
+
+# Calendar auto-join — parse iCal feeds
+icalendar>=5.0.0

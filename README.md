@@ -30,7 +30,7 @@ Set these in a `.env` file or as environment variables:
 | `GEMINI_API_KEY` | *(empty)* | Google Gemini API key — used for transcription and analysis when `ANTHROPIC_API_KEY` is not set. |
 | `API_KEY` | *(empty = no auth)* | If set, all `/api/v1/*` requests must include `Authorization: Bearer <API_KEY>`. Leave empty to disable. A warning is logged at startup when unset. |
 | `CORS_ORIGINS` | `*` | Comma-separated allowed origins, e.g. `https://app.example.com,https://admin.example.com`. `*` allows all origins. |
-| `MAX_CONCURRENT_BOTS` | `3` | Maximum number of browser bots running simultaneously. Returns 429 if exceeded. |
+| `MAX_CONCURRENT_BOTS` | `3` | Maximum number of browser bots running simultaneously. Extra bots are queued and start automatically when a slot opens. |
 | `BOT_JOIN_MAX_RETRIES` | `2` | Number of retry attempts if the bot fails to join before being admitted. |
 | `BOT_JOIN_RETRY_DELAY_S` | `30` | Seconds to wait between join retry attempts. |
 | `BOT_NAME_DEFAULT` | `MeetingBot` | Display name shown inside the meeting |
@@ -50,6 +50,13 @@ Set these in a `.env` file or as environment variables:
 | `NOTION_DATABASE_ID` | *(empty)* | Notion database ID to write meeting pages into. |
 | `LINEAR_API_KEY` | *(empty)* | Linear API key — push action items as Linear issues. |
 | `LINEAR_TEAM_ID` | *(empty)* | Linear team ID to create issues in. |
+| `JIRA_BASE_URL` | *(empty)* | Jira instance URL, e.g. `https://company.atlassian.net` — creates tasks for action items. |
+| `JIRA_EMAIL` | *(empty)* | Atlassian account email for Jira authentication. |
+| `JIRA_API_TOKEN` | *(empty)* | Atlassian API token (from id.atlassian.com). |
+| `JIRA_PROJECT_KEY` | *(empty)* | Jira project key, e.g. `ENG` or `PROJ`. |
+| `HUBSPOT_API_KEY` | *(empty)* | HubSpot Private App access token — logs meeting notes as CRM engagements. |
+| `CALENDAR_ICAL_URL` | *(empty)* | iCal feed URL (e.g. Google Calendar "Secret address in iCal format") polled every 5 min to auto-join upcoming meetings. |
+| `TRANSCRIPTION_LANGUAGE` | *(empty = auto)* | BCP-47 language code for transcription, e.g. `es`, `fr`, `de`. Leave empty for Gemini auto-detection. |
 | `DIGEST_EMAIL` | *(empty)* | Comma-separated recipients for the weekly digest email (Mondays 09:00 UTC). Requires `SMTP_HOST`. |
 | `RECORDING_RETENTION_DAYS` | `30` | Auto-delete WAV recordings older than this many days. Set to `0` to keep recordings forever. |
 
@@ -522,3 +529,52 @@ Fetch `GET /api/v1/templates/default-prompt` to get the baseline prompt text as 
 then modify and POST as a new custom template.
 
 Pass `template_id` when creating a bot to activate its custom analysis prompt.
+
+---
+
+### New Endpoints
+
+#### Follow-up email draft
+```
+POST /api/v1/bot/{id}/followup-email
+```
+Generates a ready-to-send follow-up email from the meeting transcript and analysis.
+Returns `{"subject": "...", "body": "..."}`.
+
+#### Pre-meeting brief
+```
+POST /api/v1/bot/{id}/brief
+Body: {"agenda": "optional agenda text"}
+```
+Generates a preparation brief with talking points, questions to raise, and context from
+previous meetings with the same participants.
+
+#### Recurring meeting intelligence
+```
+GET /api/v1/bot/{id}/recurring
+```
+Analyses the series of previous meetings with overlapping participants and returns
+recurring themes, unresolved items, a trend summary, and a suggested next agenda.
+
+#### Export as PDF
+```
+GET /api/v1/bot/{id}/export/pdf
+```
+Downloads the meeting report as a formatted PDF (requires `reportlab`).
+
+#### Export as Markdown
+```
+GET /api/v1/bot/{id}/export/markdown
+```
+Downloads the full meeting report as a Markdown document.
+
+#### Speaker profiles
+```
+GET    /api/v1/speakers               — list all profiles
+GET    /api/v1/speakers/{id}          — single profile
+PATCH  /api/v1/speakers/{id}          — update name/aliases/email/notes
+DELETE /api/v1/speakers/{id}          — delete profile
+GET    /api/v1/speakers/{id}/meetings — meeting history for this speaker
+```
+Speaker profiles are created and aggregated automatically after each completed meeting.
+They track cross-meeting stats: meeting count, total talk time, average talk %, questions asked.

@@ -74,6 +74,7 @@ async def _transcribe_chunked(
     audio_path: str,
     known_participants: list[str] | None,
     estimated_s: float,
+    language: str | None = None,
 ) -> list[dict[str, Any]]:
     """Split the audio into 30-min chunks and transcribe them in parallel."""
     logger.info(
@@ -88,7 +89,7 @@ async def _transcribe_chunked(
     async def _process_chunk(idx: int, chunk_path: str) -> list[dict[str, Any]]:
         offset_s = idx * _CHUNK_SIZE_S
         logger.info("Transcribing chunk %d/%d (offset %d s)…", idx + 1, len(chunks), offset_s)
-        entries = await transcribe_audio(chunk_path, known_participants)
+        entries = await transcribe_audio(chunk_path, known_participants, language=language)
         return [dict(e, timestamp=float(e.get("timestamp", 0)) + offset_s) for e in entries]
 
     all_entries: list[dict[str, Any]] = []
@@ -115,7 +116,11 @@ async def _transcribe_chunked(
     return all_entries
 
 
-async def transcribe_audio(audio_path: str, known_participants: list[str] | None = None) -> list[dict[str, Any]]:
+async def transcribe_audio(
+    audio_path: str,
+    known_participants: list[str] | None = None,
+    language: str | None = None,
+) -> list[dict[str, Any]]:
     """
     Transcribe an audio file using the Gemini API.
 
@@ -145,7 +150,7 @@ async def transcribe_audio(audio_path: str, known_participants: list[str] | None
     # For long recordings, split into chunks and transcribe sequentially
     estimated_s = _estimate_duration_s(audio_path)
     if estimated_s > _CHUNK_THRESHOLD_S:
-        return await _transcribe_chunked(audio_path, known_participants, estimated_s)
+        return await _transcribe_chunked(audio_path, known_participants, estimated_s, language=language)
 
     try:
         import google.generativeai as genai
@@ -176,6 +181,8 @@ async def transcribe_audio(audio_path: str, known_participants: list[str] | None
 
         logger.info("Audio uploaded (%s) — transcribing…", uploaded.name)
         prompt = _TRANSCRIPTION_PROMPT
+        if language:
+            prompt += f"\n\nThe spoken language is: {language}. Transcribe in that language."
         if known_participants:
             names_list = ", ".join(known_participants)
             prompt += f"\n\nKnown participants in this meeting: {names_list}. Use these exact names for speaker labels where you can match the voice."

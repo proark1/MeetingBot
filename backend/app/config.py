@@ -55,6 +55,23 @@ class Settings(BaseSettings):
     LINEAR_API_KEY: str = ""
     LINEAR_TEAM_ID: str = ""
 
+    # Jira integration (optional) — creates tasks for action items
+    JIRA_BASE_URL: str = ""         # e.g. https://yourcompany.atlassian.net
+    JIRA_EMAIL: str = ""            # Atlassian account email
+    JIRA_API_TOKEN: str = ""        # Atlassian API token
+    JIRA_PROJECT_KEY: str = ""      # e.g. ENG or PROJ
+
+    # HubSpot CRM integration (optional) — logs meeting notes as engagements
+    HUBSPOT_API_KEY: str = ""       # Private App access token
+
+    # Calendar auto-join (optional) — iCal URL polled every 5 minutes
+    # Use Google Calendar's "Secret address in iCal format" or any iCal feed
+    CALENDAR_ICAL_URL: str = ""
+
+    # Transcription language (optional) — BCP-47 code, e.g. "en", "es", "fr", "de"
+    # Leave empty to use Gemini's auto-detection (default)
+    TRANSCRIPTION_LANGUAGE: str = ""
+
     # Weekly digest email (optional) — comma-separated recipients
     DIGEST_EMAIL: str = ""
 

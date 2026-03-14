@@ -46,6 +46,7 @@ async def get_db():
 async def init_db():
     async with engine.begin() as conn:
         from app.models import bot, webhook, highlight, action_item, template  # noqa: F401 — registers models
+        from app.models import speaker_profile  # noqa: F401 — registers SpeakerProfile
         await conn.run_sync(Base.metadata.create_all)
 
         # Enable WAL mode: prevents "database is locked" under concurrent async
@@ -78,6 +79,9 @@ async def init_db():
                 # Most failures are benign "column already exists" — log at DEBUG
                 # so genuine schema errors (typos, wrong table names) are visible.
                 logger.debug("Migration skipped (already applied?): %s — %s", stmt, mig_exc)
+
+        # speaker_profiles table is created by SQLAlchemy metadata above;
+        # no ALTER TABLE needed for it since it's new.
 
         # Indexes on hot query columns (idempotent)
         for stmt in [
