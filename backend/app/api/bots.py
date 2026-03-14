@@ -199,10 +199,15 @@ async def create_bot(
         live_transcription=payload.live_transcription,
         status="scheduled" if is_scheduled else "ready",
         extra_metadata=payload.extra_metadata,
-        share_token=secrets.token_urlsafe(24),
+        share_token=secrets.token_urlsafe(16),
     )
     db.add(bot)
-    await db.commit()
+    try:
+        await db.commit()
+    except Exception as exc:
+        await db.rollback()
+        logger.exception("Failed to create bot: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Database error: {exc}")
     await db.refresh(bot)
 
     if active >= settings.MAX_CONCURRENT_BOTS:
