@@ -1,3 +1,6 @@
+from urllib.parse import quote_plus
+
+from pydantic import model_validator
 from pydantic_settings import BaseSettings
 
 
@@ -8,15 +11,32 @@ class Settings(BaseSettings):
 
     # App
     SECRET_KEY: str = "meetingbot-dev-secret-change-in-production"
-    # Database — SQLite is the default for local development only (data is lost on restart).
-    # For production, use Supabase (recommended) or any PostgreSQL instance.
-    # Accepted URL formats (the app normalises them to asyncpg automatically):
-    #   Supabase direct:        postgresql://postgres:[PASSWORD]@db.[REF].supabase.co:5432/postgres
-    #   Supabase session pool:  postgresql://postgres.[REF]:[PASSWORD]@aws-0-[REGION].pooler.supabase.com:5432/postgres
-    #   Supabase txn pool:      postgresql://postgres.[REF]:[PASSWORD]@aws-0-[REGION].pooler.supabase.com:6543/postgres
-    #   Generic PostgreSQL:     postgresql://user:pass@host:5432/dbname
-    # SSL is enabled and PgBouncer prepared-statement limits are handled automatically.
+
+    # ── Database ──────────────────────────────────────────────────────────────
+    # Option A — set DATABASE_URL directly (any SQLAlchemy async URL).
+    # Option B — set the individual SUPABASE_* variables below and leave
+    #            DATABASE_URL empty; the URL is assembled automatically.
+    # "postgres://" and "postgresql://" are both accepted — rewritten to asyncpg.
     DATABASE_URL: str = "sqlite+aiosqlite:///./meetingbot.db"
+
+    # Supabase individual connection fields (Option B).
+    # Find these in: Supabase dashboard → Project Settings → Database → Connection info
+    SUPABASE_HOST: str = ""      # e.g. db.abcdefghijklm.supabase.co
+    SUPABASE_DB: str = "postgres"
+    SUPABASE_USER: str = "postgres"
+    SUPABASE_PASSWORD: str = ""
+    SUPABASE_PORT: int = 5432    # 5432 = direct / session pooler, 6543 = transaction pooler
+
+    @model_validator(mode="after")
+    def build_database_url(self) -> "Settings":
+        """If SUPABASE_HOST + SUPABASE_PASSWORD are set, assemble DATABASE_URL from parts."""
+        if self.SUPABASE_HOST and self.SUPABASE_PASSWORD:
+            password = quote_plus(self.SUPABASE_PASSWORD)
+            self.DATABASE_URL = (
+                f"postgresql://{self.SUPABASE_USER}:{password}"
+                f"@{self.SUPABASE_HOST}:{self.SUPABASE_PORT}/{self.SUPABASE_DB}"
+            )
+        return self
     BOT_NAME_DEFAULT: str = "MeetingBot"
     WEBHOOK_TIMEOUT_SECONDS: int = 10
     BOT_SIMULATION_DURATION: int = 15  # seconds for unsupported-platform demo mode

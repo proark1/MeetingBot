@@ -79,9 +79,9 @@ SQLite (the default) stores its file inside the container, so **all data is lost
 2. Choose a region close to your Railway deployment.
 3. Note the **database password** you set during creation.
 
-### 2 — Get the connection string
+### 2 — Get your connection details
 
-In your Supabase project: **Project Settings → Database → Connection string**.
+In your Supabase project: **Project Settings → Database → Connection info**.
 
 Choose the mode that fits your deployment:
 
@@ -91,29 +91,30 @@ Choose the mode that fits your deployment:
 | **Session pooler** | 5432 | Multiple replicas, same city |
 | **Transaction pooler** | 6543 | Serverless / edge functions |
 
-Copy the URI and replace `[YOUR-PASSWORD]` with your database password:
+### 3 — Set the Railway variables
 
-```
-# Direct (recommended for Railway)
-postgresql://postgres:[PASSWORD]@db.[REF].supabase.co:5432/postgres
+Go to your Railway service → **Variables** and add these individually:
 
-# Transaction pooler (serverless)
-postgresql://postgres.[REF]:[PASSWORD]@aws-0-[REGION].pooler.supabase.com:6543/postgres
-```
+| Variable | Where to find it in Supabase |
+|---|---|
+| `SUPABASE_HOST` | Project Settings → Database → Host (e.g. `db.abcxyz.supabase.co`) |
+| `SUPABASE_PASSWORD` | The password you set when creating the project |
+| `SUPABASE_PORT` | `5432` for direct/session pooler · `6543` for transaction pooler |
+| `SUPABASE_USER` | `postgres` (default, rarely changes) |
+| `SUPABASE_DB` | `postgres` (default, rarely changes) |
 
-### 3 — Set the environment variable
-
-**Railway:** Project → Service → Variables → Add `DATABASE_URL` → paste the URI.
+The app assembles the full connection URL from these at startup — you don't need to set `DATABASE_URL` when using the `SUPABASE_*` variables.
 
 **Local `.env`:**
 ```
-DATABASE_URL=postgresql://postgres:[PASSWORD]@db.[REF].supabase.co:5432/postgres
+SUPABASE_HOST=db.abcdefghijklm.supabase.co
+SUPABASE_PASSWORD=your-database-password
+SUPABASE_PORT=5432
 ```
 
 No other changes are needed — the app auto-detects:
 - Supabase hosts → enables `ssl=require`
 - Port 6543 → disables prepared-statement cache (PgBouncer transaction mode)
-- `postgres://` / `postgresql://` schemes → rewrites to `postgresql+asyncpg://`
 
 Tables and indexes are created automatically on first startup.
 
