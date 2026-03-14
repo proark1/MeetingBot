@@ -207,6 +207,15 @@ async def create_bot(
     except Exception as exc:
         await db.rollback()
         logger.exception("Failed to create bot: %s", exc)
+        exc_str = str(exc)
+        if "Network is unreachable" in exc_str or "Connection refused" in exc_str or "could not connect" in exc_str.lower():
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Database unreachable — cannot save bot record. "
+                    "Check your DATABASE_URL / SUPABASE_* environment variables and ensure the database server is accessible."
+                ),
+            )
         raise HTTPException(status_code=500, detail=f"Database error: {exc}")
     await db.refresh(bot)
 

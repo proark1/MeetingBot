@@ -1,6 +1,6 @@
 # MeetingBot
 
-**Version: 1.5.0** — [Changelog](CHANGELOG.md)
+**Version: 1.5.1** — [Changelog](CHANGELOG.md)
 
 A self-hosted meeting bot that joins Google Meet, Zoom, and Microsoft Teams calls, records audio, transcribes it, and analyses the transcript with AI (Claude or Gemini).
 

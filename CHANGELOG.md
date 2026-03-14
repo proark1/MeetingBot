@@ -6,12 +6,14 @@ Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
 ---
 
-## [1.5.0] - 2026-03-14
+## [1.5.1] - 2026-03-14
 
 ### Fixed
 - Silent audio capture: disabled out-of-process audio service, corrected PulseAudio sink volume, fixed VAD streaming loop reliability
 - Caption scraping failure and audio silence in Google Meet sessions
 - VAD streaming loop now always runs when Gemini is available
+- Removed blocking `socket.getaddrinfo()` DNS lookup from `WebhookCreate` Pydantic validator — the synchronous call was blocking the async event loop and raising "Network is unreachable" when DNS was unavailable (same fix previously applied to the bot URL validator)
+- `POST /api/v1/bot` now returns HTTP 503 with a clear diagnostic message when the database is unreachable (e.g. misconfigured `DATABASE_URL` or Supabase credentials), instead of the opaque "Database error: [Errno 101] Network is unreachable"
 
 ---
 
