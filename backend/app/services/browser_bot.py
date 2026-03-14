@@ -172,6 +172,11 @@ def _create_pulse_sink(name: str = PULSE_SINK_NAME) -> Optional[str]:
             return None
         idx = r.stdout.strip()
         _run(["pactl", "set-default-sink", name])
+        # Ensure the sink is unmuted and at full volume — a zero-volume sink
+        # would cause ffmpeg to record silence even when Chrome is routing audio
+        # to it correctly.
+        _run(["pactl", "set-sink-volume", name, "100%"])
+        _run(["pactl", "set-sink-mute",   name, "0"])
         logger.info("PulseAudio null sink ready: %s (module %s)", name, idx)
         return idx
     except Exception as exc:
@@ -2097,12 +2102,20 @@ async def _streaming_transcription_loop(
     logger.info("Streaming transcription loop started")
 
     def _is_speech_frame(pcm_frame: bytes) -> bool:
-        """Energy-based VAD: true when >5% of s16le samples are non-zero."""
-        sample = pcm_frame[::20]   # sample every 10th s16 sample (20 bytes apart)
-        if not sample:
+        """Energy-based VAD: true when >5% of s16le samples are non-zero.
+
+        Uses struct.unpack to decode actual s16le sample values rather than
+        inspecting raw bytes — the old byte-level check (`[::20]`) missed
+        samples whose value is a non-zero multiple of 256 (e.g. 256 = 0x0100
+        has a zero low byte and would be counted as silence).
+        """
+        n = len(pcm_frame) // 2  # number of s16le samples
+        if n == 0:
             return False
-        nonzero = sum(1 for b in sample if b != 0)
-        return nonzero / len(sample) > SPEECH_ENERGY_THRESHOLD
+        # Decode every 10th sample for efficiency (~160 samples per 100 ms frame)
+        samples = struct.unpack_from(f"<{n}h", pcm_frame)[::10]
+        nonzero = sum(1 for s in samples if s != 0)
+        return nonzero / len(samples) > SPEECH_ENERGY_THRESHOLD
 
     async def _transcribe_utterance(pcm: bytes, start_byte: int) -> None:
         """Send PCM utterance to Gemini, append result to shared lists."""
@@ -3074,7 +3087,12 @@ async def run_browser_bot(
         # Chrome from using PipeWire (which bypasses our virtual null-sink mic)
         # so that source-outputs appear in `pactl list source-outputs` and TTS
         # audio routed into meetingbot_mic is captured by WebRTC.
-        "--disable-features=WebRtcHideLocalIpsWithMdns,WebRtcPipeWireCapture",
+        # AudioServiceOutOfProcess: disabled so Chrome's audio runs in-process,
+        # ensuring it inherits PULSE_SINK/PULSE_SERVER from the main browser
+        # process.  When the audio service runs out-of-process its subprocess
+        # may not see our custom env vars, causing it to output to a different
+        # device (ALSA default or /dev/null) and produce silence.
+        "--disable-features=WebRtcHideLocalIpsWithMdns,WebRtcPipeWireCapture,AudioServiceOutOfProcess",
         "--enforce-webrtc-ip-permission-check=false",
         # Performance
         "--disable-background-timer-throttling",
