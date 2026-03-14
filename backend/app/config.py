@@ -8,6 +8,14 @@ class Settings(BaseSettings):
 
     # App
     SECRET_KEY: str = "meetingbot-dev-secret-change-in-production"
+    # Database — SQLite is the default for local development only (data is lost on restart).
+    # For production, use Supabase (recommended) or any PostgreSQL instance.
+    # Accepted URL formats (the app normalises them to asyncpg automatically):
+    #   Supabase direct:        postgresql://postgres:[PASSWORD]@db.[REF].supabase.co:5432/postgres
+    #   Supabase session pool:  postgresql://postgres.[REF]:[PASSWORD]@aws-0-[REGION].pooler.supabase.com:5432/postgres
+    #   Supabase txn pool:      postgresql://postgres.[REF]:[PASSWORD]@aws-0-[REGION].pooler.supabase.com:6543/postgres
+    #   Generic PostgreSQL:     postgresql://user:pass@host:5432/dbname
+    # SSL is enabled and PgBouncer prepared-statement limits are handled automatically.
     DATABASE_URL: str = "sqlite+aiosqlite:///./meetingbot.db"
     BOT_NAME_DEFAULT: str = "MeetingBot"
     WEBHOOK_TIMEOUT_SECONDS: int = 10

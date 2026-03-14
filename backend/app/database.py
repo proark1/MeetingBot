@@ -1,4 +1,5 @@
 import logging
+from urllib.parse import urlparse
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
@@ -8,9 +9,9 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Normalise the DATABASE_URL for the async driver.
-# Railway (and most PaaS) provide "postgresql://" or the legacy "postgres://"
-# alias, but asyncpg requires the "postgresql+asyncpg://" scheme.
+# ── URL normalisation ─────────────────────────────────────────────────────────
+# Supabase, Railway, and most PaaS provide "postgresql://" or the legacy
+# "postgres://" alias, but asyncpg requires "postgresql+asyncpg://".
 _db_url = settings.DATABASE_URL
 if _db_url.startswith("postgres://"):
     _db_url = "postgresql+asyncpg://" + _db_url[len("postgres://"):]
@@ -19,13 +20,47 @@ elif _db_url.startswith("postgresql://"):
 
 _is_sqlite = _db_url.startswith("sqlite")
 
+# ── Supabase / PgBouncer detection ───────────────────────────────────────────
+# Supabase exposes three connection modes:
+#   • Direct          db.[ref].supabase.co:5432     — full PostgreSQL
+#   • Session pooler  *.pooler.supabase.com:5432    — PgBouncer session mode
+#   • Transaction pooler *.pooler.supabase.com:6543 — PgBouncer transaction mode
+#
+# Transaction-mode PgBouncer (port 6543) does not support prepared statements,
+# so we set prepared_statement_cache_size=0 for those connections.
+# All Supabase connections enforce SSL — we add ssl="require" automatically.
+_parsed = urlparse(_db_url)
+_host = _parsed.hostname or ""
+_port = _parsed.port or 5432
+
+_is_supabase   = "supabase.co" in _host or "supabase.com" in _host
+_is_pgbouncer  = _port == 6543   # transaction pooler disables prepared statements
+
+# ── Engine kwargs ─────────────────────────────────────────────────────────────
 _engine_kwargs: dict = {"echo": False, "pool_pre_ping": True}
 
 if _is_sqlite:
-    # SQLite needs a per-connection timeout; server-pool args are not applicable.
+    # SQLite needs a per-connection timeout; server-pool args don't apply.
     _engine_kwargs["connect_args"] = {"timeout": 30}
 else:
-    # Pool sizing only applies to server-based databases (PostgreSQL, MySQL, …).
+    _connect_args: dict = {}
+
+    if _is_supabase:
+        # Supabase requires SSL on all connections.
+        _connect_args["ssl"] = "require"
+        logger.info("Supabase database detected — SSL enabled")
+
+    if _is_pgbouncer:
+        # PgBouncer in transaction mode does not support the extended query
+        # protocol used by prepared statements.  Disabling the cache forces
+        # asyncpg to use the simple query protocol instead.
+        _connect_args["prepared_statement_cache_size"] = 0
+        logger.info("PgBouncer (transaction mode) detected — prepared statement cache disabled")
+
+    if _connect_args:
+        _engine_kwargs["connect_args"] = _connect_args
+
+    # Connection pool — shared across all async workers in the process.
     _engine_kwargs["pool_size"] = 10
     _engine_kwargs["max_overflow"] = 20
     _engine_kwargs["pool_timeout"] = 30

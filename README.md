@@ -39,7 +39,7 @@ Set these in a `.env` file or as environment variables:
 | `BOT_ADMISSION_TIMEOUT` | `300` | Seconds to wait for the host to admit the bot before giving up |
 | `BOT_MAX_DURATION` | `7200` | Maximum meeting recording length in seconds (2 hours) |
 | `BOT_ALONE_TIMEOUT` | `300` | Seconds the bot stays alone before leaving automatically (5 minutes) |
-| `DATABASE_URL` | `sqlite+aiosqlite:///./meetingbot.db` | SQLAlchemy async DB URL. Connection timeout is 15 s. |
+| `DATABASE_URL` | `sqlite+aiosqlite:///./meetingbot.db` | Database connection URL. SQLite is default (dev only — data lost on restart). Set to a Supabase or PostgreSQL URL for persistent storage. See **[Database / Supabase](#database--supabase)** below. |
 | `SECRET_KEY` | *(dev default)* | Change in production |
 | `SLACK_WEBHOOK_URL` | *(empty)* | Slack Incoming Webhook URL — post meeting summaries to Slack after each meeting. |
 | `SMTP_HOST` | *(empty)* | SMTP server for email summaries. Leave empty to disable. |
@@ -66,6 +66,68 @@ Set these in a `.env` file or as environment variables:
 | `STRIPE_PRICE_PER_MEETING` | `0` | Flat fee per meeting in cents. Set to `0` to disable flat fees. |
 | `STRIPE_PRICE_PER_1K_TOKENS` | `0` | Per-1K-token fee in cents for usage-based billing. Set to `0` to disable. |
 | `BILLING_COST_MARKUP` | `2.0` | Multiplier applied on top of raw AI cost (e.g. `2.0` = charge 2× your AI cost). |
+
+---
+
+## Database / Supabase
+
+SQLite (the default) stores its file inside the container, so **all data is lost every time the container restarts**. For production you need a persistent PostgreSQL database. [Supabase](https://supabase.com) provides a free-tier managed PostgreSQL that works out of the box.
+
+### 1 — Create a Supabase project
+
+1. Go to [supabase.com](https://supabase.com) → **New project**.
+2. Choose a region close to your Railway deployment.
+3. Note the **database password** you set during creation.
+
+### 2 — Get the connection string
+
+In your Supabase project: **Project Settings → Database → Connection string**.
+
+Choose the mode that fits your deployment:
+
+| Mode | Port | Use when |
+|---|---|---|
+| **Direct** | 5432 | Single long-running container (Railway, Fly.io) — recommended |
+| **Session pooler** | 5432 | Multiple replicas, same city |
+| **Transaction pooler** | 6543 | Serverless / edge functions |
+
+Copy the URI and replace `[YOUR-PASSWORD]` with your database password:
+
+```
+# Direct (recommended for Railway)
+postgresql://postgres:[PASSWORD]@db.[REF].supabase.co:5432/postgres
+
+# Transaction pooler (serverless)
+postgresql://postgres.[REF]:[PASSWORD]@aws-0-[REGION].pooler.supabase.com:6543/postgres
+```
+
+### 3 — Set the environment variable
+
+**Railway:** Project → Service → Variables → Add `DATABASE_URL` → paste the URI.
+
+**Local `.env`:**
+```
+DATABASE_URL=postgresql://postgres:[PASSWORD]@db.[REF].supabase.co:5432/postgres
+```
+
+No other changes are needed — the app auto-detects:
+- Supabase hosts → enables `ssl=require`
+- Port 6543 → disables prepared-statement cache (PgBouncer transaction mode)
+- `postgres://` / `postgresql://` schemes → rewrites to `postgresql+asyncpg://`
+
+Tables and indexes are created automatically on first startup.
+
+### 4 — Verify
+
+Watch the Railway logs on the next deploy. You should see:
+
+```
+Supabase database detected — SSL enabled
+Initialising database…
+MeetingBot ready
+```
+
+and **not** the SQLite warning.
 
 ---
 

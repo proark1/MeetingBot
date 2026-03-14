@@ -67,6 +67,11 @@ async def require_api_key(
 async def lifespan(app: FastAPI):
     logger.info("Initialising database…")
     await init_db()
+    if settings.DATABASE_URL.startswith("sqlite"):
+        logger.warning(
+            "⚠ Using SQLite — data will be LOST on every container restart. "
+            "Set DATABASE_URL to a Supabase or PostgreSQL connection string for persistent storage."
+        )
     if not settings.GEMINI_API_KEY:
         logger.warning(
             "⚠ GEMINI_API_KEY is NOT set — transcription and analysis will be "
