@@ -2,7 +2,8 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    # AI
+    # AI — set either key to enable AI features; Anthropic takes precedence over Gemini
+    ANTHROPIC_API_KEY: str = ""
     GEMINI_API_KEY: str = ""
 
     # App

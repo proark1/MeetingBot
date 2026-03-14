@@ -1,4 +1,11 @@
-"""Gemini-powered meeting intelligence — summaries, action items, etc."""
+"""Meeting intelligence — summaries, action items, etc.
+
+Supports two AI providers, selected by environment variable:
+  • Anthropic Claude  (ANTHROPIC_API_KEY)  — takes precedence
+  • Google Gemini     (GEMINI_API_KEY)      — used when no Anthropic key is set
+
+If neither key is configured the service returns stub/empty results.
+"""
 
 import json
 import logging
@@ -33,7 +40,19 @@ Generate 15–25 entries spanning 8–15 minutes.
 Make it a realistic tech-team meeting with concrete discussion."""
 
 
-def _get_model():
+# ── Provider helpers ───────────────────────────────────────────────────────────
+
+def _use_claude() -> bool:
+    from app.config import settings
+    return bool(settings.ANTHROPIC_API_KEY)
+
+
+def _use_gemini() -> bool:
+    from app.config import settings
+    return bool(settings.GEMINI_API_KEY)
+
+
+def _get_gemini_model():
     from app.config import settings
     try:
         import google.generativeai as genai
@@ -43,6 +62,17 @@ def _get_model():
         )
     genai.configure(api_key=settings.GEMINI_API_KEY)
     return genai.GenerativeModel("gemini-2.5-flash")
+
+
+def _get_anthropic_client():
+    from app.config import settings
+    try:
+        import anthropic
+    except ImportError:
+        raise RuntimeError(
+            "anthropic is not installed — run: pip install anthropic"
+        )
+    return anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
 
 
 def _strip_fences(text: str) -> str:
@@ -56,27 +86,30 @@ def _strip_fences(text: str) -> str:
     return text
 
 
-async def analyze_transcript(
+# ── Claude implementations ─────────────────────────────────────────────────────
+
+async def _claude_complete(prompt: str, max_tokens: int = 4096, temperature: float = 1.0) -> str:
+    """Call Claude and return the text response. Uses adaptive thinking for complex tasks."""
+    client = _get_anthropic_client()
+    stream = client.messages.stream(
+        model="claude-opus-4-6",
+        max_tokens=max_tokens,
+        thinking={"type": "adaptive"},
+        messages=[{"role": "user", "content": prompt}],
+    )
+    async with stream as s:
+        message = await s.get_final_message()
+    for block in message.content:
+        if block.type == "text":
+            return block.text
+    return ""
+
+
+async def _claude_analyze_transcript(
     transcript: list[dict[str, Any]],
     prompt_override: str | None = None,
     vocabulary: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Send transcript to Gemini and return structured meeting analysis.
-
-    Args:
-        prompt_override: If set (e.g. from a meeting template), replaces the default
-            analysis prompt. Should instruct Gemini to return valid JSON.
-        vocabulary: Domain-specific terms to prepend as transcription hints.
-    """
-    from app.config import settings
-
-    if not settings.GEMINI_API_KEY:
-        logger.warning("GEMINI_API_KEY not set — returning stub analysis")
-        return _stub_analysis(transcript)
-
-    if not transcript:
-        return _empty_analysis()
-
     vocab_hint = ""
     if vocabulary:
         vocab_hint = f"Known terms and names (prefer these spellings): {', '.join(vocabulary)}\n\n"
@@ -87,101 +120,44 @@ async def analyze_transcript(
     )
 
     prompt = prompt_override or _ANALYSIS_PROMPT
-
-    try:
-        model = _get_model()
-        response = await model.generate_content_async(
-            f"{prompt}\n\nAnalyze this meeting transcript:\n\n{lines}",
-            generation_config={"temperature": 0.2, "max_output_tokens": 4096},
-        )
-        return json.loads(_strip_fences(response.text))
-
-    except json.JSONDecodeError as exc:
-        logger.error("Gemini returned invalid JSON for analysis: %s", exc)
-        return _stub_analysis(transcript)
-    except ValueError as exc:
-        logger.warning("Gemini analysis blocked by safety filter: %s", exc)
-        return _stub_analysis(transcript)
-    except Exception as exc:
-        logger.error("Gemini analysis error: %s", exc)
-        return _stub_analysis(transcript)
+    text = await _claude_complete(
+        f"{prompt}\n\nAnalyze this meeting transcript:\n\n{lines}",
+        max_tokens=4096,
+    )
+    return json.loads(_strip_fences(text))
 
 
-async def generate_chapters(transcript: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Segment the transcript into named chapters with timestamps."""
-    from app.config import settings
-
-    if not settings.GEMINI_API_KEY or not transcript:
-        return []
-
+async def _claude_generate_chapters(transcript: list[dict[str, Any]]) -> list[dict[str, Any]]:
     lines = "\n".join(
         f"[{e.get('timestamp', 0):.1f}s] {e.get('speaker', '?')}: {e.get('text', '')}"
         for e in transcript
     )
-
-    try:
-        model = _get_model()
-        response = await model.generate_content_async(
-            f"{_CHAPTERS_PROMPT}\n\nTranscript:\n{lines}",
-            generation_config={"temperature": 0.2, "max_output_tokens": 2048},
-        )
-        return json.loads(_strip_fences(response.text))
-    except json.JSONDecodeError as exc:
-        logger.error("Gemini chapters: invalid JSON — %s", exc)
-        return []
-    except ValueError as exc:
-        logger.warning("Gemini chapters blocked by safety filter: %s", exc)
-        return []
-    except Exception as exc:
-        logger.warning("Chapter generation failed: %s", exc)
-        return []
+    text = await _claude_complete(
+        f"{_CHAPTERS_PROMPT}\n\nTranscript:\n{lines}",
+        max_tokens=2048,
+    )
+    return json.loads(_strip_fences(text))
 
 
-async def generate_mention_response(
+async def _claude_mention_response(
     caption_context: str,
     bot_name: str,
     for_voice: bool = False,
     source: str = "caption",
 ) -> str:
-    """Generate an in-meeting reply when the bot's name is called.
-
-    Handles three cases:
-    - Meeting-specific question  → answered using the caption context
-    - General knowledge question → answered from Gemini's own knowledge
-    - Simple greeting / name call → brief acknowledgement + offer to help
-
-    Args:
-        caption_context: Recent live-caption or chat text (~1 500 chars).
-        bot_name:        Bot's display name.
-        for_voice:       When True the reply is constrained to 2–3 short spoken
-                         sentences (no markdown, no bullet points).
-        source:          "caption" or "chat" — affects how the context is labelled
-                         so the model understands it as a question/message to answer,
-                         not as ongoing speech to continue.
-
-    Returns:
-        Answer text string, or empty string if Gemini is unavailable.
-    """
-    from app.config import settings
-
-    if not settings.GEMINI_API_KEY:
-        return ""
-
     if for_voice:
         length_rule = (
             "Keep the answer to 2–3 short sentences (aim for under 50 words total). "
             "Write in natural spoken language — no bullet points, no markdown, no lists."
         )
-        max_tokens = 500   # matches 2–3 sentence spoken reply; avoids over-generation
-    else:                  # (~50 words visible output + ~750 thinking tokens max)
+        max_tokens = 500
+    else:
         length_rule = (
             "Give a helpful, complete answer in up to 5 sentences. "
             "No markdown formatting."
         )
-        max_tokens = 4096
+        max_tokens = 1024
 
-    # Label the context correctly so the model treats it as input to answer,
-    # not as ongoing speech to continue (which caused "It's currently…" completions).
     if source == "chat":
         context_label = "Recent in-meeting chat messages (these are text messages, not speech):"
     else:
@@ -203,81 +179,309 @@ async def generate_mention_response(
         "6. Return ONLY the answer text — no name prefix, no quotes, no preamble.\n\n"
         f"{context_label}\n{caption_context}"
     )
-    try:
-        model = _get_model()
-        response = await model.generate_content_async(
-            prompt,
-            generation_config={"temperature": 0.4, "max_output_tokens": max_tokens},
-        )
-        text = response.text.strip()
-        # Strip any stray JSON brace artifacts (model sometimes wraps reply in
-        # {…} despite being instructed to return plain text).
-        if text.startswith("{") or text.endswith("}"):
-            text = text.strip("{}").strip()
-        text = text.strip('"').strip("'")
-        return text
-    except ValueError as exc:
-        logger.warning("Gemini mention response blocked by safety filter: %s", exc)
-        return ""
-    except Exception as exc:
-        logger.warning("generate_mention_response error: %s", exc)
-        return ""
+    text = await _claude_complete(prompt, max_tokens=max_tokens)
+    if text.startswith("{") or text.endswith("}"):
+        text = text.strip("{}").strip()
+    return text.strip('"').strip("'")
 
 
-async def ask_about_transcript(transcript: list[dict[str, Any]], question: str) -> str:
-    """Answer a free-form question about the meeting transcript."""
-    from app.config import settings
-
-    if not settings.GEMINI_API_KEY:
-        return "Gemini API key not configured."
-    if not transcript:
-        return "No transcript available to answer questions about."
-
+async def _claude_ask_about_transcript(
+    transcript: list[dict[str, Any]], question: str
+) -> str:
     lines = "\n".join(
         f"[{e.get('timestamp', 0):.1f}s] {e.get('speaker', '?')}: {e.get('text', '')}"
         for e in transcript
     )
+    return await _claude_complete(
+        f"You are a meeting assistant. Answer the following question based ONLY on the meeting transcript below. "
+        f"Be concise and specific. If the answer is not in the transcript, say so.\n\n"
+        f"Question: {question}\n\nTranscript:\n{lines}",
+        max_tokens=1024,
+    )
 
-    try:
-        model = _get_model()
-        response = await model.generate_content_async(
-            f"You are a meeting assistant. Answer the following question based ONLY on the meeting transcript below. "
-            f"Be concise and specific. If the answer is not in the transcript, say so.\n\n"
-            f"Question: {question}\n\nTranscript:\n{lines}",
-            generation_config={"temperature": 0.3, "max_output_tokens": 1024},
+
+async def _claude_demo_transcript(meeting_url: str) -> list[dict[str, Any]]:
+    text = await _claude_complete(
+        f"{_DEMO_TRANSCRIPT_PROMPT}\n\n"
+        f"Generate a realistic meeting transcript for a video call at: {meeting_url}\n"
+        "Topics should feel natural for this kind of meeting. Include 3–4 distinct speakers.",
+        max_tokens=8192,
+    )
+    return json.loads(_strip_fences(text))
+
+
+# ── Gemini implementations (unchanged) ────────────────────────────────────────
+
+async def _gemini_analyze_transcript(
+    transcript: list[dict[str, Any]],
+    prompt_override: str | None = None,
+    vocabulary: list[str] | None = None,
+) -> dict[str, Any]:
+    vocab_hint = ""
+    if vocabulary:
+        vocab_hint = f"Known terms and names (prefer these spellings): {', '.join(vocabulary)}\n\n"
+
+    lines = vocab_hint + "\n".join(
+        f"[{e.get('timestamp', 0):.1f}s] {e.get('speaker', '?')}: {e.get('text', '')}"
+        for e in transcript
+    )
+
+    prompt = prompt_override or _ANALYSIS_PROMPT
+    model = _get_gemini_model()
+    response = await model.generate_content_async(
+        f"{prompt}\n\nAnalyze this meeting transcript:\n\n{lines}",
+        generation_config={"temperature": 0.2, "max_output_tokens": 4096},
+    )
+    return json.loads(_strip_fences(response.text))
+
+
+async def _gemini_generate_chapters(transcript: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    lines = "\n".join(
+        f"[{e.get('timestamp', 0):.1f}s] {e.get('speaker', '?')}: {e.get('text', '')}"
+        for e in transcript
+    )
+    model = _get_gemini_model()
+    response = await model.generate_content_async(
+        f"{_CHAPTERS_PROMPT}\n\nTranscript:\n{lines}",
+        generation_config={"temperature": 0.2, "max_output_tokens": 2048},
+    )
+    return json.loads(_strip_fences(response.text))
+
+
+async def _gemini_mention_response(
+    caption_context: str,
+    bot_name: str,
+    for_voice: bool = False,
+    source: str = "caption",
+) -> str:
+    if for_voice:
+        length_rule = (
+            "Keep the answer to 2–3 short sentences (aim for under 50 words total). "
+            "Write in natural spoken language — no bullet points, no markdown, no lists."
         )
-        return response.text.strip()
-    except ValueError as exc:
-        logger.warning("Gemini answer blocked by safety filter: %s", exc)
-        return "The answer could not be generated — the content was flagged by the safety filter."
-    except Exception as exc:
-        logger.error("ask_about_transcript error: %s", exc)
-        return f"Error generating answer: {exc}"
+        max_tokens = 500
+    else:
+        length_rule = (
+            "Give a helpful, complete answer in up to 5 sentences. "
+            "No markdown formatting."
+        )
+        max_tokens = 4096
+
+    if source == "chat":
+        context_label = "Recent in-meeting chat messages (these are text messages, not speech):"
+    else:
+        context_label = "Recent live captions from the meeting (spoken words):"
+
+    prompt = (
+        f"You are '{bot_name}', an AI assistant attending a meeting as a participant.\n"
+        f"Someone addressed you by name. Read the context below and respond appropriately.\n\n"
+        "Instructions:\n"
+        "1. If a SPECIFIC QUESTION was asked, answer it directly and completely.\n"
+        "2. For questions about THIS meeting (what was discussed, who said what, decisions made, "
+        "topics covered, etc.) — use the captions provided above as your source. The captions "
+        "ARE the meeting history, so you have the information.\n"
+        "3. For general knowledge questions (not about this meeting), answer from your training — "
+        "do NOT say 'I don't know'.\n"
+        "4. If no clear question was asked and you were just greeted or called by name, "
+        "briefly acknowledge and offer to help.\n"
+        f"5. {length_rule}\n"
+        "6. Return ONLY the answer text — no name prefix, no quotes, no preamble.\n\n"
+        f"{context_label}\n{caption_context}"
+    )
+    model = _get_gemini_model()
+    response = await model.generate_content_async(
+        prompt,
+        generation_config={"temperature": 0.4, "max_output_tokens": max_tokens},
+    )
+    text = response.text.strip()
+    if text.startswith("{") or text.endswith("}"):
+        text = text.strip("{}").strip()
+    return text.strip('"').strip("'")
+
+
+async def _gemini_ask_about_transcript(
+    transcript: list[dict[str, Any]], question: str
+) -> str:
+    lines = "\n".join(
+        f"[{e.get('timestamp', 0):.1f}s] {e.get('speaker', '?')}: {e.get('text', '')}"
+        for e in transcript
+    )
+    model = _get_gemini_model()
+    response = await model.generate_content_async(
+        f"You are a meeting assistant. Answer the following question based ONLY on the meeting transcript below. "
+        f"Be concise and specific. If the answer is not in the transcript, say so.\n\n"
+        f"Question: {question}\n\nTranscript:\n{lines}",
+        generation_config={"temperature": 0.3, "max_output_tokens": 1024},
+    )
+    return response.text.strip()
+
+
+async def _gemini_demo_transcript(meeting_url: str) -> list[dict[str, Any]]:
+    model = _get_gemini_model()
+    response = await model.generate_content_async(
+        f"{_DEMO_TRANSCRIPT_PROMPT}\n\n"
+        f"Generate a realistic meeting transcript for a video call at: {meeting_url}\n"
+        "Topics should feel natural for this kind of meeting. Include 3–4 distinct speakers.",
+        generation_config={"temperature": 0.8, "max_output_tokens": 8192},
+    )
+    return json.loads(_strip_fences(response.text))
+
+
+# ── Public API ─────────────────────────────────────────────────────────────────
+
+async def analyze_transcript(
+    transcript: list[dict[str, Any]],
+    prompt_override: str | None = None,
+    vocabulary: list[str] | None = None,
+) -> dict[str, Any]:
+    """Analyze the transcript and return structured meeting intelligence.
+
+    Uses Claude (Anthropic) when ANTHROPIC_API_KEY is set, otherwise Gemini.
+
+    Args:
+        prompt_override: Replaces the default analysis prompt (e.g. from a meeting template).
+        vocabulary: Domain-specific terms to prepend as spelling hints.
+    """
+    if not transcript:
+        return _empty_analysis()
+
+    if _use_claude():
+        try:
+            return await _claude_analyze_transcript(transcript, prompt_override, vocabulary)
+        except json.JSONDecodeError as exc:
+            logger.error("Claude returned invalid JSON for analysis: %s", exc)
+        except Exception as exc:
+            logger.error("Claude analysis error: %s", exc)
+        return _stub_analysis(transcript)
+
+    if _use_gemini():
+        try:
+            return await _gemini_analyze_transcript(transcript, prompt_override, vocabulary)
+        except json.JSONDecodeError as exc:
+            logger.error("Gemini returned invalid JSON for analysis: %s", exc)
+        except ValueError as exc:
+            logger.warning("Gemini analysis blocked by safety filter: %s", exc)
+        except Exception as exc:
+            logger.error("Gemini analysis error: %s", exc)
+        return _stub_analysis(transcript)
+
+    logger.warning("No AI API key configured — returning stub analysis")
+    return _stub_analysis(transcript)
+
+
+async def generate_chapters(transcript: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Segment the transcript into named chapters with timestamps."""
+    if not transcript:
+        return []
+
+    if _use_claude():
+        try:
+            return await _claude_generate_chapters(transcript)
+        except json.JSONDecodeError as exc:
+            logger.error("Claude chapters: invalid JSON — %s", exc)
+        except Exception as exc:
+            logger.warning("Claude chapter generation failed: %s", exc)
+        return []
+
+    if _use_gemini():
+        try:
+            return await _gemini_generate_chapters(transcript)
+        except json.JSONDecodeError as exc:
+            logger.error("Gemini chapters: invalid JSON — %s", exc)
+        except ValueError as exc:
+            logger.warning("Gemini chapters blocked by safety filter: %s", exc)
+        except Exception as exc:
+            logger.warning("Chapter generation failed: %s", exc)
+        return []
+
+    return []
+
+
+async def generate_mention_response(
+    caption_context: str,
+    bot_name: str,
+    for_voice: bool = False,
+    source: str = "caption",
+) -> str:
+    """Generate an in-meeting reply when the bot's name is called.
+
+    Handles three cases:
+    - Meeting-specific question  → answered using the caption context
+    - General knowledge question → answered from the model's knowledge
+    - Simple greeting / name call → brief acknowledgement + offer to help
+
+    Args:
+        caption_context: Recent live-caption or chat text (~1 500 chars).
+        bot_name:        Bot's display name.
+        for_voice:       When True the reply is constrained to 2–3 short spoken sentences.
+        source:          "caption" or "chat" — affects how the context is labelled.
+
+    Returns:
+        Answer text string, or empty string if no AI provider is available.
+    """
+    if _use_claude():
+        try:
+            return await _claude_mention_response(caption_context, bot_name, for_voice, source)
+        except Exception as exc:
+            logger.warning("Claude mention response error: %s", exc)
+        return ""
+
+    if _use_gemini():
+        try:
+            return await _gemini_mention_response(caption_context, bot_name, for_voice, source)
+        except ValueError as exc:
+            logger.warning("Gemini mention response blocked by safety filter: %s", exc)
+        except Exception as exc:
+            logger.warning("generate_mention_response error: %s", exc)
+        return ""
+
+    return ""
+
+
+async def ask_about_transcript(transcript: list[dict[str, Any]], question: str) -> str:
+    """Answer a free-form question about the meeting transcript."""
+    if not transcript:
+        return "No transcript available to answer questions about."
+
+    if _use_claude():
+        try:
+            return await _claude_ask_about_transcript(transcript, question)
+        except Exception as exc:
+            logger.error("Claude ask_about_transcript error: %s", exc)
+            return f"Error generating answer: {exc}"
+
+    if _use_gemini():
+        try:
+            return await _gemini_ask_about_transcript(transcript, question)
+        except ValueError as exc:
+            logger.warning("Gemini answer blocked by safety filter: %s", exc)
+            return "The answer could not be generated — the content was flagged by the safety filter."
+        except Exception as exc:
+            logger.error("ask_about_transcript error: %s", exc)
+            return f"Error generating answer: {exc}"
+
+    return "No AI API key configured."
 
 
 async def generate_demo_transcript(meeting_url: str) -> list[dict[str, Any]]:
-    """Generate a realistic demo transcript via Gemini (fallback when real audio unavailable)."""
-    from app.config import settings
-
-    if not settings.GEMINI_API_KEY:
+    """Generate a realistic demo transcript (fallback when real audio unavailable)."""
+    if _use_claude():
+        try:
+            return await _claude_demo_transcript(meeting_url)
+        except Exception as exc:
+            logger.error("Claude demo transcript error: %s", exc)
         return _hardcoded_demo_transcript()
 
-    try:
-        model = _get_model()
-        response = await model.generate_content_async(
-            f"{_DEMO_TRANSCRIPT_PROMPT}\n\n"
-            f"Generate a realistic meeting transcript for a video call at: {meeting_url}\n"
-            "Topics should feel natural for this kind of meeting. Include 3–4 distinct speakers.",
-            generation_config={"temperature": 0.8, "max_output_tokens": 8192},
-        )
-        return json.loads(_strip_fences(response.text))
+    if _use_gemini():
+        try:
+            return await _gemini_demo_transcript(meeting_url)
+        except ValueError as exc:
+            logger.warning("Gemini demo transcript blocked by safety filter: %s", exc)
+        except Exception as exc:
+            logger.error("Failed to generate demo transcript: %s", exc)
+        return _hardcoded_demo_transcript()
 
-    except ValueError as exc:
-        logger.warning("Gemini demo transcript blocked by safety filter: %s", exc)
-        return _hardcoded_demo_transcript()
-    except Exception as exc:
-        logger.error("Failed to generate demo transcript: %s", exc)
-        return _hardcoded_demo_transcript()
+    return _hardcoded_demo_transcript()
 
 
 # ── Fallbacks ─────────────────────────────────────────────────────────────────

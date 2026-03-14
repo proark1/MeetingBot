@@ -1,13 +1,16 @@
 # MeetingBot
 
-A self-hosted meeting bot that joins Google Meet, Zoom, and Microsoft Teams calls, records audio, transcribes it with Gemini, and analyses the transcript with Gemini.
+A self-hosted meeting bot that joins Google Meet, Zoom, and Microsoft Teams calls, records audio, transcribes it, and analyses the transcript with AI (Claude or Gemini).
 
 ---
 
 ## Quick Start
 
 ```bash
-# Required environment variable
+# Use Claude (Anthropic) — recommended
+ANTHROPIC_API_KEY=your-key docker compose up
+
+# Or use Gemini
 GEMINI_API_KEY=your-key docker compose up
 ```
 
@@ -23,7 +26,8 @@ Set these in a `.env` file or as environment variables:
 
 | Variable | Default | Description |
 |---|---|---|
-| `GEMINI_API_KEY` | *(required)* | Google Gemini API key — used for transcription and analysis. |
+| `ANTHROPIC_API_KEY` | *(empty)* | Anthropic API key — enables Claude (`claude-opus-4-6`) for meeting analysis. Takes precedence over Gemini when both keys are set. |
+| `GEMINI_API_KEY` | *(empty)* | Google Gemini API key — used for transcription and analysis when `ANTHROPIC_API_KEY` is not set. |
 | `API_KEY` | *(empty = no auth)* | If set, all `/api/v1/*` requests must include `Authorization: Bearer <API_KEY>`. Leave empty to disable. |
 | `CORS_ORIGINS` | `*` | Comma-separated allowed origins, e.g. `https://app.example.com,https://admin.example.com`. `*` allows all origins. |
 | `MAX_CONCURRENT_BOTS` | `3` | Maximum number of browser bots running simultaneously. Returns 429 if exceeded. |
