@@ -132,6 +132,18 @@ async def init_db():
                     # so genuine schema errors (typos, wrong table names) are visible.
                     logger.debug("Migration skipped (already applied?): %s — %s", stmt, mig_exc)
 
+        # PostgreSQL-only: widen share_token from VARCHAR(24) to VARCHAR(64).
+        # secrets.token_urlsafe(24) produces 32 chars (24 bytes → base64), so the
+        # old VARCHAR(24) column caused "value too long" errors → HTTP 500 on bot create.
+        if not _is_sqlite:
+            try:
+                await conn.execute(
+                    text("ALTER TABLE bots ALTER COLUMN share_token TYPE VARCHAR(64)")
+                )
+                logger.info("Migration applied: share_token widened to VARCHAR(64)")
+            except Exception as mig_exc:
+                logger.debug("Migration skipped (already applied?): share_token VARCHAR(64) — %s", mig_exc)
+
         # speaker_profiles table is created by SQLAlchemy metadata above;
         # no ALTER TABLE needed for it since it's new.
 

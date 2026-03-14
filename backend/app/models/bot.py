@@ -47,7 +47,7 @@ class Bot(Base):
     speaker_stats: Mapped[list | None] = mapped_column(JSON, nullable=True)
     recording_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     recording_path: Mapped[str | None] = mapped_column(Text, nullable=True)
-    share_token: Mapped[str | None] = mapped_column(String(24), nullable=True, unique=True)
+    share_token: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
     notify_email: Mapped[str | None] = mapped_column(String(256), nullable=True)
 
     # Template / vocabulary
