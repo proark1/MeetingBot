@@ -1286,12 +1286,23 @@ async def _captions_already_active(page: Page, platform: str) -> bool:
                         // Filled / highlighted icon class (varies by Meet version)
                         if (btn.className && btn.className.includes('r6xAKc'))
                             return 'button:class=r6xAKc';
+                        // If the button says "Turn off captions", captions are ON
+                        // (Google Meet 2026 uses label semantics instead of aria-pressed)
+                        const lbl = (btn.getAttribute('aria-label') || '').toLowerCase();
+                        if (lbl === 'turn off captions' || lbl === 'disable captions'
+                                || lbl.includes('turn off caption') || lbl.includes('disable caption'))
+                            return 'button:label=turn-off-captions';
                     }
+                    // Also check by jsname — 'RrG0hf' is the "Turn off captions" button in 2026
+                    if (document.querySelector('button[jsname="RrG0hf"]'))
+                        return 'button:jsname=RrG0hf';
                     // 2. Caption container present in the DOM
                     const containers = [
                         'div[jsname="tgaKEf"]', 'div[jsname="YSxPC"]',
                         'div[jsname="VUpckd"]', 'div[jsname="z1asCe"]',
                         'div[class*="a4cQT"]',
+                        // 2026 caption container classes confirmed via live DOM inspection
+                        'div[class*="vNKgIf"]', 'div[class*="ygicle"]', 'div[class*="nMcdL"]',
                     ];
                     for (const s of containers) {
                         if (document.querySelector(s)) return 'container:' + s;
@@ -1351,18 +1362,17 @@ async def _enable_captions(page: Page, platform: str) -> None:
             return
         # Use short per-selector timeout (500 ms) so we don't waste 15+ seconds
         # when none of the selectors match the 2026 Google Meet UI.
+        # IMPORTANT: do NOT include 'Turn off captions' here — clicking it when
+        # captions are already ON would disable them (toggle bug).  Only click
+        # selectors that enable captions.
         clicked = await _click(page, [
-            # 2026 exact aria-labels (most reliable)
+            # 2026 exact aria-label for the OFF state (captions are currently off)
             "button[aria-label='Turn on captions']",
-            "button[aria-label='Turn off captions']",
             # jsname-based (stable internal identifiers)
             "button[jsname='r8qRAd']",
             # Partial aria-label matches (older Meet versions)
-            "button[aria-label*='caption' i]",
-            "button[aria-label*='captions' i]",
             "button[aria-label*='live caption' i]",
             "button[aria-label*='subtitles' i]",
-            "div[role='button'][aria-label*='caption' i]",
         ], timeout=500)
 
         if not clicked:
@@ -1382,16 +1392,14 @@ async def _enable_captions(page: Page, platform: str) -> None:
                     "span:has-text('captions')",
                 ], timeout=2000)
 
-        # Brief wait then verify: if we accidentally toggled OFF, click again
+        # Brief wait then verify: if captions not yet active, try once more.
+        # Only use explicit "Turn on" selectors to avoid accidentally disabling.
         await asyncio.sleep(0.6)
         if not await _captions_already_active(page, platform):
             await _click(page, [
                 "button[aria-label='Turn on captions']",
-                "button[aria-label*='caption' i]",
-                "button[aria-label*='captions' i]",
                 "button[aria-label*='live caption' i]",
                 "button[aria-label*='subtitles' i]",
-                "div[role='button'][aria-label*='caption' i]",
             ], timeout=500)
     elif platform == "zoom":
         # Captions may live inside a "More" overflow menu
@@ -1578,20 +1586,22 @@ async def _scrape_captions(page: Page, platform: str) -> str:
                     // Last-resort: element-based viewport sweep.
                     // Uses the same approach as the diagnostic DOM dump (confirmed
                     // to work).  Iterates all div/span elements in document order,
-                    // keeps those in the bottom 40% of the viewport, and returns
+                    // keeps those in the bottom 35% of the viewport, and returns
                     // the LAST valid one — newer captions appear lower in the DOM
                     // so taking the last gives us the most recent speech.
+                    // NOTE: no upper length limit — accumulated caption text can
+                    // grow to thousands of chars across a long meeting.
                     try {
-                        const vpY = window.innerHeight * 0.60;
+                        const vpY = window.innerHeight * 0.65;
                         const vpEls = Array.from(document.querySelectorAll('div,span'))
                             .filter(el => {
                                 const r = el.getBoundingClientRect();
-                                return r.top >= vpY && r.width >= 30 && r.height >= 8;
+                                return r.top >= vpY && r.width > 30 && r.height > 8;
                             });
                         let lastVp = '';
                         for (const el of vpEls) {
                             const t = (el.innerText || el.textContent || '').trim();
-                            if (t && t.length >= 8 && t.length <= 600 && isValid(t)) lastVp = t;
+                            if (t && t.length >= 8 && isValid(t)) lastVp = t;
                         }
                         if (lastVp) return lastVp;
                     } catch(_) {}
@@ -2072,6 +2082,11 @@ async def _streaming_transcription_loop(
 
     file_pos = _WAV_HEADER_SIZE  # cursor into the growing WAV file (skips header)
 
+    # Diagnostic counters — logged periodically so we can see if audio is flowing
+    _total_frames_processed = 0
+    _total_speech_frames    = 0
+    _last_diag_log_pos      = file_pos   # file position at last diagnostic log
+
     # VAD state machine
     speech_frames    = 0    # consecutive speech frames seen
     silence_frames   = 0    # consecutive silence frames after speech started
@@ -2198,6 +2213,28 @@ async def _streaming_transcription_loop(
             file_pos = file_pos + offset   # advance past fully-processed frames
 
             # Partial frame left at end — leave in next read (file_pos not advanced past it)
+
+            # Diagnostic: log VAD activity every ~30 s of audio processed
+            _total_frames_processed += offset // FRAME_BYTES
+            _total_speech_frames    += sum(
+                1 for i in range(0, offset, FRAME_BYTES)
+                if _is_speech_frame(new_data[i: i + FRAME_BYTES])
+            )
+            bytes_since_last = file_pos - _last_diag_log_pos
+            if bytes_since_last >= _PCM_BYTES_PER_S * 30:   # every ~30 s of audio
+                _last_diag_log_pos = file_pos
+                audio_s = (file_pos - _WAV_HEADER_SIZE) / _PCM_BYTES_PER_S
+                logger.info(
+                    "VAD heartbeat: %.0f s audio processed, %d/%d frames had speech (%.1f%%)",
+                    audio_s, _total_speech_frames, _total_frames_processed,
+                    100.0 * _total_speech_frames / max(1, _total_frames_processed),
+                )
+                if _total_speech_frames == 0:
+                    logger.warning(
+                        "VAD: zero speech frames detected in %.0f s — "
+                        "audio may be silent; check PulseAudio routing and Chrome audio output",
+                        audio_s,
+                    )
 
         except asyncio.CancelledError:
             raise
@@ -3072,13 +3109,13 @@ async def run_browser_bot(
                 window._mbRtcAudioForced = true;
 
                 var _AudioCtx = window.AudioContext || window.webkitAudioContext;
-                var _audioCtx = null;
+                window._mbAudioCtx = null;
                 function getCtx() {
-                    if (!_audioCtx) {
-                        _audioCtx = new _AudioCtx({ latencyHint: 'playback' });
-                        _audioCtx.resume().catch(function(){});
+                    if (!window._mbAudioCtx) {
+                        window._mbAudioCtx = new _AudioCtx({ latencyHint: 'playback' });
+                        window._mbAudioCtx.resume().catch(function(){});
                     }
-                    return _audioCtx;
+                    return window._mbAudioCtx;
                 }
 
                 var _OrigRTC = window.RTCPeerConnection;
@@ -3184,16 +3221,26 @@ async def run_browser_bot(
             # silence even though WebRTC packets are received.  Force-playing with
             # volume=1 ensures Chrome actually pushes PCM samples to PulseAudio.
             try:
-                await page.evaluate("""
-                    () => {
+                _audio_ctx_state = await page.evaluate("""
+                    async () => {
                         document.querySelectorAll('audio, video').forEach(el => {
                             el.muted  = false;
                             el.volume = 1.0;
                             el.play().catch(() => {});
                         });
+                        // Explicitly resume the RTCPeerConnection audio context so
+                        // incoming WebRTC audio is rendered to PulseAudio.  Chrome
+                        // may suspend AudioContexts until a user gesture; the flag
+                        // --autoplay-policy=no-user-gesture-required helps but an
+                        // explicit resume() here is belt-and-suspenders.
+                        if (window._mbAudioCtx) {
+                            try { await window._mbAudioCtx.resume(); } catch(e) {}
+                            return window._mbAudioCtx.state;
+                        }
+                        return 'no-audio-ctx-yet';
                     }
                 """)
-                logger.info("Audio elements unmuted in page")
+                logger.info("Audio elements unmuted in page (AudioContext state: %s)", _audio_ctx_state)
             except Exception as exc:
                 logger.debug("Audio unmute injection failed: %s", exc)
 
