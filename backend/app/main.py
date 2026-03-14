@@ -170,17 +170,43 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="MeetingBot API",
     description=(
-        "Send bots into Zoom, Google Meet, and Teams meetings to record, transcribe, "
-        "and analyse them with Gemini AI.\n\n"
+        "Send bots into **Zoom**, **Google Meet**, and **Microsoft Teams** meetings to record, "
+        "transcribe, and analyse them with **Claude** (Anthropic) or **Gemini** (Google) AI.\n\n"
         "## Authentication\n"
-        "If `API_KEY` is configured, include `Authorization: Bearer <key>` on every request.\n\n"
+        "If `API_KEY` is configured, include `Authorization: Bearer <key>` on every request. "
+        "Leave `API_KEY` empty to disable authentication (development default).\n\n"
+        "## AI providers\n"
+        "Set `ANTHROPIC_API_KEY` to use **Claude** (takes precedence). "
+        "Set `GEMINI_API_KEY` to use **Gemini**. Both keys can coexist; Claude is preferred.\n\n"
         "## Bot lifecycle\n"
-        "`joining` → `in_call` → `call_ended` → `done` (or `error`)\n\n"
+        "`ready` / `scheduled` / `queued` → `joining` → `in_call` → `call_ended` → `done` (or `error` / `cancelled`)\n\n"
         "## Auto-leave behaviour\n"
         "The bot leaves automatically when it has been the **only participant** for "
-        "`BOT_ALONE_TIMEOUT` seconds (default **5 minutes**)."
+        "`BOT_ALONE_TIMEOUT` seconds (default **5 minutes**).\n\n"
+        "## Key features\n"
+        "- **Recording** — WAV audio download (`GET /api/v1/bot/{id}/recording`)\n"
+        "- **Transcription** — speaker-diarised transcript with timestamps\n"
+        "- **AI analysis** — summary, key points, action items, decisions, sentiment, topics\n"
+        "- **Chapter segmentation** — auto-generated named chapters with timestamps\n"
+        "- **Live transcription** — real-time transcript streaming via WebSocket (`/api/v1/ws`)\n"
+        "- **Voice responses** — bot speaks when its name is mentioned (Gemini Live / edge-tts)\n"
+        "- **Ask Anything** — free-form Q&A on any transcript (`POST /api/v1/bot/{id}/ask`)\n"
+        "- **Follow-up email** — AI-drafted email after the meeting\n"
+        "- **Highlights** — bookmark key moments in a transcript\n"
+        "- **Action items** — cross-meeting action item tracking\n"
+        "- **Templates** — reusable custom analysis prompts\n"
+        "- **Speaker profiles** — cross-meeting speaker stats (talk time, questions, meetings)\n"
+        "- **Search** — full-text search across all transcripts\n"
+        "- **Analytics** — usage analytics and dashboards\n"
+        "- **Exports** — Markdown and PDF exports\n"
+        "- **Webhooks** — event delivery to external URLs\n"
+        "- **Billing** — Stripe checkout and usage-based subscription\n"
+        "- **Bot queue** — concurrent-bot limit with FIFO queue (`MAX_CONCURRENT_BOTS`)\n"
+        "- **Scheduled joins** — `join_at` for future meetings\n"
+        "- **Integrations** — Slack, Notion, Linear, Jira, HubSpot, iCal auto-join\n"
+        "- **Share links** — public read-only meeting reports\n"
     ),
-    version="1.0.0",
+    version="1.5.0",
     lifespan=lifespan,
     docs_url="/api/docs",
     redoc_url="/api/redoc",

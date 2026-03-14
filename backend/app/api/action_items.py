@@ -4,6 +4,7 @@ import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,6 +14,12 @@ from app.models.bot import Bot
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/action-items", tags=["Action Items"])
+
+
+class ActionItemUpdate(BaseModel):
+    done: bool | None = None
+    assignee: str | None = None
+    due_date: str | None = None
 
 
 @router.get("")
@@ -67,7 +74,7 @@ async def list_action_items(
 @router.patch("/{item_id}")
 async def update_action_item(
     item_id: str,
-    payload: dict,
+    payload: ActionItemUpdate,
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Toggle done state or update assignee/due_date."""
@@ -75,12 +82,12 @@ async def update_action_item(
     item = result.scalar_one_or_none()
     if item is None:
         raise HTTPException(status_code=404, detail="Action item not found")
-    if "done" in payload:
-        item.done = bool(payload["done"])
-    if "assignee" in payload:
-        item.assignee = payload["assignee"]
-    if "due_date" in payload:
-        item.due_date = payload["due_date"]
+    if payload.done is not None:
+        item.done = payload.done
+    if payload.assignee is not None:
+        item.assignee = payload.assignee
+    if payload.due_date is not None:
+        item.due_date = payload.due_date
     await db.commit()
     return {"id": item.id, "done": item.done, "assignee": item.assignee, "due_date": item.due_date}
 

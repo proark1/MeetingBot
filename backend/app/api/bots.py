@@ -7,6 +7,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
 from sqlalchemy import select, func
 from sqlalchemy.orm import defer
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,6 +16,14 @@ from app.database import get_db, AsyncSessionLocal
 from app.models.bot import Bot
 from app.schemas.bot import BotCreate, BotListResponse, BotResponse, BotSummary, MeetingAnalysis, AIUsageSummary, AIUsageEntry
 from app.services import bot_service, intelligence_service
+
+
+class AskRequest(BaseModel):
+    question: str = Field(description="Free-form question to ask about the meeting transcript.")
+
+
+class BriefRequest(BaseModel):
+    agenda: str = Field(default="", description="Optional agenda or notes for the upcoming meeting.")
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/bot", tags=["Bots"])
@@ -379,11 +388,11 @@ async def download_recording(
 @router.post("/{bot_id}/ask")
 async def ask_bot(
     bot_id: str,
-    payload: dict,
+    payload: AskRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Ask a free-form question about the meeting transcript."""
-    question = (payload.get("question") or "").strip()
+    question = payload.question.strip()
     if not question:
         raise HTTPException(status_code=422, detail="question is required")
     bot = await _get_or_404(db, bot_id)
@@ -420,16 +429,16 @@ async def generate_followup_email(
 @router.post("/{bot_id}/brief")
 async def generate_meeting_brief(
     bot_id: str,
-    payload: dict,
+    payload: BriefRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Generate a pre-meeting preparation brief for the next occurrence of this meeting.
 
-    Optionally pass {"agenda": "..."} in the request body.
+    Optionally pass `{"agenda": "..."}` in the request body.
     Looks up previous meetings with similar participants to provide context.
     """
     from sqlalchemy import select as _select
-    agenda = (payload.get("agenda") or "").strip()
+    agenda = payload.agenda.strip()
     bot = await _get_or_404(db, bot_id)
 
     # Find previous meetings with the same participants for context

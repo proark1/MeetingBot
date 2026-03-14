@@ -429,7 +429,7 @@ POST /api/v1/bot/{id}/ask
 { "question": "What were the main decisions?" }
 ```
 
-Asks Gemini a free-form question about the meeting transcript.
+Asks the configured AI provider (Claude or Gemini) a free-form question about the meeting transcript.
 
 ---
 
@@ -480,7 +480,7 @@ Cross-meeting action item tracking. Action items extracted by AI from each meeti
 
 ```
 GET  /api/v1/action-items?done=false&assignee=Alice&limit=100
-PATCH /api/v1/action-items/{id}   — toggle done, update assignee/due_date
+PATCH /api/v1/action-items/{id}   Body: {"done": true, "assignee": "Alice", "due_date": "2026-04-01"}
 GET  /api/v1/action-items/stats   — {total, done, pending} (SQL-aggregated, O(1))
 ```
 
