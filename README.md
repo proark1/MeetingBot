@@ -14,7 +14,7 @@ ANTHROPIC_API_KEY=your-key docker compose up
 GEMINI_API_KEY=your-key docker compose up
 ```
 
-The web UI (Reports) is available at `http://localhost:8080`.
+The web UI is available at `http://localhost:8080` — includes Reports, Search, Action Items, Templates, Analytics, Webhooks, Debug, Speakers, and API Docs.
 The API is available at `http://localhost:8080/api/v1`.
 Interactive docs (Swagger UI): `http://localhost:8080/api/docs`
 
