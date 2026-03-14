@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import String, DateTime, JSON, Text, Index, Boolean
+from sqlalchemy import String, DateTime, JSON, Text, Index, Boolean, Float, Integer
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -74,6 +74,14 @@ class Bot(Base):
     # Enables real-time meeting context and voice bot-name detection.
     # If False, audio is only transcribed after the meeting ends (default).
     live_transcription: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # AI usage tracking — accumulated across all AI operations in the lifecycle
+    # ai_usage stores per-operation breakdown: [{operation, provider, model, input_tokens, output_tokens, cost_usd, duration_s}]
+    ai_usage: Mapped[list] = mapped_column(JSON, default=list)
+    ai_total_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    ai_total_cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    ai_primary_model: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    meeting_duration_s: Mapped[float] = mapped_column(Float, default=0.0)
 
     # Arbitrary caller metadata
     extra_metadata: Mapped[dict] = mapped_column(JSON, default=dict)

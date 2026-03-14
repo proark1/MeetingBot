@@ -187,10 +187,32 @@ async def transcribe_audio(
             names_list = ", ".join(known_participants)
             prompt += f"\n\nKnown participants in this meeting: {names_list}. Use these exact names for speaker labels where you can match the voice."
         model = genai.GenerativeModel("gemini-2.5-flash")
+        _t0 = time.time()
         response = await model.generate_content_async(
             [prompt, uploaded],
             generation_config={"temperature": 0, "max_output_tokens": 65536},
         )
+        _duration = round(time.time() - _t0, 2)
+
+        # Record transcription AI usage
+        try:
+            from app.services.intelligence_service import record_usage, _estimate_cost
+            meta = getattr(response, "usage_metadata", None)
+            _in_tok = getattr(meta, "prompt_token_count", 0) or 0
+            _out_tok = getattr(meta, "candidates_token_count", 0) or 0
+            _cost = _estimate_cost("gemini-2.5-flash", _in_tok, _out_tok)
+            record_usage({
+                "operation": "transcription",
+                "provider": "google",
+                "model": "gemini-2.5-flash",
+                "input_tokens": _in_tok,
+                "output_tokens": _out_tok,
+                "total_tokens": _in_tok + _out_tok,
+                "cost_usd": round(_cost, 6),
+                "duration_s": _duration,
+            })
+        except Exception as _usage_exc:
+            logger.debug("Failed to record transcription usage: %s", _usage_exc)
 
         # Warn if the model stopped due to token limit (truncated JSON)
         try:

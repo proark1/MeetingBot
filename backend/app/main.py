@@ -30,6 +30,7 @@ from app.api.highlights import router as highlights_router
 from app.api.search import router as search_router
 from app.api.speakers import router as speakers_router
 from app.api.templates import router as templates_router
+from app.api.billing import router as billing_router
 from app.api.webhooks import router as webhooks_router
 from app.api.ws import router as ws_router
 
@@ -210,6 +211,7 @@ app.include_router(analytics_router,    prefix="/api/v1", dependencies=_auth)
 app.include_router(action_items_router, prefix="/api/v1", dependencies=_auth)
 app.include_router(templates_router,    prefix="/api/v1", dependencies=_auth)
 app.include_router(speakers_router,     prefix="/api/v1", dependencies=_auth)
+app.include_router(billing_router,      prefix="/api/v1", dependencies=_auth)
 app.include_router(ws_router,           prefix="/api/v1")  # WS auth handled separately
 # Share endpoint is public (no API key required)
 app.include_router(share_router, prefix="/api/v1")

@@ -37,3 +37,6 @@ reportlab>=4.0.0
 
 # Calendar auto-join — parse iCal feeds
 icalendar>=5.0.0
+
+# Billing — Stripe payment processing
+stripe>=8.0.0

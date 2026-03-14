@@ -72,6 +72,11 @@ async def init_db():
             "ALTER TABLE bots ADD COLUMN start_muted INTEGER DEFAULT 0",
             "ALTER TABLE bots ADD COLUMN live_transcription INTEGER DEFAULT 0",
             "ALTER TABLE bots ADD COLUMN prompt_override TEXT",
+            "ALTER TABLE bots ADD COLUMN ai_usage JSON DEFAULT '[]'",
+            "ALTER TABLE bots ADD COLUMN ai_total_tokens INTEGER DEFAULT 0",
+            "ALTER TABLE bots ADD COLUMN ai_total_cost_usd REAL DEFAULT 0.0",
+            "ALTER TABLE bots ADD COLUMN ai_primary_model TEXT",
+            "ALTER TABLE bots ADD COLUMN meeting_duration_s REAL DEFAULT 0.0",
         ]:
             try:
                 await conn.execute(text(stmt))

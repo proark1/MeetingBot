@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db, AsyncSessionLocal
 from app.models.bot import Bot
-from app.schemas.bot import BotCreate, BotListResponse, BotResponse, BotSummary, MeetingAnalysis
+from app.schemas.bot import BotCreate, BotListResponse, BotResponse, BotSummary, MeetingAnalysis, AIUsageSummary, AIUsageEntry
 from app.services import bot_service, intelligence_service
 
 logger = logging.getLogger(__name__)
@@ -77,6 +77,10 @@ def _bot_to_summary(bot: Bot) -> BotSummary:
         live_transcription=bool(getattr(bot, "live_transcription", False)),
         extra_metadata=bot.extra_metadata or {},
         is_demo_transcript=_is_demo(bot),
+        ai_total_tokens=bot.ai_total_tokens or 0,
+        ai_total_cost_usd=bot.ai_total_cost_usd or 0.0,
+        ai_primary_model=bot.ai_primary_model,
+        meeting_duration_s=bot.meeting_duration_s or 0.0,
     )
 
 
@@ -108,6 +112,13 @@ def _bot_to_response(bot: Bot) -> BotResponse:
         live_transcription=bool(getattr(bot, "live_transcription", False)),
         extra_metadata=bot.extra_metadata or {},
         is_demo_transcript=_is_demo(bot),
+        ai_usage=AIUsageSummary(
+            total_tokens=bot.ai_total_tokens or 0,
+            total_cost_usd=bot.ai_total_cost_usd or 0.0,
+            primary_model=bot.ai_primary_model,
+            meeting_duration_s=bot.meeting_duration_s or 0.0,
+            operations=[AIUsageEntry(**r) for r in (bot.ai_usage or [])],
+        ),
     )
 
 

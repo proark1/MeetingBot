@@ -78,6 +78,15 @@ class Settings(BaseSettings):
     # Recording retention — delete WAV files older than this many days (0 = keep forever)
     RECORDING_RETENTION_DAYS: int = 30
 
+    # ── Billing / Stripe ──────────────────────────────────────────────────────
+    STRIPE_SECRET_KEY: str = ""          # sk_live_... or sk_test_...
+    STRIPE_WEBHOOK_SECRET: str = ""      # whsec_... for verifying Stripe webhook signatures
+    STRIPE_PRICE_PER_MEETING: int = 0    # cents — flat fee per meeting (0 = free)
+    STRIPE_PRICE_PER_1K_TOKENS: int = 0  # cents — usage-based per 1K AI tokens (0 = free)
+    # Markup multiplier applied on top of raw AI cost for billing purposes.
+    # E.g. 2.0 means you charge 2× what the AI providers charge you.
+    BILLING_COST_MARKUP: float = 2.0
+
     model_config = {"env_file": ".env", "extra": "ignore"}
 
 

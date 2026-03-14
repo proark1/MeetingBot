@@ -27,6 +27,7 @@ from app.api.ws import manager as ws_manager
 from app.services import intelligence_service, webhook_service
 from app.services.browser_bot import run_browser_bot
 from app.services.transcription_service import transcribe_audio
+from app.services.intelligence_service import collect_usage
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +123,25 @@ def detect_platform(url: str) -> str:
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _flush_ai_usage(bot: Bot) -> None:
+    """Collect any pending AI usage records and merge them into the bot."""
+    records = collect_usage()
+    if not records:
+        return
+    existing = list(bot.ai_usage or [])
+    existing.extend(records)
+    bot.ai_usage = existing
+    bot.ai_total_tokens = sum(r.get("total_tokens", 0) for r in existing)
+    bot.ai_total_cost_usd = round(sum(r.get("cost_usd", 0) for r in existing), 6)
+    # Set primary model to the one used most (by token count)
+    model_tokens: dict[str, int] = {}
+    for r in existing:
+        m = r.get("model", "")
+        model_tokens[m] = model_tokens.get(m, 0) + r.get("total_tokens", 0)
+    if model_tokens:
+        bot.ai_primary_model = max(model_tokens, key=model_tokens.get)
 
 
 async def _set_status(db: AsyncSession, bot: Bot, status: str, **kwargs) -> None:
@@ -227,6 +247,9 @@ async def _salvage_and_finish(
             bot.recording_path = audio_path
         bot.updated_at = _now()
         await db.commit()
+
+    # Flush any AI usage accumulated during salvage
+    _flush_ai_usage(bot)
 
     # ── final status ───────────────────────────────────────────────────────
     await _set_status(db, bot, final_status, ended_at=bot.ended_at or _now(), **status_kwargs)
@@ -469,6 +492,9 @@ async def run_bot_lifecycle(bot_id: str, db_factory) -> None:
                     )
                 bot.extra_metadata = {**(bot.extra_metadata or {}), "is_demo_transcript": True}
 
+            # Flush AI usage from transcription phase
+            _flush_ai_usage(bot)
+
             # ── 3. Store transcript + participants ────────────────────────
             bot.transcript = transcript
             # Derive participants: prefer scraped names, fall back to transcript speakers.
@@ -555,6 +581,9 @@ async def run_bot_lifecycle(bot_id: str, db_factory) -> None:
                 else:
                     bot.chapters = chapters_result or []
 
+                # Flush AI usage from analysis phase
+                _flush_ai_usage(bot)
+
                 bot.updated_at = _now()
                 await db.commit()
                 await webhook_service.dispatch_event(db, "bot.analysis_ready", {"bot_id": bot_id})
@@ -619,6 +648,12 @@ async def run_bot_lifecycle(bot_id: str, db_factory) -> None:
                         logger.warning("Speaker profile upsert failed for bot %s: %s", bot_id, sp_exc)
 
             # ── 7. done ───────────────────────────────────────────────────
+            # Compute meeting duration from started_at → ended_at
+            if bot.started_at and bot.ended_at:
+                _start = bot.started_at.replace(tzinfo=timezone.utc) if bot.started_at.tzinfo is None else bot.started_at
+                _end = bot.ended_at.replace(tzinfo=timezone.utc) if bot.ended_at.tzinfo is None else bot.ended_at
+                bot.meeting_duration_s = round((_end - _start).total_seconds(), 1)
+
             await _set_status(db, bot, "done")
             logger.info("Bot %s done", bot_id)
 

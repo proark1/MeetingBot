@@ -9,9 +9,40 @@ If neither key is configured the service returns stub/empty results.
 
 import json
 import logging
+import time
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# ── Cost-per-token pricing (USD) ─────────────────────────────────────────────
+# Updated as of March 2026.  Keys match model IDs returned by the providers.
+_PRICING: dict[str, dict[str, float]] = {
+    "claude-opus-4-6":     {"input": 15.0 / 1_000_000, "output": 75.0 / 1_000_000},
+    "claude-sonnet-4-6":   {"input": 3.0 / 1_000_000,  "output": 15.0 / 1_000_000},
+    "claude-haiku-4-5":    {"input": 0.80 / 1_000_000, "output": 4.0 / 1_000_000},
+    "gemini-2.5-flash":    {"input": 0.15 / 1_000_000, "output": 0.60 / 1_000_000},
+    "gemini-2.0-flash":    {"input": 0.10 / 1_000_000, "output": 0.40 / 1_000_000},
+}
+
+def _estimate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
+    """Return estimated USD cost for a model call."""
+    pricing = _PRICING.get(model, {"input": 0.0, "output": 0.0})
+    return input_tokens * pricing["input"] + output_tokens * pricing["output"]
+
+
+# Accumulated usage records for the current bot session.  The bot_service
+# calls collect_usage() after each AI phase and resets via reset_usage().
+_usage_records: list[dict[str, Any]] = []
+
+def record_usage(entry: dict[str, Any]) -> None:
+    """Append a usage record (called internally after each AI call)."""
+    _usage_records.append(entry)
+
+def collect_usage() -> list[dict[str, Any]]:
+    """Return and clear all accumulated usage records."""
+    records = list(_usage_records)
+    _usage_records.clear()
+    return records
 
 _ANALYSIS_PROMPT = """You are an expert meeting analyst. Given a meeting transcript produce a
 structured JSON analysis. Be concise but thorough. Return ONLY valid JSON — no markdown fences,
@@ -126,17 +157,36 @@ def _strip_fences(text: str) -> str:
 
 # ── Claude implementations ─────────────────────────────────────────────────────
 
-async def _claude_complete(prompt: str, max_tokens: int = 4096, temperature: float = 1.0) -> str:
+async def _claude_complete(prompt: str, max_tokens: int = 4096, temperature: float = 1.0, operation: str = "unknown") -> str:
     """Call Claude and return the text response. Uses adaptive thinking for complex tasks."""
     client = _get_anthropic_client()
+    model_id = "claude-opus-4-6"
+    t0 = time.monotonic()
     stream = client.messages.stream(
-        model="claude-opus-4-6",
+        model=model_id,
         max_tokens=max_tokens,
         thinking={"type": "adaptive"},
         messages=[{"role": "user", "content": prompt}],
     )
     async with stream as s:
         message = await s.get_final_message()
+    duration_s = round(time.monotonic() - t0, 2)
+
+    input_tokens = getattr(message.usage, "input_tokens", 0)
+    output_tokens = getattr(message.usage, "output_tokens", 0)
+    cost = _estimate_cost(model_id, input_tokens, output_tokens)
+
+    record_usage({
+        "operation": operation,
+        "provider": "anthropic",
+        "model": model_id,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": input_tokens + output_tokens,
+        "cost_usd": round(cost, 6),
+        "duration_s": duration_s,
+    })
+
     for block in message.content:
         if block.type == "text":
             return block.text
@@ -161,6 +211,7 @@ async def _claude_analyze_transcript(
     text = await _claude_complete(
         f"{prompt}\n\nAnalyze this meeting transcript:\n\n{lines}",
         max_tokens=4096,
+        operation="analysis",
     )
     return json.loads(_strip_fences(text))
 
@@ -173,6 +224,7 @@ async def _claude_generate_chapters(transcript: list[dict[str, Any]]) -> list[di
     text = await _claude_complete(
         f"{_CHAPTERS_PROMPT}\n\nTranscript:\n{lines}",
         max_tokens=2048,
+        operation="chapters",
     )
     return json.loads(_strip_fences(text))
 
@@ -217,7 +269,7 @@ async def _claude_mention_response(
         "6. Return ONLY the answer text — no name prefix, no quotes, no preamble.\n\n"
         f"{context_label}\n{caption_context}"
     )
-    text = await _claude_complete(prompt, max_tokens=max_tokens)
+    text = await _claude_complete(prompt, max_tokens=max_tokens, operation="mention_response")
     if text.startswith("{") or text.endswith("}"):
         text = text.strip("{}").strip()
     return text.strip('"').strip("'")
@@ -235,6 +287,7 @@ async def _claude_ask_about_transcript(
         f"Be concise and specific. If the answer is not in the transcript, say so.\n\n"
         f"Question: {question}\n\nTranscript:\n{lines}",
         max_tokens=1024,
+        operation="ask_question",
     )
 
 
@@ -244,11 +297,30 @@ async def _claude_demo_transcript(meeting_url: str) -> list[dict[str, Any]]:
         f"Generate a realistic meeting transcript for a video call at: {meeting_url}\n"
         "Topics should feel natural for this kind of meeting. Include 3–4 distinct speakers.",
         max_tokens=8192,
+        operation="demo_transcript",
     )
     return json.loads(_strip_fences(text))
 
 
 # ── Gemini implementations (unchanged) ────────────────────────────────────────
+
+def _record_gemini_usage(response, operation: str, model_id: str = "gemini-2.5-flash", duration_s: float = 0.0) -> None:
+    """Extract usage from a Gemini response and record it."""
+    meta = getattr(response, "usage_metadata", None)
+    input_tokens = getattr(meta, "prompt_token_count", 0) or 0
+    output_tokens = getattr(meta, "candidates_token_count", 0) or 0
+    cost = _estimate_cost(model_id, input_tokens, output_tokens)
+    record_usage({
+        "operation": operation,
+        "provider": "google",
+        "model": model_id,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": input_tokens + output_tokens,
+        "cost_usd": round(cost, 6),
+        "duration_s": duration_s,
+    })
+
 
 async def _gemini_analyze_transcript(
     transcript: list[dict[str, Any]],
@@ -266,10 +338,12 @@ async def _gemini_analyze_transcript(
 
     prompt = prompt_override or _ANALYSIS_PROMPT
     model = _get_gemini_model()
+    t0 = time.monotonic()
     response = await model.generate_content_async(
         f"{prompt}\n\nAnalyze this meeting transcript:\n\n{lines}",
         generation_config={"temperature": 0.2, "max_output_tokens": 4096},
     )
+    _record_gemini_usage(response, "analysis", duration_s=round(time.monotonic() - t0, 2))
     return json.loads(_strip_fences(response.text))
 
 
@@ -279,10 +353,12 @@ async def _gemini_generate_chapters(transcript: list[dict[str, Any]]) -> list[di
         for e in transcript
     )
     model = _get_gemini_model()
+    t0 = time.monotonic()
     response = await model.generate_content_async(
         f"{_CHAPTERS_PROMPT}\n\nTranscript:\n{lines}",
         generation_config={"temperature": 0.2, "max_output_tokens": 2048},
     )
+    _record_gemini_usage(response, "chapters", duration_s=round(time.monotonic() - t0, 2))
     return json.loads(_strip_fences(response.text))
 
 
@@ -327,10 +403,12 @@ async def _gemini_mention_response(
         f"{context_label}\n{caption_context}"
     )
     model = _get_gemini_model()
+    t0 = time.monotonic()
     response = await model.generate_content_async(
         prompt,
         generation_config={"temperature": 0.4, "max_output_tokens": max_tokens},
     )
+    _record_gemini_usage(response, "mention_response", duration_s=round(time.monotonic() - t0, 2))
     text = response.text.strip()
     if text.startswith("{") or text.endswith("}"):
         text = text.strip("{}").strip()
@@ -345,23 +423,27 @@ async def _gemini_ask_about_transcript(
         for e in transcript
     )
     model = _get_gemini_model()
+    t0 = time.monotonic()
     response = await model.generate_content_async(
         f"You are a meeting assistant. Answer the following question based ONLY on the meeting transcript below. "
         f"Be concise and specific. If the answer is not in the transcript, say so.\n\n"
         f"Question: {question}\n\nTranscript:\n{lines}",
         generation_config={"temperature": 0.3, "max_output_tokens": 1024},
     )
+    _record_gemini_usage(response, "ask_question", duration_s=round(time.monotonic() - t0, 2))
     return response.text.strip()
 
 
 async def _gemini_demo_transcript(meeting_url: str) -> list[dict[str, Any]]:
     model = _get_gemini_model()
+    t0 = time.monotonic()
     response = await model.generate_content_async(
         f"{_DEMO_TRANSCRIPT_PROMPT}\n\n"
         f"Generate a realistic meeting transcript for a video call at: {meeting_url}\n"
         "Topics should feel natural for this kind of meeting. Include 3–4 distinct speakers.",
         generation_config={"temperature": 0.8, "max_output_tokens": 8192},
     )
+    _record_gemini_usage(response, "demo_transcript", duration_s=round(time.monotonic() - t0, 2))
     return json.loads(_strip_fences(response.text))
 
 
@@ -388,6 +470,7 @@ async def _claude_followup_email(
         f"Meeting analysis:\n{analysis_summary}\n\n"
         f"Transcript excerpt:\n{lines}",
         max_tokens=1024,
+        operation="followup_email",
     )
     return json.loads(_strip_fences(text))
 
@@ -408,6 +491,7 @@ async def _claude_meeting_brief(
         f"Agenda: {agenda or 'No agenda provided'}\n\n"
         f"{context}",
         max_tokens=1024,
+        operation="meeting_brief",
     )
     return json.loads(_strip_fences(text))
 
@@ -424,6 +508,7 @@ async def _claude_recurring_intelligence(
         f"Participants (typical): {', '.join(participants)}\n\n"
         f"Previous summaries:\n{summaries_text}",
         max_tokens=1024,
+        operation="recurring_intelligence",
     )
     return json.loads(_strip_fences(text))
 
@@ -446,6 +531,7 @@ async def _gemini_followup_email(
         f"Next steps: {analysis.get('next_steps', [])}"
     )
     model = _get_gemini_model()
+    t0 = time.monotonic()
     response = await model.generate_content_async(
         f"{_FOLLOWUP_EMAIL_PROMPT}\n\n"
         f"Participants: {', '.join(participants)}\n\n"
@@ -453,6 +539,7 @@ async def _gemini_followup_email(
         f"Transcript excerpt:\n{lines}",
         generation_config={"temperature": 0.3, "max_output_tokens": 1024},
     )
+    _record_gemini_usage(response, "followup_email", duration_s=round(time.monotonic() - t0, 2))
     return json.loads(_strip_fences(response.text))
 
 
@@ -467,6 +554,7 @@ async def _gemini_meeting_brief(
             f"- {s}" for s in previous_summaries[:3]
         )
     model = _get_gemini_model()
+    t0 = time.monotonic()
     response = await model.generate_content_async(
         f"{_BRIEF_PROMPT}\n\n"
         f"Participants: {', '.join(participants)}\n"
@@ -474,6 +562,7 @@ async def _gemini_meeting_brief(
         f"{context}",
         generation_config={"temperature": 0.3, "max_output_tokens": 1024},
     )
+    _record_gemini_usage(response, "meeting_brief", duration_s=round(time.monotonic() - t0, 2))
     return json.loads(_strip_fences(response.text))
 
 
@@ -485,12 +574,14 @@ async def _gemini_recurring_intelligence(
         f"Meeting {i + 1}: {s}" for i, s in enumerate(previous_summaries[:5])
     )
     model = _get_gemini_model()
+    t0 = time.monotonic()
     response = await model.generate_content_async(
         f"{_RECURRING_BRIEF_PROMPT}\n\n"
         f"Participants (typical): {', '.join(participants)}\n\n"
         f"Previous summaries:\n{summaries_text}",
         generation_config={"temperature": 0.3, "max_output_tokens": 1024},
     )
+    _record_gemini_usage(response, "recurring_intelligence", duration_s=round(time.monotonic() - t0, 2))
     return json.loads(_strip_fences(response.text))
 
 

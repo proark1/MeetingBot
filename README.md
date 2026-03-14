@@ -59,6 +59,11 @@ Set these in a `.env` file or as environment variables:
 | `TRANSCRIPTION_LANGUAGE` | *(empty = auto)* | BCP-47 language code for transcription, e.g. `es`, `fr`, `de`. Leave empty for Gemini auto-detection. |
 | `DIGEST_EMAIL` | *(empty)* | Comma-separated recipients for the weekly digest email (Mondays 09:00 UTC). Requires `SMTP_HOST`. |
 | `RECORDING_RETENTION_DAYS` | `30` | Auto-delete WAV recordings older than this many days. Set to `0` to keep recordings forever. |
+| `STRIPE_SECRET_KEY` | *(empty)* | Stripe API key (`sk_live_...` or `sk_test_...`). Required for billing features. |
+| `STRIPE_WEBHOOK_SECRET` | *(empty)* | Stripe webhook signing secret (`whsec_...`). Required for webhook verification. |
+| `STRIPE_PRICE_PER_MEETING` | `0` | Flat fee per meeting in cents. Set to `0` to disable flat fees. |
+| `STRIPE_PRICE_PER_1K_TOKENS` | `0` | Per-1K-token fee in cents for usage-based billing. Set to `0` to disable. |
+| `BILLING_COST_MARKUP` | `2.0` | Multiplier applied on top of raw AI cost (e.g. `2.0` = charge 2× your AI cost). |
 
 ---
 
@@ -578,3 +583,85 @@ GET    /api/v1/speakers/{id}/meetings — meeting history for this speaker
 ```
 Speaker profiles are created and aggregated automatically after each completed meeting.
 They track cross-meeting stats: meeting count, total talk time, average talk %, questions asked.
+
+---
+
+### AI Usage & Billing
+
+Every bot response includes an `ai_usage` field with a full breakdown of AI token usage, cost, and model information:
+
+```json
+{
+  "ai_usage": {
+    "total_tokens": 15230,
+    "total_cost_usd": 0.0045,
+    "primary_model": "gemini-2.5-flash",
+    "meeting_duration_s": 1842.5,
+    "operations": [
+      {
+        "operation": "transcription",
+        "provider": "google",
+        "model": "gemini-2.5-flash",
+        "input_tokens": 8000,
+        "output_tokens": 3500,
+        "total_tokens": 11500,
+        "cost_usd": 0.0033,
+        "duration_s": 12.4
+      },
+      {
+        "operation": "analysis",
+        "provider": "anthropic",
+        "model": "claude-opus-4-6",
+        "input_tokens": 2500,
+        "output_tokens": 1230,
+        "total_tokens": 3730,
+        "cost_usd": 0.1298,
+        "duration_s": 8.2
+      }
+    ]
+  }
+}
+```
+
+List summaries (`GET /api/v1/bot`) include lightweight usage totals: `ai_total_tokens`, `ai_total_cost_usd`, `ai_primary_model`, `meeting_duration_s`.
+
+#### Usage summary
+```
+GET /api/v1/billing/usage?status=done&limit=100
+```
+Aggregated AI usage across all meetings: total tokens, cost, per-model breakdown, averages.
+
+#### Meeting charge breakdown
+```
+GET /api/v1/billing/meeting/{bot_id}
+```
+Returns the billing breakdown for a specific meeting: raw AI cost, markup, flat fee, token fee, and total charge.
+
+#### Create checkout (one-time payment)
+```
+POST /api/v1/billing/checkout
+{
+  "customer_email": "user@example.com",
+  "bot_id": "ea69a8bc-...",
+  "success_url": "https://app.example.com/success",
+  "cancel_url": "https://app.example.com/cancel"
+}
+```
+Creates a Stripe Checkout Session. Returns `{"checkout_url": "...", "session_id": "..."}`. Redirect the user to `checkout_url`.
+
+#### Create subscription (metered usage)
+```
+POST /api/v1/billing/subscribe
+{
+  "customer_email": "user@example.com",
+  "success_url": "https://app.example.com/success",
+  "cancel_url": "https://app.example.com/cancel"
+}
+```
+Creates a Stripe Checkout Session for a metered usage subscription. Usage is reported automatically.
+
+#### Stripe webhook
+```
+POST /api/v1/billing/webhook
+```
+Configure this URL in your Stripe dashboard to receive payment confirmations and failures.

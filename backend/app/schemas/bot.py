@@ -122,6 +122,31 @@ class BotCreate(BaseModel):
         return _reject_private_url(v)
 
 
+class AIUsageEntry(BaseModel):
+    """A single AI API call made during the bot lifecycle."""
+    operation: str = Field(description="What the call was for: transcription, analysis, chapters, etc.")
+    provider: str = Field(description="AI provider: 'anthropic' or 'google'.")
+    model: str = Field(description="Model ID used (e.g. 'claude-opus-4-6', 'gemini-2.5-flash').")
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    cost_usd: float = Field(default=0.0, description="Estimated cost in USD for this call.")
+    duration_s: float = Field(default=0.0, description="Wall-clock time for the API call.")
+
+    model_config = {"extra": "allow"}
+
+
+class AIUsageSummary(BaseModel):
+    """Aggregated AI usage for a meeting session."""
+    total_tokens: int = 0
+    total_cost_usd: float = Field(default=0.0, description="Total estimated cost in USD.")
+    primary_model: str | None = Field(default=None, description="Model used for the majority of tokens.")
+    meeting_duration_s: float = Field(default=0.0, description="Meeting duration in seconds.")
+    operations: list[AIUsageEntry] = Field(default=[], description="Per-operation breakdown.")
+
+    model_config = {"extra": "allow"}
+
+
 class MeetingAnalysis(BaseModel):
     summary: str = ""
     key_points: list[str] = []
@@ -158,6 +183,10 @@ class BotSummary(BaseModel):
     live_transcription: bool = False
     extra_metadata: dict[str, Any] = {}
     is_demo_transcript: bool = False
+    ai_total_tokens: int = Field(default=0, description="Total AI tokens used across all operations.")
+    ai_total_cost_usd: float = Field(default=0.0, description="Total estimated AI cost in USD.")
+    ai_primary_model: str | None = Field(default=None, description="Primary AI model used.")
+    meeting_duration_s: float = Field(default=0.0, description="Meeting duration in seconds.")
 
     model_config = {"from_attributes": True}
 
@@ -231,6 +260,10 @@ class BotResponse(BaseModel):
     is_demo_transcript: bool = Field(
         default=False,
         description="True when the transcript was AI-generated because no real audio was captured.",
+    )
+    ai_usage: AIUsageSummary | None = Field(
+        default=None,
+        description="AI usage breakdown: tokens, cost, model, and per-operation detail.",
     )
 
     model_config = {"from_attributes": True}
