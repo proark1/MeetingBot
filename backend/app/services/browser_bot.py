@@ -3282,7 +3282,22 @@ async def run_browser_bot(
             # silently killed transcription for up to 15 s before the fallback ran.
 
             # ── Session A: VAD streaming transcription ─────────────────────────
-            if (live_transcription or respond_on_mention) and _gemini_available:
+            # Run the VAD loop whenever Gemini is available, regardless of
+            # respond_on_mention / live_transcription settings.  The loop serves
+            # two purposes:
+            #   1. Populate live_transcript for voice-based mention detection
+            #      (used by _mention_monitor when respond_on_mention=True).
+            #   2. Populate structured_transcript as a fallback in case batch
+            #      Gemini transcription after the meeting is sparse or fails.
+            # Without this, external callers that set respond_on_mention=False
+            # (pure transcription bots) receive no voice detection during the
+            # call and lose the live-transcript fallback.
+            #
+            # Real-time DB saves via on_live_transcript_entry are only triggered
+            # when live_transcription=True or respond_on_mention=True so the API
+            # contract ("audio only transcribed after meeting when both are False")
+            # is preserved.
+            if _gemini_available:
                 logger.info(
                     "Starting VAD streaming transcription loop for bot '%s'", bot_name
                 )
@@ -3291,7 +3306,11 @@ async def run_browser_bot(
                         audio_path,
                         live_transcript,
                         structured_transcript,
-                        on_transcript_entry=on_live_transcript_entry,
+                        on_transcript_entry=(
+                            on_live_transcript_entry
+                            if (live_transcription or respond_on_mention)
+                            else None
+                        ),
                     )
                 )
 
