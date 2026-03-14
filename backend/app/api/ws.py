@@ -30,7 +30,9 @@ class ConnectionManager:
 
         async def _send(ws: WebSocket) -> WebSocket | None:
             try:
-                await ws.send_text(message)
+                # 5-second timeout prevents slow/unresponsive clients from
+                # blocking the event loop and delaying all other broadcasts.
+                await asyncio.wait_for(ws.send_text(message), timeout=5.0)
                 return None
             except Exception as exc:
                 logger.debug("WS send failed — dropping connection: %s", exc)

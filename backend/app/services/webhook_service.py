@@ -30,7 +30,9 @@ def _get_client() -> httpx.AsyncClient:
     if _http_client is None or _http_client.is_closed:
         _http_client = httpx.AsyncClient(
             timeout=settings.WEBHOOK_TIMEOUT_SECONDS,
-            follow_redirects=True,
+            # Do NOT follow redirects: a redirect could bypass the SSRF check
+            # by pointing to a private IP even when the registered URL is public.
+            follow_redirects=False,
         )
     return _http_client
 

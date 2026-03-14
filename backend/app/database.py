@@ -1,14 +1,23 @@
+import logging
+
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 
 from app.config import settings
 
+logger = logging.getLogger(__name__)
+
 engine = create_async_engine(
     settings.DATABASE_URL,
     echo=False,
-    connect_args={"timeout": 15},
+    # Increase connection timeout and pool size to handle concurrent bots
+    # (3 bots × several DB sessions each = need headroom above the default pool of 5)
+    connect_args={"timeout": 30},
     pool_pre_ping=True,
+    pool_size=10,
+    max_overflow=20,
+    pool_timeout=30,
 )
 
 AsyncSessionLocal = async_sessionmaker(
@@ -61,8 +70,10 @@ async def init_db():
         ]:
             try:
                 await conn.execute(text(stmt))
-            except Exception:
-                pass  # column already exists
+            except Exception as mig_exc:
+                # Most failures are benign "column already exists" — log at DEBUG
+                # so genuine schema errors (typos, wrong table names) are visible.
+                logger.debug("Migration skipped (already applied?): %s — %s", stmt, mig_exc)
 
         # Indexes on hot query columns (idempotent)
         for stmt in [

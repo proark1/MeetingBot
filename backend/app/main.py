@@ -74,6 +74,11 @@ async def lifespan(app: FastAPI):
             "⚠ SECRET_KEY is using the insecure default value — set a strong random "
             "SECRET_KEY in your environment variables before deploying to production."
         )
+    if not settings.API_KEY:
+        logger.warning(
+            "⚠ API_KEY is not set — all /api/v1/* endpoints are UNAUTHENTICATED. "
+            "Set API_KEY in your environment variables to enable Bearer-token auth."
+        )
 
     # Register SIGTERM handler to clean up orphaned browser subprocesses
     # (ffmpeg, Xvfb) that may be left running when Railway redeploys the container.

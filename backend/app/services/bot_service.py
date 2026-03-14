@@ -288,17 +288,27 @@ async def run_bot_lifecycle(bot_id: str, db_factory) -> None:
                 # comes first, so the transcript builds up in real-time.
                 _live_buffer: list = []
                 _last_flush: float = time.monotonic()
+                _live_lock = asyncio.Lock()
 
                 async def on_live_entry(entry: dict) -> None:
                     nonlocal _last_flush
-                    _live_buffer.append(entry)
+                    # Lock prevents a race between append and the list copy
+                    # during flush when both coroutines run on the same loop.
+                    async with _live_lock:
+                        _live_buffer.append(entry)
+                        should_flush = (
+                            len(_live_buffer) >= 10
+                            or time.monotonic() - _last_flush >= 30
+                        )
                     # Push entry immediately to connected WebSocket clients for live display
                     await ws_manager.broadcast(
                         "bot.live_transcript",
                         {"bot_id": bot_id, "entry": entry},
                     )
-                    if len(_live_buffer) >= 10 or time.monotonic() - _last_flush >= 30:
-                        bot.transcript = list(_live_buffer)
+                    if should_flush:
+                        async with _live_lock:
+                            snapshot = list(_live_buffer)
+                        bot.transcript = snapshot
                         bot.updated_at = _now()
                         try:
                             await db.commit()
@@ -361,8 +371,10 @@ async def run_bot_lifecycle(bot_id: str, db_factory) -> None:
 
                 # Final flush of live transcript buffer so no entries are lost
                 # before the batch transcription overwrites bot.transcript.
-                if _live_buffer:
-                    bot.transcript = list(_live_buffer)
+                async with _live_lock:
+                    final_buffer = list(_live_buffer)
+                if final_buffer:
+                    bot.transcript = final_buffer
                     bot.updated_at = _now()
                     try:
                         await db.commit()
@@ -443,6 +455,14 @@ async def run_bot_lifecycle(bot_id: str, db_factory) -> None:
                 transcript = await intelligence_service.generate_demo_transcript(
                     bot.meeting_url
                 )
+                if not transcript:
+                    logger.warning(
+                        "Bot %s: demo transcript generation returned empty result", bot_id
+                    )
+                    bot.error_message = (
+                        (bot.error_message or "") +
+                        " Demo transcript generation returned no content."
+                    )
                 bot.extra_metadata = {**(bot.extra_metadata or {}), "is_demo_transcript": True}
 
             # ── 3. Store transcript + participants ────────────────────────

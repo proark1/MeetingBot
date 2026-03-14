@@ -28,7 +28,7 @@ Set these in a `.env` file or as environment variables:
 |---|---|---|
 | `ANTHROPIC_API_KEY` | *(empty)* | Anthropic API key — enables Claude (`claude-opus-4-6`) for meeting analysis. Takes precedence over Gemini when both keys are set. |
 | `GEMINI_API_KEY` | *(empty)* | Google Gemini API key — used for transcription and analysis when `ANTHROPIC_API_KEY` is not set. |
-| `API_KEY` | *(empty = no auth)* | If set, all `/api/v1/*` requests must include `Authorization: Bearer <API_KEY>`. Leave empty to disable. |
+| `API_KEY` | *(empty = no auth)* | If set, all `/api/v1/*` requests must include `Authorization: Bearer <API_KEY>`. Leave empty to disable. A warning is logged at startup when unset. |
 | `CORS_ORIGINS` | `*` | Comma-separated allowed origins, e.g. `https://app.example.com,https://admin.example.com`. `*` allows all origins. |
 | `MAX_CONCURRENT_BOTS` | `3` | Maximum number of browser bots running simultaneously. Returns 429 if exceeded. |
 | `BOT_JOIN_MAX_RETRIES` | `2` | Number of retry attempts if the bot fails to join before being admitted. |
@@ -108,7 +108,7 @@ POST /api/v1/bot
 `live_transcription` — when `true`, the bot transcribes audio in 15-second rolling chunks **during** the call using Gemini inline audio. This gives the bot real-time meeting context (it can answer "what did we just discuss?") and enables voice-based bot-name detection without relying on DOM captions. Requires `GEMINI_API_KEY`. Default `false` — audio is only transcribed after the meeting ends.
 
 `template_id` — optional ID of a meeting template (see `/api/v1/templates`). Templates customise the AI analysis prompt. Use `seed-customized` together with `prompt_override` to supply an inline one-off prompt without creating a saved template.
-`prompt_override` — required when `template_id` is `seed-customized`; ignored for all other templates. A custom AI analysis prompt written inline in the bot-creation request.
+`prompt_override` — required when `template_id` is `seed-customized`; ignored for all other templates. A custom AI analysis prompt written inline in the bot-creation request. Maximum 8000 characters.
 `vocabulary` — optional list of domain-specific terms to hint at during transcription.
 `extra_metadata` — arbitrary JSON object stored with the bot record and returned in all responses.
 
