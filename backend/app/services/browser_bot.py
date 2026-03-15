@@ -2243,10 +2243,25 @@ async def _streaming_transcription_loop(
                     100.0 * _total_speech_frames / max(1, _total_frames_processed),
                 )
                 if _total_speech_frames == 0:
+                    # Sample the last chunk of audio to report actual amplitude so
+                    # we can distinguish "silent content" (PulseAudio routing works
+                    # but no one spoke) from "zero-filled buffer" (routing broken).
+                    try:
+                        _diag_window = new_data[max(0, offset - FRAME_BYTES * 10): offset]
+                        if len(_diag_window) >= 2:
+                            _n = len(_diag_window) // 2
+                            _samples = struct.unpack_from(f"<{_n}h", _diag_window)
+                            _peak = max(abs(s) for s in _samples)
+                            _rms  = int((_peak + sum(abs(s) for s in _samples) / _n) / 2)
+                        else:
+                            _peak, _rms = 0, 0
+                    except Exception:
+                        _peak, _rms = -1, -1
                     logger.warning(
                         "VAD: zero speech frames detected in %.0f s — "
-                        "audio may be silent; check PulseAudio routing and Chrome audio output",
-                        audio_s,
+                        "audio may be silent; check PulseAudio routing and Chrome audio output "
+                        "(last-chunk peak=%d, avg-abs=%d; if both are 0 the sink is recording silence)",
+                        audio_s, _peak, _rms,
                     )
 
         except asyncio.CancelledError:
@@ -2908,6 +2923,7 @@ async def _wait_for_meeting_end(
     alone_since: Optional[float] = None
     _last_participant_scrape = 0.0
     _last_audio_routing_sync = 0.0   # tracks last PulseAudio re-routing
+    _last_audio_unmute = 0.0          # tracks last JS audio element unmute
 
     while time.monotonic() < deadline:
         try:
@@ -2930,6 +2946,28 @@ async def _wait_for_meeting_end(
             await asyncio.get_event_loop().run_in_executor(
                 None, functools.partial(_sync_chrome_audio_routing, pulse_sink, pulse_mic, pulse_source)
             )
+
+        # ── Periodic audio element unmuting (every 15s) ───────────────────
+        # Google Meet creates new <audio> elements as participants join.  In
+        # headless/automated Chrome these start muted; re-running the unmute
+        # JS ensures every participant's audio reaches the PulseAudio sink.
+        if now - _last_audio_unmute >= 15:
+            _last_audio_unmute = now
+            try:
+                await page.evaluate("""
+                    async () => {
+                        document.querySelectorAll('audio, video').forEach(el => {
+                            el.muted  = false;
+                            el.volume = 1.0;
+                            el.play().catch(() => {});
+                        });
+                        if (window._mbAudioCtx && window._mbAudioCtx.state !== 'running') {
+                            try { await window._mbAudioCtx.resume(); } catch(e) {}
+                        }
+                    }
+                """)
+            except Exception:
+                pass  # page may be closing; ignore
 
         # ── Participant name scraping (every 30s) ─────────────────────────
         if participants is not None and now - _last_participant_scrape >= 30:
@@ -3150,7 +3188,10 @@ async def run_browser_bot(
                             var ctx = getCtx();
                             var src = ctx.createMediaStreamSource(stream);
                             src.connect(ctx.destination);
-                        } catch (_) {}
+                            console.log('[MeetingBot] Audio track connected to AudioContext, state=' + ctx.state);
+                        } catch (err) {
+                            console.warn('[MeetingBot] Failed to connect audio track:', err);
+                        }
                     });
                     return pc;
                 }
