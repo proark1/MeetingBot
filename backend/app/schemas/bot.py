@@ -217,3 +217,14 @@ class BotListResponse(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+class Highlight(BaseModel):
+    type: str
+    text: str
+    detail: dict[str, Any] = {}
+
+
+class HighlightResponse(BaseModel):
+    bot_id: str
+    highlights: list[Highlight]

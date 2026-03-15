@@ -118,6 +118,7 @@ Or receive them via your `webhook_url` — a POST with the full payload is deliv
 | `DELETE` | `/api/v1/bot/{id}` | Stop & remove a bot |
 | `GET` | `/api/v1/bot/{id}/transcript` | Raw transcript only |
 | `GET` | `/api/v1/bot/{id}/recording` | Download WAV audio |
+| `GET` | `/api/v1/bot/{id}/highlight` | Curated highlights (key points, action items, decisions) |
 | `POST` | `/api/v1/bot/{id}/analyze` | Re-run AI analysis |
 | `POST` | `/api/v1/bot/{id}/ask` | Q&A on the transcript |
 | `POST` | `/api/v1/bot/{id}/followup-email` | Draft follow-up email |

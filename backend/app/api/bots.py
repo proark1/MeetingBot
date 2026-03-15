@@ -14,6 +14,7 @@ from app.config import settings
 from app.schemas.bot import (
     BotCreate, BotListResponse, BotResponse, BotSummary,
     MeetingAnalysis, AIUsageSummary, AIUsageEntry,
+    Highlight, HighlightResponse,
 )
 from app.services import bot_service, intelligence_service
 from app.store import store, BotSession, _now
@@ -333,6 +334,33 @@ async def analyze_bot(bot_id: str, payload: AnalyzeRequest = AnalyzeRequest()):
     )
     await store.update_bot(bot_id, analysis=analysis)
     return MeetingAnalysis(**analysis)
+
+
+# ── GET /api/v1/bot/{id}/highlight ───────────────────────────────────────────
+
+@router.get("/{bot_id}/highlight", response_model=HighlightResponse)
+async def get_highlights(bot_id: str):
+    """Return curated meeting highlights derived from AI analysis.
+
+    Aggregates key points, action items, and decisions into a flat highlight list.
+    Returns 425 if analysis is not yet available.
+    """
+    bot = await _get_or_404(bot_id)
+    bot = await _wait_for_transcript(bot)
+    if not bot.analysis:
+        raise HTTPException(
+            status_code=425,
+            detail="Analysis not yet available",
+            headers={"Retry-After": "10"},
+        )
+    highlights: list[Highlight] = []
+    for kp in bot.analysis.get("key_points", []):
+        highlights.append(Highlight(type="key_point", text=kp))
+    for ai in bot.analysis.get("action_items", []):
+        highlights.append(Highlight(type="action_item", text=ai.get("task", str(ai)), detail=ai))
+    for d in bot.analysis.get("decisions", []):
+        highlights.append(Highlight(type="decision", text=d))
+    return HighlightResponse(bot_id=bot_id, highlights=highlights)
 
 
 # ── POST /api/v1/bot/{id}/ask ─────────────────────────────────────────────────
