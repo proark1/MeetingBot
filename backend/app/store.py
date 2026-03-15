@@ -28,7 +28,7 @@ class BotSession:
     meeting_url: str
     meeting_platform: str
     bot_name: str
-    status: str  # ready | scheduled | queued | joining | in_call | call_ended | done | error | cancelled
+    status: str  # ready | scheduled | queued | joining | in_call | call_ended | transcribing | done | error | cancelled
 
     # Per-bot webhook — called once when bot reaches a terminal state
     webhook_url: Optional[str] = None

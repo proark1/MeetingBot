@@ -199,9 +199,9 @@ Pass `template` in bot creation. Use `prompt_override` for a fully custom prompt
 ## Bot lifecycle
 
 ```
-ready → joining → in_call → call_ended → done
-                                       ↘ error
-                                       ↘ cancelled
+ready → joining → in_call → call_ended → transcribing → done
+                                                      ↘ error
+                                                      ↘ cancelled
 ```
 
 The bot auto-leaves when it has been the only participant for `BOT_ALONE_TIMEOUT` seconds (default 5 min).

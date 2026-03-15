@@ -237,7 +237,7 @@ async def delete_bot(bot_id: str):
             await store.update_bot(bot_id, status="call_ended", ended_at=_now())
         task.cancel()
         try:
-            await asyncio.wait_for(asyncio.shield(task), timeout=5.0)
+            await asyncio.wait_for(asyncio.shield(task), timeout=30.0)
         except (asyncio.TimeoutError, asyncio.CancelledError):
             pass
         logger.info("Cancelled lifecycle task for bot %s", bot_id)
@@ -246,16 +246,37 @@ async def delete_bot(bot_id: str):
         await store.delete_bot(bot_id)
 
 
+# ── Helper: wait for transcription to finish ──────────────────────────────────
+
+async def _wait_for_transcript(bot: BotSession, timeout: int = 25) -> BotSession:
+    """If the bot is actively transcribing, block until it finishes (or timeout)."""
+    for _ in range(timeout):
+        if bot.status != "transcribing":
+            break
+        await asyncio.sleep(1)
+        refreshed = await store.get_bot(bot.id)
+        if refreshed is None:
+            break
+        bot = refreshed
+    return bot
+
+
 # ── GET /api/v1/bot/{id}/transcript ──────────────────────────────────────────
 
 @router.get("/{bot_id}/transcript")
 async def get_transcript(bot_id: str):
-    """Get the raw transcript (available once status is `done` or `call_ended`)."""
+    """Get the raw transcript.
+
+    If transcription is still running, this request blocks until it finishes
+    (up to 25 s) and then returns the result automatically.
+    """
     bot = await _get_or_404(bot_id)
+    bot = await _wait_for_transcript(bot)
     if bot.status not in ("call_ended", "done", "cancelled"):
         raise HTTPException(
             status_code=425,
             detail=f"Transcript not yet available (status: {bot.status})",
+            headers={"Retry-After": "5"},
         )
     return {"bot_id": bot_id, "transcript": bot.transcript}
 
@@ -287,16 +308,19 @@ class AnalyzeRequest(BaseModel):
 async def analyze_bot(bot_id: str, payload: AnalyzeRequest = AnalyzeRequest()):
     """(Re-)run AI analysis on the transcript.
 
+    If transcription is still running, this request blocks until it finishes
+    (up to 25 s) before running analysis.
+
     Use this to switch templates or run a custom prompt on an existing transcript.
     """
     bot = await _get_or_404(bot_id)
+    bot = await _wait_for_transcript(bot)
     if not bot.transcript:
-        if bot.status == "call_ended":
-            raise HTTPException(
-                status_code=425,
-                detail="Transcription in progress — poll GET /api/v1/bot/{id} until status is 'done' or 'cancelled', then retry",
-            )
-        raise HTTPException(status_code=425, detail="No transcript available to analyse")
+        raise HTTPException(
+            status_code=425,
+            detail="No transcript available to analyse",
+            headers={"Retry-After": "10"},
+        )
 
     prompt = payload.prompt_override
     if not prompt and payload.template:

@@ -369,6 +369,7 @@ async def run_bot_lifecycle(bot_id: str) -> None:
                 logger.info("Bot %s: flushed %d live transcript entries", bot_id, len(_live_buffer))
 
             await _set_status(bot, "call_ended", ended_at=_now())
+            await store.update_bot(bot_id, status="transcribing")
             logger.info("Bot %s transcribing audio…", bot_id)
 
             transcript = await transcribe_audio(
@@ -402,6 +403,7 @@ async def run_bot_lifecycle(bot_id: str) -> None:
             await _set_status(bot, "in_call", started_at=_now())
             await asyncio.sleep(settings.BOT_SIMULATION_DURATION)
             await _set_status(bot, "call_ended", ended_at=_now())
+            await store.update_bot(bot_id, status="transcribing")
             transcript = await intelligence_service.generate_demo_transcript(bot.meeting_url)
             scraped_participants = []
             await store.update_bot(bot_id, is_demo_transcript=True)
@@ -468,6 +470,7 @@ async def run_bot_lifecycle(bot_id: str) -> None:
         logger.info("Bot %s cancelled — salvaging transcript", bot_id)
         bot = await store.get_bot(bot_id)
         if bot:
+            await store.update_bot(bot_id, status="transcribing")
             try:
                 await _do_analysis(bot, audio_path, use_real_bot)
                 _flush_ai_usage(bot)
@@ -490,6 +493,7 @@ async def run_bot_lifecycle(bot_id: str) -> None:
         logger.exception("Bot %s error: %s", bot_id, exc)
         bot = await store.get_bot(bot_id)
         if bot:
+            await store.update_bot(bot_id, status="transcribing")
             try:
                 await _do_analysis(bot, audio_path, use_real_bot)
                 _flush_ai_usage(bot)
