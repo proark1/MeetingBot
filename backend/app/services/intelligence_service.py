@@ -17,9 +17,9 @@ logger = logging.getLogger(__name__)
 # ── Cost-per-token pricing (USD) ─────────────────────────────────────────────
 # Updated as of March 2026.  Keys match model IDs returned by the providers.
 _PRICING: dict[str, dict[str, float]] = {
-    "claude-opus-4-6":     {"input": 15.0 / 1_000_000, "output": 75.0 / 1_000_000},
+    "claude-opus-4-6":     {"input": 5.0 / 1_000_000,  "output": 25.0 / 1_000_000},
     "claude-sonnet-4-6":   {"input": 3.0 / 1_000_000,  "output": 15.0 / 1_000_000},
-    "claude-haiku-4-5":    {"input": 0.80 / 1_000_000, "output": 4.0 / 1_000_000},
+    "claude-haiku-4-5":    {"input": 1.0 / 1_000_000,  "output": 5.0 / 1_000_000},
     "gemini-2.5-flash":    {"input": 0.15 / 1_000_000, "output": 0.60 / 1_000_000},
     "gemini-2.0-flash":    {"input": 0.10 / 1_000_000, "output": 0.40 / 1_000_000},
 }
