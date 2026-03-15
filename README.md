@@ -128,6 +128,8 @@ Or receive them via your `webhook_url` — a POST with the full payload is deliv
 | `DELETE` | `/api/v1/webhook/{id}` | Remove webhook |
 | `POST` | `/api/v1/webhook/{id}/test` | Test webhook delivery |
 | `GET` | `/api/v1/templates` | List analysis templates |
+| `GET` | `/api/v1/analytics` | Aggregate stats (bots, durations, AI cost) |
+| `GET` | `/api/v1/action-items/stats` | Aggregate action-item counts by assignee |
 | `GET` | `/api/health` | Health check |
 
 Full interactive docs: `GET /api/docs`

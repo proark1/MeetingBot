@@ -23,6 +23,7 @@ from app.api.webhooks import router as webhooks_router
 from app.api.exports import router as exports_router
 from app.api.templates import router as templates_router
 from app.api.ws import router as ws_router
+from app.api.analytics import router as analytics_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -145,11 +146,12 @@ app.add_middleware(
 )
 
 _auth = [Depends(require_api_key)]
-app.include_router(bots_router,     prefix="/api/v1", dependencies=_auth)
-app.include_router(webhooks_router, prefix="/api/v1", dependencies=_auth)
-app.include_router(exports_router,  prefix="/api/v1", dependencies=_auth)
+app.include_router(bots_router,      prefix="/api/v1", dependencies=_auth)
+app.include_router(webhooks_router,  prefix="/api/v1", dependencies=_auth)
+app.include_router(exports_router,   prefix="/api/v1", dependencies=_auth)
 app.include_router(templates_router, prefix="/api/v1", dependencies=_auth)
-app.include_router(ws_router,       prefix="/api/v1")  # WS auth handled separately
+app.include_router(analytics_router, prefix="/api/v1", dependencies=_auth)
+app.include_router(ws_router,        prefix="/api/v1")  # WS auth handled separately
 
 
 # ── Health ────────────────────────────────────────────────────────────────────

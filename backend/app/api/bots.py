@@ -291,6 +291,11 @@ async def analyze_bot(bot_id: str, payload: AnalyzeRequest = AnalyzeRequest()):
     """
     bot = await _get_or_404(bot_id)
     if not bot.transcript:
+        if bot.status == "call_ended":
+            raise HTTPException(
+                status_code=425,
+                detail="Transcription in progress — poll GET /api/v1/bot/{id} until status is 'done' or 'cancelled', then retry",
+            )
         raise HTTPException(status_code=425, detail="No transcript available to analyse")
 
     prompt = payload.prompt_override
