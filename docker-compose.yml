@@ -8,22 +8,20 @@ services:
     volumes:
       - ./backend:/app
       - ./frontend:/frontend
-      - meetingbot_db:/app/data
+      - meetingbot_data:/app/data
     environment:
-      # AI providers — set either (or both); Anthropic takes precedence when both are set
+      # AI providers — set at least one; Anthropic takes precedence when both are set
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-      # Database — defaults to local SQLite for dev.
-      # In production (Railway/Supabase) set DATABASE_URL or SUPABASE_* in your environment;
-      # the variable below falls back to SQLite only when DATABASE_URL is not set.
-      - DATABASE_URL=${DATABASE_URL:-sqlite+aiosqlite:////app/data/meetingbot.db}
-      # Supabase alternative — set these instead of DATABASE_URL when using Supabase
-      - SUPABASE_URL=${SUPABASE_URL:-}
-      - SUPABASE_DB_PASSWORD=${SUPABASE_DB_PASSWORD:-}
+      # Optional API key for client authentication (Bearer token)
+      - API_KEY=${API_KEY:-}
+      # CORS origins (comma-separated; "*" = allow all)
+      - CORS_ORIGINS=${CORS_ORIGINS:-*}
       # Bot behaviour
       - BOT_SIMULATION_DURATION=${BOT_SIMULATION_DURATION:-60}
       - BOT_ADMISSION_TIMEOUT=${BOT_ADMISSION_TIMEOUT:-300}
       - BOT_MAX_DURATION=${BOT_MAX_DURATION:-7200}
+      - MAX_CONCURRENT_BOTS=${MAX_CONCURRENT_BOTS:-3}
       - PULSE_RUNTIME_PATH=/tmp/pulse
     # Chromium requires extra shared memory
     shm_size: "2gb"
@@ -31,4 +29,4 @@ services:
     restart: unless-stopped
 
 volumes:
-  meetingbot_db:
+  meetingbot_data:

@@ -1,4 +1,4 @@
-"""Webhook delivery service — fires HTTP POST to registered endpoints with retry."""
+"""Webhook delivery service — fires HTTP POST to registered endpoints."""
 
 import asyncio
 import hashlib
@@ -8,20 +8,15 @@ import logging
 from datetime import datetime, timezone
 
 import httpx
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.ws import manager as ws_manager
 from app.config import settings
-from app.models.webhook import Webhook
 
 logger = logging.getLogger(__name__)
 
 _MAX_RETRIES = 3
-_RETRY_DELAYS = [1, 3, 8]  # seconds between attempts
+_RETRY_DELAYS = [1, 3, 8]
 
-# Persistent client — reused across all webhook deliveries to avoid the
-# connection-pool warmup cost of creating a new client on every status change.
 _http_client: httpx.AsyncClient | None = None
 
 
@@ -30,83 +25,15 @@ def _get_client() -> httpx.AsyncClient:
     if _http_client is None or _http_client.is_closed:
         _http_client = httpx.AsyncClient(
             timeout=settings.WEBHOOK_TIMEOUT_SECONDS,
-            # Do NOT follow redirects: a redirect could bypass the SSRF check
-            # by pointing to a private IP even when the registered URL is public.
             follow_redirects=False,
         )
     return _http_client
 
 
 async def close_http_client() -> None:
-    """Close the persistent client on app shutdown."""
     global _http_client
     if _http_client and not _http_client.is_closed:
         await _http_client.aclose()
-
-
-async def dispatch_event(
-    db: AsyncSession,
-    event: str,
-    payload: dict,
-) -> None:
-    """Broadcast to WebSocket clients and deliver to all subscribed HTTP webhooks."""
-    # WebSocket — instant, best-effort
-    await ws_manager.broadcast(event, payload)
-
-    # HTTP webhooks — with retry, all delivered in parallel
-    result = await db.execute(
-        select(Webhook).where(Webhook.is_active == True)  # noqa: E712
-    )
-    webhooks = result.scalars().all()
-    if not webhooks:
-        return
-
-    body = json.dumps(
-        {"event": event, "data": payload, "ts": datetime.now(timezone.utc).isoformat()}
-    )
-    client = _get_client()
-
-    async def _deliver_one(wh: Webhook) -> tuple[Webhook, int | None] | None:
-        subscribed = wh.events == "*" or event in wh.events.split(",")
-        if not subscribed:
-            return None
-        headers = {"Content-Type": "application/json", "User-Agent": "MeetingBot/1.0"}
-        if wh.secret:
-            sig = hmac.new(
-                wh.secret.encode(), body.encode(), hashlib.sha256
-            ).hexdigest()
-            headers["X-MeetingBot-Signature"] = f"sha256={sig}"
-        status_code = await _deliver_with_retry(client, wh.url, body, headers)
-        return wh, status_code
-
-    results = await asyncio.gather(
-        *(_deliver_one(wh) for wh in webhooks),
-        return_exceptions=True,
-    )
-
-    for result in results:
-        if result is None or isinstance(result, Exception):
-            if isinstance(result, Exception):
-                logger.error("Unexpected error during webhook dispatch: %s", result)
-            continue
-        wh, status_code = result
-        wh.delivery_attempts += 1
-        wh.last_delivery_at = datetime.now(timezone.utc)
-        wh.last_delivery_status = status_code
-
-        # Track consecutive failures; auto-disable after 5
-        if status_code is None or status_code >= 500:
-            wh.consecutive_failures = (wh.consecutive_failures or 0) + 1
-            if wh.consecutive_failures >= 5:
-                wh.is_active = False
-                logger.warning(
-                    "Webhook %s auto-disabled after %d consecutive failures (url=%s)",
-                    wh.id, wh.consecutive_failures, wh.url,
-                )
-        else:
-            wh.consecutive_failures = 0
-
-    await db.commit()
 
 
 async def _deliver_with_retry(
@@ -115,8 +42,6 @@ async def _deliver_with_retry(
     body: str,
     headers: dict,
 ) -> int | None:
-    """Attempt delivery up to _MAX_RETRIES times with exponential backoff.
-    Returns the final HTTP status code, or None if all attempts failed."""
     for attempt in range(_MAX_RETRIES):
         try:
             resp = await client.post(url, content=body, headers=headers)
@@ -132,9 +57,75 @@ async def _deliver_with_retry(
                 "Webhook delivery error  url=%s  attempt=%d/%d  error=%s",
                 url, attempt + 1, _MAX_RETRIES, exc,
             )
-
         if attempt < _MAX_RETRIES - 1:
             await asyncio.sleep(_RETRY_DELAYS[attempt])
 
     logger.error("Webhook delivery failed after %d attempts  url=%s", _MAX_RETRIES, url)
     return None
+
+
+def _build_body(event: str, payload: dict) -> str:
+    return json.dumps({"event": event, "data": payload, "ts": datetime.now(timezone.utc).isoformat()})
+
+
+def _sign(body: str, secret: str) -> str:
+    return "sha256=" + hmac.new(secret.encode(), body.encode(), hashlib.sha256).hexdigest()
+
+
+async def dispatch_event(
+    event: str,
+    payload: dict,
+    extra_webhook_url: str | None = None,
+) -> None:
+    """Broadcast to WebSocket clients and all active registered webhooks.
+
+    If `extra_webhook_url` is set (per-bot webhook), it is also called.
+    """
+    # WebSocket — instant, best-effort
+    await ws_manager.broadcast(event, payload)
+
+    from app.store import store
+
+    body = _build_body(event, payload)
+    client = _get_client()
+    headers_base = {"Content-Type": "application/json", "User-Agent": "MeetingBot/1.0"}
+
+    # Build list of (url, optional_secret, webhook_entry_or_none)
+    targets: list[tuple[str, str | None, object | None]] = []
+
+    for wh in store.active_webhooks():
+        subscribed = wh.events == ["*"] or "*" in wh.events or event in wh.events
+        if subscribed:
+            targets.append((wh.url, wh.secret, wh))
+
+    if extra_webhook_url:
+        targets.append((extra_webhook_url, None, None))
+
+    if not targets:
+        return
+
+    async def _deliver_one(url: str, secret: str | None, wh_entry) -> None:
+        headers = dict(headers_base)
+        if secret:
+            headers["X-MeetingBot-Signature"] = _sign(body, secret)
+        status_code = await _deliver_with_retry(client, url, body, headers)
+        # Update stats on global webhook entries
+        if wh_entry is not None:
+            wh_entry.delivery_attempts += 1
+            wh_entry.last_delivery_at = datetime.now(timezone.utc)
+            wh_entry.last_delivery_status = status_code
+            if status_code is None or status_code >= 500:
+                wh_entry.consecutive_failures = (wh_entry.consecutive_failures or 0) + 1
+                if wh_entry.consecutive_failures >= 5:
+                    wh_entry.is_active = False
+                    logger.warning(
+                        "Webhook %s auto-disabled after %d consecutive failures",
+                        wh_entry.id, wh_entry.consecutive_failures,
+                    )
+            else:
+                wh_entry.consecutive_failures = 0
+
+    await asyncio.gather(
+        *(_deliver_one(url, secret, wh) for url, secret, wh in targets),
+        return_exceptions=True,
+    )

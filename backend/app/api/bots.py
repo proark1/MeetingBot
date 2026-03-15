@@ -1,47 +1,37 @@
-"""Bot management API — mirrors Recall.ai's /api/v1/bot endpoints."""
+"""Bot management API."""
 
 import asyncio
 import logging
-import secrets
-from typing import Annotated
+import uuid
+from datetime import datetime, timezone
+from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import select, func
-from sqlalchemy.orm import defer
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db, AsyncSessionLocal
-from app.models.bot import Bot
-from app.schemas.bot import BotCreate, BotListResponse, BotResponse, BotSummary, MeetingAnalysis, AIUsageSummary, AIUsageEntry
+from app.config import settings
+from app.schemas.bot import (
+    BotCreate, BotListResponse, BotResponse, BotSummary,
+    MeetingAnalysis, AIUsageSummary, AIUsageEntry,
+)
 from app.services import bot_service, intelligence_service
-
-
-class AskRequest(BaseModel):
-    question: str = Field(description="Free-form question to ask about the meeting transcript.")
-
-
-class BriefRequest(BaseModel):
-    agenda: str = Field(default="", description="Optional agenda or notes for the upcoming meeting.")
+from app.store import store, BotSession, _now
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/bot", tags=["Bots"])
 
-# Track running lifecycle tasks so we can cancel them (single-process only)
+# Running lifecycle tasks (single-process only)
 _running_tasks: dict[str, asyncio.Task] = {}
 
-# Queue of bot IDs waiting for a slot (FIFO)
+# FIFO queue of bot IDs waiting for a free slot
 _bot_queue: list[str] = []
 
-# Statuses treated as "active" for stats
-_ACTIVE_STATUSES = ("ready", "scheduled", "joining", "in_call", "call_ended")
+_ACTIVE_STATUSES = ("ready", "scheduled", "queued", "joining", "in_call", "call_ended")
 
 
 async def _queue_processor() -> None:
-    """Background loop: start queued bots whenever a slot is free."""
-    from app.config import settings
-
+    """Background loop: start queued bots when a slot is free."""
     while True:
         await asyncio.sleep(10)
         if not _bot_queue:
@@ -49,21 +39,17 @@ async def _queue_processor() -> None:
         active = sum(1 for t in _running_tasks.values() if not t.done())
         if active >= settings.MAX_CONCURRENT_BOTS:
             continue
-        # Claim a slot for the next queued bot
         bot_id = _bot_queue.pop(0)
-        task = asyncio.create_task(
-            bot_service.run_bot_lifecycle(bot_id, AsyncSessionLocal)
-        )
+        await store.update_bot(bot_id, status="joining")
+        task = asyncio.create_task(bot_service.run_bot_lifecycle(bot_id))
         _running_tasks[bot_id] = task
         task.add_done_callback(lambda _t, bid=bot_id: _running_tasks.pop(bid, None))
-        logger.info("Queue: started bot %s (queue length now %d)", bot_id, len(_bot_queue))
+        logger.info("Queue: started bot %s (%d remaining in queue)", bot_id, len(_bot_queue))
 
 
-def _is_demo(bot: Bot) -> bool:
-    return bool((bot.extra_metadata or {}).get("is_demo_transcript"))
+# ── Helper: session → response ────────────────────────────────────────────────
 
-
-def _bot_to_summary(bot: Bot) -> BotSummary:
+def _to_summary(bot: BotSession) -> BotSummary:
     return BotSummary(
         id=bot.id,
         meeting_url=bot.meeting_url,
@@ -75,25 +61,19 @@ def _bot_to_summary(bot: Bot) -> BotSummary:
         updated_at=bot.updated_at,
         started_at=bot.started_at,
         ended_at=bot.ended_at,
-        participants=bot.participants or [],
-        recording_url=bot.recording_url,
-        share_token=bot.share_token,
-        analysis_mode=bot.analysis_mode or "full",
-        respond_on_mention=bool(bot.respond_on_mention),
-        mention_response_mode=bot.mention_response_mode or "text",
-        tts_provider=bot.tts_provider or "edge",
-        start_muted=bool(getattr(bot, "start_muted", False)),
-        live_transcription=bool(getattr(bot, "live_transcription", False)),
-        extra_metadata=bot.extra_metadata or {},
-        is_demo_transcript=_is_demo(bot),
-        ai_total_tokens=bot.ai_total_tokens or 0,
-        ai_total_cost_usd=bot.ai_total_cost_usd or 0.0,
+        duration_seconds=bot.duration_seconds,
+        participants=bot.participants,
+        recording_available=bot.recording_available(),
+        analysis_mode=bot.analysis_mode,
+        is_demo_transcript=bot.is_demo_transcript,
+        metadata=bot.metadata,
+        ai_total_tokens=bot.ai_total_tokens,
+        ai_total_cost_usd=bot.ai_total_cost_usd,
         ai_primary_model=bot.ai_primary_model,
-        meeting_duration_s=bot.meeting_duration_s or 0.0,
     )
 
 
-def _bot_to_response(bot: Bot) -> BotResponse:
+def _to_response(bot: BotSession) -> BotResponse:
     return BotResponse(
         id=bot.id,
         meeting_url=bot.meeting_url,
@@ -105,48 +85,99 @@ def _bot_to_response(bot: Bot) -> BotResponse:
         updated_at=bot.updated_at,
         started_at=bot.started_at,
         ended_at=bot.ended_at,
-        participants=bot.participants or [],
-        transcript=bot.transcript or [],
+        duration_seconds=bot.duration_seconds,
+        participants=bot.participants,
+        transcript=bot.transcript,
         analysis=MeetingAnalysis(**bot.analysis) if bot.analysis else None,
-        chapters=bot.chapters or [],
-        speaker_stats=bot.speaker_stats or [],
-        recording_url=bot.recording_url,
-        recording_path=bot.recording_path,
-        share_token=bot.share_token,
-        analysis_mode=bot.analysis_mode or "full",
-        respond_on_mention=bool(bot.respond_on_mention),
-        mention_response_mode=bot.mention_response_mode or "text",
-        tts_provider=bot.tts_provider or "edge",
-        start_muted=bool(getattr(bot, "start_muted", False)),
-        live_transcription=bool(getattr(bot, "live_transcription", False)),
-        extra_metadata=bot.extra_metadata or {},
-        is_demo_transcript=_is_demo(bot),
+        chapters=bot.chapters,
+        speaker_stats=bot.speaker_stats,
+        recording_available=bot.recording_available(),
+        analysis_mode=bot.analysis_mode,
+        is_demo_transcript=bot.is_demo_transcript,
+        metadata=bot.metadata,
         ai_usage=AIUsageSummary(
-            total_tokens=bot.ai_total_tokens or 0,
-            total_cost_usd=bot.ai_total_cost_usd or 0.0,
+            total_tokens=bot.ai_total_tokens,
+            total_cost_usd=bot.ai_total_cost_usd,
             primary_model=bot.ai_primary_model,
-            meeting_duration_s=bot.meeting_duration_s or 0.0,
-            operations=[AIUsageEntry(**r) for r in (bot.ai_usage or [])],
+            operations=[AIUsageEntry(**r) for r in bot.ai_usage],
         ),
     )
 
 
-# ── GET /api/v1/bot/stats ────────────────────────────────────────────────────
-# Must be defined before /{bot_id} to avoid path conflict
+async def _get_or_404(bot_id: str) -> BotSession:
+    bot = await store.get_bot(bot_id)
+    if bot is None:
+        raise HTTPException(status_code=404, detail=f"Bot {bot_id!r} not found")
+    return bot
+
+
+# ── POST /api/v1/bot ──────────────────────────────────────────────────────────
+
+@router.post("", response_model=BotResponse, status_code=201)
+async def create_bot(payload: BotCreate):
+    """Create a new meeting bot.
+
+    The bot joins the meeting, records audio, transcribes with Gemini/Claude,
+    and delivers results to your `webhook_url` when done.
+
+    Poll `GET /api/v1/bot/{id}` until `status` is `done` (or `error`).
+
+    **Platforms supported for real recording:** Google Meet, Zoom, Microsoft Teams.
+    Other platforms run in demo mode (AI-generated sample transcript).
+    """
+    is_scheduled = (
+        payload.join_at is not None
+        and payload.join_at.replace(tzinfo=timezone.utc) > _now()
+    )
+
+    bot = BotSession(
+        id=str(uuid.uuid4()),
+        meeting_url=str(payload.meeting_url),
+        meeting_platform=bot_service.detect_platform(str(payload.meeting_url)),
+        bot_name=payload.bot_name,
+        status="scheduled" if is_scheduled else "ready",
+        webhook_url=payload.webhook_url,
+        join_at=payload.join_at,
+        analysis_mode=payload.analysis_mode,
+        template=payload.template,
+        prompt_override=payload.prompt_override,
+        vocabulary=payload.vocabulary or [],
+        respond_on_mention=payload.respond_on_mention,
+        mention_response_mode=payload.mention_response_mode,
+        tts_provider=payload.tts_provider,
+        start_muted=payload.start_muted,
+        live_transcription=payload.live_transcription,
+        metadata=payload.metadata,
+    )
+    await store.create_bot(bot)
+
+    active = sum(1 for t in _running_tasks.values() if not t.done())
+    if active >= settings.MAX_CONCURRENT_BOTS:
+        _bot_queue.append(bot.id)
+        await store.update_bot(bot.id, status="queued")
+        bot.status = "queued"
+        queue_pos = _bot_queue.index(bot.id) + 1
+        logger.info("Bot %s queued (position %d)", bot.id, queue_pos)
+    else:
+        task = asyncio.create_task(bot_service.run_bot_lifecycle(bot.id))
+        _running_tasks[bot.id] = task
+        task.add_done_callback(lambda _: _running_tasks.pop(bot.id, None))
+
+    logger.info("Created bot %s for %s (status=%s)", bot.id, bot.meeting_url, bot.status)
+    return _to_response(bot)
+
+
+# ── GET /api/v1/bot/stats ─────────────────────────────────────────────────────
 
 @router.get("/stats", tags=["Bots"])
-async def get_stats(db: Annotated[AsyncSession, Depends(get_db)]):
-    """Aggregate counts by status for dashboard widgets."""
-    rows = (
-        await db.execute(
-            select(Bot.status, func.count(Bot.id).label("n")).group_by(Bot.status)
-        )
-    ).all()
-
-    counts: dict[str, int] = {row.status: row.n for row in rows}
+async def get_stats():
+    """Aggregate counts by status."""
+    all_bots, _ = await store.list_bots(limit=10000)
+    counts: dict[str, int] = {}
+    for b in all_bots:
+        counts[b.status] = counts.get(b.status, 0) + 1
     total = sum(counts.values())
     active = sum(counts.get(s, 0) for s in _ACTIVE_STATUSES)
-
     return {
         "total": total,
         "active": active,
@@ -156,284 +187,150 @@ async def get_stats(db: Annotated[AsyncSession, Depends(get_db)]):
     }
 
 
-# ── POST /api/v1/bot ────────────────────────────────────────────────────────
-
-@router.post("", response_model=BotResponse, status_code=201)
-async def create_bot(
-    payload: BotCreate,
-    db: Annotated[AsyncSession, Depends(get_db)],
-):
-    """Create a new meeting bot and immediately start its lifecycle.
-
-    The bot navigates to the meeting URL, waits to be admitted, records audio,
-    transcribes with Gemini, and analyses the transcript.
-
-    **Auto-leave:** if the bot is the only participant for `BOT_ALONE_TIMEOUT`
-    seconds (default 5 min) — either because the room was empty on join, or
-    because everyone else left — it will leave automatically.
-    """
-    from app.config import settings
-
-    active = sum(1 for t in _running_tasks.values() if not t.done())
-
-    from datetime import timezone as _tz
-    from datetime import datetime as _dt
-    is_scheduled = (
-        payload.join_at is not None
-        and payload.join_at.replace(tzinfo=_tz.utc) > _dt.now(_tz.utc)
-    )
-    bot = Bot(
-        meeting_url=str(payload.meeting_url),
-        meeting_platform=bot_service.detect_platform(str(payload.meeting_url)),
-        bot_name=payload.bot_name,
-        join_at=payload.join_at,
-        notify_email=payload.notify_email,
-        template_id=payload.template_id,
-        prompt_override=payload.prompt_override,
-        vocabulary=payload.vocabulary,
-        analysis_mode=payload.analysis_mode,
-        respond_on_mention=payload.respond_on_mention,
-        mention_response_mode=payload.mention_response_mode,
-        tts_provider=payload.tts_provider,
-        start_muted=payload.start_muted,
-        live_transcription=payload.live_transcription,
-        status="scheduled" if is_scheduled else "ready",
-        extra_metadata=payload.extra_metadata,
-        share_token=secrets.token_urlsafe(16),
-    )
-    db.add(bot)
-    try:
-        await db.commit()
-    except Exception as exc:
-        await db.rollback()
-        logger.exception("Failed to create bot: %s", exc)
-        exc_str = str(exc)
-        if "Network is unreachable" in exc_str or "Connection refused" in exc_str or "could not connect" in exc_str.lower():
-            raise HTTPException(
-                status_code=503,
-                detail=(
-                    "Database unreachable — cannot save bot record. "
-                    "If using Supabase on Railway (free tier), the direct connection "
-                    "(db.[ref].supabase.co:5432) is IPv6-only and unreachable from IPv4 networks. "
-                    "Fix: in Railway, set DATABASE_URL to the 'Session pooler' connection string "
-                    "from your Supabase project → Settings → Database → Connection string. "
-                    "Alternatively set SUPABASE_DB_HOST to your pooler hostname "
-                    "(e.g. aws-0-us-east-1.pooler.supabase.com), SUPABASE_DB_USER to "
-                    "postgres.[your-project-ref], and SUPABASE_DB_PORT to 5432."
-                ),
-            )
-        raise HTTPException(status_code=500, detail=f"Database error: {exc}")
-    await db.refresh(bot)
-
-    if active >= settings.MAX_CONCURRENT_BOTS:
-        # Queue the bot instead of rejecting — it will start when a slot opens
-        _bot_queue.append(bot.id)
-        bot.status = "queued"
-        await db.commit()
-        await db.refresh(bot)
-        queue_pos = _bot_queue.index(bot.id) + 1
-        logger.info(
-            "Bot %s queued (position %d) — %d/%d slots busy",
-            bot.id, queue_pos, active, settings.MAX_CONCURRENT_BOTS,
-        )
-    else:
-        task = asyncio.create_task(
-            bot_service.run_bot_lifecycle(bot.id, AsyncSessionLocal)
-        )
-        _running_tasks[bot.id] = task
-        task.add_done_callback(lambda _: _running_tasks.pop(bot.id, None))
-
-    logger.info("Created bot %s for %s (status=%s)", bot.id, bot.meeting_url, bot.status)
-    return _bot_to_response(bot)
-
-
-# ── GET /api/v1/bot ─────────────────────────────────────────────────────────
+# ── GET /api/v1/bot ───────────────────────────────────────────────────────────
 
 @router.get("", response_model=BotListResponse)
 async def list_bots(
-    db: Annotated[AsyncSession, Depends(get_db)],
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
-    status: str | None = Query(default=None),
-    search: str | None = Query(default=None, description="Filter by meeting URL (partial match)"),
+    status: Optional[str] = Query(default=None, description="Filter by status"),
 ):
-    """List all bots. Returns lightweight summaries (no transcript/analysis)."""
-    # Defer large JSON columns that are not needed for list summaries
-    _defer_heavy = [
-        defer(Bot.transcript),
-        defer(Bot.analysis),
-        defer(Bot.chapters),
-        defer(Bot.speaker_stats),
-        defer(Bot.vocabulary),
-    ]
-    query = select(Bot).options(*_defer_heavy).order_by(Bot.created_at.desc())
-    count_query = select(func.count()).select_from(Bot)
-
-    if status:
-        query = query.where(Bot.status == status)
-        count_query = count_query.where(Bot.status == status)
-
-    if search:
-        pattern = f"%{search}%"
-        query = query.where(Bot.meeting_url.ilike(pattern))
-        count_query = count_query.where(Bot.meeting_url.ilike(pattern))
-
-    total = (await db.execute(count_query)).scalar_one()
-    bots = (await db.execute(query.limit(limit).offset(offset))).scalars().all()
-
+    """List bots (lightweight summaries, no transcript/analysis)."""
+    bots, total = await store.list_bots(status=status, limit=limit, offset=offset)
     return BotListResponse(
-        results=[_bot_to_summary(b) for b in bots],
-        count=total,
+        results=[_to_summary(b) for b in bots],
+        total=total,
+        limit=limit,
+        offset=offset,
     )
 
 
-# ── GET /api/v1/bot/{id} ────────────────────────────────────────────────────
+# ── GET /api/v1/bot/{id} ──────────────────────────────────────────────────────
 
 @router.get("/{bot_id}", response_model=BotResponse)
-async def get_bot(
-    bot_id: str,
-    db: Annotated[AsyncSession, Depends(get_db)],
-):
-    """Get a single bot by ID including full transcript and analysis.
+async def get_bot(bot_id: str):
+    """Get a bot by ID with full transcript and analysis.
 
-    Poll this endpoint until `status` is `done` (or `error`).
+    Poll until `status` is `done` (or `error`).
 
-    **Statuses:**
-    - `joining` — browser opening, navigating to meeting URL
-    - `in_call` — host admitted the bot; recording in progress
-    - `call_ended` — meeting ended (or bot left); transcription running
-    - `done` — transcript and analysis ready
-    - `error` — something failed; see `error_message`
-
-    **Auto-leave** triggers `call_ended` when the bot has been alone for
-    `BOT_ALONE_TIMEOUT` seconds (default 5 min).
+    **Note:** Results are kept in memory for 24 hours after completion.
+    Save the data to your own storage before then.
     """
-    bot = await _get_or_404(db, bot_id)
-    return _bot_to_response(bot)
+    bot = await _get_or_404(bot_id)
+    return _to_response(bot)
 
 
-# ── DELETE /api/v1/bot/{id} ─────────────────────────────────────────────────
+# ── DELETE /api/v1/bot/{id} ───────────────────────────────────────────────────
 
 @router.delete("/{bot_id}", status_code=204)
-async def delete_bot(
-    bot_id: str,
-    db: Annotated[AsyncSession, Depends(get_db)],
-):
-    """Cancel the bot and return immediately.
+async def delete_bot(bot_id: str):
+    """Stop a running bot and cancel its lifecycle.
 
-    The lifecycle task catches the cancellation, salvages any captured audio,
-    produces a transcript + analysis, and sets status = ``cancelled`` on its
-    own — so the record (and transcript) remain accessible after this call.
-
-    If the bot had already finished (``done`` / ``error``) nothing changes.
+    If the bot already finished (`done` / `error`), it is removed from memory
+    immediately. If still running, it is cancelled (transcript salvaged if possible).
     """
-    bot = await _get_or_404(db, bot_id)
+    bot = await _get_or_404(bot_id)
 
     task = _running_tasks.get(bot_id)
     if task and not task.done():
-        # Immediately mark the bot as call_ended so the UI updates right away
-        # rather than staying on "in_call" for the duration of transcription.
         if bot.status == "in_call":
-            from datetime import datetime, timezone as _tz
-            bot.status = "call_ended"
-            bot.ended_at = datetime.now(_tz.utc)
-            bot.updated_at = datetime.now(_tz.utc)
-            await db.commit()
-
+            await store.update_bot(bot_id, status="call_ended", ended_at=_now())
         task.cancel()
         try:
             await asyncio.wait_for(asyncio.shield(task), timeout=5.0)
         except (asyncio.TimeoutError, asyncio.CancelledError):
             pass
         logger.info("Cancelled lifecycle task for bot %s", bot_id)
+    else:
+        # Already finished — remove from memory immediately
+        await store.delete_bot(bot_id)
 
 
-# ── GET /api/v1/bot/{id}/transcript ─────────────────────────────────────────
+# ── GET /api/v1/bot/{id}/transcript ──────────────────────────────────────────
 
 @router.get("/{bot_id}/transcript")
-async def get_transcript(
-    bot_id: str,
-    db: Annotated[AsyncSession, Depends(get_db)],
-):
-    """Get the meeting transcript."""
-    bot = await _get_or_404(db, bot_id)
+async def get_transcript(bot_id: str):
+    """Get the raw transcript (available once status is `done` or `call_ended`)."""
+    bot = await _get_or_404(bot_id)
     if bot.status not in ("call_ended", "done", "cancelled"):
         raise HTTPException(
             status_code=425,
-            detail=f"Transcript not yet available (bot status: {bot.status})",
+            detail=f"Transcript not yet available (status: {bot.status})",
         )
-    return {"bot_id": bot_id, "transcript": bot.transcript or []}
+    return {"bot_id": bot_id, "transcript": bot.transcript}
 
 
-# ── POST /api/v1/bot/{id}/analyze ───────────────────────────────────────────
+# ── GET /api/v1/bot/{id}/recording ───────────────────────────────────────────
+
+@router.get("/{bot_id}/recording")
+async def download_recording(bot_id: str):
+    """Download the meeting audio recording (WAV)."""
+    import os
+    bot = await _get_or_404(bot_id)
+    if not bot.recording_path or not os.path.exists(bot.recording_path):
+        raise HTTPException(status_code=404, detail="Recording not available")
+    return FileResponse(
+        bot.recording_path,
+        media_type="audio/wav",
+        filename=f"recording-{bot_id[:8]}.wav",
+    )
+
+
+# ── POST /api/v1/bot/{id}/analyze ────────────────────────────────────────────
+
+class AnalyzeRequest(BaseModel):
+    template: Optional[str] = None
+    prompt_override: Optional[str] = Field(default=None, max_length=8000)
+
 
 @router.post("/{bot_id}/analyze", response_model=MeetingAnalysis)
-async def analyze_bot(
-    bot_id: str,
-    db: Annotated[AsyncSession, Depends(get_db)],
-):
-    """(Re-)run Claude analysis on the transcript."""
-    bot = await _get_or_404(db, bot_id)
+async def analyze_bot(bot_id: str, payload: AnalyzeRequest = AnalyzeRequest()):
+    """(Re-)run AI analysis on the transcript.
+
+    Use this to switch templates or run a custom prompt on an existing transcript.
+    """
+    bot = await _get_or_404(bot_id)
     if not bot.transcript:
-        raise HTTPException(
-            status_code=425,
-            detail="No transcript available to analyse",
-        )
+        raise HTTPException(status_code=425, detail="No transcript available to analyse")
 
-    analysis = await intelligence_service.analyze_transcript(bot.transcript)
-    bot.analysis = analysis
-    await db.commit()
+    prompt = payload.prompt_override
+    if not prompt and payload.template:
+        prompt = intelligence_service.get_template_prompt(payload.template)
 
+    analysis = await intelligence_service.analyze_transcript(
+        bot.transcript,
+        prompt_override=prompt,
+        vocabulary=bot.vocabulary or [],
+    )
+    await store.update_bot(bot_id, analysis=analysis)
     return MeetingAnalysis(**analysis)
 
 
-# ── GET /api/v1/bot/{id}/recording ──────────────────────────────────────────
+# ── POST /api/v1/bot/{id}/ask ─────────────────────────────────────────────────
 
-@router.get("/{bot_id}/recording")
-async def download_recording(
-    bot_id: str,
-    db: Annotated[AsyncSession, Depends(get_db)],
-):
-    """Download the meeting audio recording (WAV)."""
-    import os
-    bot = await _get_or_404(db, bot_id)
-    path = bot.recording_path
-    if not path or not os.path.exists(path):
-        raise HTTPException(status_code=404, detail="Recording not available")
-    return FileResponse(path, media_type="audio/wav", filename=f"recording-{bot_id[:8]}.wav")
+class AskRequest(BaseModel):
+    question: str = Field(description="Free-form question about the meeting transcript.")
 
-
-# ── POST /api/v1/bot/{id}/ask ────────────────────────────────────────────────
 
 @router.post("/{bot_id}/ask")
-async def ask_bot(
-    bot_id: str,
-    payload: AskRequest,
-    db: Annotated[AsyncSession, Depends(get_db)],
-):
+async def ask_bot(bot_id: str, payload: AskRequest):
     """Ask a free-form question about the meeting transcript."""
     question = payload.question.strip()
     if not question:
         raise HTTPException(status_code=422, detail="question is required")
-    bot = await _get_or_404(db, bot_id)
+    bot = await _get_or_404(bot_id)
     if not bot.transcript:
         raise HTTPException(status_code=425, detail="No transcript available yet")
     answer = await intelligence_service.ask_about_transcript(bot.transcript, question)
     return {"bot_id": bot_id, "question": question, "answer": answer}
 
 
-# ── POST /api/v1/bot/{id}/followup-email ────────────────────────────────────
+# ── POST /api/v1/bot/{id}/followup-email ─────────────────────────────────────
 
 @router.post("/{bot_id}/followup-email")
-async def generate_followup_email(
-    bot_id: str,
-    db: Annotated[AsyncSession, Depends(get_db)],
-):
-    """Generate a draft follow-up email for the meeting.
-
-    Returns {"subject": "...", "body": "..."} ready to copy-paste or send.
-    """
-    bot = await _get_or_404(db, bot_id)
+async def generate_followup_email(bot_id: str):
+    """Generate a draft follow-up email for the meeting."""
+    bot = await _get_or_404(bot_id)
     if not bot.transcript and not bot.analysis:
         raise HTTPException(status_code=425, detail="No transcript or analysis available yet")
     result = await intelligence_service.generate_followup_email(
@@ -442,126 +339,3 @@ async def generate_followup_email(
         participants=bot.participants or [],
     )
     return {"bot_id": bot_id, **result}
-
-
-# ── POST /api/v1/bot/{id}/brief ──────────────────────────────────────────────
-
-@router.post("/{bot_id}/brief")
-async def generate_meeting_brief(
-    bot_id: str,
-    payload: BriefRequest,
-    db: Annotated[AsyncSession, Depends(get_db)],
-):
-    """Generate a pre-meeting preparation brief for the next occurrence of this meeting.
-
-    Optionally pass `{"agenda": "..."}` in the request body.
-    Looks up previous meetings with similar participants to provide context.
-    """
-    from sqlalchemy import select as _select
-    agenda = payload.agenda.strip()
-    bot = await _get_or_404(db, bot_id)
-
-    # Find previous meetings with the same participants for context
-    previous_summaries: list[str] = []
-    if bot.participants:
-        candidates = (
-            await db.execute(
-                _select(Bot)
-                .where(Bot.status == "done", Bot.id != bot_id)
-                .order_by(Bot.created_at.desc())
-                .limit(20)
-            )
-        ).scalars().all()
-        bot_names = {n.lower() for n in bot.participants}
-        for c in candidates:
-            overlap = sum(1 for p in (c.participants or []) if p.lower() in bot_names)
-            if overlap >= max(1, len(bot.participants) // 2):
-                summary = (c.analysis or {}).get("summary", "")
-                if summary:
-                    previous_summaries.append(summary)
-            if len(previous_summaries) >= 3:
-                break
-
-    result = await intelligence_service.generate_meeting_brief(
-        agenda=agenda,
-        participants=bot.participants or [],
-        previous_summaries=previous_summaries,
-    )
-    return {"bot_id": bot_id, "previous_meetings_used": len(previous_summaries), **result}
-
-
-# ── GET /api/v1/bot/{id}/recurring ───────────────────────────────────────────
-
-@router.get("/{bot_id}/recurring")
-async def get_recurring_intelligence(
-    bot_id: str,
-    db: Annotated[AsyncSession, Depends(get_db)],
-):
-    """Analyse the series of recurring meetings with similar participants.
-
-    Returns patterns, unresolved items, and a suggested agenda for the next meeting.
-    """
-    from sqlalchemy import select as _select
-    bot = await _get_or_404(db, bot_id)
-
-    previous_summaries: list[str] = []
-    all_participants: set[str] = set(bot.participants or [])
-
-    if bot.participants:
-        candidates = (
-            await db.execute(
-                _select(Bot)
-                .where(Bot.status == "done", Bot.id != bot_id)
-                .order_by(Bot.created_at.desc())
-                .limit(30)
-            )
-        ).scalars().all()
-        bot_names = {n.lower() for n in bot.participants}
-        for c in candidates:
-            overlap = sum(1 for p in (c.participants or []) if p.lower() in bot_names)
-            if overlap >= max(1, len(bot.participants) // 2):
-                summary = (c.analysis or {}).get("summary", "")
-                if summary:
-                    previous_summaries.append(summary)
-                all_participants.update(c.participants or [])
-            if len(previous_summaries) >= 5:
-                break
-
-    result = await intelligence_service.generate_recurring_intelligence(
-        previous_summaries=previous_summaries,
-        participants=sorted(all_participants),
-    )
-    return {
-        "bot_id": bot_id,
-        "recurring_meetings_analysed": len(previous_summaries),
-        **result,
-    }
-
-
-# ── GET /api/v1/share/{token} ────────────────────────────────────────────────
-# This endpoint is registered on a separate public router in main.py
-
-share_router = APIRouter(prefix="/share", tags=["Share"])
-
-
-@share_router.get("/{token}")
-async def get_shared_bot(
-    token: str,
-    db: Annotated[AsyncSession, Depends(get_db)],
-):
-    """Public read-only view of a meeting by share token."""
-    result = await db.execute(select(Bot).where(Bot.share_token == token))
-    bot = result.scalar_one_or_none()
-    if bot is None:
-        raise HTTPException(status_code=404, detail="Shared report not found")
-    return _bot_to_response(bot)
-
-
-# ── helpers ───────────────────────────────────────────────────────────────────
-
-async def _get_or_404(db: AsyncSession, bot_id: str) -> Bot:
-    result = await db.execute(select(Bot).where(Bot.id == bot_id))
-    bot = result.scalar_one_or_none()
-    if bot is None:
-        raise HTTPException(status_code=404, detail=f"Bot {bot_id!r} not found")
-    return bot

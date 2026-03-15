@@ -2,15 +2,11 @@
 
 import io
 import logging
-from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response, PlainTextResponse
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db
-from app.models.bot import Bot
+from app.store import store, BotSession
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/bot", tags=["Exports"])
@@ -31,15 +27,19 @@ def _fmt_ts(secs: float) -> str:
     return f"{m:02d}:{s:02d}"
 
 
+async def _get_or_404(bot_id: str) -> BotSession:
+    bot = await store.get_bot(bot_id)
+    if bot is None:
+        raise HTTPException(status_code=404, detail=f"Bot {bot_id!r} not found")
+    return bot
+
+
 # ── Markdown export ───────────────────────────────────────────────────────────
 
 @router.get("/{bot_id}/export/markdown", response_class=PlainTextResponse)
-async def export_markdown(
-    bot_id: str,
-    db: Annotated[AsyncSession, Depends(get_db)],
-):
+async def export_markdown(bot_id: str):
     """Export the meeting report as a Markdown document."""
-    bot = await _get_or_404(db, bot_id)
+    bot = await _get_or_404(bot_id)
     md = _build_markdown(bot)
     filename = f"meeting-{bot_id[:8]}.md"
     return PlainTextResponse(
@@ -52,29 +52,18 @@ async def export_markdown(
 # ── PDF export ────────────────────────────────────────────────────────────────
 
 @router.get("/{bot_id}/export/pdf")
-async def export_pdf(
-    bot_id: str,
-    db: Annotated[AsyncSession, Depends(get_db)],
-):
+async def export_pdf(bot_id: str):
     """Export the meeting report as a PDF document."""
     try:
-        from reportlab.lib.pagesizes import A4
-        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-        from reportlab.lib.units import cm
-        from reportlab.lib import colors
-        from reportlab.platypus import (
-            SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
-            HRFlowable, ListFlowable, ListItem,
-        )
+        from reportlab.lib.pagesizes import A4  # noqa: F401 (import check)
     except ImportError:
         raise HTTPException(
             status_code=501,
             detail="PDF export requires reportlab — run: pip install reportlab",
         )
 
-    bot = await _get_or_404(db, bot_id)
+    bot = await _get_or_404(bot_id)
     pdf_bytes = _build_pdf(bot)
-
     filename = f"meeting-{bot_id[:8]}.pdf"
     return Response(
         content=pdf_bytes,
@@ -85,11 +74,11 @@ async def export_pdf(
 
 # ── Builders ──────────────────────────────────────────────────────────────────
 
-def _build_markdown(bot: Bot) -> str:
+def _build_markdown(bot: BotSession) -> str:
     analysis = bot.analysis or {}
     lines: list[str] = []
 
-    lines.append(f"# Meeting Report")
+    lines.append("# Meeting Report")
     lines.append("")
     lines.append(f"**URL:** {bot.meeting_url}")
     lines.append(f"**Platform:** {(bot.meeting_platform or 'unknown').replace('_', ' ').title()}")
@@ -183,7 +172,7 @@ def _build_markdown(bot: Bot) -> str:
     return "\n".join(lines)
 
 
-def _build_pdf(bot: Bot) -> bytes:
+def _build_pdf(bot: BotSession) -> bytes:
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.units import cm
@@ -205,19 +194,14 @@ def _build_pdf(bot: Bot) -> bytes:
     h2 = ParagraphStyle("H2", parent=styles["Heading2"], fontSize=13, spaceBefore=12, spaceAfter=4)
     h3 = ParagraphStyle("H3", parent=styles["Heading3"], fontSize=11, spaceBefore=8, spaceAfter=2)
     body = styles["Normal"]
-    meta = ParagraphStyle("Meta", parent=body, fontSize=9, textColor=colors.grey)
-    bold = ParagraphStyle("Bold", parent=body, fontName="Helvetica-Bold")
-    mono = ParagraphStyle("Mono", parent=body, fontName="Courier", fontSize=8.5)
 
     story = []
     analysis = bot.analysis or {}
 
-    # Title
     story.append(Paragraph("Meeting Report", h1))
     story.append(HRFlowable(width="100%", thickness=1, color=colors.lightgrey))
     story.append(Spacer(1, 0.3 * cm))
 
-    # Metadata table
     platform = (bot.meeting_platform or "unknown").replace("_", " ").title()
     duration = _fmt_duration(bot.started_at, bot.ended_at)
     started = bot.started_at.strftime("%Y-%m-%d %H:%M UTC") if bot.started_at else "—"
@@ -243,14 +227,13 @@ def _build_pdf(bot: Bot) -> bytes:
     ]))
     story += [t, Spacer(1, 0.5 * cm)]
 
-    def _section(title: str, items: list[str], ordered: bool = False) -> None:
+    def _section(title: str, items: list[str]) -> None:
         if not items:
             return
         story.append(Paragraph(title, h2))
         list_items = [ListItem(Paragraph(str(i), body), leftIndent=15) for i in items]
-        story.append(ListFlowable(list_items, bulletType="bullet" if not ordered else "1"))
+        story.append(ListFlowable(list_items, bulletType="bullet"))
 
-    # Summary
     summary = analysis.get("summary", "")
     if summary:
         story.append(Paragraph("Summary", h2))
@@ -259,7 +242,6 @@ def _build_pdf(bot: Bot) -> bytes:
     _section("Key Points", analysis.get("key_points", []))
     _section("Decisions", analysis.get("decisions", []))
 
-    # Action items
     action_items = analysis.get("action_items", [])
     if action_items:
         story.append(Paragraph("Action Items", h2))
@@ -276,7 +258,6 @@ def _build_pdf(bot: Bot) -> bytes:
 
     _section("Next Steps", analysis.get("next_steps", []))
 
-    # Speaker stats
     speaker_stats = bot.speaker_stats or []
     if speaker_stats:
         story.append(Paragraph("Speaker Stats", h2))
@@ -286,11 +267,9 @@ def _build_pdf(bot: Bot) -> bytes:
             tt = sp.get("talk_time_s", 0)
             m, s = divmod(int(tt), 60)
             rows.append([
-                sp.get("name", "?"),
-                f"{m}m {s}s",
+                sp.get("name", "?"), f"{m}m {s}s",
                 f"{sp.get('talk_pct', 0):.1f}%",
-                str(sp.get("turns", 0)),
-                str(sp.get("questions", 0)),
+                str(sp.get("turns", 0)), str(sp.get("questions", 0)),
                 str(sp.get("filler_words", 0)),
             ])
         t2 = Table(rows, repeatRows=1)
@@ -306,7 +285,6 @@ def _build_pdf(bot: Bot) -> bytes:
         ]))
         story += [t2, Spacer(1, 0.4 * cm)]
 
-    # Chapters
     chapters = bot.chapters or []
     if chapters:
         story.append(Paragraph("Chapters", h2))
@@ -316,7 +294,6 @@ def _build_pdf(bot: Bot) -> bytes:
             if ch.get("summary"):
                 story.append(Paragraph(ch["summary"], body))
 
-    # Transcript
     transcript = bot.transcript or []
     if transcript:
         story.append(Paragraph("Transcript", h2))
@@ -324,20 +301,8 @@ def _build_pdf(bot: Bot) -> bytes:
             ts = _fmt_ts(entry.get("timestamp", 0))
             speaker = entry.get("speaker", "?")
             text = entry.get("text", "")
-            story.append(
-                Paragraph(f"<b>[{ts}] {speaker}:</b> {text}", body)
-            )
+            story.append(Paragraph(f"<b>[{ts}] {speaker}:</b> {text}", body))
             story.append(Spacer(1, 0.1 * cm))
 
     doc.build(story)
     return buf.getvalue()
-
-
-# ── Helper ────────────────────────────────────────────────────────────────────
-
-async def _get_or_404(db: AsyncSession, bot_id: str) -> Bot:
-    result = await db.execute(select(Bot).where(Bot.id == bot_id))
-    bot = result.scalar_one_or_none()
-    if bot is None:
-        raise HTTPException(status_code=404, detail=f"Bot {bot_id!r} not found")
-    return bot

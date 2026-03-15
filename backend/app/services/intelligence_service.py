@@ -859,6 +859,163 @@ def _stub_analysis(transcript: list[dict]) -> dict[str, Any]:
     }
 
 
+_BUILTIN_TEMPLATE_PROMPTS: dict[str, str] = {
+    "sales": (
+        'You are a sales coach. Analyze this sales call transcript and return ONLY valid JSON.\n'
+        'Required JSON shape:\n'
+        '{\n'
+        '  "summary": "<2\u20133 sentence overview>",\n'
+        '  "key_points": ["<point>"],\n'
+        '  "action_items": [{"task": "...", "assignee": "...", "due_date": "..."}],\n'
+        '  "decisions": ["<decision>"],\n'
+        '  "next_steps": ["<step>"],\n'
+        '  "sentiment": "positive|neutral|negative",\n'
+        '  "topics": ["<topic>"],\n'
+        '  "buying_signals": ["<signal>"],\n'
+        '  "objections": ["<objection>"],\n'
+        '  "deal_stage": "discovery|evaluation|negotiation|closed|unknown"\n'
+        '}'
+    ),
+    "standup": (
+        'You are a scrum master. Analyze this standup transcript and return ONLY valid JSON.\n'
+        'Required JSON shape:\n'
+        '{\n'
+        '  "summary": "<1\u20132 sentence overview>",\n'
+        '  "key_points": ["<point>"],\n'
+        '  "action_items": [{"task": "...", "assignee": "...", "due_date": "..."}],\n'
+        '  "decisions": ["<decision>"],\n'
+        '  "next_steps": ["<step>"],\n'
+        '  "sentiment": "positive|neutral|negative",\n'
+        '  "topics": ["<topic>"],\n'
+        '  "blockers": ["<blocker>"],\n'
+        '  "completed_yesterday": ["<item>"],\n'
+        '  "planned_today": ["<item>"]\n'
+        '}'
+    ),
+    "1on1": (
+        'You are an executive coach. Analyze this 1:1 meeting transcript and return ONLY valid JSON.\n'
+        'Required JSON shape:\n'
+        '{\n'
+        '  "summary": "<2\u20133 sentence overview>",\n'
+        '  "key_points": ["<point>"],\n'
+        '  "action_items": [{"task": "...", "assignee": "...", "due_date": "..."}],\n'
+        '  "decisions": ["<decision>"],\n'
+        '  "next_steps": ["<step>"],\n'
+        '  "sentiment": "positive|neutral|negative",\n'
+        '  "topics": ["<topic>"],\n'
+        '  "feedback_given": ["<feedback>"],\n'
+        '  "growth_areas": ["<area>"]\n'
+        '}'
+    ),
+    "retro": (
+        'You are an agile coach. Analyze this sprint retrospective transcript and return ONLY valid JSON.\n'
+        'Required JSON shape:\n'
+        '{\n'
+        '  "summary": "<2\u20133 sentence overview>",\n'
+        '  "key_points": ["<point>"],\n'
+        '  "action_items": [{"task": "...", "assignee": "...", "due_date": "..."}],\n'
+        '  "decisions": ["<decision>"],\n'
+        '  "next_steps": ["<step>"],\n'
+        '  "sentiment": "positive|neutral|negative",\n'
+        '  "topics": ["<topic>"],\n'
+        '  "went_well": ["<item>"],\n'
+        '  "went_poorly": ["<item>"],\n'
+        '  "process_improvements": ["<improvement>"]\n'
+        '}'
+    ),
+    "kickoff": (
+        'You are a project manager. Analyze this client kickoff meeting transcript and return ONLY valid JSON.\n'
+        'Required JSON shape:\n'
+        '{\n'
+        '  "summary": "<2\u20133 sentence overview>",\n'
+        '  "key_points": ["<point>"],\n'
+        '  "action_items": [{"task": "...", "assignee": "...", "due_date": "..."}],\n'
+        '  "decisions": ["<decision>"],\n'
+        '  "next_steps": ["<step>"],\n'
+        '  "sentiment": "positive|neutral|negative",\n'
+        '  "topics": ["<topic>"],\n'
+        '  "scope_items": ["<scope>"],\n'
+        '  "deliverables": ["<deliverable>"],\n'
+        '  "risks": ["<risk>"],\n'
+        '  "success_metrics": ["<metric>"]\n'
+        '}'
+    ),
+    "allhands": (
+        'You are a communications specialist. Analyze this all-hands meeting transcript and return ONLY valid JSON.\n'
+        'Required JSON shape:\n'
+        '{\n'
+        '  "summary": "<2\u20133 sentence overview>",\n'
+        '  "key_points": ["<point>"],\n'
+        '  "action_items": [{"task": "...", "assignee": "...", "due_date": "..."}],\n'
+        '  "decisions": ["<decision>"],\n'
+        '  "next_steps": ["<step>"],\n'
+        '  "sentiment": "positive|neutral|negative",\n'
+        '  "topics": ["<topic>"],\n'
+        '  "announcements": ["<announcement>"],\n'
+        '  "metrics_shared": ["<metric>"],\n'
+        '  "employee_questions": ["<question>"],\n'
+        '  "leadership_commitments": ["<commitment>"]\n'
+        '}'
+    ),
+    "postmortem": (
+        'You are a site reliability engineer. Analyze this incident post-mortem meeting transcript and return ONLY valid JSON.\n'
+        'Required JSON shape:\n'
+        '{\n'
+        '  "summary": "<2\u20133 sentence overview>",\n'
+        '  "key_points": ["<point>"],\n'
+        '  "action_items": [{"task": "...", "assignee": "...", "due_date": "..."}],\n'
+        '  "decisions": ["<decision>"],\n'
+        '  "next_steps": ["<step>"],\n'
+        '  "sentiment": "positive|neutral|negative",\n'
+        '  "topics": ["<topic>"],\n'
+        '  "timeline": ["<event>"],\n'
+        '  "root_causes": ["<cause>"],\n'
+        '  "customer_impact": "<description>",\n'
+        '  "remediation_items": [{"item": "...", "owner": "...", "priority": "high|medium|low"}]\n'
+        '}'
+    ),
+    "interview": (
+        'You are a talent acquisition specialist. Analyze this interview transcript and return ONLY valid JSON.\n'
+        'Required JSON shape:\n'
+        '{\n'
+        '  "summary": "<2\u20133 sentence overview>",\n'
+        '  "key_points": ["<point>"],\n'
+        '  "action_items": [{"task": "...", "assignee": "...", "due_date": "..."}],\n'
+        '  "decisions": ["<decision>"],\n'
+        '  "next_steps": ["<step>"],\n'
+        '  "sentiment": "positive|neutral|negative",\n'
+        '  "topics": ["<topic>"],\n'
+        '  "strengths": ["<strength>"],\n'
+        '  "concerns": ["<concern>"],\n'
+        '  "competency_ratings": [{"competency": "...", "rating": "strong|acceptable|weak", "evidence": "..."}],\n'
+        '  "recommendation": "strong_yes|yes|no|strong_no|undecided"\n'
+        '}'
+    ),
+    "design-review": (
+        'You are a product designer. Analyze this design review meeting transcript and return ONLY valid JSON.\n'
+        'Required JSON shape:\n'
+        '{\n'
+        '  "summary": "<2\u20133 sentence overview>",\n'
+        '  "key_points": ["<point>"],\n'
+        '  "action_items": [{"task": "...", "assignee": "...", "due_date": "..."}],\n'
+        '  "decisions": ["<decision>"],\n'
+        '  "next_steps": ["<step>"],\n'
+        '  "sentiment": "positive|neutral|negative",\n'
+        '  "topics": ["<topic>"],\n'
+        '  "design_decisions": ["<decision>"],\n'
+        '  "alternatives_rejected": [{"option": "...", "reason": "..."}],\n'
+        '  "open_questions": ["<question>"],\n'
+        '  "usability_concerns": ["<concern>"]\n'
+        '}'
+    ),
+}
+
+
+def get_template_prompt(template: str) -> str | None:
+    """Return the prompt for a built-in template name, or None for the default."""
+    return _BUILTIN_TEMPLATE_PROMPTS.get(template)
+
+
 def _hardcoded_demo_transcript() -> list[dict[str, Any]]:
     return [
         {"speaker": "Alice (PM)",     "text": "Good morning everyone! Let's get started with the sprint review.", "timestamp": 2.0},

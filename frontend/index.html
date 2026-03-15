@@ -3,506 +3,263 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>MeetingBot</title>
-  <link rel="stylesheet" href="/static/style.css?v=4" />
+  <title>MeetingBot API</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --brand: #4361ee;
+      --brand-light: #e8ecfd;
+      --bg: #f8f9fc;
+      --card: #ffffff;
+      --text: #1a1a2e;
+      --muted: #6b7280;
+      --border: #e5e7eb;
+      --code-bg: #1e1e2e;
+      --code-text: #cdd6f4;
+      --radius: 10px;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+    }
+
+    .hero {
+      background: linear-gradient(135deg, #4361ee 0%, #7209b7 100%);
+      color: white;
+      padding: 64px 24px 56px;
+      text-align: center;
+    }
+    .hero h1 { font-size: clamp(2rem, 5vw, 3rem); font-weight: 800; letter-spacing: -0.02em; }
+    .hero p  { font-size: 1.15rem; opacity: .85; margin: 12px auto 0; max-width: 560px; }
+
+    .badge-row {
+      display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 28px;
+    }
+    .badge {
+      background: rgba(255,255,255,.15); border: 1px solid rgba(255,255,255,.3);
+      border-radius: 20px; padding: 6px 16px; font-size: .85rem; font-weight: 500;
+    }
+
+    .cta-row {
+      display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin-top: 32px;
+    }
+    .btn {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 12px 24px; border-radius: 8px; font-weight: 600; font-size: .95rem;
+      text-decoration: none; transition: opacity .15s;
+    }
+    .btn:hover { opacity: .85; }
+    .btn-primary { background: white; color: var(--brand); }
+    .btn-outline { background: transparent; color: white; border: 2px solid rgba(255,255,255,.5); }
+
+    .container { max-width: 960px; margin: 0 auto; padding: 0 24px; }
+
+    section { padding: 56px 0 0; }
+    section h2 {
+      font-size: 1.4rem; font-weight: 700; margin-bottom: 24px;
+      padding-bottom: 12px; border-bottom: 2px solid var(--brand-light);
+    }
+
+    .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; }
+    .step {
+      background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 24px;
+    }
+    .step-num {
+      width: 32px; height: 32px; background: var(--brand); color: white;
+      border-radius: 50%; display: flex; align-items: center; justify-content: center;
+      font-weight: 700; font-size: .9rem; margin-bottom: 12px;
+    }
+    .step h3 { font-size: 1rem; margin-bottom: 6px; }
+    .step p  { font-size: .88rem; color: var(--muted); }
+
+    .endpoint-list { display: flex; flex-direction: column; gap: 12px; }
+    .endpoint {
+      background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 16px 20px; display: flex; align-items: center; gap: 14px;
+    }
+    .method {
+      font-family: "Courier New", monospace; font-size: .8rem; font-weight: 700;
+      padding: 4px 10px; border-radius: 5px; white-space: nowrap;
+    }
+    .method.get    { background: #dcfce7; color: #166534; }
+    .method.post   { background: #dbeafe; color: #1e40af; }
+    .method.delete { background: #fee2e2; color: #991b1b; }
+    .path { font-family: "Courier New", monospace; font-size: .9rem; color: var(--brand); font-weight: 600; }
+    .ep-desc { font-size: .88rem; color: var(--muted); margin-left: auto; }
+
+    .code-block {
+      background: var(--code-bg); color: var(--code-text);
+      border-radius: var(--radius); padding: 20px 24px; overflow-x: auto;
+      font-family: "Courier New", Courier, monospace; font-size: .85rem; line-height: 1.7;
+      white-space: pre;
+    }
+    .code-title { font-size: .8rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 8px; }
+
+    .status-flow {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0;
+    }
+    .pill {
+      padding: 4px 12px; border-radius: 20px; font-size: .8rem; font-weight: 600;
+    }
+    .pill.a { background: #fef9c3; color: #854d0e; }
+    .pill.b { background: #dcfce7; color: #166534; }
+    .pill.c { background: #dbeafe; color: #1e40af; }
+    .pill.d { background: #fee2e2; color: #991b1b; }
+    .arrow  { color: var(--muted); font-size: .85rem; }
+
+    footer {
+      margin-top: 72px; padding: 32px 24px;
+      border-top: 1px solid var(--border); text-align: center;
+      font-size: .85rem; color: var(--muted);
+    }
+    footer a { color: var(--brand); text-decoration: none; }
+  </style>
 </head>
 <body>
-  <div id="app">
-    <!-- Mobile header (hidden on desktop) -->
-    <header class="mobile-header">
-      <div class="logo">
-        <span class="logo-icon">🤖</span>
-        <span class="logo-text">MeetingBot</span>
-      </div>
-      <button class="hamburger-btn" id="hamburger-btn" aria-label="Open menu">☰</button>
-    </header>
 
-    <!-- Sidebar overlay (mobile only) -->
-    <div class="sidebar-overlay" id="sidebar-overlay"></div>
-
-    <!-- Sidebar -->
-    <aside class="sidebar">
-      <div class="logo">
-        <span class="logo-icon">🤖</span>
-        <span class="logo-text">MeetingBot</span>
-      </div>
-      <nav>
-        <a class="nav-item active" data-page="bots" href="#">
-          <span class="nav-icon">📋</span> Reports
-        </a>
-        <a class="nav-item" data-page="search" href="#">
-          <span class="nav-icon">🔍</span> Search
-        </a>
-        <a class="nav-item" data-page="action-items" href="#">
-          <span class="nav-icon">✅</span> Action Items
-        </a>
-        <a class="nav-item" data-page="templates" href="#">
-          <span class="nav-icon">📝</span> Templates
-        </a>
-        <a class="nav-item" data-page="analytics" href="#">
-          <span class="nav-icon">📊</span> Analytics
-        </a>
-        <a class="nav-item" data-page="webhooks" href="#">
-          <span class="nav-icon">🔔</span> Webhooks
-        </a>
-        <a class="nav-item" data-page="debug" href="#">
-          <span class="nav-icon">🐛</span> Debug
-        </a>
-        <a class="nav-item" data-page="docs" href="/api/docs" target="_blank">
-          <span class="nav-icon">📖</span> API Docs
-        </a>
-      </nav>
-      <div class="sidebar-footer">
-        <div id="ws-indicator" class="ws-indicator disconnected" title="WebSocket connection">
-          <span class="ws-dot"></span>
-          <span class="ws-label">Connecting…</span>
-        </div>
-      </div>
-    </aside>
-
-    <!-- Main content -->
-    <main class="main">
-
-      <!-- ── BOTS PAGE ── -->
-      <section id="page-bots" class="page active">
-        <div class="page-header">
-          <div>
-            <h1>Reports</h1>
-            <p class="subtitle">All meeting recordings and transcripts, newest first</p>
-          </div>
-          <button class="btn btn-primary" id="btn-new-bot">+ New Bot</button>
-        </div>
-
-        <!-- Stats bar -->
-        <div class="stats-bar">
-          <div class="stat-card">
-            <div class="stat-value" id="stat-total">—</div>
-            <div class="stat-label">Total</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-value" id="stat-active">—</div>
-            <div class="stat-label">Active</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-value" id="stat-done">—</div>
-            <div class="stat-label">Done</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-value" id="stat-error">—</div>
-            <div class="stat-label">Error</div>
-          </div>
-        </div>
-
-        <!-- Bot list -->
-        <div class="card">
-          <div class="card-toolbar">
-            <div class="filter-group">
-              <button class="filter-btn active" data-status="">All</button>
-              <button class="filter-btn" data-status="scheduled">Scheduled</button>
-              <button class="filter-btn" data-status="joining">Joining</button>
-              <button class="filter-btn" data-status="in_call">In Call</button>
-              <button class="filter-btn" data-status="done">Done</button>
-              <button class="filter-btn" data-status="error">Error</button>
-            </div>
-            <input class="input btn-sm" id="bot-search" type="search" placeholder="Search by URL…" style="width:200px">
-            <button class="btn btn-ghost btn-sm" id="btn-refresh">↻ Refresh</button>
-          </div>
-          <div id="bot-list" class="bot-list"></div>
-          <div id="bot-pagination"></div>
-        </div>
-      </section>
-
-      <!-- ── BOT DETAIL PAGE ── -->
-      <section id="page-bot-detail" class="page">
-        <div class="page-header">
-          <button class="btn btn-ghost" id="btn-back-bots">← Back to Bots</button>
-          <div id="bot-detail-badges" style="display:flex;gap:0.5rem;align-items:center"></div>
-        </div>
-
-        <!-- Lifecycle progress bar -->
-        <div class="card lifecycle-card" id="lifecycle-card">
-          <div class="lifecycle-steps" id="lifecycle-steps"></div>
-        </div>
-
-        <div id="bot-detail-content"></div>
-      </section>
-
-      <!-- ── SEARCH PAGE ── -->
-      <section id="page-search" class="page">
-        <div class="page-header">
-          <div>
-            <h1>Search</h1>
-            <p class="subtitle">Search across all meeting transcripts</p>
-          </div>
-        </div>
-        <div class="card">
-          <div style="display:flex;gap:0.75rem;margin-bottom:1rem">
-            <input class="input" id="search-input" type="search"
-              placeholder="Search for a keyword, topic, or speaker…" style="flex:1" />
-            <button class="btn btn-primary" id="btn-search">Search</button>
-          </div>
-          <div id="search-results"></div>
-        </div>
-      </section>
-
-      <!-- ── ANALYTICS PAGE ── -->
-      <section id="page-analytics" class="page">
-        <div class="page-header">
-          <div>
-            <h1>Analytics</h1>
-            <p class="subtitle">Trends and insights across all meetings</p>
-          </div>
-          <button class="btn btn-ghost btn-sm" id="btn-refresh-analytics">↻ Refresh</button>
-        </div>
-        <div id="analytics-content"><p class="loading">Loading…</p></div>
-      </section>
-
-      <!-- ── ACTION ITEMS PAGE ── -->
-      <section id="page-action-items" class="page">
-        <div class="page-header">
-          <div>
-            <h1>Action Items</h1>
-            <p class="subtitle">Open tasks across all meetings</p>
-          </div>
-          <div style="display:flex;gap:0.5rem;align-items:center">
-            <select class="input btn-sm" id="ai-filter-done" style="width:140px">
-              <option value="">All</option>
-              <option value="false">Pending</option>
-              <option value="true">Done</option>
-            </select>
-            <input class="input btn-sm" id="ai-filter-assignee" placeholder="Assignee…" style="width:150px">
-            <button class="btn btn-ghost btn-sm" id="btn-refresh-ai">↻ Refresh</button>
-          </div>
-        </div>
-
-        <div class="card">
-          <div id="ai-stats" class="stats-bar" style="margin-bottom:1rem"></div>
-          <div id="action-items-list"></div>
-        </div>
-      </section>
-
-      <!-- ── TEMPLATES PAGE ── -->
-      <section id="page-templates" class="page">
-        <div class="page-header">
-          <div>
-            <h1>Meeting Templates</h1>
-            <p class="subtitle">Customise AI analysis prompts per meeting type</p>
-          </div>
-          <button class="btn btn-primary" id="btn-new-template">+ New Template</button>
-        </div>
-        <div id="templates-list" class="templates-grid"></div>
-      </section>
-
-      <!-- ── DEBUG PAGE ── -->
-      <section id="page-debug" class="page">
-        <div class="page-header">
-          <div>
-            <h1>Debug</h1>
-            <p class="subtitle">Screenshots and HTML dumps captured during bot join attempts</p>
-          </div>
-          <button class="btn btn-ghost btn-sm" id="btn-refresh-debug">↻ Refresh</button>
-        </div>
-
-        <div class="card">
-          <div id="debug-file-list"><p class="empty-state">Loading…</p></div>
-        </div>
-      </section>
-
-      <!-- ── WEBHOOKS PAGE ── -->
-      <section id="page-webhooks" class="page">
-        <div class="page-header">
-          <div>
-            <h1>Webhooks</h1>
-            <p class="subtitle">Receive real-time event notifications via HTTP POST</p>
-          </div>
-          <button class="btn btn-primary" id="btn-new-webhook">+ Add Webhook</button>
-        </div>
-        <div class="card">
-          <div id="webhook-list"></div>
-        </div>
-        <div class="card" style="margin-top:1.5rem">
-          <h3 style="margin-bottom:0.75rem">Available Events</h3>
-          <div class="event-chips">
-            <span class="chip chip-code">bot.joining</span>
-            <span class="chip chip-code">bot.in_call</span>
-            <span class="chip chip-code">bot.call_ended</span>
-            <span class="chip chip-code">bot.done</span>
-            <span class="chip chip-code">bot.error</span>
-            <span class="chip chip-code">bot.transcript_ready</span>
-            <span class="chip chip-code">bot.analysis_ready</span>
-          </div>
-          <p class="hint" style="margin-top:0.75rem">
-            Payloads are signed with HMAC-SHA256 when a secret is set.
-            Verify with header <code>X-MeetingBot-Signature: sha256=&lt;hash&gt;</code>.
-          </p>
-        </div>
-      </section>
-
-    </main>
+<div class="hero">
+  <h1>MeetingBot API</h1>
+  <p>Drop a bot into any Zoom, Google Meet, or Teams call. Get back a full transcript and AI analysis. No database required — you store the data.</p>
+  <div class="badge-row">
+    <span class="badge">Google Meet</span>
+    <span class="badge">Zoom</span>
+    <span class="badge">Microsoft Teams</span>
+    <span class="badge">Claude / Gemini</span>
+    <span class="badge">Stateless API</span>
   </div>
+  <div class="cta-row">
+    <a href="/api/docs" class="btn btn-primary">Interactive API Docs</a>
+    <a href="/api/redoc" class="btn btn-outline">ReDoc Reference</a>
+  </div>
+</div>
 
-  <!-- ── MODALS ── -->
+<div class="container">
 
-  <!-- New Bot Modal -->
-  <div class="modal-backdrop hidden" id="modal-new-bot">
-    <div class="modal modal-wide">
-      <div class="modal-header">
-        <div class="modal-title-group">
-          <h2>Deploy Meeting Bot</h2>
-          <p class="modal-subtitle">Configure your bot and choose how to process the recording.</p>
-        </div>
-        <button class="modal-close" data-close="modal-new-bot">✕</button>
+  <section>
+    <h2>How it works</h2>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <h3>Send the URL</h3>
+        <p>POST your meeting URL and optional <code>webhook_url</code> to <strong>/api/v1/bot</strong>.</p>
       </div>
-      <div class="modal-body">
-
-        <!-- Section: Meeting -->
-        <div class="form-section">
-          <div class="form-section-label">Meeting</div>
-          <label>
-            URL <span class="required">*</span>
-            <input class="input" id="new-bot-url"
-              placeholder="https://zoom.us/j/… · meet.google.com/… · teams.microsoft.com/…" />
-            <span class="field-error hidden" id="new-bot-url-error"></span>
-          </label>
-          <div class="form-row">
-            <label style="flex:1">
-              Bot Display Name
-              <input class="input" id="new-bot-name" placeholder="MeetingBot" value="MeetingBot" />
-            </label>
-            <label style="flex:1">
-              Schedule <span class="optional">optional</span>
-              <input class="input" id="new-bot-join-at" type="datetime-local" />
-            </label>
-          </div>
-        </div>
-
-        <!-- Section: Analysis Mode -->
-        <div class="form-section">
-          <div class="form-section-label">Post-Meeting Processing</div>
-          <div class="mode-picker" id="analysis-mode-picker">
-            <label class="mode-card mode-card-active" data-value="full">
-              <input type="radio" name="analysis_mode" value="full" checked style="position:absolute;opacity:0;width:0;height:0" />
-              <div class="mode-card-icon">✦</div>
-              <div class="mode-card-body">
-                <div class="mode-card-title">Full AI Analysis</div>
-                <div class="mode-card-desc">Summary, key points, action items, smart chapters, sentiment &amp; speaker stats — powered by Gemini.</div>
-              </div>
-              <div class="mode-card-check">✓</div>
-            </label>
-            <label class="mode-card" data-value="transcript_only">
-              <input type="radio" name="analysis_mode" value="transcript_only" style="position:absolute;opacity:0;width:0;height:0" />
-              <div class="mode-card-icon">📄</div>
-              <div class="mode-card-body">
-                <div class="mode-card-title">Transcript Only</div>
-                <div class="mode-card-desc">Raw speaker-labelled text, no AI processing. Faster completion, full privacy, lower cost.</div>
-              </div>
-              <div class="mode-card-check">✓</div>
-            </label>
-          </div>
-        </div>
-
-        <!-- Section: AI Options (shown only in full mode) -->
-        <div class="form-section" id="ai-options-section">
-          <div class="form-section-label">AI Options</div>
-          <div class="form-row">
-            <label style="flex:1">
-              Meeting Template <span class="optional">optional</span>
-              <select class="input" id="new-bot-template">
-                <option value="">Default analysis</option>
-              </select>
-            </label>
-            <label style="flex:1">
-              Notify Email <span class="optional">optional</span>
-              <input class="input" id="new-bot-email" type="email" placeholder="you@example.com" />
-            </label>
-          </div>
-          <div id="custom-prompt-row" style="display:none">
-            <label>
-              Your Custom Prompt <span style="color:var(--danger,#e55)">required</span>
-              <textarea class="input" id="new-bot-custom-prompt" rows="7" placeholder="Example:&#10;You are a customer success manager. Analyze this meeting transcript and return ONLY valid JSON.&#10;&#10;Required JSON shape:&#10;{&#10;  &quot;summary&quot;: &quot;&lt;2–3 sentence overview&gt;&quot;,&#10;  &quot;key_points&quot;: [&quot;&lt;point&gt;&quot;],&#10;  &quot;action_items&quot;: [{&quot;task&quot;: &quot;...&quot;, &quot;assignee&quot;: &quot;...&quot;, &quot;due_date&quot;: &quot;...&quot;}],&#10;  &quot;decisions&quot;: [&quot;&lt;decision&gt;&quot;],&#10;  &quot;next_steps&quot;: [&quot;&lt;step&gt;&quot;],&#10;  &quot;sentiment&quot;: &quot;positive|neutral|negative&quot;,&#10;  &quot;topics&quot;: [&quot;&lt;topic&gt;&quot;]&#10;}"></textarea>
-              <span class="hint">Start with a role ("You are a …"), tell the AI to return ONLY valid JSON, then define the JSON shape with any fields you need.</span>
-            </label>
-          </div>
-          <label>
-            Custom Vocabulary <span class="optional">optional</span>
-            <input class="input" id="new-bot-vocab" placeholder="Acme Corp, SKU-1234, Project Phoenix — improves transcription accuracy" />
-          </label>
-        </div>
-
-        <!-- Section: Live Behaviour -->
-        <div class="form-section">
-          <div class="form-section-label">Live Behaviour</div>
-
-          <!-- Respond-on-mention master toggle -->
-          <label class="toggle-row" for="new-bot-respond-mention">
-            <div class="toggle-row-body">
-              <div class="toggle-label">Respond when mentioned</div>
-              <div class="toggle-desc">Bot monitors live captions and replies when its name is called out in the meeting.</div>
-            </div>
-            <div class="toggle-track">
-              <input type="checkbox" id="new-bot-respond-mention" class="toggle-input" checked />
-              <span class="toggle-switch"></span>
-            </div>
-          </label>
-
-          <!-- Response mode selector (shown only when toggle is on) -->
-          <div id="response-mode-row" class="response-mode-row">
-            <div class="response-mode-label">Reply via</div>
-            <div class="response-mode-options">
-              <label class="mode-pill mode-pill-active" data-value="text">
-                <input type="radio" name="mention_response_mode" value="text" checked style="position:absolute;opacity:0;width:0;height:0" />
-                <span class="mode-pill-icon">💬</span> Text chat
-              </label>
-              <label class="mode-pill" data-value="voice">
-                <input type="radio" name="mention_response_mode" value="voice" style="position:absolute;opacity:0;width:0;height:0" />
-                <span class="mode-pill-icon">🔊</span> Voice
-              </label>
-              <label class="mode-pill" data-value="both">
-                <input type="radio" name="mention_response_mode" value="both" style="position:absolute;opacity:0;width:0;height:0" />
-                <span class="mode-pill-icon">✦</span> Both
-              </label>
-            </div>
-          </div>
-
-          <!-- TTS engine selector (shown only when voice or both is selected) -->
-          <div id="tts-provider-row" class="response-mode-row" style="display:none">
-            <div class="response-mode-label">Voice engine</div>
-            <div class="response-mode-options">
-              <label class="mode-pill mode-pill-active" data-value="edge" id="tts-pill-edge">
-                <input type="radio" name="tts_provider" value="edge" checked style="position:absolute;opacity:0;width:0;height:0" />
-                ⚡ Edge TTS
-              </label>
-              <label class="mode-pill" data-value="gemini" id="tts-pill-gemini">
-                <input type="radio" name="tts_provider" value="gemini" style="position:absolute;opacity:0;width:0;height:0" />
-                ✦ Gemini TTS
-              </label>
-            </div>
-            <span class="tts-hint" id="tts-hint"></span>
-          </div>
-
-          <!-- Live transcription toggle -->
-          <label class="toggle-row" for="new-bot-live-transcription">
-            <div class="toggle-row-body">
-              <div class="toggle-label">Live transcription</div>
-              <div class="toggle-desc">Transcribes audio every 15 s during the call so the bot can answer questions about the meeting in real time. Requires Gemini API key.</div>
-            </div>
-            <div class="toggle-track">
-              <input type="checkbox" id="new-bot-live-transcription" class="toggle-input" />
-              <span class="toggle-switch"></span>
-            </div>
-          </label>
-        </div>
-
+      <div class="step">
+        <div class="step-num">2</div>
+        <h3>Bot joins</h3>
+        <p>A headless Chromium browser joins the call, records audio, and monitors captions.</p>
       </div>
-      <div class="modal-footer">
-        <button class="btn btn-ghost" data-close="modal-new-bot">Cancel</button>
-        <button class="btn btn-primary" id="btn-create-bot">
-          <span class="btn-create-icon">▶</span> Deploy Bot
-        </button>
+      <div class="step">
+        <div class="step-num">3</div>
+        <h3>Transcribe &amp; analyse</h3>
+        <p>Audio is transcribed and analysed by Claude or Gemini AI.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">4</div>
+        <h3>Get results</h3>
+        <p>Full payload delivered to your <code>webhook_url</code>, or poll <strong>GET /api/v1/bot/{id}</strong>.</p>
       </div>
     </div>
-  </div>
+  </section>
 
-  <!-- New Webhook Modal -->
-  <div class="modal-backdrop hidden" id="modal-new-webhook">
-    <div class="modal">
-      <div class="modal-header">
-        <h2>Register Webhook</h2>
-        <button class="modal-close" data-close="modal-new-webhook">✕</button>
-      </div>
-      <div class="modal-body">
-        <label>
-          Endpoint URL <span class="required">*</span>
-          <input class="input" id="new-wh-url" placeholder="https://your-server.com/webhook" />
-          <span class="field-error hidden" id="new-wh-url-error"></span>
-        </label>
-        <label>
-          Signing Secret <span class="optional">(optional)</span>
-          <input class="input" id="new-wh-secret" type="password"
-            placeholder="Used to verify HMAC-SHA256 signature" />
-        </label>
-        <fieldset class="event-fieldset">
-          <legend>Events</legend>
-          <label class="checkbox-row">
-            <input type="checkbox" value="*" id="wh-ev-all" checked />
-            <span><strong>*</strong> — all events</span>
-          </label>
-          <div id="wh-event-list" class="event-checkbox-list disabled">
-            <label class="checkbox-row"><input type="checkbox" value="bot.joining" /><span>bot.joining</span></label>
-            <label class="checkbox-row"><input type="checkbox" value="bot.in_call" /><span>bot.in_call</span></label>
-            <label class="checkbox-row"><input type="checkbox" value="bot.call_ended" /><span>bot.call_ended</span></label>
-            <label class="checkbox-row"><input type="checkbox" value="bot.done" /><span>bot.done</span></label>
-            <label class="checkbox-row"><input type="checkbox" value="bot.error" /><span>bot.error</span></label>
-            <label class="checkbox-row"><input type="checkbox" value="bot.transcript_ready" /><span>bot.transcript_ready</span></label>
-            <label class="checkbox-row"><input type="checkbox" value="bot.analysis_ready" /><span>bot.analysis_ready</span></label>
-          </div>
-        </fieldset>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-ghost" data-close="modal-new-webhook">Cancel</button>
-        <button class="btn btn-primary" id="btn-create-webhook">Register</button>
-      </div>
+  <section>
+    <h2>Bot lifecycle</h2>
+    <div class="status-flow">
+      <span class="pill a">joining</span>
+      <span class="arrow">→</span>
+      <span class="pill b">in_call</span>
+      <span class="arrow">→</span>
+      <span class="pill a">call_ended</span>
+      <span class="arrow">→</span>
+      <span class="pill c">done</span>
+      <span class="arrow">or</span>
+      <span class="pill d">error</span>
     </div>
-  </div>
+    <p style="font-size:.88rem;color:var(--muted);margin-top:8px">
+      Results are kept in memory for <strong>24 hours</strong> — save them to your own storage before then.
+    </p>
+  </section>
 
-  <!-- New Template Modal -->
-  <div class="modal-backdrop hidden" id="modal-new-template">
-    <div class="modal modal-wide">
-      <div class="modal-header">
-        <h2>New Custom Template</h2>
-        <button class="modal-close" data-close="modal-new-template">✕</button>
-      </div>
-      <div class="modal-body">
-        <label>
-          Name <span class="required">*</span>
-          <input class="input" id="new-tmpl-name" placeholder="e.g. My Sales Call" />
-        </label>
-        <label>
-          Description <span class="optional">(optional)</span>
-          <input class="input" id="new-tmpl-desc" placeholder="What meeting type this is for" />
-        </label>
-        <div class="tmpl-prompt-label-row">
-          <span class="label-text">
-            Analysis Prompt <span class="optional">(leave blank to use default)</span>
-          </span>
-          <button class="btn btn-ghost btn-xs" id="btn-load-default-prompt" type="button">
-            Load default prompt
-          </button>
-        </div>
-        <div class="tmpl-prompt-hint">
-          Write any prompt you like. The bot sends this to the AI along with the transcript.
-          <strong>Tips:</strong>
-          start with a role (<em>"You are a sales coach."</em>),
-          add <em>"Analyze this meeting transcript and return ONLY valid JSON."</em>,
-          then define the JSON shape — include any fields you need
-          (e.g. <code>buying_signals</code>, <code>blockers</code>, <code>root_causes</code>).
-          Click <em>Load default prompt</em> to start from the built-in structure.
-        </div>
-        <textarea class="input tmpl-prompt-textarea" id="new-tmpl-prompt" rows="12"
-          placeholder='You are an expert meeting analyst. Analyze this meeting transcript and return ONLY valid JSON.
+  <section>
+    <h2>Quick start</h2>
+    <p class="code-title">Create a bot</p>
+    <div class="code-block">curl -X POST https://your-meetingbot.com/api/v1/bot \
+  -H "Content-Type: application/json" \
+  -d '{
+    "meeting_url":  "https://meet.google.com/abc-defg-hij",
+    "bot_name":     "Notetaker",
+    "webhook_url":  "https://your-app.com/webhook/meeting-done",
+    "template":     "default"
+  }'</div>
 
-Required JSON shape:
-{
-  "summary":      "<2–4 sentence overview>",
-  "key_points":   ["<point>"],
-  "action_items": [{"task": "...", "assignee": "...", "due_date": "..."}],
-  "decisions":    ["<decision>"],
-  "next_steps":   ["<step>"],
-  "sentiment":    "positive|neutral|negative",
-  "topics":       ["<topic>"],
-  "your_field":   ["<add any extra fields you need>"]
-}'></textarea>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-ghost" data-close="modal-new-template">Cancel</button>
-        <button class="btn btn-primary" id="btn-create-template">Create</button>
-      </div>
+    <br /><p class="code-title">Poll for status</p>
+    <div class="code-block">curl https://your-meetingbot.com/api/v1/bot/{id}</div>
+
+    <br /><p class="code-title">Webhook payload (POST to your webhook_url when done)</p>
+    <div class="code-block">{
+  "event": "bot.done",
+  "data": {
+    "bot_id": "550e8400-...",
+    "status": "done",
+    "participants": ["Alice", "Bob"],
+    "transcript": [{ "speaker": "Alice", "text": "...", "timestamp": 2.0 }],
+    "analysis": {
+      "summary": "...",
+      "action_items": [{ "task": "...", "assignee": "Alice" }],
+      "decisions": [...],
+      "sentiment": "positive"
+    },
+    "ai_usage": { "total_tokens": 4200, "total_cost_usd": 0.021 }
+  }
+}</div>
+  </section>
+
+  <section>
+    <h2>API Endpoints</h2>
+    <div class="endpoint-list">
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/api/v1/bot</span><span class="ep-desc">Create a bot &amp; join a meeting</span></div>
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/v1/bot</span><span class="ep-desc">List all in-memory bots</span></div>
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/v1/bot/{id}</span><span class="ep-desc">Full details — transcript, analysis, stats</span></div>
+      <div class="endpoint"><span class="method delete">DELETE</span><span class="path">/api/v1/bot/{id}</span><span class="ep-desc">Stop &amp; remove a bot</span></div>
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/v1/bot/{id}/transcript</span><span class="ep-desc">Raw transcript only</span></div>
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/v1/bot/{id}/recording</span><span class="ep-desc">Download WAV audio</span></div>
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/api/v1/bot/{id}/analyze</span><span class="ep-desc">Re-run AI analysis</span></div>
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/api/v1/bot/{id}/ask</span><span class="ep-desc">Q&amp;A on the transcript</span></div>
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/api/v1/bot/{id}/followup-email</span><span class="ep-desc">Draft a follow-up email</span></div>
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/v1/bot/{id}/export/markdown</span><span class="ep-desc">Export as Markdown</span></div>
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/v1/bot/{id}/export/pdf</span><span class="ep-desc">Export as PDF</span></div>
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/api/v1/webhook</span><span class="ep-desc">Register global webhook</span></div>
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/v1/templates</span><span class="ep-desc">List analysis templates</span></div>
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/health</span><span class="ep-desc">Health check</span></div>
     </div>
-  </div>
+  </section>
 
-  <!-- Toast -->
-  <div id="toast-container"></div>
+  <section>
+    <h2>Templates</h2>
+    <p style="font-size:.9rem;color:var(--muted);margin-bottom:12px">
+      Pass <code>template</code> in your bot creation request. Use <code>prompt_override</code> for a custom prompt.
+    </p>
+    <div class="code-block">default · sales · standup · 1on1 · retro · kickoff
+allhands · postmortem · interview · design-review</div>
+  </section>
 
-  <script src="/static/app.js"></script>
+  <section style="padding-bottom:0">
+    <h2>Authentication</h2>
+    <p style="font-size:.9rem;color:var(--muted);margin-bottom:12px">
+      Set <code>API_KEY</code> to require a Bearer token on all requests.
+    </p>
+    <div class="code-block">Authorization: Bearer &lt;your-API_KEY&gt;</div>
+  </section>
+
+</div>
+
+<footer>
+  <p>MeetingBot API v2.0 &nbsp;·&nbsp; <a href="/api/docs">Swagger UI</a> &nbsp;·&nbsp; <a href="/api/redoc">ReDoc</a></p>
+</footer>
+
 </body>
 </html>

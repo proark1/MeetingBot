@@ -1,18 +1,18 @@
-"""Webhook registration API."""
+"""Global webhook registration API.
+
+Webhooks registered here receive events for ALL bots.
+For per-bot webhooks, pass `webhook_url` when creating a bot.
+"""
 
 import asyncio
 import ipaddress
 import socket
-from typing import Annotated
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import APIRouter, HTTPException
 
-from app.database import get_db
-from app.models.webhook import Webhook
 from app.schemas.webhook import WebhookCreate, WebhookResponse
+from app.store import store
 
 router = APIRouter(prefix="/webhook", tags=["Webhooks"])
 
@@ -22,130 +22,105 @@ _PRIVATE_NETS = [ipaddress.ip_network(n) for n in [
 ]]
 
 
-def _is_private_ip(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+def _is_private_ip(addr) -> bool:
     return addr.is_private or addr.is_loopback or addr.is_link_local or any(addr in net for net in _PRIVATE_NETS)
 
 
 async def _block_ssrf(url: str) -> None:
-    """Reject URLs targeting localhost, private IPs, or hostnames that resolve to them."""
     host = urlparse(url).hostname or ""
     if not host or host.lower() == "localhost":
         raise HTTPException(status_code=400, detail="Webhook URL must not target localhost")
     try:
-        # Direct IP address — check immediately
         addr = ipaddress.ip_address(host)
         if _is_private_ip(addr):
-            raise HTTPException(status_code=400, detail="Webhook URL must not target a private/internal address")
+            raise HTTPException(status_code=400, detail="Webhook URL must not target a private address")
         return
     except ValueError:
-        pass  # It's a hostname — fall through to DNS check
-
-    # Resolve hostname and validate all returned IPs (mitigates DNS rebinding)
+        pass
     try:
         infos = await asyncio.to_thread(socket.getaddrinfo, host, None)
         for *_, sockaddr in infos:
-            ip_str = sockaddr[0]
             try:
-                addr = ipaddress.ip_address(ip_str)
+                addr = ipaddress.ip_address(sockaddr[0])
                 if _is_private_ip(addr):
                     raise HTTPException(
                         status_code=400,
-                        detail=f"Webhook URL resolves to a private/internal address ({ip_str})",
+                        detail=f"Webhook URL resolves to a private address ({sockaddr[0]})",
                     )
             except ValueError:
                 pass
     except socket.gaierror:
-        pass  # DNS resolution failed — allow (delivery will fail gracefully)
+        pass
 
 
-def _to_response(wh: Webhook) -> WebhookResponse:
+def _to_response(wh) -> WebhookResponse:
     return WebhookResponse(
         id=wh.id,
         url=wh.url,
-        events=wh.events.split(",") if wh.events else ["*"],
+        events=wh.events,
         is_active=wh.is_active,
         created_at=wh.created_at,
         delivery_attempts=wh.delivery_attempts,
         last_delivery_at=wh.last_delivery_at,
         last_delivery_status=wh.last_delivery_status,
+        consecutive_failures=wh.consecutive_failures,
     )
 
 
 @router.post("", response_model=WebhookResponse, status_code=201)
-async def create_webhook(
-    payload: WebhookCreate,
-    db: Annotated[AsyncSession, Depends(get_db)],
-):
+async def create_webhook(payload: WebhookCreate):
+    """Register a global webhook.
+
+    The webhook will receive events for all bots:
+    - `bot.joining`, `bot.in_call`, `bot.call_ended`
+    - `bot.transcript_ready`, `bot.analysis_ready`
+    - `bot.done`, `bot.error`, `bot.cancelled`
+
+    Use `events: ["*"]` to receive all events (default), or list specific ones.
+
+    For per-bot webhooks (results from a single bot), pass `webhook_url` when
+    creating the bot instead.
+    """
     await _block_ssrf(payload.url)
-    wh = Webhook(
-        url=payload.url,
-        events=",".join(payload.events),
-        secret=payload.secret,
-    )
-    db.add(wh)
-    await db.commit()
-    await db.refresh(wh)
+    wh = store.new_webhook(url=payload.url, events=payload.events, secret=payload.secret)
     return _to_response(wh)
 
 
 @router.get("", response_model=list[WebhookResponse])
-async def list_webhooks(db: Annotated[AsyncSession, Depends(get_db)]):
-    result = await db.execute(select(Webhook).order_by(Webhook.created_at.desc()))
-    return [_to_response(wh) for wh in result.scalars().all()]
+async def list_webhooks():
+    """List all registered global webhooks."""
+    return [_to_response(wh) for wh in store.list_webhooks()]
 
 
 @router.get("/{webhook_id}", response_model=WebhookResponse)
-async def get_webhook(
-    webhook_id: str,
-    db: Annotated[AsyncSession, Depends(get_db)],
-):
-    wh = await _get_or_404(db, webhook_id)
+async def get_webhook(webhook_id: str):
+    wh = store.get_webhook(webhook_id)
+    if wh is None:
+        raise HTTPException(status_code=404, detail=f"Webhook {webhook_id!r} not found")
     return _to_response(wh)
 
 
 @router.delete("/{webhook_id}", status_code=204)
-async def delete_webhook(
-    webhook_id: str,
-    db: Annotated[AsyncSession, Depends(get_db)],
-):
-    wh = await _get_or_404(db, webhook_id)
-    await db.delete(wh)
-    await db.commit()
+async def delete_webhook(webhook_id: str):
+    if not store.delete_webhook(webhook_id):
+        raise HTTPException(status_code=404, detail=f"Webhook {webhook_id!r} not found")
 
 
 @router.post("/{webhook_id}/test")
-async def test_webhook(
-    webhook_id: str,
-    db: Annotated[AsyncSession, Depends(get_db)],
-):
-    """Send a test delivery to this webhook endpoint and return the HTTP status code."""
-    wh = await _get_or_404(db, webhook_id)
-    # Re-validate SSRF at delivery time (URL may have been registered before this check existed)
+async def test_webhook(webhook_id: str):
+    """Send a test event to this webhook endpoint."""
+    wh = store.get_webhook(webhook_id)
+    if wh is None:
+        raise HTTPException(status_code=404, detail=f"Webhook {webhook_id!r} not found")
     await _block_ssrf(wh.url)
-    from app.services.webhook_service import _get_client, _deliver_with_retry
-    import hashlib
-    import hmac
-    import json
-    from datetime import datetime, timezone
-    body = json.dumps({
-        "event": "bot.test",
-        "data": {"message": "Test delivery from MeetingBot"},
-        "ts": datetime.now(timezone.utc).isoformat(),
-    })
+
+    from app.services.webhook_service import _get_client, _deliver_with_retry, _build_body, _sign
+    body = _build_body("bot.test", {"message": "Test delivery from MeetingBot"})
     headers = {"Content-Type": "application/json", "User-Agent": "MeetingBot/1.0"}
     if wh.secret:
-        sig = hmac.new(wh.secret.encode(), body.encode(), hashlib.sha256).hexdigest()
-        headers["X-MeetingBot-Signature"] = f"sha256={sig}"
-    client = _get_client()
-    status_code = await _deliver_with_retry(client, wh.url, body, headers)
+        headers["X-MeetingBot-Signature"] = _sign(body, wh.secret)
+
+    status_code = await _deliver_with_retry(_get_client(), wh.url, body, headers)
     if status_code is None:
         raise HTTPException(status_code=502, detail="Test delivery failed — endpoint unreachable or returned 5xx")
     return {"status_code": status_code, "url": wh.url}
-
-
-async def _get_or_404(db: AsyncSession, webhook_id: str) -> Webhook:
-    result = await db.execute(select(Webhook).where(Webhook.id == webhook_id))
-    wh = result.scalar_one_or_none()
-    if wh is None:
-        raise HTTPException(status_code=404, detail=f"Webhook {webhook_id!r} not found")
-    return wh
