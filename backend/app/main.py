@@ -72,13 +72,17 @@ async def lifespan(app: FastAPI):
         logger.error(
             "✖ Database initialisation timed out after 30 s — the app will start but "
             "all database-dependent endpoints will fail until the DB is reachable. "
-            "Check DATABASE_URL / SUPABASE_* environment variables."
+            "Check DATABASE_URL / SUPABASE_* environment variables. "
+            "If using Supabase free tier on Railway, set DATABASE_URL to the "
+            "'Session pooler' connection string from Supabase → Settings → Database."
         )
     except Exception as exc:
         logger.error(
             "✖ Database initialisation failed: %s — the app will start but "
             "all database-dependent endpoints will fail. "
-            "Check DATABASE_URL / SUPABASE_* environment variables.",
+            "Check DATABASE_URL / SUPABASE_* environment variables. "
+            "If using Supabase free tier on Railway, set DATABASE_URL to the "
+            "'Session pooler' connection string from Supabase → Settings → Database.",
             exc,
         )
     if settings.DATABASE_URL.startswith("sqlite"):

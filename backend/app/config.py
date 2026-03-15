@@ -27,19 +27,45 @@ class Settings(BaseSettings):
     #                        (Settings → Database → Database password)
     #
     # The remaining fields default to Supabase's standard values and rarely need changing.
+    # SUPABASE_DB_HOST overrides the derived host (db.[ref].supabase.co).  Use this to
+    # point at the session pooler instead of the direct connection, e.g.:
+    #   SUPABASE_DB_HOST=aws-0-us-east-1.pooler.supabase.com
+    #   SUPABASE_DB_USER=postgres.[ref]   (pooler requires the project-ref suffix)
+    #   SUPABASE_DB_PORT=5432             (or 6543 for transaction pooler)
     SUPABASE_URL: str = ""           # https://[ref].supabase.co
     SUPABASE_DB_PASSWORD: str = ""   # database password (NOT the anon/service key)
+    SUPABASE_DB_HOST: str = ""       # optional host override (e.g. pooler hostname)
     SUPABASE_DB_USER: str = "postgres"
     SUPABASE_DB_NAME: str = "postgres"
-    SUPABASE_DB_PORT: int = 5432     # 5432 = direct, 6543 = transaction pooler
+    SUPABASE_DB_PORT: int = 5432     # 5432 = direct/session pooler, 6543 = transaction pooler
 
     @model_validator(mode="after")
     def build_database_url(self) -> "Settings":
-        """Build DATABASE_URL from SUPABASE_URL + SUPABASE_DB_PASSWORD if provided."""
+        """Build DATABASE_URL from SUPABASE_URL + SUPABASE_DB_PASSWORD if provided.
+
+        Priority order:
+        1. DATABASE_URL explicitly set to a Postgres URL → used as-is (no override).
+        2. SUPABASE_URL + SUPABASE_DB_PASSWORD both set → DATABASE_URL is derived.
+           Use SUPABASE_DB_HOST to override the database host (e.g. session pooler).
+        3. Fallback → SQLite default (development only).
+
+        On Railway + Supabase free tier the direct connection (db.[ref].supabase.co:5432)
+        is IPv6-only and unreachable from IPv4 networks.  Fix: set DATABASE_URL in Railway
+        to the "Session pooler" connection string from Supabase → Settings → Database.
+        """
+        # If the user explicitly provided a non-SQLite DATABASE_URL, respect it and
+        # do NOT override it — even when SUPABASE_* variables are also set.
+        db_explicitly_set = (
+            "DATABASE_URL" in self.model_fields_set
+            and not self.DATABASE_URL.startswith("sqlite")
+        )
+        if db_explicitly_set:
+            return self
+
         if self.SUPABASE_URL and self.SUPABASE_DB_PASSWORD:
             # Extract project ref from https://[ref].supabase.co
             ref = self.SUPABASE_URL.rstrip("/").removeprefix("https://").split(".")[0]
-            host = f"db.{ref}.supabase.co"
+            host = self.SUPABASE_DB_HOST or f"db.{ref}.supabase.co"
             password = quote_plus(self.SUPABASE_DB_PASSWORD)
             self.DATABASE_URL = (
                 f"postgresql://{self.SUPABASE_DB_USER}:{password}"

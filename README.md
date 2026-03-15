@@ -81,44 +81,55 @@ SQLite (the default) stores its file inside the container, so **all data is lost
 
 ### 2 — Get your connection details
 
-In your Supabase project: **Project Settings → Database → Connection info**.
+In your Supabase project: **Project Settings → Database → Connection string**.
 
-Choose the mode that fits your deployment:
-
-| Mode | Port | Use when |
-|---|---|---|
-| **Direct** | 5432 | Single long-running container (Railway, Fly.io) — recommended |
-| **Session pooler** | 5432 | Multiple replicas, same city |
-| **Transaction pooler** | 6543 | Serverless / edge functions |
+> ⚠️ **Railway + Supabase free tier:** Supabase's **direct connection** (`db.[ref].supabase.co:5432`) is **IPv6-only** on the free tier. Railway uses IPv4, so this connection will fail with "Network is unreachable". You must use the **Session pooler** connection instead (see Step 3 below).
 
 ### 3 — Set the Railway variables
 
-Go to your Railway service → **Variables** and add just these two:
+**Recommended: use `DATABASE_URL` directly (most reliable)**
+
+In your Supabase project go to **Settings → Database → Connection string** and copy the **Session pooler** URI. Then set it in Railway:
+
+| Variable | Where to find it |
+|---|---|
+| `DATABASE_URL` | Supabase → Settings → Database → Connection string → **Session pooler** |
+
+The session pooler URI looks like:
+```
+postgresql://postgres.[ref]:[password]@aws-0-[region].pooler.supabase.com:5432/postgres
+```
+
+**Alternative: use `SUPABASE_*` variables + host override**
 
 | Variable | Where to find it | Example |
 |---|---|---|
-| `SUPABASE_URL` | Supabase dashboard → **Settings → API → Project URL** | `https://abcdefgh.supabase.co` |
-| `SUPABASE_DB_PASSWORD` | Supabase dashboard → **Settings → Database → Database password** | `your-db-password` |
+| `SUPABASE_URL` | Supabase → **Settings → API → Project URL** | `https://abcdefgh.supabase.co` |
+| `SUPABASE_DB_PASSWORD` | Supabase → **Settings → Database → Database password** | `your-db-password` |
+| `SUPABASE_DB_HOST` | Supabase → Settings → Database → Connection string (extract the host from the Session pooler URI) | `aws-0-us-east-1.pooler.supabase.com` |
+| `SUPABASE_DB_USER` | `postgres.[your-project-ref]` (from the Session pooler URI) | `postgres.abcdefgh` |
 
-> **Note:** `SUPABASE_URL` is the project URL (the one that starts with `https://`), not the anon key or publishable key. The database password is separate from the API keys — find it under **Settings → Database**, not Settings → API.
+> **Note:** `DATABASE_URL`, when explicitly set to a Postgres URL, always takes precedence over the `SUPABASE_*` variables. Use whichever approach is easier.
 
-The app derives the database host from the URL automatically. You do **not** need to set `DATABASE_URL`.
-
-**Optional overrides** (defaults work for almost everyone):
+**Optional overrides** (only needed with the `SUPABASE_*` approach):
 
 | Variable | Default | Change if… |
 |---|---|---|
 | `SUPABASE_DB_PORT` | `5432` | Using the transaction pooler (set to `6543`) |
-| `SUPABASE_DB_USER` | `postgres` | You created a custom DB user |
 | `SUPABASE_DB_NAME` | `postgres` | You created a custom database |
 
-**Local `.env`:**
+**Local `.env` (direct connection — works if your machine supports IPv6):**
 ```
 SUPABASE_URL=https://abcdefghijklm.supabase.co
 SUPABASE_DB_PASSWORD=your-database-password
 ```
 
-No other changes are needed — the app auto-detects:
+**Local `.env` (session pooler — works everywhere):**
+```
+DATABASE_URL=postgresql://postgres.abcdefgh:your-password@aws-0-us-east-1.pooler.supabase.com:5432/postgres
+```
+
+The app auto-detects:
 - Supabase hosts → enables `ssl=require`
 - Port 6543 → disables prepared-statement cache (PgBouncer transaction mode)
 

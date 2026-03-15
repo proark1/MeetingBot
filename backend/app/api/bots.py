@@ -213,7 +213,13 @@ async def create_bot(
                 status_code=503,
                 detail=(
                     "Database unreachable — cannot save bot record. "
-                    "Check your DATABASE_URL / SUPABASE_* environment variables and ensure the database server is accessible."
+                    "If using Supabase on Railway (free tier), the direct connection "
+                    "(db.[ref].supabase.co:5432) is IPv6-only and unreachable from IPv4 networks. "
+                    "Fix: in Railway, set DATABASE_URL to the 'Session pooler' connection string "
+                    "from your Supabase project → Settings → Database → Connection string. "
+                    "Alternatively set SUPABASE_DB_HOST to your pooler hostname "
+                    "(e.g. aws-0-us-east-1.pooler.supabase.com), SUPABASE_DB_USER to "
+                    "postgres.[your-project-ref], and SUPABASE_DB_PORT to 5432."
                 ),
             )
         raise HTTPException(status_code=500, detail=f"Database error: {exc}")
