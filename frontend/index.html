@@ -88,6 +88,7 @@
     }
     .method.get    { background: #dcfce7; color: #166534; }
     .method.post   { background: #dbeafe; color: #1e40af; }
+    .method.put    { background: #fef9c3; color: #854d0e; }
     .method.delete { background: #fee2e2; color: #991b1b; }
     .path { font-family: "Courier New", monospace; font-size: .9rem; color: var(--brand); font-weight: 600; }
     .ep-desc { font-size: .88rem; color: var(--muted); margin-left: auto; }
@@ -130,11 +131,13 @@
     <span class="badge">Zoom</span>
     <span class="badge">Microsoft Teams</span>
     <span class="badge">Claude / Gemini</span>
-    <span class="badge">Stateless API</span>
+    <span class="badge">Multi-Tenant</span>
+    <span class="badge">Stripe + USDC</span>
   </div>
   <div class="cta-row">
     <a href="/api/docs" class="btn btn-primary">Interactive API Docs</a>
     <a href="/api/redoc" class="btn btn-outline">ReDoc Reference</a>
+    <a href="/register" class="btn btn-outline">Register Account</a>
   </div>
 </div>
 
@@ -247,18 +250,51 @@
 allhands · postmortem · interview · design-review</div>
   </section>
 
-  <section style="padding-bottom:0">
-    <h2>Authentication</h2>
+  <section>
+    <h2>Authentication &amp; Accounts</h2>
     <p style="font-size:.9rem;color:var(--muted);margin-bottom:12px">
-      Set <code>API_KEY</code> to require a Bearer token on all requests.
+      Register an account to receive an <code>sk_live_...</code> API key. Use it as a Bearer token on all requests.
     </p>
-    <div class="code-block">Authorization: Bearer &lt;your-API_KEY&gt;</div>
+    <div class="endpoint-list">
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/api/v1/auth/register</span><span class="ep-desc">Create account → get API key</span></div>
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/api/v1/auth/login</span><span class="ep-desc">Email + password → JWT for web UI</span></div>
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/v1/auth/me</span><span class="ep-desc">Account info + balance</span></div>
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/api/v1/auth/keys</span><span class="ep-desc">Generate new API key</span></div>
+    </div>
+    <div class="code-block" style="margin-top:16px">Authorization: Bearer sk_live_&lt;your-api-key&gt;</div>
+  </section>
+
+  <section>
+    <h2>Billing &amp; Credits</h2>
+    <p style="font-size:.9rem;color:var(--muted);margin-bottom:12px">
+      Pre-fund your credit balance via Stripe card or USDC (ERC-20). Credits are deducted per bot run.
+    </p>
+    <div class="endpoint-list">
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/v1/billing/balance</span><span class="ep-desc">Current balance + transaction history</span></div>
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/api/v1/billing/stripe/checkout</span><span class="ep-desc">Create Stripe checkout session</span></div>
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/v1/billing/usdc/address</span><span class="ep-desc">Get USDC deposit address (1 USDC = $1)</span></div>
+    </div>
+  </section>
+
+  <section style="padding-bottom:0">
+    <h2>Admin (restricted)</h2>
+    <p style="font-size:.9rem;color:var(--muted);margin-bottom:12px">
+      Platform administration — only admin accounts can access these endpoints.
+    </p>
+    <div class="endpoint-list">
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/v1/admin/wallet</span><span class="ep-desc">View platform USDC collection wallet</span></div>
+      <div class="endpoint"><span class="method post">PUT</span><span class="path">/api/v1/admin/wallet</span><span class="ep-desc">Set/update platform USDC wallet</span></div>
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/v1/admin/config</span><span class="ep-desc">List platform configuration</span></div>
+    </div>
+    <p style="font-size:.85rem;color:var(--muted);margin-top:12px">
+      Web admin panel: <a href="/admin" style="color:var(--brand);text-decoration:none">/admin</a>
+    </p>
   </section>
 
 </div>
 
 <footer>
-  <p>MeetingBot API v2.0 &nbsp;·&nbsp; <a href="/api/docs">Swagger UI</a> &nbsp;·&nbsp; <a href="/api/redoc">ReDoc</a></p>
+  <p>MeetingBot API v2.1 &nbsp;·&nbsp; <a href="/api/docs">Swagger UI</a> &nbsp;·&nbsp; <a href="/api/redoc">ReDoc</a> &nbsp;·&nbsp; <a href="/register">Register</a> &nbsp;·&nbsp; <a href="/dashboard">Dashboard</a></p>
 </footer>
 
 </body>

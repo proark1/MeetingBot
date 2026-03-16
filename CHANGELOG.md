@@ -6,6 +6,24 @@ Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
 ---
 
+## [2.1.0] - 2026-03-16
+
+### Added
+- **Admin interface** — platform administration panel at `/admin` (web UI) and `/api/v1/admin/*` (API), restricted to admin accounts only
+- **Platform USDC collection wallet** — admins can set/change a single Ethereum wallet address where all users send USDC via `PUT /api/v1/admin/wallet` or the admin web UI. When configured, this address is returned to all users on the top-up page and `GET /api/v1/billing/usdc/address`, replacing HD-derived per-user addresses
+- **Admin API endpoints:** `GET /api/v1/admin/wallet`, `PUT /api/v1/admin/wallet`, `GET /api/v1/admin/config`
+- **Admin access control** — only `assad.dar@gmail.com` or accounts with `is_admin=true` can access admin endpoints and the `/admin` page; all others receive HTTP 403
+- `is_admin` field on Account model for role-based access
+- `PlatformConfig` database model for storing platform-level key/value settings
+- Admin nav link (visible only to admin users) in the web UI navbar
+
+### Changed
+- `GET /api/v1/billing/usdc/address` now returns the admin-configured platform wallet when set, falling back to HD-derived per-user addresses
+- Top-up page (`/topup`) shows the platform wallet when configured by an admin
+- `CRYPTO_HD_SEED` is no longer required for USDC deposits if a platform wallet is set via the admin panel
+
+---
+
 ## [1.5.1] - 2026-03-14
 
 ### Fixed

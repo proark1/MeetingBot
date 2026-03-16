@@ -29,7 +29,7 @@ cd MeetingBot
 # Set your API keys
 export ANTHROPIC_API_KEY=sk-ant-...   # or GEMINI_API_KEY
 export STRIPE_SECRET_KEY=sk_live_...  # for card payments
-export CRYPTO_HD_SEED=<64-char hex>   # for USDC payments
+export CRYPTO_HD_SEED=<64-char hex>   # for USDC payments (optional — admin can also set wallet via UI)
 
 docker compose up
 ```
@@ -37,6 +37,7 @@ docker compose up
 API available at `http://localhost:8000`
 Interactive docs at `http://localhost:8000/api/docs`
 Web UI at `http://localhost:8000/register`
+Admin panel at `http://localhost:8000/admin` (admin accounts only)
 
 ### 2. Register an account and get an API key
 
@@ -59,12 +60,14 @@ curl -X POST http://localhost:8000/api/v1/billing/stripe/checkout \
   -H "Content-Type: application/json" \
   -d '{"amount_usd": 25, "success_url": "https://your-app.com/thanks", "cancel_url": "https://your-app.com/topup"}'
 
-# Via USDC — get your unique deposit address (1 USDC = $1 credit)
+# Via USDC — get the platform USDC deposit address (1 USDC = $1 credit)
 curl http://localhost:8000/api/v1/billing/usdc/address \
   -H "Authorization: Bearer sk_live_..."
 ```
 
 Or use the web UI at `/topup`.
+
+> **USDC deposits:** If a platform admin has configured a collection wallet via `/admin`, that address is returned to all users. Otherwise, each user gets a unique HD-derived address (requires `CRYPTO_HD_SEED`).
 
 ### 4. Create a bot
 
@@ -158,7 +161,7 @@ Or receive them via your `webhook_url` — a POST with the full payload is deliv
 | `GET` | `/api/v1/billing/balance` | Current balance + last 50 transactions (each with `id`, `amount_usd`, `type`, `description`, `reference_id`, `created_at`) |
 | `POST` | `/api/v1/billing/stripe/checkout` | Create Stripe Checkout session. Body: `{amount_usd, success_url?, cancel_url?}`. `amount_usd` must be one of the values in `STRIPE_TOP_UP_AMOUNTS`. |
 | `POST` | `/api/v1/billing/stripe/webhook` | Stripe webhook receiver — register this URL in your Stripe dashboard for `checkout.session.completed` events |
-| `GET` | `/api/v1/billing/usdc/address` | Get unique USDC/ERC-20 deposit address (1 USDC = $1 credit, credited within ~1 min) |
+| `GET` | `/api/v1/billing/usdc/address` | Get USDC/ERC-20 deposit address (platform wallet if admin-configured, otherwise HD-derived per-user address). 1 USDC = $1 credit, credited within ~1 min |
 
 **Transaction types** (the `type` field in balance transactions):
 | Type | Meaning |
@@ -200,6 +203,21 @@ Or receive them via your `webhook_url` — a POST with the full payload is deliv
 | `GET` | `/api/v1/admin/config` | List all platform configuration values |
 
 > **Admin access:** Only the admin account (`assad.dar@gmail.com`) or accounts with `is_admin=true` can access these endpoints. All other users receive a 403 error.
+
+**Set the platform USDC wallet (admin only):**
+```bash
+# Set the wallet where all users will send USDC
+curl -X PUT http://localhost:8000/api/v1/admin/wallet \
+  -H "Authorization: Bearer sk_live_<admin-api-key>" \
+  -H "Content-Type: application/json" \
+  -d '{"wallet_address": "0xYourEthereumWalletAddress1234567890abcdef"}'
+
+# Check the current wallet
+curl http://localhost:8000/api/v1/admin/wallet \
+  -H "Authorization: Bearer sk_live_<admin-api-key>"
+```
+
+Or use the admin web UI at `/admin` to manage the wallet address through a form.
 
 ### Web UI
 | Path | Description |
@@ -280,11 +298,13 @@ Pass `template` in bot creation. Use `prompt_override` for a fully custom prompt
 | `STRIPE_SECRET_KEY` | — | Stripe secret key (`sk_live_...`) |
 | `STRIPE_WEBHOOK_SECRET` | — | Stripe webhook signing secret (`whsec_...`) |
 | `STRIPE_TOP_UP_AMOUNTS` | `10,25,50,100` | Comma-separated USD top-up options |
-| `CRYPTO_HD_SEED` | — | 64-char hex seed for HD wallet (generate once, keep secret) |
+| `CRYPTO_HD_SEED` | — | 64-char hex seed for HD wallet (generate once, keep secret). Not required if the admin sets a platform wallet via `/admin` |
 | `CRYPTO_RPC_URL` | — | Infura/Alchemy RPC endpoint for USDC monitoring |
 | `USDC_CONTRACT` | `0xA0b8...eB48` | USDC ERC-20 contract address |
 | `CREDIT_MARKUP` | `3.0` | Multiply raw AI cost by this factor when deducting credits |
 | `MIN_CREDITS_USD` | `0.05` | Minimum balance required to create a bot |
+
+> **USDC wallet configuration:** The platform USDC collection wallet can be set by an admin via `PUT /api/v1/admin/wallet` or the `/admin` web UI. When set, this wallet address is returned to all users at `GET /api/v1/billing/usdc/address`, overriding the HD-derived per-user addresses. This means you can accept USDC without configuring `CRYPTO_HD_SEED` — just set the wallet via the admin panel.
 
 ### Bot settings
 | Variable | Default | Description |
