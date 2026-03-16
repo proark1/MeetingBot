@@ -264,7 +264,7 @@ app = FastAPI(
         "The bot leaves automatically when it has been the only participant for "
         "`BOT_ALONE_TIMEOUT` seconds (default 5 min).\n"
     ),
-    version="4.0.0",
+    version="2.2.0",
     lifespan=lifespan,
     docs_url="/api/docs",
     redoc_url="/api/redoc",
@@ -307,7 +307,7 @@ app.include_router(ui_router)                                          # web UI 
 @app.get("/health", tags=["Health"])
 @app.get("/api/health", tags=["Health"])
 async def health():
-    return {"status": "ok", "service": "MeetingBot", "version": "4.0.0"}
+    return {"status": "ok", "service": "MeetingBot", "version": "2.2.0"}
 
 
 # ── Serve frontend ────────────────────────────────────────────────────────────

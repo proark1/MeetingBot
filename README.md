@@ -1,8 +1,8 @@
 # MeetingBot API
 
-**Version 4.0.0** — A stateless meeting bot API service with multi-tenant billing, Google/Microsoft SSO, Python & JS SDKs, webhook retry/delivery logs, bot persona customization, video recording, Prometheus metrics, idempotency keys, cloud storage, email notifications, calendar auto-join, Slack/Notion integrations, and GDPR compliance.
+**Version 2.2.0** — A stateless meeting bot API service with multi-tenant billing, business account support, Google/Microsoft SSO, Python & JS SDKs, webhook retry/delivery logs, bot persona customization, video recording, Prometheus metrics, idempotency keys, cloud storage, email notifications, calendar auto-join, Slack/Notion integrations, and GDPR compliance.
 
-> **Last updated:** 2026-03-16 · **API version in Swagger UI:** 4.0.0 <!-- auto-updated on each release -->
+> **Last updated:** 2026-03-16 · **API version in Swagger UI:** 2.2.0 <!-- auto-updated on each release -->
 
 Send bots into **Zoom**, **Google Meet**, and **Microsoft Teams** meetings to record, transcribe, and analyse them with **Claude** (Anthropic) or **Gemini** (Google) AI.
 
@@ -10,18 +10,15 @@ Send bots into **Zoom**, **Google Meet**, and **Microsoft Teams** meetings to re
 
 ---
 
-## What's new in v4.0.0
+## What's new in v2.2.0
 
 | Feature | Description |
 |---------|-------------|
-| **Google/Microsoft SSO** | `GET /api/v1/auth/oauth/{google\|microsoft}/authorize` — one-click login, no password required |
-| **Python SDK** | `pip install meetingbot-sdk` — sync + async clients in `sdk/python/` |
-| **JavaScript/TypeScript SDK** | `npm install meetingbot-sdk` — fully typed client in `sdk/js/` |
-| **Webhook retry + delivery logs** | Automatic exponential backoff (up to 5 attempts); `GET /api/v1/webhooks/{id}/deliveries` shows full history |
-| **Bot persona / white-label** | `bot_avatar_url` field on `POST /api/v1/bot` — custom bot avatar for B2B deployments |
-| **Video recording** | `record_video: true` on `POST /api/v1/bot`; download at `GET /api/v1/bot/{id}/video` |
-| **Prometheus metrics** | `GET /metrics` — standard Prometheus scrape endpoint (unauthenticated) |
-| **Idempotency keys** | Pass `Idempotency-Key` header on `POST /api/v1/bot`; replay returns `X-Idempotency-Replayed: true` |
+| **Business accounts** | Register with `account_type: "business"` — one API key, shared credit balance, complete data isolation between end-users |
+| **Sub-user data isolation** | Pass `X-Sub-User: <user-id>` header (or `sub_user_id` in bot body) to scope all bot data to a specific end-user; different sub-users cannot see each other's bots, transcripts, or analyses |
+| **`sub_user_id` field** | Available on bot creation, bot response, and bot summary schemas; body field takes precedence over the header |
+| **Copy-to-clipboard for API keys** | Clipboard icon beside each API key in the dashboard; newly created keys display the full key once with a prominent copy button |
+| **Account type on registration** | Account type selection (Personal / Business) on the registration page and in the admin panel user table |
 
 ---
 
@@ -503,7 +500,7 @@ The background poll loop checks all active feeds every `CALENDAR_POLL_INTERVAL_S
 | `GET` | `/api/v1/analytics` | Aggregate stats for all bots in memory. Returns `{total_bots, active_bots, by_status, by_platform, success_rate, avg_duration_seconds, total_transcript_entries, total_ai_tokens, total_ai_cost_usd}` |
 | `GET` | `/api/v1/action-items/stats` | Cross-meeting action-item counts. Returns `{total, by_assignee, recent}` where `recent` contains up to 20 most recent action items with `bot_id` and `meeting_url` |
 | `GET` | `/api/v1/search` | Full-text search across all transcripts. Query param: `q`. Returns matching transcript snippets with bot context |
-| `GET` | `/api/v1/health` or `/health` | Health check → `{status: "ok", service: "MeetingBot", version: "2.2.0"}` |
+| `GET` | `/api/v1/health` or `/health` | Health check → `{"status": "ok", "service": "MeetingBot", "version": "2.2.0"}` |
 
 ### Admin (requires admin account)
 
@@ -791,22 +788,29 @@ pip install meetingbot-sdk
 ```
 
 ```python
+import time
 from meetingbot import MeetingBotClient
 
 client = MeetingBotClient(api_key="sk_live_...")
-bot = client.bots.create(meeting_url="https://meet.google.com/xyz-abc-def")
-result = client.bots.wait_for_completion(bot.id)
-print(result.transcript)
+bot = client.create_bot(meeting_url="https://meet.google.com/xyz-abc-def")
+while bot.status not in {"done", "error", "cancelled"}:
+    time.sleep(10)
+    bot = client.get_bot(bot.id)
+print(bot.transcript)
 ```
 
 Async usage:
 
 ```python
+import asyncio
 from meetingbot import AsyncMeetingBotClient
 
 async with AsyncMeetingBotClient(api_key="sk_live_...") as client:
-    bot = await client.bots.create(meeting_url="https://meet.google.com/xyz-abc-def")
-    result = await client.bots.wait_for_completion(bot.id)
+    bot = await client.create_bot(meeting_url="https://meet.google.com/xyz-abc-def")
+    while bot.status not in {"done", "error", "cancelled"}:
+        await asyncio.sleep(10)
+        bot = await client.get_bot(bot.id)
+    print(bot.transcript)
 ```
 
 See [`sdk/python/README.md`](sdk/python/README.md) for full reference.
@@ -821,9 +825,14 @@ npm install meetingbot-sdk
 import { MeetingBotClient } from "meetingbot-sdk";
 
 const client = new MeetingBotClient({ apiKey: "sk_live_..." });
-const bot = await client.bots.create({ meetingUrl: "https://meet.google.com/xyz" });
-const result = await client.bots.waitForCompletion(bot.id);
-console.log(result.transcript);
+const bot = await client.createBot({ meeting_url: "https://meet.google.com/xyz" });
+const terminal = new Set(["done", "error", "cancelled"]);
+let current = bot;
+while (!terminal.has(current.status ?? "")) {
+  await new Promise((r) => setTimeout(r, 10_000));
+  current = await client.getBot(bot.id);
+}
+console.log(current.transcript);
 ```
 
 See [`sdk/js/README.md`](sdk/js/README.md) for full reference.
