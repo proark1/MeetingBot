@@ -302,7 +302,7 @@ Pass `template` in bot creation. Use `prompt_override` for a fully custom prompt
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `API_KEY` | — | Legacy superadmin key (bypasses per-user auth; leave empty to use accounts only) |
-| `JWT_SECRET` | — | **Required.** Secret for signing web UI JWT tokens. Generate with `openssl rand -hex 32` |
+| `JWT_SECRET` | auto-generated | Secret for signing web UI JWT tokens. Generate a stable value with `openssl rand -hex 32`. If unset, a random secret is generated on each startup (sessions are invalidated on every restart) |
 | `JWT_EXPIRE_HOURS` | `24` | JWT token lifetime in hours |
 
 ### Billing

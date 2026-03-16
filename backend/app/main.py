@@ -50,11 +50,13 @@ async def lifespan(app: FastAPI):
 
     # ── Startup validation ────────────────────────────────────────────────
     if settings.JWT_SECRET == "change-me-in-production":
-        raise RuntimeError(
-            "JWT_SECRET is set to the insecure default value. "
-            "Generate a strong secret and set it in your environment:\n"
-            "  export JWT_SECRET=$(openssl rand -hex 32)\n"
-            "All web UI sessions would otherwise be trivially forgeable."
+        import secrets as _secrets
+        settings.JWT_SECRET = _secrets.token_hex(32)
+        logger.warning(
+            "⚠ JWT_SECRET is the insecure default — a random secret was generated for this "
+            "session. Web UI sessions will be invalidated on every restart. "
+            "Set JWT_SECRET to a stable value in your environment:\n"
+            "  export JWT_SECRET=$(openssl rand -hex 32)"
         )
 
     if settings.CORS_ORIGINS == "*":
