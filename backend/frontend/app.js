@@ -827,7 +827,22 @@ function renderBotDetail(bot) {
       <div class="meta-item"><div class="meta-label">Transcript</div><div class="meta-value">${(bot.transcript || []).length} entries</div></div>
       <div class="meta-item"><div class="meta-label">Analysis Mode</div><div class="meta-value">${bot.analysis_mode === "transcript_only" ? '<span style="color:var(--text-muted);font-weight:500">Transcript Only</span>' : '<span style="color:var(--accent);font-weight:600">✦ Full AI</span>'}</div></div>
       <div class="meta-item"><div class="meta-label">Meeting URL</div><div class="meta-value" style="font-family:var(--font-mono);font-size:0.75rem;color:var(--text-muted)">${esc(bot.meeting_url.slice(0, 40))}${bot.meeting_url.length > 40 ? "…" : ""}</div></div>
+      ${bot.ai_usage ? `<div class="meta-item"><div class="meta-label">AI Cost</div><div class="meta-value">$${(bot.ai_usage.total_cost_usd || 0).toFixed(4)} <span style="color:var(--text-muted);font-size:0.75rem">(${(bot.ai_usage.total_tokens || 0).toLocaleString()} tokens)</span></div></div>` : ""}
+      ${bot.sub_user_id ? `<div class="meta-item"><div class="meta-label">Sub-User</div><div class="meta-value" style="font-family:var(--font-mono);font-size:0.8rem">${esc(bot.sub_user_id)}</div></div>` : ""}
     </div>
+
+    <!-- Metadata -->
+    ${bot.metadata && Object.keys(bot.metadata).length ? `
+    <div class="section-card">
+      <div class="section-header"><h3>Metadata</h3></div>
+      <div class="detail-meta" style="margin-top:0.25rem">
+        ${Object.entries(bot.metadata).map(([k, v]) => `
+          <div class="meta-item">
+            <div class="meta-label">${esc(k)}</div>
+            <div class="meta-value" style="font-family:var(--font-mono);font-size:0.8rem">${esc(String(v))}</div>
+          </div>`).join("")}
+      </div>
+    </div>` : ""}
 
     <!-- Participants + Speaker Stats -->
     ${(bot.participants || []).length || (bot.speaker_stats || []).length ? `
@@ -867,7 +882,7 @@ function renderBotDetail(bot) {
     </div>` : ""}
 
     <!-- Recording download -->
-    ${bot.recording_path ? `
+    ${bot.recording_available ? `
     <div class="section-card">
       <div class="section-header"><h3>Recording</h3></div>
       <a class="btn btn-ghost" href="/api/v1/bot/${esc(bot.id)}/recording" download>⬇ Download Audio (WAV)</a>
@@ -928,6 +943,29 @@ function renderBotDetail(bot) {
         <button class="btn btn-primary" id="btn-ask">Ask</button>
       </div>
       <div id="ask-answer" class="ask-answer hidden"></div>
+    </div>` : ""}
+
+    <!-- AI Usage breakdown -->
+    ${bot.ai_usage && (bot.ai_usage.operations || []).length ? `
+    <div class="section-card">
+      <div class="section-header"><h3>AI Usage</h3><span style="color:var(--text-muted);font-size:0.85rem">Total: $${(bot.ai_usage.total_cost_usd || 0).toFixed(4)} · ${(bot.ai_usage.total_tokens || 0).toLocaleString()} tokens</span></div>
+      <table style="width:100%;font-size:0.82rem;border-collapse:collapse">
+        <thead><tr style="border-bottom:1px solid var(--border);color:var(--text-muted)">
+          <th style="padding:0.3rem 0.5rem;text-align:left;font-weight:500">Operation</th>
+          <th style="padding:0.3rem 0.5rem;text-align:left;font-weight:500">Model</th>
+          <th style="padding:0.3rem 0.5rem;text-align:right;font-weight:500">Tokens</th>
+          <th style="padding:0.3rem 0.5rem;text-align:right;font-weight:500">Cost</th>
+        </tr></thead>
+        <tbody>
+          ${(bot.ai_usage.operations || []).map(op => `
+          <tr style="border-bottom:1px solid var(--border)">
+            <td style="padding:0.3rem 0.5rem">${esc(op.operation)}</td>
+            <td style="padding:0.3rem 0.5rem;color:var(--text-muted);font-size:0.78rem">${esc(op.model || op.provider || "—")}</td>
+            <td style="padding:0.3rem 0.5rem;text-align:right">${(op.total_tokens || 0).toLocaleString()}</td>
+            <td style="padding:0.3rem 0.5rem;text-align:right">$${(op.cost_usd || 0).toFixed(4)}</td>
+          </tr>`).join("")}
+        </tbody>
+      </table>
     </div>` : ""}
 
     <!-- Highlights -->
