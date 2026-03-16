@@ -158,7 +158,7 @@ async def _monitor_loop() -> None:
 async def _check_transfers() -> None:
     from app.config import settings
     from app.db import AsyncSessionLocal
-    from app.models.account import Account, UsdcDeposit, MonitorState, CreditTransaction
+    from app.models.account import Account, UsdcDeposit, MonitorState, CreditTransaction, UnmatchedUsdcTransfer
     from app.services.credit_service import add_credits
     from sqlalchemy import select
 
@@ -228,6 +228,29 @@ async def _check_transfers() -> None:
                 account_id = to_addr_to_account[to_addr]
 
             if account_id is None:
+                # Transfer arrived at the platform wallet from an unrecognized address.
+                # Record it so admins can identify the sender and manually credit their account.
+                if platform_wallet and to_addr == platform_wallet:
+                    dup = await db.execute(
+                        select(UnmatchedUsdcTransfer).where(UnmatchedUsdcTransfer.tx_hash == tx_hash)
+                    )
+                    if dup.scalar_one_or_none() is None:
+                        db.add(UnmatchedUsdcTransfer(
+                            tx_hash=tx_hash,
+                            from_address=from_addr,
+                            to_address=to_addr,
+                            amount_usdc=amount_usd,
+                            block_number=event["block"],
+                        ))
+                        logger.warning(
+                            "USDC transfer to platform wallet not attributed — "
+                            "sender wallet not registered on any account. "
+                            "Amount: %.6f USDC, from: %s, tx: %s. "
+                            "Use POST /api/v1/admin/credit to manually credit the user, "
+                            "or ask the user to register their wallet then use "
+                            "POST /api/v1/admin/usdc/rescan.",
+                            amount_usd, from_addr, tx_hash,
+                        )
                 continue
 
             # Idempotency — skip if already processed

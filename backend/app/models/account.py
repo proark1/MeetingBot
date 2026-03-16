@@ -140,3 +140,24 @@ class PlatformConfig(Base):
     key: Mapped[str] = mapped_column(String(100), primary_key=True)
     value: Mapped[str] = mapped_column(Text, default="")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
+class UnmatchedUsdcTransfer(Base):
+    """
+    Records USDC transfers sent to the platform wallet that could not be attributed
+    to any registered user account (e.g. the sender's wallet was not registered).
+
+    Admins can inspect these via GET /admin/usdc/unmatched and manually credit
+    the correct account using POST /admin/credit once the user is identified.
+    """
+
+    __tablename__ = "unmatched_usdc_transfers"
+
+    tx_hash: Mapped[str] = mapped_column(String(66), primary_key=True)
+    from_address: Mapped[str] = mapped_column(String(42), nullable=False, index=True)
+    to_address: Mapped[str] = mapped_column(String(42), nullable=False)
+    amount_usdc: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
+    block_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    resolved: Mapped[bool] = mapped_column(Boolean, default=False)
+    resolution_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

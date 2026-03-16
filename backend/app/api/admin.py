@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.deps import require_admin
-from app.models.account import Account, MonitorState, PlatformConfig
+from app.models.account import Account, MonitorState, PlatformConfig, UnmatchedUsdcTransfer
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin", tags=["Admin"], dependencies=[Depends(require_admin)])
@@ -68,6 +68,26 @@ class RescanRequest(BaseModel):
 class RescanResponse(BaseModel):
     from_block: int
     message: str
+
+
+class UnmatchedTransferItem(BaseModel):
+    tx_hash: str = Field(description="Ethereum transaction hash.")
+    from_address: str = Field(description="Sender's Ethereum address (unrecognized — not registered on any account).")
+    to_address: str = Field(description="Platform wallet address that received the USDC.")
+    amount_usdc: float = Field(description="Amount of USDC sent.")
+    block_number: int = Field(description="Ethereum block number of the transfer.")
+    detected_at: str = Field(description="ISO-8601 UTC timestamp when the monitor detected the transfer.")
+    resolved: bool = Field(description="True if an admin has manually credited the account.")
+    resolution_note: Optional[str] = Field(default=None, description="Admin note set when resolving.")
+
+
+class UnmatchedTransferListResponse(BaseModel):
+    transfers: list[UnmatchedTransferItem]
+    total: int
+
+
+class ResolveUnmatchedRequest(BaseModel):
+    note: Optional[str] = Field(None, description="Optional note describing the resolution action taken.")
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -174,6 +194,90 @@ async def manual_credit(
         email=account.email,
         credited_usd=float(payload.amount_usd),
         new_balance_usd=float(new_balance),
+    )
+
+
+@router.get("/usdc/unmatched", response_model=UnmatchedTransferListResponse)
+async def list_unmatched_transfers(
+    resolved: Optional[bool] = None,
+    db: AsyncSession = Depends(get_db),
+    _admin: str = Depends(require_admin),
+):
+    """
+    List USDC transfers that arrived at the platform wallet but could not be
+    attributed to any user account because the sender's wallet was not registered.
+
+    These represent funds that were received on-chain but have not yet been credited
+    to any user balance. To resolve:
+
+    1. Identify the user by their `from_address` (ask them which wallet they used).
+    2. Credit their account via `POST /admin/credit`.
+    3. Mark the transfer resolved via `POST /admin/usdc/unmatched/{tx_hash}/resolve`.
+
+    Use `?resolved=false` (default) to see only pending items, `?resolved=true` for
+    resolved ones, or omit the parameter to see all.
+    """
+    from sqlalchemy import desc
+
+    query = select(UnmatchedUsdcTransfer)
+    if resolved is not None:
+        query = query.where(UnmatchedUsdcTransfer.resolved == resolved)
+    query = query.order_by(desc(UnmatchedUsdcTransfer.detected_at))
+
+    result = await db.execute(query)
+    transfers = result.scalars().all()
+
+    return UnmatchedTransferListResponse(
+        transfers=[
+            UnmatchedTransferItem(
+                tx_hash=t.tx_hash,
+                from_address=t.from_address,
+                to_address=t.to_address,
+                amount_usdc=float(t.amount_usdc),
+                block_number=t.block_number,
+                detected_at=t.detected_at.isoformat(),
+                resolved=t.resolved,
+                resolution_note=t.resolution_note,
+            )
+            for t in transfers
+        ],
+        total=len(transfers),
+    )
+
+
+@router.post("/usdc/unmatched/{tx_hash}/resolve", response_model=UnmatchedTransferItem)
+async def resolve_unmatched_transfer(
+    tx_hash: str,
+    payload: ResolveUnmatchedRequest,
+    db: AsyncSession = Depends(get_db),
+    _admin: str = Depends(require_admin),
+):
+    """
+    Mark an unmatched USDC transfer as resolved after the account has been manually credited.
+
+    Call this after using `POST /admin/credit` to apply the funds to the correct account.
+    """
+    result = await db.execute(
+        select(UnmatchedUsdcTransfer).where(UnmatchedUsdcTransfer.tx_hash == tx_hash)
+    )
+    transfer = result.scalar_one_or_none()
+    if transfer is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transaction not found.")
+
+    transfer.resolved = True
+    transfer.resolution_note = payload.note or "Resolved by admin"
+    await db.commit()
+    logger.info("Admin marked unmatched USDC transfer %s as resolved. Note: %s", tx_hash, transfer.resolution_note)
+
+    return UnmatchedTransferItem(
+        tx_hash=transfer.tx_hash,
+        from_address=transfer.from_address,
+        to_address=transfer.to_address,
+        amount_usdc=float(transfer.amount_usdc),
+        block_number=transfer.block_number,
+        detected_at=transfer.detected_at.isoformat(),
+        resolved=transfer.resolved,
+        resolution_note=transfer.resolution_note,
     )
 
 

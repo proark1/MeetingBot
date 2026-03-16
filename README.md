@@ -80,6 +80,8 @@ curl http://localhost:8000/api/v1/billing/usdc/address \
 Or use the web UI at `/topup`.
 
 > **USDC deposits — how attribution works:** Each user registers their Ethereum wallet on their account (`PUT /api/v1/auth/wallet`). The admin sets a single platform collection wallet via `/admin`. When a user sends USDC to the platform wallet, the system matches the `from` address to the user's registered wallet and credits their account automatically. If no platform wallet is configured, users get per-user HD-derived addresses (requires `CRYPTO_HD_SEED`).
+>
+> **Important:** In platform wallet mode, users **must register their wallet before sending USDC**. Transfers from an unregistered address are recorded in the `unmatched_usdc_transfers` table and logged as warnings, but are not credited automatically. Admins can view these via `GET /api/v1/admin/usdc/unmatched` and use `POST /api/v1/admin/credit` to apply the funds manually.
 
 ### 5. Create a bot
 
@@ -216,6 +218,8 @@ Or receive them via your `webhook_url` — a POST with the full payload is deliv
 | `PUT` | `/api/v1/admin/wallet` | Set or update the platform USDC collection wallet address. Body: `{wallet_address}` |
 | `GET` | `/api/v1/admin/config` | List all platform configuration values |
 | `POST` | `/api/v1/admin/credit` | Manually credit a user account. Body: `{email, amount_usd, note?}` — use to fix missed USDC deposits |
+| `GET` | `/api/v1/admin/usdc/unmatched` | List USDC transfers received at the platform wallet that couldn't be attributed to any account (sender wallet not registered). Query: `?resolved=false` (default) / `?resolved=true` / omit for all |
+| `POST` | `/api/v1/admin/usdc/unmatched/{tx_hash}/resolve` | Mark an unmatched transfer as resolved after crediting the account. Body: `{note?}` |
 | `POST` | `/api/v1/admin/usdc/rescan` | Reset the USDC monitor's block pointer so it rescans from `from_block` on the next cycle. Body: `{from_block}` |
 
 > **Admin access:** Accounts listed in `ADMIN_EMAILS` (comma-separated env var) or accounts with `is_admin=true` in the database can access these endpoints. All other users receive a 403 error.
