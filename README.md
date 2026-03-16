@@ -43,18 +43,21 @@ Web UI at `http://localhost:8000/register`
 ```bash
 curl -X POST http://localhost:8000/api/v1/auth/register \
   -H "Content-Type: application/json" \
-  -d '{"email": "you@example.com", "password": "yourpassword"}'
-# → {"account_id": "...", "api_key": "sk_live_..."}
+  -d '{"email": "you@example.com", "password": "yourpassword", "key_name": "Default"}'
+# → {"account_id": "...", "email": "...", "api_key": "sk_live_...", "message": "..."}
 ```
+
+> **`key_name`** (optional, default `"Default"`) — a label for the first API key created with your account.
 
 ### 3. Top up credits
 
 ```bash
 # Via Stripe — returns a checkout URL to complete payment
+# amount_usd must be one of the values in STRIPE_TOP_UP_AMOUNTS (default: 10, 25, 50, 100)
 curl -X POST http://localhost:8000/api/v1/billing/stripe/checkout \
   -H "Authorization: Bearer sk_live_..." \
   -H "Content-Type: application/json" \
-  -d '{"amount_usd": 25}'
+  -d '{"amount_usd": 25, "success_url": "https://your-app.com/thanks", "cancel_url": "https://your-app.com/topup"}'
 
 # Via USDC — get your unique deposit address (1 USDC = $1 credit)
 curl http://localhost:8000/api/v1/billing/usdc/address \
@@ -87,12 +90,12 @@ Response:
 }
 ```
 
-### 3. Get results
+### 5. Get results
 
 Poll until `status` is `done`:
 ```bash
 curl http://localhost:8000/api/v1/bot/550e8400-... \
-  -H "Authorization: Bearer your-secret-key"
+  -H "Authorization: Bearer sk_live_..."
 ```
 
 Or receive them via your `webhook_url` — a POST with the full payload is delivered automatically.
@@ -140,26 +143,36 @@ Or receive them via your `webhook_url` — a POST with the full payload is deliv
 ### Auth & Accounts
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/api/v1/auth/register` | Create account → returns first API key |
-| `POST` | `/api/v1/auth/login` | Email+password → JWT (for web UI) |
+| `POST` | `/api/v1/auth/register` | Create account → returns first API key. Body: `{email, password, key_name?}` |
+| `POST` | `/api/v1/auth/login` | Email+password (OAuth2 **form data**: `username`, `password`) → JWT for web UI |
 | `GET` | `/api/v1/auth/me` | Account info + credit balance |
-| `POST` | `/api/v1/auth/keys` | Generate a new API key |
+| `POST` | `/api/v1/auth/keys` | Generate a new named API key. Body: `{name?}` |
 | `GET` | `/api/v1/auth/keys` | List active API keys |
 | `DELETE` | `/api/v1/auth/keys/{id}` | Revoke an API key |
+
+> **Login note:** `POST /api/v1/auth/login` expects **`application/x-www-form-urlencoded`** (not JSON) with fields `username` (your email) and `password`. The returned JWT is for the web UI only; use your `sk_live_...` API key as a Bearer token for all other API calls.
 
 ### Billing
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/api/v1/billing/balance` | Current balance + last 50 transactions |
-| `POST` | `/api/v1/billing/stripe/checkout` | Create Stripe Checkout session |
-| `POST` | `/api/v1/billing/stripe/webhook` | Stripe webhook (register in Stripe dashboard) |
-| `GET` | `/api/v1/billing/usdc/address` | Get unique USDC/ERC-20 deposit address |
+| `GET` | `/api/v1/billing/balance` | Current balance + last 50 transactions (each with `id`, `amount_usd`, `type`, `description`, `reference_id`, `created_at`) |
+| `POST` | `/api/v1/billing/stripe/checkout` | Create Stripe Checkout session. Body: `{amount_usd, success_url?, cancel_url?}`. `amount_usd` must be one of the values in `STRIPE_TOP_UP_AMOUNTS`. |
+| `POST` | `/api/v1/billing/stripe/webhook` | Stripe webhook receiver — register this URL in your Stripe dashboard for `checkout.session.completed` events |
+| `GET` | `/api/v1/billing/usdc/address` | Get unique USDC/ERC-20 deposit address (1 USDC = $1 credit, credited within ~1 min) |
+
+**Transaction types** (the `type` field in balance transactions):
+| Type | Meaning |
+|------|---------|
+| `stripe_topup` | Credits added via Stripe card payment |
+| `usdc_topup` | Credits added via USDC deposit |
+| `bot_usage` | Credits deducted on bot completion (raw AI cost × `CREDIT_MARKUP`) |
 
 ### Bots
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `POST` | `/api/v1/bot` | Create a bot & join a meeting |
-| `GET` | `/api/v1/bot` | List bots (scoped to your account) |
+| `GET` | `/api/v1/bot` | List bots (scoped to your account). Query params: `limit`, `offset`, `status` |
+| `GET` | `/api/v1/bot/stats` | Aggregate counts by status: `{total, active, done, error, by_status}` |
 | `GET` | `/api/v1/bot/{id}` | Full details (transcript, analysis) |
 | `DELETE` | `/api/v1/bot/{id}` | Stop & remove a bot |
 | `GET` | `/api/v1/bot/{id}/transcript` | Raw transcript only |
@@ -177,7 +190,7 @@ Or receive them via your `webhook_url` — a POST with the full payload is deliv
 | `GET` | `/api/v1/templates` | List analysis templates |
 | `GET` | `/api/v1/analytics` | Aggregate stats (bots, durations, AI cost) |
 | `GET` | `/api/v1/action-items/stats` | Aggregate action-item counts by assignee |
-| `GET` | `/api/health` | Health check |
+| `GET` | `/api/health` or `/health` | Health check |
 
 ### Web UI
 | Path | Description |
@@ -278,10 +291,25 @@ Pass `template` in bot creation. Use `prompt_override` for a fully custom prompt
 ## Bot lifecycle
 
 ```
-ready → joining → in_call → call_ended → transcribing → done
-                                                      ↘ error
-                                                      ↘ cancelled
+                     ┌─ queued ──────────────────────┐
+                     │  (max concurrent bots reached) │
+ready ───────────────┴──────────────────────────────► joining → in_call → call_ended → transcribing → done
+  ↑                                                                                                  ↘ error
+scheduled (join_at set)                                                                              ↘ cancelled
 ```
+
+| Status | Meaning |
+|--------|---------|
+| `ready` | Created, about to join immediately |
+| `scheduled` | Created with a future `join_at` time, waiting to join |
+| `queued` | Waiting for a free bot slot (`MAX_CONCURRENT_BOTS` reached) |
+| `joining` | Chromium browser launching and joining the meeting |
+| `in_call` | Recording in progress |
+| `call_ended` | Meeting ended, audio saved |
+| `transcribing` | Sending audio to AI for transcription |
+| `done` | Transcript + analysis complete, results available |
+| `error` | An unrecoverable error occurred |
+| `cancelled` | Bot was stopped via `DELETE /api/v1/bot/{id}` |
 
 The bot auto-leaves when it has been the only participant for `BOT_ALONE_TIMEOUT` seconds (default 5 min).
 
