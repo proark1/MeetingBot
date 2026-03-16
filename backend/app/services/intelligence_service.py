@@ -7,6 +7,7 @@ Supports two AI providers, selected by environment variable:
 If neither key is configured the service returns stub/empty results.
 """
 
+import contextvars
 import json
 import logging
 import time
@@ -30,19 +31,23 @@ def _estimate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
     return input_tokens * pricing["input"] + output_tokens * pricing["output"]
 
 
-# Accumulated usage records for the current bot session.  The bot_service
-# calls collect_usage() after each AI phase and resets via reset_usage().
-_usage_records: list[dict[str, Any]] = []
+# Per-task usage sink using ContextVar — each asyncio Task (one per bot) gets
+# its own context, so concurrent bots never share or corrupt each other's records.
+_usage_ctx: contextvars.ContextVar[list[dict[str, Any]] | None] = contextvars.ContextVar(
+    "ai_usage_sink", default=None
+)
 
-def record_usage(entry: dict[str, Any]) -> None:
-    """Append a usage record (called internally after each AI call)."""
-    _usage_records.append(entry)
 
-def collect_usage() -> list[dict[str, Any]]:
-    """Return and clear all accumulated usage records."""
-    records = list(_usage_records)
-    _usage_records.clear()
-    return records
+def set_usage_sink(sink: list[dict[str, Any]]) -> None:
+    """Point the current task's usage records at *sink* (called once per bot lifecycle)."""
+    _usage_ctx.set(sink)
+
+
+def _record_usage(entry: dict[str, Any]) -> None:
+    """Append a usage record to the current task's sink (no-op if no sink is set)."""
+    sink = _usage_ctx.get()
+    if sink is not None:
+        sink.append(entry)
 
 _ANALYSIS_PROMPT = """You are an expert meeting analyst. Given a meeting transcript produce a
 structured JSON analysis. Be concise but thorough. Return ONLY valid JSON — no markdown fences,
@@ -177,7 +182,7 @@ async def _claude_complete(prompt: str, max_tokens: int = 4096, temperature: flo
     output_tokens = getattr(message.usage, "output_tokens", 0)
     cost = _estimate_cost(model_id, input_tokens, output_tokens)
 
-    record_usage({
+    _record_usage({
         "operation": operation,
         "provider": "anthropic",
         "model": model_id,
@@ -311,7 +316,7 @@ def _record_gemini_usage(response, operation: str, model_id: str = "gemini-2.5-f
     input_tokens = getattr(meta, "prompt_token_count", 0) or 0
     output_tokens = getattr(meta, "candidates_token_count", 0) or 0
     cost = _estimate_cost(model_id, input_tokens, output_tokens)
-    record_usage({
+    _record_usage({
         "operation": operation,
         "provider": "google",
         "model": model_id,

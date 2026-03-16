@@ -9,6 +9,8 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from app.config import settings
 from app.deps import get_current_account_id, SUPERADMIN_ACCOUNT_ID
@@ -22,6 +24,7 @@ from app.store import store, BotSession, _now
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/bot", tags=["Bots"])
+_limiter = Limiter(key_func=get_remote_address)
 
 
 class BotStatsResponse(BaseModel):
@@ -133,6 +136,7 @@ async def _get_or_404(bot_id: str, account_id: Optional[str] = None) -> BotSessi
 # ── POST /api/v1/bot ──────────────────────────────────────────────────────────
 
 @router.post("", response_model=BotResponse, status_code=201)
+@_limiter.limit("20/minute")
 async def create_bot(payload: BotCreate, request: Request):
     """Create a new meeting bot.
 

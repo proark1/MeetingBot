@@ -76,13 +76,15 @@ async def dispatch_event(
     event: str,
     payload: dict,
     extra_webhook_url: str | None = None,
+    account_id: str | None = None,
 ) -> None:
     """Broadcast to WebSocket clients and all active registered webhooks.
 
     If `extra_webhook_url` is set (per-bot webhook), it is also called.
+    `account_id` is used to filter WebSocket delivery to the owning account.
     """
     # WebSocket — instant, best-effort
-    await ws_manager.broadcast(event, payload)
+    await ws_manager.broadcast(event, payload, account_id=account_id)
 
     from app.store import store
 

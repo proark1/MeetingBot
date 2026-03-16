@@ -8,10 +8,12 @@ from decimal import Decimal
 from typing import Optional
 
 import bcrypt
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from jose import jwt
 from pydantic import BaseModel, EmailStr, Field
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,6 +24,7 @@ from app.models.account import Account, ApiKey
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["Auth"])
+_limiter = Limiter(key_func=get_remote_address)
 
 
 def _hash_password(password: str) -> str:
@@ -152,7 +155,8 @@ class WalletResponse(BaseModel):
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.post("/register", response_model=RegisterResponse, status_code=201)
-async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db)):
+@_limiter.limit("3/minute")
+async def register(request: Request, payload: RegisterRequest, db: AsyncSession = Depends(get_db)):
     """Create a new account and return the first API key."""
     existing = await db.execute(select(Account).where(Account.email == payload.email))
     if existing.scalar_one_or_none():
@@ -189,7 +193,9 @@ async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db))
 
 
 @router.post("/login", response_model=LoginResponse)
+@_limiter.limit("5/minute")
 async def login(
+    request: Request,
     form: OAuth2PasswordRequestForm = Depends(),
     db: AsyncSession = Depends(get_db),
 ):
@@ -360,7 +366,9 @@ async def set_wallet(
     if not account_id or account_id == SUPERADMIN_ACCOUNT_ID:
         raise HTTPException(status_code=403, detail="Use per-user authentication")
 
-    address = payload.wallet_address.strip()
+    # Normalise to lowercase so "0xAbCd..." and "0xabcd..." are treated as the
+    # same address (Ethereum addresses are case-insensitive; EIP-55 is advisory).
+    address = payload.wallet_address.strip().lower()
     if not _ETH_ADDRESS_RE.match(address):
         raise HTTPException(
             status_code=422,

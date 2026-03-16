@@ -108,13 +108,18 @@ async def handle_checkout_completed(session: dict) -> Optional[Decimal]:
     stripe_session_id = session.get("id", "")
     metadata = session.get("metadata", {})
     account_id = metadata.get("account_id", "")
-    amount_usd_str = metadata.get("amount_usd", "0")
 
     if not account_id or not stripe_session_id:
         logger.warning("Stripe webhook: missing account_id or session_id in metadata")
         return None
 
-    amount_usd = Decimal(amount_usd_str)
+    # Use the amount Stripe actually charged (amount_total is in cents) as the
+    # authoritative value — fall back to metadata only if the field is absent.
+    amount_total_cents = session.get("amount_total")
+    if amount_total_cents is not None:
+        amount_usd = Decimal(str(amount_total_cents)) / 100
+    else:
+        amount_usd = Decimal(metadata.get("amount_usd", "0"))
 
     async with AsyncSessionLocal() as db:
         # Check for duplicate processing

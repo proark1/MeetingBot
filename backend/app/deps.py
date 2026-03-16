@@ -103,8 +103,9 @@ async def require_auth(
     return account_id
 
 
-# Admin email whitelist — only these emails can access admin endpoints
-ADMIN_EMAILS = {"assad.dar@gmail.com"}
+def _admin_emails() -> set[str]:
+    """Return the set of admin emails from config (evaluated at call time, not import time)."""
+    return {e.strip().lower() for e in settings.ADMIN_EMAILS.split(",") if e.strip()}
 
 
 async def require_admin(
@@ -124,7 +125,7 @@ async def require_admin(
     if not account:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
 
-    if account.email not in ADMIN_EMAILS and not account.is_admin:
+    if account.email.lower() not in _admin_emails() and not account.is_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access denied.",

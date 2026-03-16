@@ -374,7 +374,14 @@ Register via `POST /api/v1/webhook` to receive all events for all bots.
 **HMAC signing:** Pass `secret` when registering. Deliveries include `X-MeetingBot-Signature: sha256=<hmac>`.
 
 ### WebSocket
-Connect to `ws://host/api/v1/ws` for real-time events. Send `ping` to keep alive.
+Connect to `ws://host/api/v1/ws?token=<your-api-key-or-jwt>` for real-time events.
+Authenticated connections only receive events for their own bots.
+Send `ping` to keep alive. Returns WebSocket close code `4001` if auth is required
+but no token is provided, or `4003` for an invalid token.
+
+> **Rate limits:** `POST /api/v1/auth/register` is limited to 3 requests/min per IP,
+> `POST /api/v1/auth/login` to 5/min, and `POST /api/v1/bot` to 20/min. Exceeded
+> limits return HTTP 429.
 
 ---
 

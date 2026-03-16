@@ -91,6 +91,20 @@ class UsdcDeposit(Base):
     account: Mapped["Account"] = relationship(back_populates="usdc_deposit")
 
 
+class BotSnapshot(Base):
+    """Persists completed/error/cancelled bot sessions across server restarts."""
+
+    __tablename__ = "bot_snapshots"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    account_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    meeting_url: Mapped[str] = mapped_column(String(2048), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    data: Mapped[str] = mapped_column(Text, nullable=False)  # JSON-serialized BotSession fields
+
+
 class MonitorState(Base):
     """Persists state for background tasks (e.g. last processed Ethereum block)."""
 

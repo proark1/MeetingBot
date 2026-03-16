@@ -16,7 +16,7 @@ from app.api.ws import manager as ws_manager
 from app.services import intelligence_service, webhook_service
 from app.services.browser_bot import run_browser_bot
 from app.services.transcription_service import transcribe_audio
-from app.services.intelligence_service import collect_usage
+from app.services.intelligence_service import set_usage_sink
 
 logger = logging.getLogger(__name__)
 
@@ -114,11 +114,6 @@ def _compute_speaker_stats(transcript: list[dict]) -> list[dict]:
     ]
 
 
-def _flush_ai_usage(bot: BotSession) -> None:
-    records = collect_usage()
-    if records:
-        bot.ai_usage.extend(records)
-
 
 async def _set_status(bot: BotSession, status: str, **kwargs) -> None:
     """Update bot status in-memory and fire a webhook + WebSocket event."""
@@ -132,8 +127,10 @@ async def _set_status(bot: BotSession, status: str, **kwargs) -> None:
             "status":           status,
             "meeting_url":      bot.meeting_url,
             "meeting_platform": bot.meeting_platform,
+            "account_id":       bot.account_id,
             "ts":               _now().isoformat(),
         },
+        account_id=bot.account_id,
     )
 
 
@@ -170,7 +167,8 @@ async def _do_analysis(bot: BotSession, audio_path: str, use_real_bot: bool) -> 
 
         await webhook_service.dispatch_event(
             "bot.transcript_ready",
-            {"bot_id": bot.id, "entry_count": len(transcript)},
+            {"bot_id": bot.id, "account_id": bot.account_id, "entry_count": len(transcript)},
+            account_id=bot.account_id,
         )
 
     # ── analysis ───────────────────────────────────────────────────────────
@@ -215,7 +213,7 @@ async def _do_analysis(bot: BotSession, audio_path: str, use_real_bot: bool) -> 
         )
         bot.analysis = analysis_result
 
-        await webhook_service.dispatch_event("bot.analysis_ready", {"bot_id": bot.id})
+        await webhook_service.dispatch_event("bot.analysis_ready", {"bot_id": bot.id, "account_id": bot.account_id}, account_id=bot.account_id)
 
     elif analysis_mode == "transcript_only":
         logger.info("Bot %s: analysis_mode=transcript_only — skipping AI analysis", bot.id)
@@ -270,6 +268,10 @@ async def run_bot_lifecycle(bot_id: str) -> None:
         logger.error("Bot %s not found in store", bot_id)
         return
 
+    # Point this task's AI usage at the bot's own list — concurrent bots
+    # each run in their own asyncio Task/context so they never share state.
+    set_usage_sink(bot.ai_usage)
+
     audio_path = str(_RECORDINGS_DIR / f"{bot_id}.wav")
     use_real_bot = bot.meeting_platform in _REAL_PLATFORMS
 
@@ -308,7 +310,7 @@ async def run_bot_lifecycle(bot_id: str) -> None:
                         len(_live_buffer) >= 10
                         or time.monotonic() - _last_flush >= 30
                     )
-                await ws_manager.broadcast("bot.live_transcript", {"bot_id": bot_id, "entry": entry})
+                await ws_manager.broadcast("bot.live_transcript", {"bot_id": bot_id, "account_id": bot.account_id, "entry": entry}, account_id=bot.account_id)
                 if should_flush:
                     async with _live_lock:
                         snapshot = list(_live_buffer)
@@ -409,8 +411,6 @@ async def run_bot_lifecycle(bot_id: str) -> None:
             await store.update_bot(bot_id, is_demo_transcript=True)
             bot.is_demo_transcript = True
 
-        # Flush AI usage from transcription
-        _flush_ai_usage(bot)
 
         # ── 3. Store transcript + participants ────────────────────────────
         raw_names: list[str] = list(scraped_participants or []) if use_real_bot else []
@@ -432,7 +432,8 @@ async def run_bot_lifecycle(bot_id: str) -> None:
 
         await webhook_service.dispatch_event(
             "bot.transcript_ready",
-            {"bot_id": bot_id, "entry_count": len(transcript)},
+            {"bot_id": bot_id, "account_id": bot.account_id, "entry_count": len(transcript)},
+            account_id=bot.account_id,
         )
 
         # ── 4. Analysis + chapters + speaker stats ────────────────────────
@@ -442,8 +443,6 @@ async def run_bot_lifecycle(bot_id: str) -> None:
 
         await _do_analysis(bot, audio_path, use_real_bot)
 
-        # Flush AI usage from analysis
-        _flush_ai_usage(bot)
 
         # Refresh bot state from store to get latest fields
         bot_refreshed = await store.get_bot(bot_id)
@@ -467,6 +466,7 @@ async def run_bot_lifecycle(bot_id: str) -> None:
             "bot.done",
             done_payload,
             extra_webhook_url=bot.webhook_url,
+            account_id=bot.account_id,
         )
         logger.info("Bot %s done", bot_id)
 
@@ -477,7 +477,6 @@ async def run_bot_lifecycle(bot_id: str) -> None:
             await store.update_bot(bot_id, status="transcribing")
             try:
                 await _do_analysis(bot, audio_path, use_real_bot)
-                _flush_ai_usage(bot)
                 bot = await store.get_bot(bot_id)
             except Exception:
                 logger.exception("Bot %s: error during cancellation cleanup", bot_id)
@@ -491,6 +490,7 @@ async def run_bot_lifecycle(bot_id: str) -> None:
                     "bot.cancelled",
                     done_payload,
                     extra_webhook_url=bot.webhook_url,
+                    account_id=bot.account_id,
                 )
             except Exception:
                 pass
@@ -502,7 +502,6 @@ async def run_bot_lifecycle(bot_id: str) -> None:
             await store.update_bot(bot_id, status="transcribing")
             try:
                 await _do_analysis(bot, audio_path, use_real_bot)
-                _flush_ai_usage(bot)
                 bot = await store.get_bot(bot_id)
             except Exception:
                 logger.exception("Bot %s: error during error cleanup", bot_id)
@@ -521,6 +520,7 @@ async def run_bot_lifecycle(bot_id: str) -> None:
                         "bot.error",
                         done_payload,
                         extra_webhook_url=bot.webhook_url,
+                        account_id=bot.account_id,
                     )
             except Exception:
                 pass

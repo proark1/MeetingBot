@@ -1,10 +1,11 @@
 """In-memory store for bot sessions and webhooks.
 
-No database — all state lives here during the process lifetime.
-Completed bots are kept for BOT_TTL_HOURS then cleaned up automatically.
+Terminal bots (done/error/cancelled) are also persisted to SQLite so they
+survive server restarts.  Active bots are still RAM-only.
 """
 
 import asyncio
+import json
 import logging
 import uuid
 from dataclasses import dataclass, field
@@ -165,9 +166,85 @@ class Store:
             self._bots.pop(bot_id, None)
 
     async def mark_terminal(self, bot_id: str, status: str, **kwargs) -> Optional[BotSession]:
-        """Set terminal status and schedule TTL expiry."""
+        """Set terminal status, schedule TTL expiry, and persist to SQLite."""
         kwargs["expires_at"] = _now() + timedelta(hours=BOT_TTL_HOURS)
-        return await self.update_bot(bot_id, status=status, **kwargs)
+        bot = await self.update_bot(bot_id, status=status, **kwargs)
+        if bot is not None:
+            await self._persist_bot(bot)
+        return bot
+
+    async def _persist_bot(self, bot: "BotSession") -> None:
+        """Upsert a bot snapshot into the database (best-effort)."""
+        try:
+            from app.db import AsyncSessionLocal
+            from app.models.account import BotSnapshot
+            from sqlalchemy import select as _select
+
+            def _dt(v):
+                if v is None:
+                    return None
+                if isinstance(v, datetime):
+                    return v.isoformat()
+                return str(v)
+
+            data = json.dumps({
+                "id": bot.id,
+                "meeting_url": bot.meeting_url,
+                "meeting_platform": bot.meeting_platform,
+                "bot_name": bot.bot_name,
+                "status": bot.status,
+                "webhook_url": bot.webhook_url,
+                "transcript": bot.transcript,
+                "analysis": bot.analysis,
+                "chapters": bot.chapters,
+                "speaker_stats": bot.speaker_stats,
+                "participants": bot.participants,
+                "recording_path": bot.recording_path,
+                "error_message": bot.error_message,
+                "analysis_mode": bot.analysis_mode,
+                "template": bot.template,
+                "prompt_override": bot.prompt_override,
+                "vocabulary": bot.vocabulary,
+                "respond_on_mention": bot.respond_on_mention,
+                "mention_response_mode": bot.mention_response_mode,
+                "tts_provider": bot.tts_provider,
+                "start_muted": bot.start_muted,
+                "live_transcription": bot.live_transcription,
+                "join_at": _dt(bot.join_at),
+                "metadata": bot.metadata,
+                "is_demo_transcript": bot.is_demo_transcript,
+                "account_id": bot.account_id,
+                "ai_usage": bot.ai_usage,
+                "created_at": _dt(bot.created_at),
+                "updated_at": _dt(bot.updated_at),
+                "started_at": _dt(bot.started_at),
+                "ended_at": _dt(bot.ended_at),
+                "expires_at": _dt(bot.expires_at),
+            })
+
+            async with AsyncSessionLocal() as db:
+                result = await db.execute(
+                    _select(BotSnapshot).where(BotSnapshot.id == bot.id)
+                )
+                snap = result.scalar_one_or_none()
+                if snap is None:
+                    snap = BotSnapshot(
+                        id=bot.id,
+                        account_id=bot.account_id,
+                        status=bot.status,
+                        meeting_url=bot.meeting_url,
+                        created_at=bot.created_at,
+                        expires_at=bot.expires_at,
+                        data=data,
+                    )
+                    db.add(snap)
+                else:
+                    snap.status = bot.status
+                    snap.expires_at = bot.expires_at
+                    snap.data = data
+                await db.commit()
+        except Exception:
+            logger.exception("Failed to persist bot %s to database", bot.id)
 
     # ── Webhooks ──────────────────────────────────────────────────────────────
 
@@ -191,7 +268,7 @@ class Store:
     # ── Cleanup ───────────────────────────────────────────────────────────────
 
     async def cleanup_expired(self) -> int:
-        """Remove expired bots (and their recording files) from memory."""
+        """Remove expired bots (and their recording files) from memory and DB."""
         import os
         now = _now()
         async with self._lock:
@@ -208,9 +285,105 @@ class Store:
                         logger.debug("Deleted recording for expired bot %s", bot_id)
                     except Exception as exc:
                         logger.warning("Could not delete recording %s: %s", bot.recording_path, exc)
+
         if expired:
+            # Purge expired snapshots from DB too
+            try:
+                from app.db import AsyncSessionLocal
+                from app.models.account import BotSnapshot
+                from sqlalchemy import delete as _delete
+                async with AsyncSessionLocal() as db:
+                    await db.execute(
+                        _delete(BotSnapshot).where(BotSnapshot.expires_at < now)
+                    )
+                    await db.commit()
+            except Exception:
+                logger.exception("Failed to purge expired bot snapshots from database")
+
             logger.info("Cleaned up %d expired bot(s) from memory", len(expired))
         return len(expired)
+
+
+async def load_persisted_bots() -> int:
+    """Load non-expired bot snapshots from SQLite into the in-memory store.
+
+    Called once at startup so terminal bots survive server restarts.
+    Returns the number of bots loaded.
+    """
+    try:
+        from app.db import AsyncSessionLocal
+        from app.models.account import BotSnapshot
+        from sqlalchemy import select as _select
+
+        def _parse_dt(v):
+            if v is None:
+                return None
+            if isinstance(v, datetime):
+                return v
+            try:
+                dt = datetime.fromisoformat(v)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                return dt
+            except Exception:
+                return None
+
+        now = _now()
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                _select(BotSnapshot).where(
+                    (BotSnapshot.expires_at > now) | (BotSnapshot.expires_at.is_(None))
+                )
+            )
+            snapshots = result.scalars().all()
+
+        count = 0
+        for snap in snapshots:
+            try:
+                d = json.loads(snap.data)
+                bot = BotSession(
+                    id=d["id"],
+                    meeting_url=d["meeting_url"],
+                    meeting_platform=d.get("meeting_platform", "unknown"),
+                    bot_name=d.get("bot_name", "MeetingBot"),
+                    status=d.get("status", "done"),
+                    webhook_url=d.get("webhook_url"),
+                    transcript=d.get("transcript", []),
+                    analysis=d.get("analysis"),
+                    chapters=d.get("chapters", []),
+                    speaker_stats=d.get("speaker_stats", []),
+                    participants=d.get("participants", []),
+                    recording_path=d.get("recording_path"),
+                    error_message=d.get("error_message"),
+                    analysis_mode=d.get("analysis_mode", "full"),
+                    template=d.get("template"),
+                    prompt_override=d.get("prompt_override"),
+                    vocabulary=d.get("vocabulary", []),
+                    respond_on_mention=d.get("respond_on_mention", True),
+                    mention_response_mode=d.get("mention_response_mode", "text"),
+                    tts_provider=d.get("tts_provider", "edge"),
+                    start_muted=d.get("start_muted", False),
+                    live_transcription=d.get("live_transcription", False),
+                    join_at=_parse_dt(d.get("join_at")),
+                    metadata=d.get("metadata", {}),
+                    is_demo_transcript=d.get("is_demo_transcript", False),
+                    account_id=d.get("account_id"),
+                    ai_usage=d.get("ai_usage", []),
+                    created_at=_parse_dt(d.get("created_at")) or now,
+                    updated_at=_parse_dt(d.get("updated_at")) or now,
+                    started_at=_parse_dt(d.get("started_at")),
+                    ended_at=_parse_dt(d.get("ended_at")),
+                    expires_at=_parse_dt(d.get("expires_at")),
+                )
+                await store.create_bot(bot)
+                count += 1
+            except Exception:
+                logger.exception("Failed to restore bot snapshot %s", snap.id)
+
+        return count
+    except Exception:
+        logger.exception("Failed to load persisted bots from database")
+        return 0
 
 
 # Module-level singleton

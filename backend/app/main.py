@@ -14,6 +14,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
+
 from app.config import settings
 from app.api.bots import router as bots_router, _queue_processor, _running_tasks
 from app.api.webhooks import router as webhooks_router
@@ -44,7 +48,27 @@ async def lifespan(app: FastAPI):
     await create_all_tables()
     logger.info("Database tables ready (%s)", settings.DATABASE_URL.split("///")[0])
 
-    # Startup warnings
+    # ── Startup validation ────────────────────────────────────────────────
+    if settings.JWT_SECRET == "change-me-in-production":
+        raise RuntimeError(
+            "JWT_SECRET is set to the insecure default value. "
+            "Generate a strong secret and set it in your environment:\n"
+            "  export JWT_SECRET=$(openssl rand -hex 32)\n"
+            "All web UI sessions would otherwise be trivially forgeable."
+        )
+
+    if settings.CORS_ORIGINS == "*":
+        logger.warning(
+            "⚠ CORS_ORIGINS='*' — all browser origins can call this API. "
+            "Set CORS_ORIGINS to your frontend domain(s) before going to production."
+        )
+
+    if not settings.ADMIN_EMAILS:
+        logger.warning(
+            "⚠ ADMIN_EMAILS is not set — admin endpoints are only accessible to "
+            "accounts with is_admin=True in the database."
+        )
+
     if not settings.GEMINI_API_KEY and not settings.ANTHROPIC_API_KEY:
         logger.warning(
             "⚠ Neither GEMINI_API_KEY nor ANTHROPIC_API_KEY is set — "
@@ -59,6 +83,12 @@ async def lifespan(app: FastAPI):
         logger.warning("⚠ STRIPE_SECRET_KEY not set — Stripe card payments disabled")
     if not settings.CRYPTO_RPC_URL:
         logger.info("USDC payments disabled — set CRYPTO_RPC_URL to enable")
+
+    # ── Load persisted bots ───────────────────────────────────────────────
+    from app.store import load_persisted_bots
+    restored = await load_persisted_bots()
+    if restored:
+        logger.info("Restored %d bot(s) from previous run", restored)
 
     # ── USDC monitor ──────────────────────────────────────────────────────
     from app.services.crypto_service import start_usdc_monitor
@@ -104,6 +134,8 @@ async def lifespan(app: FastAPI):
 
 
 # ── App ───────────────────────────────────────────────────────────────────────
+
+_limiter = Limiter(key_func=get_remote_address)
 
 app = FastAPI(
     title="MeetingBot API",
@@ -173,6 +205,9 @@ app = FastAPI(
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json",
 )
+
+app.state.limiter = _limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 _origins = [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
 _wildcard = _origins == ["*"]

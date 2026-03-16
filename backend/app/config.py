@@ -10,8 +10,14 @@ class Settings(BaseSettings):
     # Leave empty to disable authentication (useful for internal deployments)
     API_KEY: str = ""
 
-    # CORS — comma-separated list of allowed origins, or "*" for all
+    # CORS — comma-separated allowed origins.  Set to your frontend domain(s) in
+    # production (e.g. "https://app.example.com").  "*" allows all origins and
+    # should only be used during local development.
     CORS_ORIGINS: str = "*"
+
+    # Admin — comma-separated list of emails granted admin access.
+    # Accounts with is_admin=True in the DB are also granted access.
+    ADMIN_EMAILS: str = ""
 
     # Bot defaults
     BOT_NAME_DEFAULT: str = "MeetingBot"
