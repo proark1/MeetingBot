@@ -192,13 +192,15 @@ async def create_stripe_checkout(
     success_url = payload.success_url or f"{base_url}/dashboard?payment=success"
     cancel_url = payload.cancel_url or f"{base_url}/topup?payment=cancelled"
 
-    from app.services.stripe_service import create_checkout_session
+    from app.services.stripe_service import create_checkout_session, record_stripe_session
     session_id, checkout_url = create_checkout_session(
         account_id=account_id,
         amount_usd=payload.amount_usd,
         success_url=success_url,
         cancel_url=cancel_url,
     )
+
+    await record_stripe_session(session_id, account_id, payload.amount_usd)
 
     return CheckoutResponse(
         session_id=session_id,

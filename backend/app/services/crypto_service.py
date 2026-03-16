@@ -83,21 +83,36 @@ async def get_or_create_deposit_address(
     if deposit:
         return deposit.deposit_address
 
-    # Assign next available HD index
-    max_result = await db.execute(select(func.max(UsdcDeposit.hd_index)))
-    max_index = max_result.scalar_one_or_none()
-    next_index = (max_index or -1) + 1
+    # Assign next available HD index (retry on race condition with concurrent requests)
+    from sqlalchemy.exc import IntegrityError
+    for attempt in range(5):
+        max_result = await db.execute(select(func.max(UsdcDeposit.hd_index)))
+        max_index = max_result.scalar_one_or_none()
+        next_index = (max_index or -1) + 1
 
-    address = derive_address(settings.CRYPTO_HD_SEED, next_index)
+        address = derive_address(settings.CRYPTO_HD_SEED, next_index)
 
-    deposit = UsdcDeposit(
-        id=str(uuid.uuid4()),
-        account_id=account_id,
-        deposit_address=address,
-        hd_index=next_index,
-    )
-    db.add(deposit)
-    await db.commit()
+        deposit = UsdcDeposit(
+            id=str(uuid.uuid4()),
+            account_id=account_id,
+            deposit_address=address,
+            hd_index=next_index,
+        )
+        db.add(deposit)
+        try:
+            await db.commit()
+            break
+        except IntegrityError:
+            await db.rollback()
+            if attempt == 4:
+                raise
+            # Another request may have claimed this index; check if our account got one
+            result = await db.execute(
+                select(UsdcDeposit).where(UsdcDeposit.account_id == account_id)
+            )
+            existing = result.scalar_one_or_none()
+            if existing:
+                return existing.deposit_address
 
     logger.info("Created USDC deposit address for account %s: %s (index=%d)", account_id, address, next_index)
     return address

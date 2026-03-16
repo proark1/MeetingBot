@@ -66,27 +66,30 @@ def verify_webhook(payload: bytes, sig_header: str) -> dict:
     return event
 
 
-def record_stripe_session(session_id: str, account_id: str, amount_usd: int) -> None:
+async def record_stripe_session(session_id: str, account_id: str, amount_usd: int) -> None:
     """Store a pending Stripe top-up record in the database."""
-    import asyncio
     from decimal import Decimal
     from app.db import AsyncSessionLocal
     from app.models.account import StripeTopUp
     import uuid
 
-    async def _save():
-        async with AsyncSessionLocal() as db:
-            topup = StripeTopUp(
-                id=str(uuid.uuid4()),
-                account_id=account_id,
-                stripe_session_id=session_id,
-                amount_usd=Decimal(str(amount_usd)),
-                status="pending",
-            )
-            db.add(topup)
+    async with AsyncSessionLocal() as db:
+        topup = StripeTopUp(
+            id=str(uuid.uuid4()),
+            account_id=account_id,
+            stripe_session_id=session_id,
+            amount_usd=Decimal(str(amount_usd)),
+            status="pending",
+        )
+        db.add(topup)
+        try:
             await db.commit()
-
-    asyncio.create_task(_save())
+        except Exception:
+            logger.exception(
+                "Failed to record Stripe session %s for account %s — credits will still "
+                "be applied when the webhook arrives",
+                session_id, account_id,
+            )
 
 
 async def handle_checkout_completed(session: dict) -> Optional[Decimal]:

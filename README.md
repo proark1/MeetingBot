@@ -173,7 +173,7 @@ Or receive them via your `webhook_url` — a POST with the full payload is deliv
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/api/v1/billing/balance` | Current balance + last 50 transactions (each with `id`, `amount_usd`, `type`, `description`, `reference_id`, `created_at`) |
-| `POST` | `/api/v1/billing/stripe/checkout` | Create Stripe Checkout session. Body: `{amount_usd, success_url?, cancel_url?}`. `amount_usd` must be one of the values in `STRIPE_TOP_UP_AMOUNTS`. |
+| `POST` | `/api/v1/billing/stripe/checkout` | Create Stripe Checkout session. Body: `{amount_usd, success_url?, cancel_url?}`. `amount_usd` must be one of the values in `STRIPE_TOP_UP_AMOUNTS`. A pending record is stored immediately; credits are applied on webhook confirmation. |
 | `POST` | `/api/v1/billing/stripe/webhook` | Stripe webhook receiver — register this URL in your Stripe dashboard for `checkout.session.completed` events |
 | `GET` | `/api/v1/billing/usdc/address` | Get USDC/ERC-20 deposit address (platform wallet if admin-configured, otherwise HD-derived per-user address). 1 USDC = $1 credit, credited within ~1 min |
 
