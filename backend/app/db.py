@@ -36,3 +36,35 @@ async def create_all_tables() -> None:
     from app.models import account  # noqa: F401 — registers models with Base.metadata
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(_migrate_schema)
+
+
+def _migrate_schema(conn) -> None:
+    """Apply additive schema migrations for columns added after initial deployment."""
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(conn)
+
+    # accounts table — columns added in v2.x
+    if "accounts" in inspector.get_table_names():
+        existing = {col["name"] for col in inspector.get_columns("accounts")}
+        migrations = [
+            ("is_admin", "BOOLEAN NOT NULL DEFAULT 0"),
+            ("account_type", "VARCHAR(20) NOT NULL DEFAULT 'personal'"),
+            ("wallet_address", "VARCHAR(42)"),
+        ]
+        for col_name, col_def in migrations:
+            if col_name not in existing:
+                conn.execute(text(f"ALTER TABLE accounts ADD COLUMN {col_name} {col_def}"))
+
+    # api_keys table — last_used_at added in v2.x
+    if "api_keys" in inspector.get_table_names():
+        existing = {col["name"] for col in inspector.get_columns("api_keys")}
+        if "last_used_at" not in existing:
+            conn.execute(text("ALTER TABLE api_keys ADD COLUMN last_used_at DATETIME"))
+
+    # bot_snapshots — sub_user_id added in v2.1
+    if "bot_snapshots" in inspector.get_table_names():
+        existing = {col["name"] for col in inspector.get_columns("bot_snapshots")}
+        if "sub_user_id" not in existing:
+            conn.execute(text("ALTER TABLE bot_snapshots ADD COLUMN sub_user_id VARCHAR(255)"))
