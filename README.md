@@ -555,7 +555,7 @@ Full interactive docs (with request/response examples and try-it-out): `GET /api
 Alternative ReDoc view: `GET /api/redoc`
 Raw OpenAPI JSON: `GET /api/openapi.json`
 
-> The Swagger UI at `/api/docs` is generated directly from the FastAPI application and always reflects the live API — including all request/response schemas, authentication requirements, rate limits, and business account behaviour documented in the description header.
+> The Swagger UI at `/api/docs` is generated directly from the FastAPI application and always reflects the live API — including all request/response schemas, authentication requirements, rate limits, business account behaviour, SSO, webhooks, integrations, calendar auto-join, subscription plans, notification preferences, exports, analytics, idempotency keys, video recording, cloud storage, Prometheus metrics, and WebSocket events documented in the description header.
 
 ---
 
