@@ -191,7 +191,16 @@ async def _check_transfers() -> None:
                 to_addr_to_account[d.deposit_address.lower()] = d.account_id
 
         if not from_addr_to_account and not to_addr_to_account:
+            logger.warning(
+                "USDC monitor: no user wallets registered and no HD deposit addresses — "
+                "nothing to match against. Register a wallet via PUT /api/v1/auth/wallet."
+            )
             return
+
+        logger.debug(
+            "USDC monitor: platform_wallet=%s, %d registered sender wallet(s), %d HD address(es)",
+            platform_wallet, len(from_addr_to_account), len(to_addr_to_account),
+        )
 
         # Get last processed block
         state_result = await db.execute(
@@ -208,18 +217,31 @@ async def _check_transfers() -> None:
             filter_to_addresses.append(platform_wallet)  # already lowercased
         filter_to_addresses.extend(to_addr_to_account.keys())  # HD deposit addrs
 
+        last_block_val = int(state.value) if state and state.value else None
+        logger.info(
+            "USDC monitor: scanning from block %s, watching %d address(es): %s",
+            last_block_val or "latest-1000",
+            len(filter_to_addresses),
+            filter_to_addresses,
+        )
+
         # Poll blockchain in thread to avoid blocking event loop
         try:
             from_block, to_block, raw_events = await asyncio.to_thread(
                 _fetch_usdc_events,
                 settings.CRYPTO_RPC_URL,
                 settings.USDC_CONTRACT,
-                int(state.value) if state and state.value else None,
+                last_block_val,
                 filter_to_addresses or None,
             )
         except Exception as exc:
-            logger.error("USDC RPC error: %s", exc)
+            logger.error("USDC RPC error: %s", exc, exc_info=True)
             return
+
+        logger.info(
+            "USDC monitor: scanned blocks %d–%d, found %d matching transfer(s)",
+            from_block, to_block, len(raw_events),
+        )
 
         for event in raw_events:
             to_addr = event["to"].lower()
@@ -298,12 +320,13 @@ def _fetch_usdc_events(
     from_block: Optional[int],
     to_addresses: Optional[list] = None,
 ) -> tuple:
-    """Synchronous: fetch USDC Transfer events via web3.py (runs in thread pool).
+    """Synchronous: fetch USDC Transfer events via w3.eth.get_logs (runs in thread pool).
 
-    ``to_addresses`` should be a list of lowercase Ethereum addresses to filter
-    on (the ``to`` indexed topic).  Always pass this — without it, the query
-    returns *all* USDC transfers on mainnet (thousands per block), which blows
-    past RPC result-size limits and causes the monitor to silently fail.
+    Uses the raw JSON-RPC eth_getLogs call with explicit topic filters instead of
+    the contract-event API.  This avoids web3.py version-specific Python keyword
+    argument differences (fromBlock vs from_block changed between v5 and v7) and
+    ensures the ``to``-address filter is applied at the RPC level so only relevant
+    transfers are returned (not every USDC transfer on mainnet).
     """
     try:
         from web3 import Web3
@@ -311,6 +334,10 @@ def _fetch_usdc_events(
         raise RuntimeError("web3 package not installed. Run: pip install web3")
 
     w3 = Web3(Web3.HTTPProvider(rpc_url))
+
+    if not w3.is_connected():
+        raise RuntimeError(f"Cannot connect to Ethereum RPC endpoint: {rpc_url}")
+
     current_block = w3.eth.block_number
 
     if from_block is None:
@@ -319,42 +346,68 @@ def _fetch_usdc_events(
     if from_block >= current_block:
         return from_block, current_block, []
 
-    usdc = w3.eth.contract(
-        address=Web3.to_checksum_address(contract_address),
-        abi=_ERC20_TRANSFER_ABI,
-    )
+    # ERC-20 Transfer(address,address,uint256) event signature hash (topic[0])
+    # This is a well-known constant; computing it avoids any version dependency.
+    TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 
-    # Build the argument filter for the ``to`` indexed topic.
-    # This converts the query from "all USDC transfers" to "only transfers to
-    # our wallet(s)", reducing results from millions to near-zero per block.
-    argument_filters: dict = {}
+    # Build topic[2] filter (the `to` indexed parameter).
+    # Ethereum topics for addresses are zero-padded to 32 bytes:
+    #   "0x" + 24 zero chars + 40 address hex chars  (total 66 chars)
+    to_topic: Optional[object] = None
     if to_addresses:
-        checksum_addrs = [Web3.to_checksum_address(a) for a in to_addresses]
-        argument_filters = {"to": checksum_addrs[0] if len(checksum_addrs) == 1 else checksum_addrs}
+        padded = [
+            "0x" + addr.replace("0x", "").lower().zfill(64)
+            for addr in to_addresses
+        ]
+        to_topic = padded[0] if len(padded) == 1 else padded
 
-    # Fetch in chunks of 2000 blocks to avoid RPC limits
-    all_events = []
+    # topics array: [event_sig, any_from_address, to_filter]
+    # None at position 1 means "match any from-address"
+    topics = [TRANSFER_TOPIC, None, to_topic] if to_topic is not None else [TRANSFER_TOPIC]
+
+    # Fetch in chunks of 2000 blocks to stay within RPC result limits
+    all_logs = []
     chunk_size = 2000
     scan_from = from_block + 1
     while scan_from <= current_block:
         scan_to = min(scan_from + chunk_size - 1, current_block)
-        if argument_filters:
-            events = usdc.events.Transfer().get_logs(
-                fromBlock=scan_from, toBlock=scan_to, argument_filters=argument_filters
-            )
-        else:
-            events = usdc.events.Transfer().get_logs(fromBlock=scan_from, toBlock=scan_to)
-        all_events.extend(events)
+        filter_params = {
+            "address": Web3.to_checksum_address(contract_address),
+            "fromBlock": scan_from,
+            "toBlock": scan_to,
+            "topics": topics,
+        }
+        chunk_logs = w3.eth.get_logs(filter_params)
+        all_logs.extend(chunk_logs)
+        logger.debug(
+            "USDC scan blocks %d–%d: %d event(s)", scan_from, scan_to, len(chunk_logs)
+        )
         scan_from = scan_to + 1
 
-    parsed = [
-        {
-            "to": e["args"]["to"],
-            "from": e["args"]["from"],
-            "value": e["args"]["value"],
-            "tx_hash": e["transactionHash"].hex(),
-            "block": e["blockNumber"],
-        }
-        for e in all_events
-    ]
+    # Parse raw log entries into a normalised dict format.
+    # topic[1] = from-address (indexed), topic[2] = to-address (indexed)
+    # data     = ABI-encoded uint256 transfer value
+    parsed = []
+    for log in all_logs:
+        try:
+            log_topics = log.get("topics", [])
+            if len(log_topics) < 3:
+                continue  # malformed — skip
+            from_addr = "0x" + log_topics[1].hex()[-40:]
+            to_addr   = "0x" + log_topics[2].hex()[-40:]
+            # data is a 32-byte big-endian uint256
+            value     = int.from_bytes(bytes(log["data"]), "big") if log["data"] else 0
+            tx_hash   = "0x" + log["transactionHash"].hex()
+            block_num = log["blockNumber"]
+            parsed.append({
+                "from":    from_addr,
+                "to":      to_addr,
+                "value":   value,
+                "tx_hash": tx_hash,
+                "block":   block_num,
+            })
+        except Exception as exc:
+            logger.warning("Failed to parse USDC log entry: %s", exc)
+            continue
+
     return from_block, current_block, parsed
