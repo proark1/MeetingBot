@@ -126,8 +126,27 @@ class AccountResponse(BaseModel):
     id: str = Field(description="Unique account UUID.")
     email: str = Field(description="Registered email address.")
     credits_usd: float = Field(description="Current prepaid credit balance in USD.")
+    wallet_address: Optional[str] = Field(
+        default=None,
+        description=(
+            "Your registered Ethereum wallet address for USDC deposits. "
+            "Set this so the platform can automatically attribute USDC transfers to your account."
+        ),
+    )
     is_active: bool = Field(description="False if the account has been disabled by an admin.")
     created_at: datetime = Field(description="Account creation time (UTC).")
+
+
+class WalletRequest(BaseModel):
+    wallet_address: str = Field(
+        description="Your Ethereum wallet address (0x..., 42 characters). USDC sent from this address to the platform wallet will be credited to your account.",
+        examples=["0xAbCdEf0123456789AbCdEf0123456789AbCdEf01"],
+    )
+
+
+class WalletResponse(BaseModel):
+    wallet_address: Optional[str] = Field(description="Your registered wallet address, or null if not set.")
+    message: str = Field(description="Status message.")
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -210,6 +229,7 @@ async def get_me(
         id=account.id,
         email=account.email,
         credits_usd=float(account.credits_usd or 0),
+        wallet_address=account.wallet_address,
         is_active=account.is_active,
         created_at=account.created_at,
     )
@@ -291,3 +311,82 @@ async def revoke_api_key(
         raise HTTPException(status_code=404, detail="API key not found")
     key.is_active = False
     await db.commit()
+
+
+# ── Wallet ───────────────────────────────────────────────────────────────────
+
+import re
+_ETH_ADDRESS_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
+
+
+@router.get("/wallet", response_model=WalletResponse)
+async def get_wallet(
+    account_id: Optional[str] = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get your registered Ethereum wallet address for USDC deposits."""
+    if not account_id or account_id == SUPERADMIN_ACCOUNT_ID:
+        raise HTTPException(status_code=403, detail="Use per-user authentication")
+
+    result = await db.execute(select(Account).where(Account.id == account_id))
+    account = result.scalar_one_or_none()
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    if account.wallet_address:
+        return WalletResponse(
+            wallet_address=account.wallet_address,
+            message="Wallet address is set. USDC sent from this address to the platform wallet will be credited automatically.",
+        )
+    return WalletResponse(
+        wallet_address=None,
+        message="No wallet address set. Add your Ethereum wallet so the platform can attribute USDC deposits to your account.",
+    )
+
+
+@router.put("/wallet", response_model=WalletResponse)
+async def set_wallet(
+    payload: WalletRequest,
+    account_id: Optional[str] = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Set or update your Ethereum wallet address for USDC deposits.
+
+    When you send USDC from this wallet to the platform collection wallet,
+    the system automatically matches the `from` address and credits your account.
+    Each wallet address can only be linked to one account.
+    """
+    if not account_id or account_id == SUPERADMIN_ACCOUNT_ID:
+        raise HTTPException(status_code=403, detail="Use per-user authentication")
+
+    address = payload.wallet_address.strip()
+    if not _ETH_ADDRESS_RE.match(address):
+        raise HTTPException(
+            status_code=422,
+            detail="Invalid Ethereum address. Must be 0x followed by 40 hex characters.",
+        )
+
+    # Check uniqueness — no other account should have this wallet
+    existing = await db.execute(
+        select(Account).where(Account.wallet_address == address, Account.id != account_id)
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(
+            status_code=409,
+            detail="This wallet address is already linked to another account.",
+        )
+
+    result = await db.execute(select(Account).where(Account.id == account_id))
+    account = result.scalar_one_or_none()
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    account.wallet_address = address
+    await db.commit()
+
+    logger.info("Account %s set wallet to %s", account_id, address)
+    return WalletResponse(
+        wallet_address=address,
+        message="Wallet address saved. USDC sent from this address to the platform wallet will be credited automatically.",
+    )

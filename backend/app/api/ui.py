@@ -201,12 +201,19 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
     flash = None
     if request.query_params.get("payment") == "success":
         flash = _flash("success", "Payment successful! Your credits will be added shortly.")
+    if request.query_params.get("wallet") == "saved":
+        flash = _flash("success", "Wallet address saved successfully.")
+    if request.query_params.get("wallet") == "error":
+        flash = _flash("danger", "Invalid Ethereum address. Must be 0x followed by 40 hex characters.")
+    if request.query_params.get("wallet") == "taken":
+        flash = _flash("danger", "This wallet address is already linked to another account.")
 
     return templates.TemplateResponse("dashboard.html", {
         "request": request,
         "account": account,
         "is_admin": _is_admin(account),
         "balance": float(account.credits_usd or 0),
+        "wallet_address": account.wallet_address,
         "api_keys": api_keys,
         "transactions": transactions,
         "flash": flash,
@@ -259,6 +266,35 @@ async def revoke_key_ui(
     return RedirectResponse("/dashboard", status_code=303)
 
 
+@router.post("/dashboard/wallet", include_in_schema=False)
+async def save_wallet_ui(
+    request: Request,
+    wallet_address: str = Form(...),
+    db: AsyncSession = Depends(get_db),
+):
+    account = await _get_account_from_request(request, db)
+    if not account:
+        return RedirectResponse("/login")
+
+    import re
+    address = wallet_address.strip()
+    if not re.match(r"^0x[0-9a-fA-F]{40}$", address):
+        return RedirectResponse("/dashboard?wallet=error", status_code=303)
+
+    # Check uniqueness
+    from app.models.account import Account as AccountModel
+    existing = await db.execute(
+        select(AccountModel).where(AccountModel.wallet_address == address, AccountModel.id != account.id)
+    )
+    if existing.scalar_one_or_none():
+        return RedirectResponse("/dashboard?wallet=taken", status_code=303)
+
+    account.wallet_address = address
+    await db.commit()
+
+    return RedirectResponse("/dashboard?wallet=saved", status_code=303)
+
+
 # ── Top Up ────────────────────────────────────────────────────────────────────
 
 @router.get("/topup", response_class=HTMLResponse, include_in_schema=False)
@@ -302,6 +338,7 @@ async def topup_page(request: Request, db: AsyncSession = Depends(get_db)):
         "usdc_enabled": bool(usdc_address),
         "usdc_address": usdc_address,
         "usdc_contract": settings.USDC_CONTRACT,
+        "user_wallet": account.wallet_address,
         "flash": flash,
     })
 

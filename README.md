@@ -50,7 +50,17 @@ curl -X POST http://localhost:8000/api/v1/auth/register \
 
 > **`key_name`** (optional, default `"Default"`) — a label for the first API key created with your account.
 
-### 3. Top up credits
+### 3. Register your USDC wallet (for crypto top-ups)
+
+```bash
+# Register the Ethereum wallet you'll send USDC from
+curl -X PUT http://localhost:8000/api/v1/auth/wallet \
+  -H "Authorization: Bearer sk_live_..." \
+  -H "Content-Type: application/json" \
+  -d '{"wallet_address": "0xYourEthereumWalletAddress..."}'
+```
+
+### 4. Top up credits
 
 ```bash
 # Via Stripe — returns a checkout URL to complete payment
@@ -67,9 +77,9 @@ curl http://localhost:8000/api/v1/billing/usdc/address \
 
 Or use the web UI at `/topup`.
 
-> **USDC deposits:** If a platform admin has configured a collection wallet via `/admin`, that address is returned to all users. Otherwise, each user gets a unique HD-derived address (requires `CRYPTO_HD_SEED`).
+> **USDC deposits — how attribution works:** Each user registers their Ethereum wallet on their account (`PUT /api/v1/auth/wallet`). The admin sets a single platform collection wallet via `/admin`. When a user sends USDC to the platform wallet, the system matches the `from` address to the user's registered wallet and credits their account automatically. If no platform wallet is configured, users get per-user HD-derived addresses (requires `CRYPTO_HD_SEED`).
 
-### 4. Create a bot
+### 5. Create a bot
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/bot \
@@ -93,7 +103,7 @@ Response:
 }
 ```
 
-### 5. Get results
+### 6. Get results
 
 Poll until `status` is `done`:
 ```bash
@@ -152,6 +162,8 @@ Or receive them via your `webhook_url` — a POST with the full payload is deliv
 | `POST` | `/api/v1/auth/keys` | Generate a new named API key. Body: `{name?}` |
 | `GET` | `/api/v1/auth/keys` | List active API keys |
 | `DELETE` | `/api/v1/auth/keys/{id}` | Revoke an API key |
+| `GET` | `/api/v1/auth/wallet` | Get your registered Ethereum wallet address |
+| `PUT` | `/api/v1/auth/wallet` | Set or update your Ethereum wallet address. Body: `{wallet_address}`. Required for USDC deposits to the platform wallet |
 
 > **Login note:** `POST /api/v1/auth/login` expects **`application/x-www-form-urlencoded`** (not JSON) with fields `username` (your email) and `password`. The returned JWT is for the web UI only; use your `sk_live_...` API key as a Bearer token for all other API calls.
 

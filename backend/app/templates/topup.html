@@ -62,12 +62,26 @@
       {% if usdc_enabled %}
       <div class="tab-pane fade" id="tab-usdc">
         <div class="card p-4">
-          <p class="mb-2">Send <strong>USDC (ERC-20)</strong> to your unique deposit address:</p>
+          <p class="mb-2">Send <strong>USDC (ERC-20)</strong> to the platform deposit address:</p>
           <div class="input-group mb-3">
             <input type="text" class="form-control font-monospace" id="usdc-address"
               value="{{ usdc_address }}" readonly>
             <button class="btn btn-outline-secondary" onclick="copyAddress()">Copy</button>
           </div>
+
+          {% if user_wallet %}
+          <div class="alert alert-info small mb-2">
+            Your registered wallet: <code>{{ user_wallet }}</code><br>
+            Send USDC <strong>from this wallet only</strong> so we can credit your account automatically.
+          </div>
+          {% else %}
+          <div class="alert alert-danger small mb-2">
+            <strong>Action required:</strong> You must register your Ethereum wallet address on your
+            <a href="/dashboard">dashboard</a> before sending USDC. Without a registered wallet,
+            the system cannot attribute your deposit to your account.
+          </div>
+          {% endif %}
+
           <p class="text-muted small mb-1">
             Contract: <code>{{ usdc_contract }}</code><br>
             Network: Ethereum Mainnet only<br>

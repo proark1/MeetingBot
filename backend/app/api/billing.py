@@ -62,22 +62,27 @@ class CheckoutResponse(BaseModel):
 
 class UsdcAddressResponse(BaseModel):
     deposit_address: str = Field(
+        description="The Ethereum address to send USDC to (platform collection wallet or per-user HD address)."
+    )
+    your_wallet: Optional[str] = Field(
+        default=None,
         description=(
-            "Your unique Ethereum address for USDC deposits. "
-            "This address is derived from an HD wallet — it never changes for your account."
-        )
+            "Your registered sending wallet address. "
+            "If using the platform wallet, you MUST send from this address so the system can identify you."
+        ),
     )
     contract: str = Field(description="USDC ERC-20 token contract address on Ethereum mainnet.")
     network: str = Field(description="Blockchain network (always `Ethereum Mainnet (ERC-20)`).")
-    note: str = Field(description="Additional instructions — send USDC only; other tokens are not credited.")
+    note: str = Field(description="Additional instructions.")
 
     model_config = {
         "json_schema_extra": {
             "example": {
-                "deposit_address": "0xAbCd1234...",
+                "deposit_address": "0xPlatformWallet...",
+                "your_wallet": "0xYourRegisteredWallet...",
                 "contract": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
                 "network": "Ethereum Mainnet (ERC-20)",
-                "note": "Send USDC only. Other tokens will not be credited. Credits are added automatically within ~1 minute after confirmation.",
+                "note": "Send USDC from your registered wallet only. Credits are added automatically within ~1 minute.",
             }
         }
     }
@@ -237,14 +242,24 @@ async def get_usdc_address(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Get your unique USDC deposit address on Ethereum mainnet.
+    Get the USDC deposit address and instructions.
 
-    Send USDC (ERC-20) to this address and your credit balance will be
-    updated automatically within ~1 minute.
+    **Platform wallet mode** (preferred): The admin sets a single collection wallet.
+    You must first register your own Ethereum wallet via `PUT /api/v1/auth/wallet`
+    so the system can match incoming transfers to your account by the `from` address.
 
-    1 USDC = $1.00 credit
+    **HD wallet mode** (legacy fallback): If no platform wallet is configured,
+    each user gets a unique deposit address derived from an HD seed.
+
+    1 USDC = $1.00 credit. Credits are added automatically within ~1 minute.
     """
     _require_account(account_id)
+
+    # Load the user's account to check their registered wallet
+    result = await db.execute(select(Account).where(Account.id == account_id))
+    account = result.scalar_one_or_none()
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
 
     # First try the admin-configured platform wallet
     from app.models.account import PlatformConfig
@@ -255,14 +270,25 @@ async def get_usdc_address(
     wallet_config = wallet_result.scalar_one_or_none()
 
     if wallet_config and wallet_config.value:
+        if not account.wallet_address:
+            note = (
+                "IMPORTANT: You must register your Ethereum wallet first via "
+                "PUT /api/v1/auth/wallet (or the dashboard). Without a registered wallet, "
+                "the system cannot attribute your USDC deposit to your account."
+            )
+        else:
+            note = (
+                f"Send USDC from your registered wallet ({account.wallet_address}) only. "
+                "Other tokens will not be credited. "
+                "Credits are added automatically within ~1 minute after confirmation."
+            )
+
         return UsdcAddressResponse(
             deposit_address=wallet_config.value,
+            your_wallet=account.wallet_address,
             contract=settings.USDC_CONTRACT,
             network="Ethereum Mainnet (ERC-20)",
-            note=(
-                "Send USDC only. Other tokens will not be credited. "
-                "Credits are added automatically within ~1 minute after confirmation."
-            ),
+            note=note,
         )
 
     # Fallback to HD-derived per-user address
@@ -277,6 +303,7 @@ async def get_usdc_address(
 
     return UsdcAddressResponse(
         deposit_address=address,
+        your_wallet=account.wallet_address,
         contract=settings.USDC_CONTRACT,
         network="Ethereum Mainnet (ERC-20)",
         note=(

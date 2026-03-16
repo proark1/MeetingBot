@@ -10,17 +10,23 @@ Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
 ### Added
 - **Admin interface** — platform administration panel at `/admin` (web UI) and `/api/v1/admin/*` (API), restricted to admin accounts only
-- **Platform USDC collection wallet** — admins can set/change a single Ethereum wallet address where all users send USDC via `PUT /api/v1/admin/wallet` or the admin web UI. When configured, this address is returned to all users on the top-up page and `GET /api/v1/billing/usdc/address`, replacing HD-derived per-user addresses
+- **Platform USDC collection wallet** — admins can set/change a single Ethereum wallet address where all users send USDC via `PUT /api/v1/admin/wallet` or the admin web UI
+- **User wallet registration** — users register their Ethereum wallet on their account (`PUT /api/v1/auth/wallet`). The USDC monitor matches the `from` address of incoming transfers to the platform wallet against registered user wallets, automatically crediting the correct account
 - **Admin API endpoints:** `GET /api/v1/admin/wallet`, `PUT /api/v1/admin/wallet`, `GET /api/v1/admin/config`
+- **User wallet endpoints:** `GET /api/v1/auth/wallet`, `PUT /api/v1/auth/wallet`
 - **Admin access control** — only `assad.dar@gmail.com` or accounts with `is_admin=true` can access admin endpoints and the `/admin` page; all others receive HTTP 403
-- `is_admin` field on Account model for role-based access
+- `is_admin` and `wallet_address` fields on Account model
 - `PlatformConfig` database model for storing platform-level key/value settings
 - Admin nav link (visible only to admin users) in the web UI navbar
+- Wallet registration card on the user dashboard
+- Wallet status shown on the top-up page with warnings if not registered
 
 ### Changed
-- `GET /api/v1/billing/usdc/address` now returns the admin-configured platform wallet when set, falling back to HD-derived per-user addresses
-- Top-up page (`/topup`) shows the platform wallet when configured by an admin
+- `GET /api/v1/billing/usdc/address` now returns the admin-configured platform wallet when set (with the user's registered wallet info), falling back to HD-derived per-user addresses
+- USDC transfer monitor now supports two modes: platform wallet (matches `from` address to user wallets) and HD wallet (matches `to` address to per-user deposit addresses)
+- Top-up page (`/topup`) shows the platform wallet when configured by an admin, with user wallet status
 - `CRYPTO_HD_SEED` is no longer required for USDC deposits if a platform wallet is set via the admin panel
+- `GET /api/v1/auth/me` now includes `wallet_address` in the response
 
 ---
 

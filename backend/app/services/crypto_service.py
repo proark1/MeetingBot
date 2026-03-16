@@ -1,12 +1,16 @@
 """USDC/ERC-20 deposit address generation and transfer monitoring.
 
-Requires:
-  - CRYPTO_HD_SEED (64-char hex) — master seed for HD wallet derivation
-  - CRYPTO_RPC_URL — Infura/Alchemy JSON-RPC endpoint
-  - eth-account and web3 packages
+Supports two modes:
+  1. **Platform wallet mode** — admin sets a single collection wallet via the
+     admin panel. Users register their own Ethereum wallet on their account.
+     The monitor matches the `from` address of incoming transfers to user wallets.
+  2. **HD wallet mode** (legacy) — each user gets a unique deposit address
+     derived from CRYPTO_HD_SEED. The monitor matches `to` addresses.
 
-If CRYPTO_RPC_URL or CRYPTO_HD_SEED is not set, this module is effectively
-a no-op (deposit addresses can still be generated but monitoring is disabled).
+Requires:
+  - CRYPTO_RPC_URL — Infura/Alchemy JSON-RPC endpoint
+  - Either a platform wallet (set via admin) or CRYPTO_HD_SEED for HD mode
+  - eth-account and web3 packages (only if HD mode is used)
 """
 
 import asyncio
@@ -99,14 +103,31 @@ async def get_or_create_deposit_address(
     return address
 
 
+async def _get_platform_wallet() -> Optional[str]:
+    """Return the admin-configured platform wallet address, or None."""
+    from app.db import AsyncSessionLocal
+    from app.models.account import PlatformConfig
+    from sqlalchemy import select
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(PlatformConfig).where(PlatformConfig.key == "usdc_collection_wallet")
+        )
+        config = result.scalar_one_or_none()
+        return config.value if config and config.value else None
+
+
 async def start_usdc_monitor() -> None:
     """Start the background USDC transfer monitoring task."""
     from app.config import settings
     if not settings.CRYPTO_RPC_URL:
         logger.info("USDC monitoring disabled — CRYPTO_RPC_URL not set")
         return
-    if not settings.CRYPTO_HD_SEED:
-        logger.info("USDC monitoring disabled — CRYPTO_HD_SEED not set")
+
+    # Monitor can work in platform-wallet mode OR HD-wallet mode
+    platform_wallet = await _get_platform_wallet()
+    if not platform_wallet and not settings.CRYPTO_HD_SEED:
+        logger.info("USDC monitoring disabled — no platform wallet and no CRYPTO_HD_SEED")
         return
 
     logger.info("Starting USDC transfer monitor (polling every 60s)")
@@ -125,18 +146,40 @@ async def _monitor_loop() -> None:
 async def _check_transfers() -> None:
     from app.config import settings
     from app.db import AsyncSessionLocal
-    from app.models.account import UsdcDeposit, MonitorState, CreditTransaction
+    from app.models.account import Account, UsdcDeposit, MonitorState, CreditTransaction
     from app.services.credit_service import add_credits
     from sqlalchemy import select
 
     async with AsyncSessionLocal() as db:
-        # Load all registered deposit addresses
-        dep_result = await db.execute(select(UsdcDeposit))
-        deposits = dep_result.scalars().all()
-        if not deposits:
-            return
+        platform_wallet = None
+        # Check for platform wallet
+        from app.models.account import PlatformConfig
+        pw_result = await db.execute(
+            select(PlatformConfig).where(PlatformConfig.key == "usdc_collection_wallet")
+        )
+        pw_config = pw_result.scalar_one_or_none()
+        if pw_config and pw_config.value:
+            platform_wallet = pw_config.value.lower()
 
-        addr_to_account = {d.deposit_address.lower(): d.account_id for d in deposits}
+        # Build lookup maps for both modes
+        # Mode 1: Platform wallet — match `from` address to user's registered wallet
+        from_addr_to_account = {}
+        if platform_wallet:
+            acct_result = await db.execute(
+                select(Account).where(Account.wallet_address.isnot(None))
+            )
+            for acct in acct_result.scalars().all():
+                from_addr_to_account[acct.wallet_address.lower()] = acct.id
+
+        # Mode 2: HD addresses — match `to` address to per-user deposit addresses
+        to_addr_to_account = {}
+        if settings.CRYPTO_HD_SEED:
+            dep_result = await db.execute(select(UsdcDeposit))
+            for d in dep_result.scalars().all():
+                to_addr_to_account[d.deposit_address.lower()] = d.account_id
+
+        if not from_addr_to_account and not to_addr_to_account:
+            return
 
         # Get last processed block
         state_result = await db.execute(
@@ -158,12 +201,22 @@ async def _check_transfers() -> None:
 
         for event in raw_events:
             to_addr = event["to"].lower()
-            if to_addr not in addr_to_account:
-                continue
-
-            account_id = addr_to_account[to_addr]
+            from_addr = event["from"].lower()
             tx_hash = event["tx_hash"]
             amount_usd = Decimal(str(event["value"])) / _USDC_DECIMALS
+
+            account_id = None
+
+            # Mode 1: Transfer TO platform wallet FROM a registered user wallet
+            if platform_wallet and to_addr == platform_wallet and from_addr in from_addr_to_account:
+                account_id = from_addr_to_account[from_addr]
+
+            # Mode 2: Transfer TO a per-user HD deposit address
+            if account_id is None and to_addr in to_addr_to_account:
+                account_id = to_addr_to_account[to_addr]
+
+            if account_id is None:
+                continue
 
             # Idempotency — skip if already processed
             dup = await db.execute(
@@ -176,13 +229,13 @@ async def _check_transfers() -> None:
                 account_id=account_id,
                 amount_usd=amount_usd,
                 type="usdc_topup",
-                description=f"USDC deposit: {amount_usd:.2f} USDC",
+                description=f"USDC deposit: {amount_usd:.2f} USDC (from {from_addr[:10]}...)",
                 reference_id=tx_hash,
                 db=db,
             )
             logger.info(
-                "USDC deposit credited: +$%.2f to account %s (tx=%s)",
-                amount_usd, account_id, tx_hash[:16],
+                "USDC deposit credited: +$%.2f to account %s (tx=%s, from=%s)",
+                amount_usd, account_id, tx_hash[:16], from_addr[:10],
             )
 
         # Persist last processed block

@@ -47,6 +47,34 @@
   </div>
 </div>
 
+<div class="card p-4 mb-4">
+  <div class="d-flex justify-content-between align-items-center mb-2">
+    <h6 class="mb-0">USDC Wallet</h6>
+  </div>
+  <p class="text-muted small mb-2">
+    Register your Ethereum wallet so the platform can automatically credit your account when you send USDC.
+  </p>
+  <form method="post" action="/dashboard/wallet" class="d-flex gap-2 align-items-start">
+    <div class="flex-grow-1">
+      <input
+        type="text"
+        name="wallet_address"
+        class="form-control form-control-sm font-monospace"
+        value="{{ wallet_address or '' }}"
+        placeholder="0x0000000000000000000000000000000000000000"
+        pattern="0x[0-9a-fA-F]{40}"
+        required
+      >
+    </div>
+    <button type="submit" class="btn btn-sm btn-primary">Save</button>
+  </form>
+  {% if wallet_address %}
+  <div class="mt-2 small text-success">Wallet registered: <code>{{ wallet_address }}</code></div>
+  {% else %}
+  <div class="mt-2 small text-warning">No wallet set — you won't be able to top up via USDC until you add one.</div>
+  {% endif %}
+</div>
+
 <div class="card p-4">
   <h6 class="mb-3">Recent Transactions</h6>
   {% if transactions %}
