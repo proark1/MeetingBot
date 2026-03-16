@@ -126,6 +126,8 @@ async def dispatch_event(
                     )
             else:
                 wh_entry.consecutive_failures = 0
+            # Persist updated stats to database (best-effort)
+            await store._persist_webhook(wh_entry)
 
     await asyncio.gather(
         *(_deliver_one(url, secret, wh) for url, secret, wh in targets),

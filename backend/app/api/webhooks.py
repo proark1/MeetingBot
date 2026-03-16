@@ -82,7 +82,7 @@ async def create_webhook(payload: WebhookCreate):
     creating the bot instead.
     """
     await _block_ssrf(payload.url)
-    wh = store.new_webhook(url=payload.url, events=payload.events, secret=payload.secret)
+    wh = await store.new_webhook(url=payload.url, events=payload.events, secret=payload.secret)
     return _to_response(wh)
 
 
@@ -102,7 +102,7 @@ async def get_webhook(webhook_id: str):
 
 @router.delete("/{webhook_id}", status_code=204)
 async def delete_webhook(webhook_id: str):
-    if not store.delete_webhook(webhook_id):
+    if not await store.delete_webhook(webhook_id):
         raise HTTPException(status_code=404, detail=f"Webhook {webhook_id!r} not found")
 
 

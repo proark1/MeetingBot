@@ -105,6 +105,24 @@ class BotSnapshot(Base):
     data: Mapped[str] = mapped_column(Text, nullable=False)  # JSON-serialized BotSession fields
 
 
+class Webhook(Base):
+    """Persists global webhook registrations across server restarts."""
+
+    __tablename__ = "webhooks"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    url: Mapped[str] = mapped_column(String(2048), nullable=False)
+    events: Mapped[str] = mapped_column(Text, nullable=False)  # JSON-serialized list of event names
+    # Stored in plaintext — required to compute HMAC-SHA256 signatures on outgoing deliveries
+    secret: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    delivery_attempts: Mapped[int] = mapped_column(Integer, default=0)
+    last_delivery_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_delivery_status: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    consecutive_failures: Mapped[int] = mapped_column(Integer, default=0)
+
+
 class MonitorState(Base):
     """Persists state for background tasks (e.g. last processed Ethereum block)."""
 

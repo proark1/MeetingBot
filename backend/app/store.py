@@ -248,9 +248,11 @@ class Store:
 
     # ── Webhooks ──────────────────────────────────────────────────────────────
 
-    def new_webhook(self, url: str, events: list[str], secret: Optional[str] = None) -> WebhookEntry:
+    async def new_webhook(self, url: str, events: list[str], secret: Optional[str] = None) -> WebhookEntry:
         wh = WebhookEntry(id=str(uuid.uuid4()), url=url, events=events, secret=secret)
-        self._webhooks[wh.id] = wh
+        async with self._lock:
+            self._webhooks[wh.id] = wh
+        await self._persist_webhook(wh)
         return wh
 
     def get_webhook(self, webhook_id: str) -> Optional[WebhookEntry]:
@@ -259,11 +261,65 @@ class Store:
     def list_webhooks(self) -> list[WebhookEntry]:
         return sorted(self._webhooks.values(), key=lambda w: w.created_at, reverse=True)
 
-    def delete_webhook(self, webhook_id: str) -> bool:
-        return self._webhooks.pop(webhook_id, None) is not None
+    async def delete_webhook(self, webhook_id: str) -> bool:
+        async with self._lock:
+            removed = self._webhooks.pop(webhook_id, None) is not None
+        if removed:
+            await self._delete_webhook_from_db(webhook_id)
+        return removed
 
     def active_webhooks(self) -> list[WebhookEntry]:
         return [w for w in self._webhooks.values() if w.is_active]
+
+    async def _persist_webhook(self, wh: "WebhookEntry") -> None:
+        """Upsert a webhook into the database (best-effort)."""
+        try:
+            from app.db import AsyncSessionLocal
+            from app.models.account import Webhook as WebhookModel
+            from sqlalchemy import select as _select
+
+            async with AsyncSessionLocal() as db:
+                result = await db.execute(_select(WebhookModel).where(WebhookModel.id == wh.id))
+                row = result.scalar_one_or_none()
+                if row is None:
+                    row = WebhookModel(
+                        id=wh.id,
+                        url=wh.url,
+                        events=json.dumps(wh.events),
+                        secret=wh.secret,
+                        is_active=wh.is_active,
+                        created_at=wh.created_at,
+                        delivery_attempts=wh.delivery_attempts,
+                        last_delivery_at=wh.last_delivery_at,
+                        last_delivery_status=wh.last_delivery_status,
+                        consecutive_failures=wh.consecutive_failures,
+                    )
+                    db.add(row)
+                else:
+                    row.url = wh.url
+                    row.events = json.dumps(wh.events)
+                    row.secret = wh.secret
+                    row.is_active = wh.is_active
+                    row.delivery_attempts = wh.delivery_attempts
+                    row.last_delivery_at = wh.last_delivery_at
+                    row.last_delivery_status = wh.last_delivery_status
+                    row.consecutive_failures = wh.consecutive_failures
+                await db.commit()
+        except Exception:
+            logger.exception("Failed to persist webhook %s to database", wh.id)
+
+    async def _delete_webhook_from_db(self, webhook_id: str) -> None:
+        """Delete a webhook from the database (best-effort)."""
+        try:
+            from app.db import AsyncSessionLocal
+            from app.models.account import Webhook as WebhookModel
+            from sqlalchemy import delete as _delete
+
+            async with AsyncSessionLocal() as db:
+                await db.execute(_delete(WebhookModel).where(WebhookModel.id == webhook_id))
+                await db.commit()
+        except Exception:
+            logger.exception("Failed to delete webhook %s from database", webhook_id)
 
     # ── Cleanup ───────────────────────────────────────────────────────────────
 
@@ -383,6 +439,48 @@ async def load_persisted_bots() -> int:
         return count
     except Exception:
         logger.exception("Failed to load persisted bots from database")
+        return 0
+
+
+async def load_persisted_webhooks() -> int:
+    """Load webhook registrations from the database into the in-memory store.
+
+    Called once at startup so webhook configs survive server restarts.
+    Returns the number of webhooks loaded.
+    """
+    try:
+        from app.db import AsyncSessionLocal
+        from app.models.account import Webhook as WebhookModel
+        from sqlalchemy import select as _select
+
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(_select(WebhookModel))
+            rows = result.scalars().all()
+
+        count = 0
+        for row in rows:
+            try:
+                events = json.loads(row.events) if row.events else ["*"]
+                wh = WebhookEntry(
+                    id=row.id,
+                    url=row.url,
+                    events=events,
+                    secret=row.secret,
+                    is_active=row.is_active,
+                    created_at=row.created_at if row.created_at.tzinfo else row.created_at.replace(tzinfo=timezone.utc),
+                    delivery_attempts=row.delivery_attempts or 0,
+                    last_delivery_at=row.last_delivery_at,
+                    last_delivery_status=row.last_delivery_status,
+                    consecutive_failures=row.consecutive_failures or 0,
+                )
+                store._webhooks[wh.id] = wh
+                count += 1
+            except Exception:
+                logger.exception("Failed to restore webhook %s", row.id)
+
+        return count
+    except Exception:
+        logger.exception("Failed to load persisted webhooks from database")
         return 0
 
 

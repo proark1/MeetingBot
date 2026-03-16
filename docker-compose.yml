@@ -1,15 +1,37 @@
 version: "3.9"
 
 services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: meetingbot
+      POSTGRES_USER: meetingbot
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U meetingbot"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   api:
     build: ./backend
     ports:
       - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
     volumes:
       - ./backend:/app
       - ./frontend:/frontend
       - meetingbot_data:/app/data
     environment:
+      # Database
+      - DATABASE_URL=${DATABASE_URL}
+      # JWT — required, must be set to a strong secret
+      - JWT_SECRET=${JWT_SECRET}
       # AI providers — set at least one; Anthropic takes precedence when both are set
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
@@ -30,3 +52,4 @@ services:
 
 volumes:
   meetingbot_data:
+  postgres_data:

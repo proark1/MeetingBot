@@ -85,10 +85,15 @@ async def lifespan(app: FastAPI):
         logger.info("USDC payments disabled — set CRYPTO_RPC_URL to enable")
 
     # ── Load persisted bots ───────────────────────────────────────────────
-    from app.store import load_persisted_bots
+    from app.store import load_persisted_bots, load_persisted_webhooks
     restored = await load_persisted_bots()
     if restored:
         logger.info("Restored %d bot(s) from previous run", restored)
+
+    # ── Load persisted webhooks ───────────────────────────────────────────
+    restored_webhooks = await load_persisted_webhooks()
+    if restored_webhooks:
+        logger.info("Restored %d webhook(s) from previous run", restored_webhooks)
 
     # ── USDC monitor ──────────────────────────────────────────────────────
     from app.services.crypto_service import start_usdc_monitor

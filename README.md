@@ -302,13 +302,13 @@ Pass `template` in bot creation. Use `prompt_override` for a fully custom prompt
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `API_KEY` | — | Legacy superadmin key (bypasses per-user auth; leave empty to use accounts only) |
-| `JWT_SECRET` | `change-me-in-production` | Secret for signing web UI JWT tokens |
+| `JWT_SECRET` | — | **Required.** Secret for signing web UI JWT tokens. Generate with `openssl rand -hex 32` |
 | `JWT_EXPIRE_HOURS` | `24` | JWT token lifetime in hours |
 
 ### Billing
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DATABASE_URL` | `sqlite+aiosqlite:///./meetingbot.db` | SQLAlchemy async URL (use `postgresql+asyncpg://...` on Railway) |
+| `DATABASE_URL` | `sqlite+aiosqlite:///./meetingbot.db` | SQLAlchemy async URL. The bundled `docker-compose.yml` sets this to PostgreSQL automatically via the `db` service. |
 | `STRIPE_SECRET_KEY` | — | Stripe secret key (`sk_live_...`) |
 | `STRIPE_WEBHOOK_SECRET` | — | Stripe webhook signing secret (`whsec_...`) |
 | `STRIPE_TOP_UP_AMOUNTS` | `10,25,50,100` | Comma-separated USD top-up options |
@@ -367,11 +367,11 @@ The bot auto-leaves when it has been the only participant for `BOT_ALONE_TIMEOUT
 Pass `webhook_url` when creating a bot. A single POST with full results is sent when the bot reaches a terminal state (`done`, `error`, or `cancelled`).
 
 ### Global webhooks
-Register via `POST /api/v1/webhook` to receive all events for all bots.
+Register via `POST /api/v1/webhook` to receive all events for all bots. Webhook registrations are persisted to the database and survive server restarts.
 
 **Events:** `bot.joining`, `bot.in_call`, `bot.call_ended`, `bot.transcript_ready`, `bot.analysis_ready`, `bot.done`, `bot.error`, `bot.cancelled`
 
-**HMAC signing:** Pass `secret` when registering. Deliveries include `X-MeetingBot-Signature: sha256=<hmac>`.
+**HMAC signing:** Pass `secret` when registering. Deliveries include `X-MeetingBot-Signature: sha256=<hmac>`. After 5 consecutive delivery failures the webhook is automatically disabled.
 
 ### WebSocket
 Connect to `ws://host/api/v1/ws?token=<your-api-key-or-jwt>` for real-time events.
@@ -404,12 +404,21 @@ but no token is provided, or `4003` for an invalid token.
 docker compose up --build
 ```
 
+The `docker-compose.yml` automatically starts a **PostgreSQL 16** service and wires the
+`DATABASE_URL` and `JWT_SECRET` from your `.env` file. Copy `.env.example` (or create `.env`)
+with at least:
+
+```
+JWT_SECRET=$(openssl rand -hex 32)
+POSTGRES_PASSWORD=$(openssl rand -hex 16)
+DATABASE_URL=postgresql://meetingbot:${POSTGRES_PASSWORD}@db:5432/meetingbot
+```
+
 ### Railway / Heroku
 
-Set environment variables and deploy. Accounts/billing data persists in SQLite by default.
-For production, add a **PostgreSQL plugin** in Railway — the `DATABASE_URL` is injected
-automatically and the app translates it to the correct asyncpg driver format with no extra
-configuration required.
+Set environment variables and deploy. Add a **PostgreSQL plugin** in Railway — the
+`DATABASE_URL` is injected automatically and the app translates it to the correct asyncpg
+driver format with no extra configuration required.
 
 ### Manual
 
