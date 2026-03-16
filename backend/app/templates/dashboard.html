@@ -15,13 +15,41 @@
       <a href="/topup" class="btn btn-sm btn-outline-primary mt-3">Top Up</a>
     </div>
   </div>
-  <div class="col-md-8">
-    <div class="card p-4">
+  <div class="col-md-4">
+    <div class="card p-4 text-center">
+      <div class="text-muted small mb-1">Subscription Plan</div>
+      <div class="fs-4 fw-bold text-capitalize">
+        {% if plan == "free" %}<span class="text-secondary">Free</span>
+        {% elif plan == "starter" %}<span class="text-info">Starter</span>
+        {% elif plan == "pro" %}<span class="text-primary">Pro</span>
+        {% elif plan == "business" %}<span class="text-warning">Business</span>
+        {% else %}<span>{{ plan }}</span>
+        {% endif %}
+      </div>
+      <div class="text-muted small mt-1">
+        {% if plan_limit == -1 %}
+        {{ monthly_bots_used }} bots used this month (unlimited)
+        {% else %}
+        {{ monthly_bots_used }} / {{ plan_limit }} bots used this month
+        {% endif %}
+      </div>
+      {% if plan_limit != -1 and monthly_bots_used >= plan_limit %}
+      <div class="text-danger small mt-1 fw-semibold">Monthly limit reached</div>
+      {% elif plan_limit != -1 %}
+      <div class="progress mt-2" style="height:6px">
+        <div class="progress-bar {% if monthly_bots_used / plan_limit > 0.8 %}bg-warning{% else %}bg-success{% endif %}"
+          style="width:{{ [((monthly_bots_used / plan_limit) * 100)|int, 100]|min }}%"></div>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card p-4 h-100">
       <div class="d-flex justify-content-between align-items-center mb-3">
         <h6 class="mb-0">API Keys</h6>
         <form method="post" action="/dashboard/keys" class="d-flex gap-2">
-          <input type="text" name="name" class="form-control form-control-sm" placeholder="Key name" style="width:150px">
-          <button type="submit" class="btn btn-sm btn-success">+ New Key</button>
+          <input type="text" name="name" class="form-control form-control-sm" placeholder="Key name" style="width:130px">
+          <button type="submit" class="btn btn-sm btn-success">+ New</button>
         </form>
       </div>
       {% if api_keys %}
@@ -88,34 +116,180 @@
 </div>
 {% endif %}
 
-<div class="card p-4 mb-4">
-  <div class="d-flex justify-content-between align-items-center mb-2">
-    <h6 class="mb-0">USDC Wallet</h6>
-  </div>
-  <p class="text-muted small mb-2">
-    Register your Ethereum wallet so the platform can automatically credit your account when you send USDC.
-  </p>
-  <form method="post" action="/dashboard/wallet" class="d-flex gap-2 align-items-start">
-    <div class="flex-grow-1">
-      <input
-        type="text"
-        name="wallet_address"
-        class="form-control form-control-sm font-monospace"
-        value="{{ wallet_address or '' }}"
-        placeholder="0x0000000000000000000000000000000000000000"
-        pattern="0x[0-9a-fA-F]{40}"
-        required
-      >
+<!-- ── Notification Preferences ──────────────────────────────────────────── -->
+<div class="row g-3 mb-4">
+  <div class="col-md-6">
+    <div class="card p-4 h-100">
+      <h6 class="mb-3">Email Notifications</h6>
+      <p class="text-muted small mb-3">
+        Receive an email when a bot finishes recording and analysis is ready.
+      </p>
+      <form method="post" action="/dashboard/notifications">
+        <div class="form-check form-switch mb-2">
+          <input class="form-check-input" type="checkbox" role="switch" name="notify_on_done" id="notify-switch"
+            {% if notify_on_done %}checked{% endif %}>
+          <label class="form-check-label" for="notify-switch">Notify when bot is done</label>
+        </div>
+        <div class="mb-2">
+          <label class="form-label small fw-semibold">Notification email <span class="text-muted fw-normal">(optional — defaults to account email)</span></label>
+          <input type="email" name="notify_email" class="form-control form-control-sm"
+            value="{{ notify_email }}" placeholder="{{ account.email }}">
+        </div>
+        <button type="submit" class="btn btn-sm btn-primary">Save Preferences</button>
+      </form>
     </div>
-    <button type="submit" class="btn btn-sm btn-primary">Save</button>
-  </form>
-  {% if wallet_address %}
-  <div class="mt-2 small text-success">Wallet registered: <code>{{ wallet_address }}</code></div>
-  {% else %}
-  <div class="mt-2 small text-warning">No wallet set — you won't be able to top up via USDC until you add one.</div>
-  {% endif %}
+  </div>
+
+  <div class="col-md-6">
+    <div class="card p-4 h-100">
+      <h6 class="mb-3">USDC Wallet</h6>
+      <p class="text-muted small mb-2">
+        Register your Ethereum wallet so the platform can automatically credit your account when you send USDC.
+      </p>
+      <form method="post" action="/dashboard/wallet" class="d-flex gap-2 align-items-start">
+        <div class="flex-grow-1">
+          <input
+            type="text"
+            name="wallet_address"
+            class="form-control form-control-sm font-monospace"
+            value="{{ wallet_address or '' }}"
+            placeholder="0x0000000000000000000000000000000000000000"
+            pattern="0x[0-9a-fA-F]{40}"
+            required
+          >
+        </div>
+        <button type="submit" class="btn btn-sm btn-primary">Save</button>
+      </form>
+      {% if wallet_address %}
+      <div class="mt-2 small text-success">Wallet registered: <code>{{ wallet_address }}</code></div>
+      {% else %}
+      <div class="mt-2 small text-warning">No wallet set — you won't be able to top up via USDC until you add one.</div>
+      {% endif %}
+    </div>
+  </div>
 </div>
 
+<!-- ── Linked Accounts (SSO) ─────────────────────────────────────────────── -->
+{% if google_sso_enabled or microsoft_sso_enabled or oauth_accounts %}
+<div class="card p-4 mb-4">
+  <h6 class="mb-3">Linked Accounts</h6>
+  {% if oauth_accounts %}
+  <div class="d-flex flex-wrap gap-2 mb-3">
+    {% for oa in oauth_accounts %}
+    <span class="badge bg-light text-dark border d-flex align-items-center gap-1 p-2">
+      {% if oa.provider == "google" %}
+      <svg width="14" height="14" viewBox="0 0 48 48" fill="none"><path d="M43.611 20.083H42V20H24V28H35.303C33.654 32.657 29.223 36 24 36C17.373 36 12 30.627 12 24C12 17.373 17.373 12 24 12C27.059 12 29.842 13.154 31.961 15.039L37.618 9.382C34.046 6.053 29.268 4 24 4C12.955 4 4 12.955 4 24C4 35.045 12.955 44 24 44C35.045 44 44 35.045 44 24C44 22.659 43.862 21.35 43.611 20.083Z" fill="#FFC107"/><path d="M6.306 14.691L12.877 19.51C14.655 15.108 18.961 12 24 12C27.059 12 29.842 13.154 31.961 15.039L37.618 9.382C34.046 6.053 29.268 4 24 4C16.318 4 9.656 8.337 6.306 14.691Z" fill="#FF3D00"/><path d="M24 44C29.166 44 33.86 42.023 37.409 38.808L31.219 33.57C29.21 35.099 26.715 36 24 36C18.798 36 14.381 32.683 12.717 28.054L6.195 33.079C9.505 39.556 16.227 44 24 44Z" fill="#4CAF50"/><path d="M43.611 20.083H42V20H24V28H35.303C34.511 30.237 33.072 32.165 31.216 33.572L31.219 33.57L37.409 38.808C36.971 39.205 44 34 44 24C44 22.659 43.862 21.35 43.611 20.083Z" fill="#1976D2"/></svg>
+      Google
+      {% elif oa.provider == "microsoft" %}
+      <svg width="14" height="14" viewBox="0 0 23 23"><path fill="#f3f3f3" d="M0 0h23v23H0z"/><path fill="#f35325" d="M1 1h10v10H1z"/><path fill="#81bc06" d="M12 1h10v10H12z"/><path fill="#05a6f0" d="M1 12h10v10H1z"/><path fill="#ffba08" d="M12 12h10v10H12z"/></svg>
+      Microsoft
+      {% else %}
+      {{ oa.provider|title }}
+      {% endif %}
+      {% if oa.email %}<span class="text-muted">· {{ oa.email }}</span>{% endif %}
+      <span class="badge bg-success ms-1">Linked</span>
+    </span>
+    {% endfor %}
+  </div>
+  {% endif %}
+  <div class="d-flex flex-wrap gap-2">
+    {% if google_sso_enabled %}
+    {% set google_linked = oauth_accounts | selectattr("provider", "equalto", "google") | list %}
+    {% if not google_linked %}
+    <a href="/api/v1/auth/oauth/google/authorize?redirect=1" class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1">
+      <svg width="14" height="14" viewBox="0 0 48 48" fill="none"><path d="M43.611 20.083H42V20H24V28H35.303C33.654 32.657 29.223 36 24 36C17.373 36 12 30.627 12 24C12 17.373 17.373 12 24 12C27.059 12 29.842 13.154 31.961 15.039L37.618 9.382C34.046 6.053 29.268 4 24 4C12.955 4 4 12.955 4 24C4 35.045 12.955 44 24 44C35.045 44 44 35.045 44 24C44 22.659 43.862 21.35 43.611 20.083Z" fill="#FFC107"/></svg>
+      Link Google
+    </a>
+    {% endif %}
+    {% endif %}
+    {% if microsoft_sso_enabled %}
+    {% set ms_linked = oauth_accounts | selectattr("provider", "equalto", "microsoft") | list %}
+    {% if not ms_linked %}
+    <a href="/api/v1/auth/oauth/microsoft/authorize?redirect=1" class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1">
+      <svg width="14" height="14" viewBox="0 0 23 23"><path fill="#f3f3f3" d="M0 0h23v23H0z"/><path fill="#f35325" d="M1 1h10v10H1z"/><path fill="#81bc06" d="M12 1h10v10H12z"/><path fill="#05a6f0" d="M1 12h10v10H1z"/><path fill="#ffba08" d="M12 12h10v10H12z"/></svg>
+      Link Microsoft
+    </a>
+    {% endif %}
+    {% endif %}
+  </div>
+  {% if not oauth_accounts and not google_sso_enabled and not microsoft_sso_enabled %}
+  <p class="text-muted small mb-0">No SSO providers are configured on this server.</p>
+  {% endif %}
+</div>
+{% endif %}
+
+<!-- ── Integrations ───────────────────────────────────────────────────────── -->
+<div class="row g-3 mb-4">
+  <div class="col-md-6">
+    <div class="card p-4 h-100">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h6 class="mb-0">Integrations</h6>
+        <a href="/api/docs#/Integrations" target="_blank" class="btn btn-sm btn-outline-secondary">Manage via API</a>
+      </div>
+      <p class="text-muted small mb-2">
+        Push meeting notes automatically to Slack, Notion, and more after each bot session.
+      </p>
+      {% if active_integrations %}
+      <div class="d-flex flex-wrap gap-1">
+        {% for integ in active_integrations %}
+        <span class="badge bg-light text-dark border">
+          {% if integ.type == "slack" %}
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="#E01E5A"><path d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zM6.313 15.165a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313zM8.834 5.042a2.528 2.528 0 0 1-2.521-2.52A2.528 2.528 0 0 1 8.834 0a2.528 2.528 0 0 1 2.521 2.522v2.52H8.834zM8.834 6.313a2.528 2.528 0 0 1 2.521 2.521 2.528 2.528 0 0 1-2.521 2.521H2.522A2.528 2.528 0 0 1 0 8.834a2.528 2.528 0 0 1 2.522-2.521h6.312zM18.956 8.834a2.528 2.528 0 0 1 2.522-2.521A2.528 2.528 0 0 1 24 8.834a2.528 2.528 0 0 1-2.522 2.521h-2.522V8.834zM17.688 8.834a2.528 2.528 0 0 1-2.523 2.521 2.527 2.527 0 0 1-2.52-2.521V2.522A2.527 2.527 0 0 1 15.165 0a2.528 2.528 0 0 1 2.523 2.522v6.312zM15.165 18.956a2.528 2.528 0 0 1 2.523 2.522A2.528 2.528 0 0 1 15.165 24a2.527 2.527 0 0 1-2.52-2.522v-2.522h2.52zM15.165 17.688a2.527 2.527 0 0 1-2.52-2.523 2.526 2.526 0 0 1 2.52-2.52h6.313A2.527 2.527 0 0 1 24 15.165a2.528 2.528 0 0 1-2.522 2.523h-6.313z"/></svg>
+          {% elif integ.type == "notion" %}📝
+          {% endif %}
+          {{ integ.name or integ.type|title }}
+        </span>
+        {% endfor %}
+      </div>
+      <div class="text-muted small mt-2">{{ active_integrations|length }} active integration{% if active_integrations|length != 1 %}s{% endif %}</div>
+      {% else %}
+      <div class="text-muted small">No integrations configured. Use the API to add Slack or Notion.</div>
+      <div class="mt-2 p-2 bg-light rounded small">
+        <code>POST /api/v1/integrations</code> — <span class="text-muted">create Slack or Notion integration</span>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="col-md-6">
+    <div class="card p-4 h-100">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h6 class="mb-0">Calendar Auto-Join</h6>
+        <a href="/api/docs#/Calendar" target="_blank" class="btn btn-sm btn-outline-secondary">Manage via API</a>
+      </div>
+      <p class="text-muted small mb-2">
+        Connect an iCal feed (Google Calendar, Outlook) to automatically dispatch bots to upcoming meetings.
+      </p>
+      {% if calendar_feeds %}
+      <table class="table table-sm mb-0">
+        <thead><tr><th>Name</th><th>Status</th><th>Last synced</th></tr></thead>
+        <tbody>
+          {% for feed in calendar_feeds %}
+          <tr>
+            <td class="small">{{ feed.name }}</td>
+            <td>
+              {% if feed.is_active %}
+              <span class="badge bg-success">Active</span>
+              {% else %}
+              <span class="badge bg-secondary">Paused</span>
+              {% endif %}
+            </td>
+            <td class="small text-muted">{{ feed.last_synced_at or "Never" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="text-muted small">No calendar feeds configured. Use the API to add one.</div>
+      <div class="mt-2 p-2 bg-light rounded small">
+        <code>POST /api/v1/calendar</code> — <span class="text-muted">add an iCal feed for auto-join</span>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<!-- ── Recent Transactions ────────────────────────────────────────────────── -->
 <div class="card p-4">
   <h6 class="mb-3">Recent Transactions</h6>
   {% if transactions %}

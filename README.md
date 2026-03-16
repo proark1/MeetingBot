@@ -522,6 +522,7 @@ The background poll loop checks all active feeds every `CALENDAR_POLL_INTERVAL_S
 |--------|-------------|
 | Enable/Disable account | Toggle `is_active` on any user account (prevents login and API access) |
 | Make Admin / Revoke Admin | Toggle `is_admin` to grant or revoke admin privileges |
+| Set Plan | Inline dropdown to change any account's subscription plan (free/starter/pro/business) |
 
 > **Admin access:** Accounts listed in `ADMIN_EMAILS` (comma-separated env var) or accounts with `is_admin=true` in the database can access these endpoints. All other users receive HTTP 403.
 
@@ -544,11 +545,11 @@ Or use the admin web UI at `/admin` to manage all settings through a form.
 
 | Path | Description |
 |------|-------------|
-| `/register` | Create account (Personal or Business) |
-| `/login` | Login |
-| `/dashboard` | Balance, API keys, transaction history, wallet registration, business account info |
+| `/register` | Create account (Personal or Business); Google/Microsoft SSO sign-up buttons when configured |
+| `/login` | Login with email/password or SSO (Google/Microsoft when configured) |
+| `/dashboard` | Balance, API keys, subscription plan & monthly usage, email notification preferences, USDC wallet, linked SSO accounts, integrations summary, calendar feeds, transaction history, business account multi-user info |
 | `/topup` | Add credits (Stripe card or USDC) |
-| `/admin` | Platform administration — stats, unmatched transfers, user accounts, manual credit, rescan, wallet config, RPC URL (admin only) |
+| `/admin` | Platform administration — plan breakdown stats, bot activity & platform feature counters (webhooks/integrations/calendar/SSO), system status (Stripe/RPC/HD seed/email/storage/video/SSO), unmatched USDC transfers, user accounts with inline plan management, manual credit, rescan, wallet config, RPC URL (admin only) |
 
 Full interactive docs (with request/response examples and try-it-out): `GET /api/docs`
 Alternative ReDoc view: `GET /api/redoc`

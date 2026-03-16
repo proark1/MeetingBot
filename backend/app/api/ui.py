@@ -14,7 +14,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.db import get_db
 from app.deps import _admin_emails
-from app.models.account import Account, ApiKey, CreditTransaction, PlatformConfig, MonitorState, UnmatchedUsdcTransfer
+from app.models.account import (
+    Account, ApiKey, CreditTransaction, PlatformConfig, MonitorState,
+    UnmatchedUsdcTransfer, Integration, CalendarFeed, OAuthAccount, Webhook,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["UI"])
@@ -62,7 +65,12 @@ async def root(request: Request, db: AsyncSession = Depends(get_db)):
 
 @router.get("/register", response_class=HTMLResponse, include_in_schema=False)
 async def register_page(request: Request):
-    return templates.TemplateResponse("register.html", {"request": request, "account": None})
+    return templates.TemplateResponse("register.html", {
+        "request": request,
+        "account": None,
+        "google_sso_enabled": bool(settings.GOOGLE_CLIENT_ID),
+        "microsoft_sso_enabled": bool(settings.MICROSOFT_CLIENT_ID),
+    })
 
 
 @router.post("/register", response_class=HTMLResponse, include_in_schema=False)
@@ -129,7 +137,12 @@ async def register_submit(
 
 @router.get("/login", response_class=HTMLResponse, include_in_schema=False)
 async def login_page(request: Request):
-    return templates.TemplateResponse("login.html", {"request": request, "account": None})
+    return templates.TemplateResponse("login.html", {
+        "request": request,
+        "account": None,
+        "google_sso_enabled": bool(settings.GOOGLE_CLIENT_ID),
+        "microsoft_sso_enabled": bool(settings.MICROSOFT_CLIENT_ID),
+    })
 
 
 @router.post("/login", response_class=HTMLResponse, include_in_schema=False)
@@ -148,6 +161,8 @@ async def login_submit(
             "request": request,
             "account": None,
             "flash": _flash("danger", "Invalid email or password."),
+            "google_sso_enabled": bool(settings.GOOGLE_CLIENT_ID),
+            "microsoft_sso_enabled": bool(settings.MICROSOFT_CLIENT_ID),
         })
 
     token = _create_jwt(account.id)
@@ -204,6 +219,46 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
         for t in txns_result.scalars().all()
     ]
 
+    # Subscription plan info
+    plan_limits = {
+        "free": settings.PLAN_FREE_BOTS_PER_MONTH,
+        "starter": settings.PLAN_STARTER_BOTS_PER_MONTH,
+        "pro": settings.PLAN_PRO_BOTS_PER_MONTH,
+        "business": settings.PLAN_BUSINESS_BOTS_PER_MONTH,
+    }
+    plan = account.plan or "free"
+    plan_limit = plan_limits.get(plan, settings.PLAN_FREE_BOTS_PER_MONTH)
+
+    # Linked SSO accounts
+    oauth_result = await db.execute(
+        select(OAuthAccount).where(OAuthAccount.account_id == account.id)
+    )
+    oauth_accounts = [
+        {"provider": o.provider, "email": o.email}
+        for o in oauth_result.scalars().all()
+    ]
+
+    # Active integrations
+    integ_result = await db.execute(
+        select(Integration).where(
+            Integration.account_id == account.id, Integration.is_active == True  # noqa: E712
+        )
+    )
+    active_integrations = [
+        {"id": i.id, "type": i.type, "name": i.name}
+        for i in integ_result.scalars().all()
+    ]
+
+    # Calendar feeds
+    cal_result = await db.execute(
+        select(CalendarFeed).where(CalendarFeed.account_id == account.id)
+    )
+    calendar_feeds = [
+        {"id": f.id, "name": f.name, "is_active": f.is_active,
+         "last_synced_at": f.last_synced_at.strftime("%Y-%m-%d %H:%M") if f.last_synced_at else None}
+        for f in cal_result.scalars().all()
+    ]
+
     flash = None
     if request.query_params.get("payment") == "success":
         flash = _flash("success", "Payment successful! Your credits will be added shortly.")
@@ -213,6 +268,8 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
         flash = _flash("danger", "Invalid Ethereum address. Must be 0x followed by 40 hex characters.")
     if request.query_params.get("wallet") == "taken":
         flash = _flash("danger", "This wallet address is already linked to another account.")
+    if request.query_params.get("notify") == "saved":
+        flash = _flash("success", "Notification preferences updated.")
 
     new_key = request.query_params.get("new_key")
     if new_key and request.query_params.get("created") == "1":
@@ -228,6 +285,20 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
         "transactions": transactions,
         "flash": flash,
         "new_key": new_key if request.query_params.get("created") == "1" else None,
+        # Plan info
+        "plan": plan,
+        "plan_limit": plan_limit,
+        "monthly_bots_used": account.monthly_bots_used or 0,
+        # Notification prefs
+        "notify_on_done": account.notify_on_done,
+        "notify_email": account.notify_email or "",
+        # SSO
+        "oauth_accounts": oauth_accounts,
+        "google_sso_enabled": bool(settings.GOOGLE_CLIENT_ID),
+        "microsoft_sso_enabled": bool(settings.MICROSOFT_CLIENT_ID),
+        # Integrations & calendar
+        "active_integrations": active_integrations,
+        "calendar_feeds": calendar_feeds,
     })
 
 
@@ -306,6 +377,23 @@ async def save_wallet_ui(
     await db.commit()
 
     return RedirectResponse("/dashboard?wallet=saved", status_code=303)
+
+
+@router.post("/dashboard/notifications", include_in_schema=False)
+async def update_notifications_ui(
+    request: Request,
+    notify_on_done: str = Form(default=""),
+    notify_email: str = Form(default=""),
+    db: AsyncSession = Depends(get_db),
+):
+    account = await _get_account_from_request(request, db)
+    if not account:
+        return RedirectResponse("/login")
+
+    account.notify_on_done = notify_on_done == "on"
+    account.notify_email = notify_email.strip() or None
+    await db.commit()
+    return RedirectResponse("/dashboard?notify=saved", status_code=303)
 
 
 # ── Top Up ────────────────────────────────────────────────────────────────────
@@ -401,7 +489,7 @@ async def admin_page(request: Request, db: AsyncSession = Depends(get_db)):
         return RedirectResponse("/dashboard")
 
     from app.api.admin import WALLET_KEY, RPC_URL_KEY
-    from sqlalchemy import func, desc
+    from sqlalchemy import func, desc, case
 
     # Platform wallet
     wallet_result = await db.execute(
@@ -445,6 +533,37 @@ async def admin_page(request: Request, db: AsyncSession = Depends(get_db)):
         select(func.count(UnmatchedUsdcTransfer.tx_hash)).where(UnmatchedUsdcTransfer.resolved == False)  # noqa: E712
     )).scalar_one()
 
+    # Plan breakdown
+    plan_counts_result = await db.execute(
+        select(Account.plan, func.count(Account.id))
+        .group_by(Account.plan)
+    )
+    plan_counts = {row[0] or "free": row[1] for row in plan_counts_result.all()}
+
+    # Webhook count
+    webhook_count_result = await db.execute(
+        select(func.count(Webhook.id)).where(Webhook.is_active == True)  # noqa: E712
+    )
+    active_webhook_count = webhook_count_result.scalar_one()
+
+    # Integration count
+    integration_count_result = await db.execute(
+        select(func.count(Integration.id)).where(Integration.is_active == True)  # noqa: E712
+    )
+    active_integration_count = integration_count_result.scalar_one()
+
+    # Calendar feeds count
+    calendar_feed_count_result = await db.execute(
+        select(func.count(CalendarFeed.id)).where(CalendarFeed.is_active == True)  # noqa: E712
+    )
+    active_calendar_feed_count = calendar_feed_count_result.scalar_one()
+
+    # OAuth (SSO) linked accounts
+    oauth_linked_count_result = await db.execute(
+        select(func.count(OAuthAccount.id))
+    )
+    oauth_linked_count = oauth_linked_count_result.scalar_one()
+
     # All user accounts
     accounts_result = await db.execute(
         select(Account).order_by(desc(Account.credits_usd))
@@ -454,10 +573,12 @@ async def admin_page(request: Request, db: AsyncSession = Depends(get_db)):
             "id": a.id,
             "email": a.email,
             "account_type": a.account_type,
+            "plan": a.plan or "free",
             "credits_usd": float(a.credits_usd or 0),
             "wallet_address": a.wallet_address,
             "is_active": a.is_active,
             "is_admin": a.is_admin,
+            "monthly_bots_used": a.monthly_bots_used or 0,
             "created_at": a.created_at.strftime("%Y-%m-%d %H:%M"),
         }
         for a in accounts_result.scalars().all()
@@ -578,6 +699,17 @@ async def admin_page(request: Request, db: AsyncSession = Depends(get_db)):
             "total_stripe_received": float(total_stripe_in),
             "unmatched_pending": total_unmatched_pending,
         },
+        "plan_counts": plan_counts,
+        "active_webhook_count": active_webhook_count,
+        "active_integration_count": active_integration_count,
+        "active_calendar_feed_count": active_calendar_feed_count,
+        "oauth_linked_count": oauth_linked_count,
+        # SSO / email / storage config status
+        "google_sso_configured": bool(settings.GOOGLE_CLIENT_ID),
+        "microsoft_sso_configured": bool(settings.MICROSOFT_CLIENT_ID),
+        "email_configured": settings.EMAIL_BACKEND not in ("none", ""),
+        "storage_backend": settings.STORAGE_BACKEND,
+        "video_recording_enabled": settings.VIDEO_RECORDING_ENABLED,
         "all_accounts": all_accounts,
         "recent_txns": recent_txns,
         "unmatched_transfers": unmatched_transfers,
@@ -782,4 +914,29 @@ async def admin_toggle_account_admin(
         await db.commit()
         state = "granted" if target.is_admin else "revoked"
         logger.info("Admin %s %s admin for account %s", admin.email, state, target.email)
+    return RedirectResponse("/admin?msg=account_updated", status_code=303)
+
+
+@router.post("/admin/accounts/{account_id}/set-plan", include_in_schema=False)
+async def admin_set_account_plan(
+    account_id: str,
+    request: Request,
+    plan: str = Form(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Set the subscription plan for a user account."""
+    admin = await _get_account_from_request(request, db)
+    if not _is_admin(admin):
+        return RedirectResponse("/dashboard")
+
+    valid_plans = ("free", "starter", "pro", "business")
+    if plan not in valid_plans:
+        return RedirectResponse("/admin?error=invalid_amount", status_code=303)
+
+    result = await db.execute(select(Account).where(Account.id == account_id))
+    target = result.scalar_one_or_none()
+    if target:
+        target.plan = plan
+        await db.commit()
+        logger.info("Admin %s set plan=%s for account %s", admin.email, plan, target.email)
     return RedirectResponse("/admin?msg=account_updated", status_code=303)
