@@ -40,7 +40,18 @@ class Settings(BaseSettings):
     WEBHOOK_TIMEOUT_SECONDS: int = 10
 
     # ── Multi-tenant billing ──────────────────────────────────────────────────
+    # Railway injects DATABASE_URL as "postgresql://..." — translate to asyncpg driver.
+    # SQLite (default for local dev) stays as-is.
     DATABASE_URL: str = "sqlite+aiosqlite:///./meetingbot.db"
+
+    @property
+    def async_database_url(self) -> str:
+        url = self.DATABASE_URL
+        if url.startswith("postgresql://"):
+            url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        elif url.startswith("postgres://"):
+            url = url.replace("postgres://", "postgresql+asyncpg://", 1)
+        return url
 
     # Stripe — leave empty to disable card payments
     STRIPE_SECRET_KEY: str = ""

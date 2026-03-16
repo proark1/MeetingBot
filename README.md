@@ -407,7 +407,9 @@ docker compose up --build
 ### Railway / Heroku
 
 Set environment variables and deploy. Accounts/billing data persists in SQLite by default.
-For production, set `DATABASE_URL` to a PostgreSQL connection string provided by Railway.
+For production, add a **PostgreSQL plugin** in Railway — the `DATABASE_URL` is injected
+automatically and the app translates it to the correct asyncpg driver format with no extra
+configuration required.
 
 ### Manual
 
