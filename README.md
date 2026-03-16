@@ -216,7 +216,7 @@ Or receive them via your `webhook_url` — a POST with the full payload is deliv
 | `PUT` | `/api/v1/admin/wallet` | Set or update the platform USDC collection wallet address. Body: `{wallet_address}` |
 | `GET` | `/api/v1/admin/config` | List all platform configuration values |
 
-> **Admin access:** Only the admin account (`assad.dar@gmail.com`) or accounts with `is_admin=true` can access these endpoints. All other users receive a 403 error.
+> **Admin access:** Accounts listed in `ADMIN_EMAILS` (comma-separated env var) or accounts with `is_admin=true` in the database can access these endpoints. All other users receive a 403 error.
 
 **Set the platform USDC wallet (admin only):**
 ```bash

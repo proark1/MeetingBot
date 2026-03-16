@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.db import get_db
-from app.deps import ADMIN_EMAILS
+from app.deps import _admin_emails
 from app.models.account import Account, ApiKey, CreditTransaction, PlatformConfig
 
 logger = logging.getLogger(__name__)
@@ -378,7 +378,7 @@ async def topup_stripe_submit(
 def _is_admin(account: Optional[Account]) -> bool:
     if not account:
         return False
-    return account.email in ADMIN_EMAILS or account.is_admin
+    return account.email.lower() in _admin_emails() or account.is_admin
 
 
 @router.get("/admin", response_class=HTMLResponse, include_in_schema=False)
