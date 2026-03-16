@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,36 +21,114 @@ router = APIRouter(prefix="/billing", tags=["Billing"])
 # ── Schemas ───────────────────────────────────────────────────────────────────
 
 class CheckoutRequest(BaseModel):
-    amount_usd: int
-    success_url: Optional[str] = None
-    cancel_url: Optional[str] = None
+    amount_usd: int = Field(
+        description=(
+            "Top-up amount in whole USD. Must be one of the values configured in "
+            "`STRIPE_TOP_UP_AMOUNTS` (default: 10, 25, 50, 100)."
+        ),
+        examples=[25],
+    )
+    success_url: Optional[str] = Field(
+        default=None,
+        description=(
+            "URL to redirect to after a successful payment. "
+            "Defaults to `{base_url}/dashboard?payment=success`."
+        ),
+    )
+    cancel_url: Optional[str] = Field(
+        default=None,
+        description=(
+            "URL to redirect to if the user cancels the payment. "
+            "Defaults to `{base_url}/topup?payment=cancelled`."
+        ),
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "amount_usd": 25,
+                "success_url": "https://your-app.com/billing/success",
+                "cancel_url": "https://your-app.com/billing/cancel",
+            }
+        }
+    }
 
 
 class CheckoutResponse(BaseModel):
-    session_id: str
-    checkout_url: str
-    amount_usd: int
+    session_id: str = Field(description="Stripe Checkout session ID (`cs_...`).")
+    checkout_url: str = Field(description="Redirect the user to this URL to complete payment.")
+    amount_usd: int = Field(description="Amount that will be credited after successful payment.")
 
 
 class UsdcAddressResponse(BaseModel):
-    deposit_address: str
-    contract: str
-    network: str
-    note: str
+    deposit_address: str = Field(
+        description=(
+            "Your unique Ethereum address for USDC deposits. "
+            "This address is derived from an HD wallet — it never changes for your account."
+        )
+    )
+    contract: str = Field(description="USDC ERC-20 token contract address on Ethereum mainnet.")
+    network: str = Field(description="Blockchain network (always `Ethereum Mainnet (ERC-20)`).")
+    note: str = Field(description="Additional instructions — send USDC only; other tokens are not credited.")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "deposit_address": "0xAbCd1234...",
+                "contract": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+                "network": "Ethereum Mainnet (ERC-20)",
+                "note": "Send USDC only. Other tokens will not be credited. Credits are added automatically within ~1 minute after confirmation.",
+            }
+        }
+    }
 
 
 class TransactionItem(BaseModel):
-    id: str
-    amount_usd: float
-    type: str
-    description: str
-    reference_id: Optional[str]
-    created_at: str
+    id: str = Field(description="Unique transaction UUID.")
+    amount_usd: float = Field(
+        description=(
+            "Amount in USD. Positive = credits added (top-up). "
+            "Negative = credits deducted (bot usage)."
+        )
+    )
+    type: str = Field(
+        description=(
+            "Transaction type. One of:\n"
+            "- `stripe_topup` — credits added via Stripe card payment\n"
+            "- `usdc_topup` — credits added via USDC deposit\n"
+            "- `bot_usage` — credits deducted on bot completion (raw AI cost × `CREDIT_MARKUP`)"
+        )
+    )
+    description: str = Field(description="Human-readable description of the transaction.")
+    reference_id: Optional[str] = Field(
+        default=None,
+        description=(
+            "External reference. For `stripe_topup`: Stripe session ID. "
+            "For `usdc_topup`: Ethereum transaction hash. "
+            "For `bot_usage`: bot UUID."
+        ),
+    )
+    created_at: str = Field(description="ISO-8601 UTC timestamp when the transaction was recorded.")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "id": "550e8400-e29b-41d4-a716-446655440000",
+                "amount_usd": -0.063,
+                "type": "bot_usage",
+                "description": "Bot usage: 45-min meeting (claude-sonnet-4-6)",
+                "reference_id": "bot-uuid-here",
+                "created_at": "2026-03-15T11:00:00Z",
+            }
+        }
+    }
 
 
 class BalanceResponse(BaseModel):
-    credits_usd: float
-    transactions: list[TransactionItem]
+    credits_usd: float = Field(description="Current prepaid credit balance in USD.")
+    transactions: list[TransactionItem] = Field(
+        description="Last 50 transactions ordered by most recent first."
+    )
 
 
 # ── Helper ────────────────────────────────────────────────────────────────────
@@ -80,10 +158,15 @@ async def create_stripe_checkout(
     account_id: Optional[str] = Depends(get_current_account_id),
 ):
     """
-    Create a Stripe Checkout session to top up your credit balance.
+    Create a Stripe Checkout session to top up your credit balance via card payment.
 
-    After payment, credits are added automatically via the Stripe webhook.
-    Set `success_url` and `cancel_url` to redirect after payment (optional).
+    `amount_usd` must be one of the values in `STRIPE_TOP_UP_AMOUNTS` (default: 10, 25, 50, 100).
+
+    Returns a `checkout_url` — redirect your user to that URL to complete payment.
+    After a successful payment, credits are added to your balance automatically via
+    the Stripe webhook (`POST /api/v1/billing/stripe/webhook`).
+
+    Optional `success_url` and `cancel_url` override the default redirect destinations.
     """
     _require_account(account_id)
 
@@ -190,7 +273,15 @@ async def get_balance(
     account_id: Optional[str] = Depends(get_current_account_id),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get current credit balance and the last 50 transactions."""
+    """
+    Get current credit balance and transaction history.
+
+    Returns `credits_usd` (current balance) and the last 50 transactions ordered
+    most-recent-first. Transaction `type` values:
+    - `stripe_topup` — credits added via Stripe card payment
+    - `usdc_topup` — credits added via USDC on-chain deposit
+    - `bot_usage` — credits deducted on bot completion (raw AI cost × `CREDIT_MARKUP`)
+    """
     _require_account(account_id)
 
     result = await db.execute(select(Account).where(Account.id == account_id))

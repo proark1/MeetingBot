@@ -44,7 +44,7 @@ Web UI at `http://localhost:8000/register`
 curl -X POST http://localhost:8000/api/v1/auth/register \
   -H "Content-Type: application/json" \
   -d '{"email": "you@example.com", "password": "yourpassword", "key_name": "Default"}'
-# → {"account_id": "...", "email": "...", "api_key": "sk_live_...", "message": "..."}
+# → {"account_id": "...", "email": "...", "api_key": "<your-api-key>", "message": "..."}
 ```
 
 > **`key_name`** (optional, default `"Default"`) — a label for the first API key created with your account.
@@ -200,7 +200,9 @@ Or receive them via your `webhook_url` — a POST with the full payload is deliv
 | `/dashboard` | Balance, API keys, transaction history |
 | `/topup` | Add credits (Stripe card or USDC) |
 
-Full interactive docs: `GET /api/docs`
+Full interactive docs (with request/response examples): `GET /api/docs`
+Alternative ReDoc view: `GET /api/redoc`
+Raw OpenAPI JSON: `GET /api/openapi.json`
 
 ---
 

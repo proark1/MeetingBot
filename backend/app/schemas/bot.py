@@ -153,9 +153,18 @@ class BotResponse(BaseModel):
     bot_name: str
     status: str = Field(
         description=(
-            "Current lifecycle status: "
-            "`joining` → `in_call` → `call_ended` → `done` (or `error` / `cancelled`). "
-            "Poll this endpoint until `done` or check your `webhook_url`."
+            "Current lifecycle status:\n"
+            "- `ready` — created, about to join immediately\n"
+            "- `scheduled` — waiting for the scheduled `join_at` time\n"
+            "- `queued` — waiting for a free bot slot (`MAX_CONCURRENT_BOTS` reached)\n"
+            "- `joining` — Chromium browser launching and joining the meeting\n"
+            "- `in_call` — recording in progress\n"
+            "- `call_ended` — meeting ended, audio saved\n"
+            "- `transcribing` — audio being transcribed by AI\n"
+            "- `done` — transcript and analysis complete ✓\n"
+            "- `error` — unrecoverable error (see `error_message`)\n"
+            "- `cancelled` — stopped via DELETE /api/v1/bot/{id}\n\n"
+            "Poll this endpoint until `done` or `error`, or use `webhook_url` for push delivery."
         )
     )
     error_message: Optional[str] = None
@@ -195,7 +204,12 @@ class BotSummary(BaseModel):
     meeting_url: str
     meeting_platform: str
     bot_name: str
-    status: str
+    status: str = Field(
+        description=(
+            "Current lifecycle status. One of: `ready`, `scheduled`, `queued`, `joining`, "
+            "`in_call`, `call_ended`, `transcribing`, `done`, `error`, `cancelled`."
+        )
+    )
     error_message: Optional[str] = None
     created_at: datetime
     updated_at: datetime

@@ -23,6 +23,15 @@ from app.store import store, BotSession, _now
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/bot", tags=["Bots"])
 
+
+class BotStatsResponse(BaseModel):
+    """Aggregate bot counts by status."""
+    total: int = Field(description="Total number of bots in memory (24-hour window).")
+    active: int = Field(description="Number of bots currently in an active state (ready/scheduled/queued/joining/in_call/call_ended).")
+    done: int = Field(description="Number of bots that completed successfully.")
+    error: int = Field(description="Number of bots that ended in an error state.")
+    by_status: dict[str, int] = Field(description="Count of bots broken down by each status string.")
+
 # Running lifecycle tasks (single-process only)
 _running_tasks: dict[str, asyncio.Task] = {}
 
@@ -189,9 +198,14 @@ async def create_bot(payload: BotCreate, request: Request):
 
 # ── GET /api/v1/bot/stats ─────────────────────────────────────────────────────
 
-@router.get("/stats", tags=["Bots"])
+@router.get("/stats", response_model=BotStatsResponse, tags=["Bots"])
 async def get_stats(request: Request):
-    """Aggregate counts by status."""
+    """
+    Aggregate bot counts by status for your account.
+
+    Returns totals across all bots currently in memory (24-hour window).
+    Per-user accounts see only their own bots; superadmin sees all.
+    """
     account_id: Optional[str] = getattr(request.state, "account_id", None)
     filter_account = account_id if (account_id and account_id != SUPERADMIN_ACCOUNT_ID) else None
     all_bots, _ = await store.list_bots(limit=10000, account_id=filter_account)
@@ -200,13 +214,13 @@ async def get_stats(request: Request):
         counts[b.status] = counts.get(b.status, 0) + 1
     total = sum(counts.values())
     active = sum(counts.get(s, 0) for s in _ACTIVE_STATUSES)
-    return {
-        "total": total,
-        "active": active,
-        "done": counts.get("done", 0),
-        "error": counts.get("error", 0),
-        "by_status": counts,
-    }
+    return BotStatsResponse(
+        total=total,
+        active=active,
+        done=counts.get("done", 0),
+        error=counts.get("error", 0),
+        by_status=counts,
+    )
 
 
 # ── GET /api/v1/bot ───────────────────────────────────────────────────────────

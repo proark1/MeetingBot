@@ -50,43 +50,86 @@ def generate_api_key() -> str:
 # ── Schemas ───────────────────────────────────────────────────────────────────
 
 class RegisterRequest(BaseModel):
-    email: EmailStr
-    password: str = Field(min_length=8)
-    key_name: str = Field(default="Default", max_length=100)
+    email: EmailStr = Field(description="Email address for the new account.")
+    password: str = Field(min_length=8, description="Password (minimum 8 characters).")
+    key_name: str = Field(
+        default="Default",
+        max_length=100,
+        description="Label for the first API key generated with your account.",
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "email": "you@example.com",
+                "password": "supersecret",
+                "key_name": "Production",
+            }
+        }
+    }
 
 
 class RegisterResponse(BaseModel):
-    account_id: str
-    email: str
-    api_key: str
-    message: str
+    account_id: str = Field(description="Unique account UUID.")
+    email: str = Field(description="Registered email address.")
+    api_key: str = Field(
+        description=(
+            "Your first API key (`sk_live_...`). "
+            "Include it on every API request as: `Authorization: Bearer <api_key>`."
+        )
+    )
+    message: str = Field(description="Human-readable instructions for using the API key.")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "account_id": "550e8400-e29b-41d4-a716-446655440000",
+                "email": "you@example.com",
+                "api_key": "YOUR_API_KEY_RETURNED_HERE",
+                "message": "Account created. Use the api_key as your Bearer token: Authorization: Bearer <api_key>",
+            }
+        }
+    }
 
 
 class LoginResponse(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
-    account_id: str
+    """
+    JWT access token for authenticating web UI sessions.
+
+    **Note:** This token is intended for the browser-based web UI only.
+    For API calls, use your `sk_live_...` API key as a Bearer token instead.
+    """
+
+    access_token: str = Field(description="JWT token for web UI session (valid for `JWT_EXPIRE_HOURS` hours).")
+    token_type: str = Field(default="bearer", description="Always `bearer`.")
+    account_id: str = Field(description="The authenticated account UUID.")
 
 
 class CreateKeyRequest(BaseModel):
-    name: str = Field(default="New Key", max_length=100)
+    name: str = Field(
+        default="New Key",
+        max_length=100,
+        description="Human-readable label for this API key (e.g. 'Production', 'CI/CD').",
+    )
+
+    model_config = {"json_schema_extra": {"example": {"name": "Production"}}}
 
 
 class ApiKeyResponse(BaseModel):
-    id: str
-    name: str
-    key_preview: str
-    is_active: bool
-    created_at: datetime
-    last_used_at: Optional[datetime]
+    id: str = Field(description="Unique key UUID (used to revoke the key).")
+    name: str = Field(description="Human-readable label.")
+    key_preview: str = Field(description="First 16 characters of the key followed by `...` — the full key is only shown once at creation.")
+    is_active: bool = Field(description="False if the key has been revoked.")
+    created_at: datetime = Field(description="When the key was created (UTC).")
+    last_used_at: Optional[datetime] = Field(default=None, description="Last time this key was used for an authenticated request (UTC), or null if never used.")
 
 
 class AccountResponse(BaseModel):
-    id: str
-    email: str
-    credits_usd: float
-    is_active: bool
-    created_at: datetime
+    id: str = Field(description="Unique account UUID.")
+    email: str = Field(description="Registered email address.")
+    credits_usd: float = Field(description="Current prepaid credit balance in USD.")
+    is_active: bool = Field(description="False if the account has been disabled by an admin.")
+    created_at: datetime = Field(description="Account creation time (UTC).")
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -133,7 +176,15 @@ async def login(
     form: OAuth2PasswordRequestForm = Depends(),
     db: AsyncSession = Depends(get_db),
 ):
-    """Authenticate with email/password and receive a JWT (for web UI sessions)."""
+    """
+    Authenticate and receive a JWT for web UI sessions.
+
+    **Request format:** `application/x-www-form-urlencoded` (OAuth2 password flow).
+    Send `username` (your email) and `password` as form fields — **not** JSON.
+
+    The returned JWT is only for the browser-based web UI (`/dashboard`, `/topup`).
+    For API calls, use your `sk_live_...` API key with `Authorization: Bearer <key>`.
+    """
     result = await db.execute(select(Account).where(Account.email == form.username))
     account = result.scalar_one_or_none()
     if not account or not _verify_password(form.password, account.hashed_password):

@@ -107,20 +107,50 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="MeetingBot API",
     description=(
-        "A **stateless meeting bot API** service. Send bots into **Zoom**, **Google Meet**, "
+        "A **multi-tenant meeting bot API** service. Send bots into **Zoom**, **Google Meet**, "
         "and **Microsoft Teams** meetings to record, transcribe, and analyse them with "
         "**Claude** (Anthropic) or **Gemini** (Google) AI.\n\n"
+
         "## How it works\n"
-        "1. `POST /api/v1/bot` with your `meeting_url` and optional `webhook_url`\n"
-        "2. The bot joins the meeting, records audio, and transcribes it\n"
-        "3. Results are POSTed to your `webhook_url` when done (or poll `GET /api/v1/bot/{id}`)\n"
-        "4. **You store the data** — this service keeps results in memory for 24 h only\n\n"
+        "1. Register an account → receive an `sk_live_...` API key\n"
+        "2. Top up credits via **Stripe card** or **USDC (ERC-20)**\n"
+        "3. `POST /api/v1/bot` with your `meeting_url` and optional `webhook_url`\n"
+        "4. A headless Chromium bot joins the meeting, records audio, and transcribes it\n"
+        "5. Results are POSTed to your `webhook_url` when done (or poll `GET /api/v1/bot/{id}`)\n"
+        "6. **You store the data** — this service keeps results in memory for 24 h only\n\n"
+
         "## Authentication\n"
-        "If `API_KEY` is set, include `Authorization: Bearer <key>` on every request.\n\n"
+        "All API calls (except `/api/v1/auth/register` and `/api/v1/auth/login`) require:\n"
+        "```\nAuthorization: Bearer sk_live_<your-api-key>\n```\n"
+        "The legacy `API_KEY` environment variable acts as a superadmin bypass and skips "
+        "per-user account checks. Leave it unset to enforce per-user auth.\n\n"
+
+        "## Accounts & API keys\n"
+        "Register at `POST /api/v1/auth/register` to receive your first `sk_live_...` key. "
+        "Generate additional named keys with `POST /api/v1/auth/keys`. "
+        "Revoke individual keys with `DELETE /api/v1/auth/keys/{id}`.\n\n"
+
+        "## Credits & billing\n"
+        "Each bot run deducts credits equal to the raw AI cost × `CREDIT_MARKUP` (default 3×). "
+        "A minimum balance of `MIN_CREDITS_USD` (default $0.05) is required to create a bot.\n\n"
+        "**Top up via Stripe card:** `POST /api/v1/billing/stripe/checkout` — returns a "
+        "Stripe Checkout URL. Credits are added automatically once payment is confirmed via webhook.\n\n"
+        "**Top up via USDC (ERC-20):** `GET /api/v1/billing/usdc/address` — returns your "
+        "unique Ethereum deposit address. Send USDC to that address; 1 USDC = $1 credit, "
+        "credited automatically within ~1 minute after on-chain confirmation.\n\n"
+        "**Check balance:** `GET /api/v1/billing/balance` — returns current `credits_usd` and "
+        "the last 50 transactions. Transaction `type` values: `stripe_topup`, `usdc_topup`, `bot_usage`.\n\n"
+
         "## AI providers\n"
-        "Set `ANTHROPIC_API_KEY` for Claude (preferred) or `GEMINI_API_KEY` for Gemini.\n\n"
+        "Set `ANTHROPIC_API_KEY` for Claude (preferred) or `GEMINI_API_KEY` for Gemini. "
+        "Claude is used for both transcription (Haiku) and analysis (Sonnet/Opus).\n\n"
+
         "## Bot lifecycle\n"
-        "`ready` → `joining` → `in_call` → `call_ended` → `done` (or `error` / `cancelled`)\n\n"
+        "`ready` / `scheduled` / `queued` → `joining` → `in_call` → `call_ended` → "
+        "`transcribing` → `done` (or `error` / `cancelled`)\n\n"
+        "- **`scheduled`** — bot has a future `join_at` time and is waiting\n"
+        "- **`queued`** — concurrency limit reached; bot is waiting for a free slot\n\n"
+
         "## Auto-leave\n"
         "The bot leaves when alone for `BOT_ALONE_TIMEOUT` seconds (default 5 min).\n"
     ),
