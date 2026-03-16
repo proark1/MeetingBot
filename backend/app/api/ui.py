@@ -502,6 +502,34 @@ async def admin_page(request: Request, db: AsyncSession = Depends(get_db)):
         for u in unmatched_result.scalars().all()
     ]
 
+    # Bot activity stats (platform-wide from in-memory store)
+    try:
+        from app.store import store as _store
+        all_bots, total_bots_mem = await _store.list_bots(limit=10000)
+        bot_status_counts: dict[str, int] = {}
+        bot_platform_counts: dict[str, int] = {}
+        total_ai_cost = 0.0
+        total_ai_tokens = 0
+        active_statuses = ("ready", "scheduled", "queued", "joining", "in_call", "call_ended")
+        for b in all_bots:
+            bot_status_counts[b.status] = bot_status_counts.get(b.status, 0) + 1
+            bot_platform_counts[b.meeting_platform] = bot_platform_counts.get(b.meeting_platform, 0) + 1
+            total_ai_cost += b.ai_total_cost_usd
+            total_ai_tokens += b.ai_total_tokens
+        active_bots = sum(bot_status_counts.get(s, 0) for s in active_statuses)
+        bot_stats = {
+            "total": total_bots_mem,
+            "active": active_bots,
+            "done": bot_status_counts.get("done", 0),
+            "error": bot_status_counts.get("error", 0),
+            "by_status": bot_status_counts,
+            "by_platform": bot_platform_counts,
+            "total_ai_cost_usd": round(total_ai_cost, 4),
+            "total_ai_tokens": total_ai_tokens,
+        }
+    except Exception:
+        bot_stats = {"total": 0, "active": 0, "done": 0, "error": 0, "by_status": {}, "by_platform": {}, "total_ai_cost_usd": 0.0, "total_ai_tokens": 0}
+
     flash = None
     msg = request.query_params.get("msg")
     err = request.query_params.get("error")
@@ -515,6 +543,8 @@ async def admin_page(request: Request, db: AsyncSession = Depends(get_db)):
         flash = _flash("success", "Transfer marked as resolved.")
     elif msg == "rpc_saved":
         flash = _flash("success", "RPC URL saved. The USDC monitor will use it on the next cycle (within 60 s).")
+    elif msg == "account_updated":
+        flash = _flash("success", "Account updated successfully.")
     elif err == "invalid_address":
         flash = _flash("danger", "Invalid Ethereum address.")
     elif err == "invalid_rpc_url":
@@ -551,6 +581,7 @@ async def admin_page(request: Request, db: AsyncSession = Depends(get_db)):
         "all_accounts": all_accounts,
         "recent_txns": recent_txns,
         "unmatched_transfers": unmatched_transfers,
+        "bot_stats": bot_stats,
         "flash": flash,
     })
 
@@ -710,3 +741,45 @@ async def admin_resolve_unmatched(
         await db.commit()
         logger.info("Admin resolved unmatched transfer %s. Note: %s", tx_hash, transfer.resolution_note)
     return RedirectResponse("/admin?msg=resolved", status_code=303)
+
+
+@router.post("/admin/accounts/{account_id}/toggle-active", include_in_schema=False)
+async def admin_toggle_account_active(
+    account_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Enable or disable a user account."""
+    admin = await _get_account_from_request(request, db)
+    if not _is_admin(admin):
+        return RedirectResponse("/dashboard")
+
+    result = await db.execute(select(Account).where(Account.id == account_id))
+    target = result.scalar_one_or_none()
+    if target and target.id != admin.id:  # prevent self-disable
+        target.is_active = not target.is_active
+        await db.commit()
+        state = "enabled" if target.is_active else "disabled"
+        logger.info("Admin %s %s account %s", admin.email, state, target.email)
+    return RedirectResponse("/admin?msg=account_updated", status_code=303)
+
+
+@router.post("/admin/accounts/{account_id}/toggle-admin", include_in_schema=False)
+async def admin_toggle_account_admin(
+    account_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Grant or revoke admin privileges for a user account."""
+    admin = await _get_account_from_request(request, db)
+    if not _is_admin(admin):
+        return RedirectResponse("/dashboard")
+
+    result = await db.execute(select(Account).where(Account.id == account_id))
+    target = result.scalar_one_or_none()
+    if target and target.id != admin.id:  # prevent self-de-admin
+        target.is_admin = not target.is_admin
+        await db.commit()
+        state = "granted" if target.is_admin else "revoked"
+        logger.info("Admin %s %s admin for account %s", admin.email, state, target.email)
+    return RedirectResponse("/admin?msg=account_updated", status_code=303)

@@ -269,6 +269,12 @@ Or receive them via your `webhook_url` — a POST with the full payload is deliv
 | `POST` | `/api/v1/admin/usdc/unmatched/{tx_hash}/resolve` | Mark an unmatched transfer as resolved after crediting the account. Body: `{note?}` |
 | `POST` | `/api/v1/admin/usdc/rescan` | Reset the USDC monitor's block pointer so it rescans from `from_block` on the next cycle. Body: `{from_block}` |
 
+### Admin UI actions (web panel at `/admin`)
+| Action | Description |
+|--------|-------------|
+| Enable/Disable account | Toggle `is_active` on any user account (prevents login and API access) |
+| Make Admin / Revoke Admin | Toggle `is_admin` to grant or revoke admin privileges |
+
 > **Admin access:** Accounts listed in `ADMIN_EMAILS` (comma-separated env var) or accounts with `is_admin=true` in the database can access these endpoints. All other users receive a 403 error.
 
 **Set the platform USDC wallet (admin only):**

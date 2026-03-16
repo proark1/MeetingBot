@@ -53,6 +53,76 @@
   </div>
 </div>
 
+<!-- ── Bot activity stats ─────────────────────────────────────────────────── -->
+<div class="card p-4 mb-4">
+  <h6 class="mb-3">Bot Activity <span class="text-muted small fw-normal">(24-hour in-memory window)</span></h6>
+  <div class="row g-3 mb-3">
+    <div class="col-6 col-md-3">
+      <div class="p-3 bg-light rounded text-center">
+        <div class="fs-4 fw-bold">{{ bot_stats.total }}</div>
+        <div class="text-muted small">Total Bots</div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="p-3 bg-light rounded text-center">
+        <div class="fs-4 fw-bold {% if bot_stats.active > 0 %}text-primary{% endif %}">{{ bot_stats.active }}</div>
+        <div class="text-muted small">Active Now</div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="p-3 bg-light rounded text-center">
+        <div class="fs-4 fw-bold text-success">{{ bot_stats.done }}</div>
+        <div class="text-muted small">Completed</div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="p-3 bg-light rounded text-center">
+        <div class="fs-4 fw-bold {% if bot_stats.error > 0 %}text-danger{% endif %}">{{ bot_stats.error }}</div>
+        <div class="text-muted small">Errors</div>
+      </div>
+    </div>
+  </div>
+  <div class="row g-3">
+    <div class="col-md-4">
+      <div class="small fw-semibold text-muted mb-1">By Status</div>
+      {% if bot_stats.by_status %}
+      {% for status, count in bot_stats.by_status.items() %}
+      <div class="d-flex justify-content-between small py-1 border-bottom">
+        <span>{{ status.replace("_", " ").title() }}</span>
+        <span class="fw-bold">{{ count }}</span>
+      </div>
+      {% endfor %}
+      {% else %}
+      <div class="text-muted small">No bots yet</div>
+      {% endif %}
+    </div>
+    <div class="col-md-4">
+      <div class="small fw-semibold text-muted mb-1">By Platform</div>
+      {% if bot_stats.by_platform %}
+      {% for platform, count in bot_stats.by_platform.items() %}
+      <div class="d-flex justify-content-between small py-1 border-bottom">
+        <span>{{ platform.replace("_", " ").title() }}</span>
+        <span class="fw-bold">{{ count }}</span>
+      </div>
+      {% endfor %}
+      {% else %}
+      <div class="text-muted small">No bots yet</div>
+      {% endif %}
+    </div>
+    <div class="col-md-4">
+      <div class="small fw-semibold text-muted mb-1">AI Usage</div>
+      <div class="d-flex justify-content-between small py-1 border-bottom">
+        <span>Total Tokens</span>
+        <span class="fw-bold">{{ "{:,}".format(bot_stats.total_ai_tokens) }}</span>
+      </div>
+      <div class="d-flex justify-content-between small py-1 border-bottom">
+        <span>Total AI Cost</span>
+        <span class="fw-bold">${{ "%.4f"|format(bot_stats.total_ai_cost_usd) }}</span>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ── System status + wallet config ─────────────────────────────────────── -->
 <div class="row g-3 mb-4">
   <div class="col-md-5">
@@ -270,11 +340,12 @@
               <th>Wallet</th>
               <th>Joined</th>
               <th>Flags</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
             {% for a in all_accounts %}
-            <tr>
+            <tr class="{% if not a.is_active %}table-secondary{% endif %}">
               <td class="small">{{ a.email }}</td>
               <td class="small">
                 {% if a.account_type == "business" %}
@@ -297,6 +368,24 @@
               <td>
                 {% if not a.is_active %}<span class="badge bg-danger">Disabled</span>{% endif %}
                 {% if a.is_admin %}<span class="badge bg-warning text-dark">Admin</span>{% endif %}
+              </td>
+              <td>
+                <div class="d-flex gap-1">
+                  <form method="post" action="/admin/accounts/{{ a.id }}/toggle-active" class="d-inline">
+                    <button type="submit" class="btn btn-xs py-0 px-1 {% if a.is_active %}btn-outline-danger{% else %}btn-outline-success{% endif %} btn-sm"
+                      onclick="return confirm('{{ 'Disable' if a.is_active else 'Enable' }} account for {{ a.email }}?')"
+                      title="{{ 'Disable' if a.is_active else 'Enable' }} account">
+                      {{ "Disable" if a.is_active else "Enable" }}
+                    </button>
+                  </form>
+                  <form method="post" action="/admin/accounts/{{ a.id }}/toggle-admin" class="d-inline">
+                    <button type="submit" class="btn btn-xs py-0 px-1 {% if a.is_admin %}btn-outline-secondary{% else %}btn-outline-warning{% endif %} btn-sm"
+                      onclick="return confirm('{{ 'Revoke admin from' if a.is_admin else 'Grant admin to' }} {{ a.email }}?')"
+                      title="{{ 'Revoke admin' if a.is_admin else 'Grant admin' }}">
+                      {{ "Revoke Admin" if a.is_admin else "Make Admin" }}
+                    </button>
+                  </form>
+                </div>
               </td>
             </tr>
             {% endfor %}

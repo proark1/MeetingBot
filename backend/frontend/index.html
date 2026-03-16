@@ -107,6 +107,7 @@
               <button class="filter-btn" data-status="in_call">In Call</button>
               <button class="filter-btn" data-status="done">Done</button>
               <button class="filter-btn" data-status="error">Error</button>
+              <button class="filter-btn" data-status="cancelled">Cancelled</button>
             </div>
             <input class="input btn-sm" id="bot-search" type="search" placeholder="Search by URL…" style="width:200px">
             <button class="btn btn-ghost btn-sm" id="btn-refresh">↻ Refresh</button>
@@ -125,8 +126,6 @@
         <!-- Action buttons — separate from badges so renderBotDetail doesn't wipe them -->
         <div id="bot-detail-actions" style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-bottom:0.75rem">
           <button class="btn btn-ghost btn-sm hidden" id="btn-followup-email" title="Generate follow-up email">✉ Follow-up Email</button>
-          <button class="btn btn-ghost btn-sm hidden" id="btn-meeting-brief" title="Generate pre-meeting brief">📋 Meeting Brief</button>
-          <button class="btn btn-ghost btn-sm hidden" id="btn-recurring" title="Recurring meeting intelligence">🔄 Series Insights</button>
           <button class="btn btn-ghost btn-sm hidden" id="btn-export-md" title="Export as Markdown">⬇ Export MD</button>
           <button class="btn btn-ghost btn-sm hidden" id="btn-export-pdf" title="Export as PDF">⬇ Export PDF</button>
         </div>
@@ -255,6 +254,7 @@
             <span class="chip chip-code">bot.call_ended</span>
             <span class="chip chip-code">bot.done</span>
             <span class="chip chip-code">bot.error</span>
+            <span class="chip chip-code">bot.cancelled</span>
             <span class="chip chip-code">bot.transcript_ready</span>
             <span class="chip chip-code">bot.analysis_ready</span>
           </div>
@@ -339,13 +339,19 @@
               </select>
             </label>
             <label style="flex:1">
-              Notify Email <span class="optional">optional</span>
-              <input class="input" id="new-bot-email" type="email" placeholder="you@example.com" />
+              Webhook URL <span class="optional">optional</span>
+              <input class="input" id="new-bot-webhook-url" type="url" placeholder="https://your-server.com/callback" />
             </label>
           </div>
           <label>
             Custom Vocabulary <span class="optional">optional</span>
             <input class="input" id="new-bot-vocab" placeholder="Acme Corp, SKU-1234, Project Phoenix — improves transcription accuracy" />
+          </label>
+          <label>
+            Custom Analysis Prompt <span class="optional">optional — overrides template</span>
+            <textarea class="input" id="new-bot-prompt-override" rows="3"
+              placeholder="You are analysing a meeting transcript. Extract: buying signals, objections, next steps…"
+              style="resize:vertical;font-family:monospace;font-size:0.85rem"></textarea>
           </label>
         </div>
 
@@ -400,6 +406,18 @@
             <span class="tts-hint" id="tts-hint"></span>
           </div>
 
+          <!-- Start muted toggle -->
+          <label class="toggle-row" for="new-bot-start-muted">
+            <div class="toggle-row-body">
+              <div class="toggle-label">Start muted</div>
+              <div class="toggle-desc">Bot joins the meeting with its microphone muted.</div>
+            </div>
+            <div class="toggle-track">
+              <input type="checkbox" id="new-bot-start-muted" class="toggle-input" />
+              <span class="toggle-switch"></span>
+            </div>
+          </label>
+
           <!-- Live transcription toggle -->
           <label class="toggle-row" for="new-bot-live-transcription">
             <div class="toggle-row-body">
@@ -453,6 +471,7 @@
             <label class="checkbox-row"><input type="checkbox" value="bot.call_ended" /><span>bot.call_ended</span></label>
             <label class="checkbox-row"><input type="checkbox" value="bot.done" /><span>bot.done</span></label>
             <label class="checkbox-row"><input type="checkbox" value="bot.error" /><span>bot.error</span></label>
+            <label class="checkbox-row"><input type="checkbox" value="bot.cancelled" /><span>bot.cancelled</span></label>
             <label class="checkbox-row"><input type="checkbox" value="bot.transcript_ready" /><span>bot.transcript_ready</span></label>
             <label class="checkbox-row"><input type="checkbox" value="bot.analysis_ready" /><span>bot.analysis_ready</span></label>
           </div>
@@ -508,43 +527,6 @@
       <div class="modal-footer">
         <button class="btn btn-ghost" data-close="modal-followup-email">Close</button>
         <button class="btn btn-primary" id="btn-copy-email">Copy to Clipboard</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Meeting Brief Modal -->
-  <div class="modal-backdrop hidden" id="modal-meeting-brief">
-    <div class="modal modal-wide">
-      <div class="modal-header">
-        <h2>Pre-Meeting Brief</h2>
-        <button class="modal-close" data-close="modal-meeting-brief">✕</button>
-      </div>
-      <div class="modal-body">
-        <label style="margin-bottom:0.75rem;display:block">
-          Agenda <span class="optional">(optional)</span>
-          <textarea class="input" id="brief-agenda" rows="3" placeholder="Enter agenda items…" style="resize:vertical"></textarea>
-        </label>
-        <div id="meeting-brief-body"></div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-ghost" data-close="modal-meeting-brief">Close</button>
-        <button class="btn btn-primary" id="btn-generate-brief">Generate Brief</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Series Insights Modal -->
-  <div class="modal-backdrop hidden" id="modal-recurring">
-    <div class="modal modal-wide">
-      <div class="modal-header">
-        <h2>Recurring Meeting Insights</h2>
-        <button class="modal-close" data-close="modal-recurring">✕</button>
-      </div>
-      <div class="modal-body" id="recurring-body">
-        <p class="loading">Analysing meeting series…</p>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-ghost" data-close="modal-recurring">Close</button>
       </div>
     </div>
   </div>

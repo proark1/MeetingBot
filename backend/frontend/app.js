@@ -637,11 +637,12 @@ document.getElementById("btn-new-bot").addEventListener("click", async () => {
   openModal("modal-new-bot");
   // Populate template dropdown
   try {
-    const tmpls = await apiFetch("GET", "/templates");
+    const tmplsResp = await apiFetch("GET", "/templates");
+    const tmpls = tmplsResp.templates || tmplsResp || [];
     const sel = document.getElementById("new-bot-template");
     if (sel) {
       sel.innerHTML = '<option value="">Default analysis</option>' +
-        tmpls.map(t => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join("");
+        tmpls.map(t => `<option value="${esc(t.name)}">${esc(t.label || t.name)}</option>`).join("");
     }
   } catch (_) {}
 });
@@ -668,15 +669,16 @@ async function submitCreateBot() {
 
   const joinAtInput = document.getElementById("new-bot-join-at");
   const joinAtVal = joinAtInput ? joinAtInput.value : "";
-  const emailInput = document.getElementById("new-bot-email");
-  const notifyEmail = emailInput ? emailInput.value.trim() : "";
-  const templateId = (document.getElementById("new-bot-template")?.value || "").trim();
+  const webhookUrl = (document.getElementById("new-bot-webhook-url")?.value || "").trim();
+  const template = (document.getElementById("new-bot-template")?.value || "").trim();
   const vocabRaw = (document.getElementById("new-bot-vocab")?.value || "").trim();
   const vocabulary = vocabRaw ? vocabRaw.split(",").map(s => s.trim()).filter(Boolean) : null;
+  const promptOverride = (document.getElementById("new-bot-prompt-override")?.value || "").trim();
   const analysisMode = document.querySelector('input[name="analysis_mode"]:checked')?.value || "full";
   const respondOnMention = document.getElementById("new-bot-respond-mention")?.checked ?? true;
   const mentionResponseMode = document.querySelector('input[name="mention_response_mode"]:checked')?.value || "text";
   const ttsProvider = document.querySelector('input[name="tts_provider"]:checked')?.value || "edge";
+  const startMuted = document.getElementById("new-bot-start-muted")?.checked ?? false;
   const liveTranscription = document.getElementById("new-bot-live-transcription")?.checked ?? false;
   const body = {
     meeting_url: url,
@@ -685,13 +687,15 @@ async function submitCreateBot() {
     respond_on_mention: respondOnMention,
     mention_response_mode: mentionResponseMode,
     tts_provider: ttsProvider,
+    start_muted: startMuted,
     live_transcription: liveTranscription,
   };
   if (joinAtVal) body.join_at = new Date(joinAtVal).toISOString();
-  if (notifyEmail) body.notify_email = notifyEmail;
+  if (webhookUrl) body.webhook_url = webhookUrl;
   if (analysisMode === "full") {
-    if (templateId) body.template_id = templateId;
+    if (template) body.template = template;
     if (vocabulary) body.vocabulary = vocabulary;
+    if (promptOverride) body.prompt_override = promptOverride;
   }
 
   try {
@@ -1710,19 +1714,16 @@ document.getElementById("btn-create-template")?.addEventListener("click", async 
   });
 })();
 
-// ── Bot detail action buttons (export, follow-up, brief, recurring) ────────
+// ── Bot detail action buttons (export, follow-up) ─────────────────────────
 
 function _showDetailActionButtons(bot) {
   const isDone = bot.status === "done" || bot.status === "cancelled";
-  const hasContent = isDone && (bot.transcript || []).length > 0;
 
-  const btnEmail    = document.getElementById("btn-followup-email");
-  const btnBrief    = document.getElementById("btn-meeting-brief");
-  const btnRecurr   = document.getElementById("btn-recurring");
-  const btnMd       = document.getElementById("btn-export-md");
-  const btnPdf      = document.getElementById("btn-export-pdf");
+  const btnEmail = document.getElementById("btn-followup-email");
+  const btnMd    = document.getElementById("btn-export-md");
+  const btnPdf   = document.getElementById("btn-export-pdf");
 
-  [btnEmail, btnBrief, btnRecurr, btnMd, btnPdf].forEach(b => {
+  [btnEmail, btnMd, btnPdf].forEach(b => {
     if (b) b.classList.toggle("hidden", !isDone);
   });
 
@@ -1738,12 +1739,6 @@ function _showDetailActionButtons(bot) {
   }
   if (btnEmail) {
     btnEmail.onclick = () => _openFollowupEmail(bot.id);
-  }
-  if (btnBrief) {
-    btnBrief.onclick = () => _openMeetingBrief(bot.id);
-  }
-  if (btnRecurr) {
-    btnRecurr.onclick = () => _openRecurring(bot.id);
   }
 }
 
@@ -1770,72 +1765,6 @@ async function _openFollowupEmail(botId) {
   }
 }
 
-async function _openMeetingBrief(botId) {
-  openModal("modal-meeting-brief");
-  document.getElementById("meeting-brief-body").innerHTML = "";
-  document.getElementById("brief-agenda").value = "";
-
-  document.getElementById("btn-generate-brief").onclick = async () => {
-    const agenda = document.getElementById("brief-agenda").value.trim();
-    const briefBody = document.getElementById("meeting-brief-body");
-    briefBody.innerHTML = '<p class="loading">Generating brief…</p>';
-    try {
-      const data = await apiFetch("POST", `/bot/${botId}/brief`, { agenda });
-      briefBody.innerHTML = `
-        <div style="margin-bottom:1rem">
-          <div style="font-weight:600;margin-bottom:0.5rem">Brief</div>
-          <div style="white-space:pre-wrap;font-size:0.9rem;line-height:1.6;background:var(--surface);padding:0.75rem;border-radius:6px">${esc(data.brief)}</div>
-        </div>
-        ${data.talking_points?.length ? `
-        <div style="margin-bottom:1rem">
-          <div style="font-weight:600;margin-bottom:0.5rem">Talking Points</div>
-          <ul style="margin:0;padding-left:1.5rem">${data.talking_points.map(p => `<li>${esc(p)}</li>`).join("")}</ul>
-        </div>` : ""}
-        ${data.questions_to_raise?.length ? `
-        <div style="margin-bottom:1rem">
-          <div style="font-weight:600;margin-bottom:0.5rem">Questions to Raise</div>
-          <ul style="margin:0;padding-left:1.5rem">${data.questions_to_raise.map(q => `<li>${esc(q)}</li>`).join("")}</ul>
-        </div>` : ""}
-        ${data.context_summary ? `<div class="hint">${esc(data.context_summary)}</div>` : ""}
-        ${data.previous_meetings_used ? `<div class="hint" style="margin-top:0.5rem">Based on ${data.previous_meetings_used} previous meeting(s)</div>` : ""}`;
-    } catch (e) {
-      briefBody.innerHTML = `<div class="empty-state">Error: ${esc(e.message)}</div>`;
-    }
-  };
-}
-
-async function _openRecurring(botId) {
-  openModal("modal-recurring");
-  const body = document.getElementById("recurring-body");
-  body.innerHTML = '<p class="loading">Analysing meeting series…</p>';
-  try {
-    const data = await apiFetch("GET", `/bot/${botId}/recurring`);
-    body.innerHTML = `
-      ${data.trend_summary ? `
-      <div style="margin-bottom:1rem">
-        <div style="font-weight:600;margin-bottom:0.5rem">Trend</div>
-        <div style="font-size:0.9rem;line-height:1.6">${esc(data.trend_summary)}</div>
-      </div>` : ""}
-      ${data.recurring_themes?.length ? `
-      <div style="margin-bottom:1rem">
-        <div style="font-weight:600;margin-bottom:0.5rem">Recurring Themes</div>
-        <ul style="margin:0;padding-left:1.5rem">${data.recurring_themes.map(t => `<li>${esc(t)}</li>`).join("")}</ul>
-      </div>` : ""}
-      ${data.unresolved_items?.length ? `
-      <div style="margin-bottom:1rem">
-        <div style="font-weight:600;margin-bottom:0.5rem">Unresolved Items</div>
-        <ul style="margin:0;padding-left:1.5rem">${data.unresolved_items.map(i => `<li>${esc(i)}</li>`).join("")}</ul>
-      </div>` : ""}
-      ${data.suggested_agenda?.length ? `
-      <div style="margin-bottom:1rem">
-        <div style="font-weight:600;margin-bottom:0.5rem">Suggested Agenda</div>
-        <ol style="margin:0;padding-left:1.5rem">${data.suggested_agenda.map(a => `<li>${esc(a)}</li>`).join("")}</ol>
-      </div>` : ""}
-      <div class="hint">${data.recurring_meetings_analysed} previous meeting(s) analysed</div>`;
-  } catch (e) {
-    body.innerHTML = `<div class="empty-state">Error: ${esc(e.message)}</div>`;
-  }
-}
 
 // Hook into renderBotDetail to show/hide action buttons
 const _origRenderBotDetail = typeof renderBotDetail === "function" ? renderBotDetail : null;
