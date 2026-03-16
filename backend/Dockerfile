@@ -43,8 +43,13 @@ WORKDIR /app
 ENV PYTHONUNBUFFERED=1
 
 # ── Python dependencies ───────────────────────────────────────────────────────
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.txt requirements-crypto.txt ./
+# Core deps first (fast — no heavy native extensions)
+RUN pip install --no-cache-dir --prefer-binary -r requirements.txt
+# Crypto deps in a separate layer (web3 + eth-account are large).
+# If this step times out or fails, the app still starts and USDC payments return 503.
+RUN pip install --no-cache-dir --prefer-binary -r requirements-crypto.txt || \
+    echo "WARNING: Crypto packages (web3/eth-account) could not be installed. USDC payments will be unavailable."
 
 # ── Playwright: install Chromium and its system deps ─────────────────────────
 RUN playwright install chromium

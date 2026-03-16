@@ -42,6 +42,6 @@ jinja2>=3.1.0
 # Stripe card payments
 stripe>=8.0.0
 
-# USDC/ERC-20 crypto payments (optional — only needed if CRYPTO_RPC_URL is set)
-web3>=7.0.0
-eth-account>=0.13.0
+# USDC/ERC-20 crypto payments — installed separately (see requirements-crypto.txt)
+# web3 and eth-account are large packages; they are installed in a dedicated Docker
+# layer so a build timeout does not break the rest of the application.

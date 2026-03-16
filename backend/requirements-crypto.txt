@@ -1,0 +1,8 @@
+# Optional USDC/ERC-20 crypto payment dependencies.
+#
+# These are installed in a separate Docker layer so that a slow download or
+# build-time failure does not prevent the rest of the application from starting.
+# If this layer fails, USDC payments return HTTP 503 but all other features work.
+
+web3>=7.0.0
+eth-account>=0.13.0
