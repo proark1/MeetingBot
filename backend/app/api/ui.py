@@ -389,7 +389,7 @@ async def admin_page(request: Request, db: AsyncSession = Depends(get_db)):
     if not _is_admin(account):
         return RedirectResponse("/dashboard")
 
-    from app.api.admin import WALLET_KEY
+    from app.api.admin import WALLET_KEY, RPC_URL_KEY
     from sqlalchemy import func, desc
 
     # Platform wallet
@@ -397,6 +397,23 @@ async def admin_page(request: Request, db: AsyncSession = Depends(get_db)):
         select(PlatformConfig).where(PlatformConfig.key == WALLET_KEY)
     )
     wallet_config = wallet_result.scalar_one_or_none()
+
+    # RPC URL — check env first, then DB
+    rpc_url_source = "none"
+    rpc_url_preview = None
+    if settings.CRYPTO_RPC_URL:
+        rpc_url_source = "env"
+        u = settings.CRYPTO_RPC_URL
+        rpc_url_preview = u[:30] + "..." if len(u) > 30 else u
+    else:
+        rpc_result = await db.execute(
+            select(PlatformConfig).where(PlatformConfig.key == RPC_URL_KEY)
+        )
+        rpc_config = rpc_result.scalar_one_or_none()
+        if rpc_config and rpc_config.value:
+            rpc_url_source = "db"
+            u = rpc_config.value
+            rpc_url_preview = u[:30] + "..." if len(u) > 30 else u
 
     # Monitor state
     monitor_result = await db.execute(
@@ -484,8 +501,12 @@ async def admin_page(request: Request, db: AsyncSession = Depends(get_db)):
         flash = _flash("success", "USDC monitor rescan scheduled.")
     elif msg == "resolved":
         flash = _flash("success", "Transfer marked as resolved.")
+    elif msg == "rpc_saved":
+        flash = _flash("success", "RPC URL saved. The USDC monitor will use it on the next cycle (within 60 s).")
     elif err == "invalid_address":
         flash = _flash("danger", "Invalid Ethereum address.")
+    elif err == "invalid_rpc_url":
+        flash = _flash("danger", "Invalid RPC URL — must start with http:// or https://")
     elif err == "account_not_found":
         flash = _flash("danger", "Account not found for that email.")
     elif err == "credit_failed":
@@ -499,7 +520,9 @@ async def admin_page(request: Request, db: AsyncSession = Depends(get_db)):
         "is_admin": True,
         "wallet_address": wallet_config.value if wallet_config else None,
         "usdc_contract": settings.USDC_CONTRACT,
-        "crypto_rpc_configured": bool(settings.CRYPTO_RPC_URL),
+        "crypto_rpc_configured": rpc_url_source != "none",
+        "crypto_rpc_source": rpc_url_source,
+        "crypto_rpc_preview": rpc_url_preview,
         "hd_seed_configured": bool(settings.CRYPTO_HD_SEED),
         "stripe_configured": bool(settings.STRIPE_SECRET_KEY),
         "monitor_last_block": monitor_state.value if monitor_state else None,
@@ -547,6 +570,35 @@ async def admin_wallet_submit(
     await db.commit()
     logger.info("Admin updated platform wallet to %s", address)
     return RedirectResponse("/admin?msg=wallet_saved", status_code=303)
+
+
+@router.post("/admin/rpc-url", include_in_schema=False)
+async def admin_rpc_url_submit(
+    request: Request,
+    rpc_url: str = Form(...),
+    db: AsyncSession = Depends(get_db),
+):
+    account = await _get_account_from_request(request, db)
+    if not _is_admin(account):
+        return RedirectResponse("/dashboard")
+
+    url = rpc_url.strip()
+    if not url.startswith(("http://", "https://")):
+        return RedirectResponse("/admin?error=invalid_rpc_url", status_code=303)
+
+    from app.api.admin import RPC_URL_KEY
+    result = await db.execute(
+        select(PlatformConfig).where(PlatformConfig.key == RPC_URL_KEY)
+    )
+    config = result.scalar_one_or_none()
+    if config:
+        config.value = url
+    else:
+        config = PlatformConfig(key=RPC_URL_KEY, value=url)
+        db.add(config)
+    await db.commit()
+    logger.info("Admin set CRYPTO_RPC_URL via admin panel")
+    return RedirectResponse("/admin?msg=rpc_saved", status_code=303)
 
 
 @router.post("/admin/credit", include_in_schema=False)

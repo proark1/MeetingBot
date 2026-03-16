@@ -132,16 +132,29 @@ async def _get_platform_wallet() -> Optional[str]:
         return config.value if config and config.value else None
 
 
-async def start_usdc_monitor() -> None:
-    """Start the background USDC transfer monitoring task."""
+async def _get_rpc_url() -> Optional[str]:
+    """Return the RPC URL from env var, falling back to the admin-configured DB value."""
     from app.config import settings
-    if not settings.CRYPTO_RPC_URL:
-        logger.info("USDC monitoring disabled — CRYPTO_RPC_URL not set")
-        return
+    if settings.CRYPTO_RPC_URL:
+        return settings.CRYPTO_RPC_URL
+    # Fall back to admin-set value stored in PlatformConfig
+    from app.db import AsyncSessionLocal
+    from app.models.account import PlatformConfig
+    from sqlalchemy import select
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(PlatformConfig).where(PlatformConfig.key == "crypto_rpc_url")
+        )
+        config = result.scalar_one_or_none()
+        return config.value if config and config.value else None
 
-    # Always start the monitor when CRYPTO_RPC_URL is set.
-    # It will pick up platform wallet and HD wallet config dynamically each cycle,
-    # so there's no need to check for them here — the admin can set them later.
+
+async def start_usdc_monitor() -> None:
+    """Start the background USDC transfer monitoring task.
+
+    Always starts the loop regardless of env config — the RPC URL is resolved
+    dynamically each cycle so it can be set via the admin panel without a restart.
+    """
     logger.info("Starting USDC transfer monitor (polling every 60s)")
     asyncio.create_task(_monitor_loop())
 
@@ -161,6 +174,14 @@ async def _check_transfers() -> None:
     from app.models.account import Account, UsdcDeposit, MonitorState, CreditTransaction, UnmatchedUsdcTransfer
     from app.services.credit_service import add_credits
     from sqlalchemy import select
+
+    rpc_url = await _get_rpc_url()
+    if not rpc_url:
+        logger.warning(
+            "USDC monitor: CRYPTO_RPC_URL is not set — monitoring is disabled. "
+            "Set it as an environment variable or via the admin panel."
+        )
+        return
 
     async with AsyncSessionLocal() as db:
         platform_wallet = None
@@ -229,7 +250,7 @@ async def _check_transfers() -> None:
         try:
             from_block, to_block, raw_events = await asyncio.to_thread(
                 _fetch_usdc_events,
-                settings.CRYPTO_RPC_URL,
+                rpc_url,
                 settings.USDC_CONTRACT,
                 last_block_val,
                 filter_to_addresses or None,

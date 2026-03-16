@@ -216,6 +216,8 @@ Or receive them via your `webhook_url` — a POST with the full payload is deliv
 |--------|----------|-------------|
 | `GET` | `/api/v1/admin/wallet` | Get the current platform USDC collection wallet address |
 | `PUT` | `/api/v1/admin/wallet` | Set or update the platform USDC collection wallet address. Body: `{wallet_address}` |
+| `GET` | `/api/v1/admin/rpc-url` | Check whether a CRYPTO_RPC_URL is configured (env var or admin-set) |
+| `PUT` | `/api/v1/admin/rpc-url` | Set the Ethereum RPC URL used by the USDC monitor (stored in DB, no restart needed). Body: `{rpc_url}` |
 | `GET` | `/api/v1/admin/config` | List all platform configuration values |
 | `POST` | `/api/v1/admin/credit` | Manually credit a user account. Body: `{email, amount_usd, note?}` — use to fix missed USDC deposits |
 | `GET` | `/api/v1/admin/usdc/unmatched` | List USDC transfers received at the platform wallet that couldn't be attributed to any account (sender wallet not registered). Query: `?resolved=false` (default) / `?resolved=true` / omit for all |

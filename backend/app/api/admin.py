@@ -21,6 +21,7 @@ _ETH_ADDRESS_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
 
 # Platform config keys
 WALLET_KEY = "usdc_collection_wallet"
+RPC_URL_KEY = "crypto_rpc_url"
 
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
@@ -195,6 +196,70 @@ async def manual_credit(
         credited_usd=float(payload.amount_usd),
         new_balance_usd=float(new_balance),
     )
+
+
+class RpcUrlRequest(BaseModel):
+    rpc_url: str = Field(
+        description="Ethereum JSON-RPC endpoint URL (Infura, Alchemy, QuickNode, etc.).",
+        examples=["https://mainnet.infura.io/v3/YOUR_KEY"],
+    )
+
+
+class RpcUrlResponse(BaseModel):
+    rpc_url_set: bool = Field(description="True if an RPC URL is now configured.")
+    source: str = Field(description="'env' if from environment variable, 'db' if set via admin panel.")
+
+
+@router.get("/rpc-url", response_model=RpcUrlResponse)
+async def get_rpc_url_status(
+    db: AsyncSession = Depends(get_db),
+    _admin: str = Depends(require_admin),
+):
+    """Check whether a CRYPTO_RPC_URL is configured (env var or admin-set)."""
+    from app.config import settings
+    if settings.CRYPTO_RPC_URL:
+        return RpcUrlResponse(rpc_url_set=True, source="env")
+    result = await db.execute(
+        select(PlatformConfig).where(PlatformConfig.key == RPC_URL_KEY)
+    )
+    config = result.scalar_one_or_none()
+    return RpcUrlResponse(
+        rpc_url_set=bool(config and config.value),
+        source="db" if config and config.value else "none",
+    )
+
+
+@router.put("/rpc-url", response_model=RpcUrlResponse)
+async def set_rpc_url(
+    payload: RpcUrlRequest,
+    db: AsyncSession = Depends(get_db),
+    _admin: str = Depends(require_admin),
+):
+    """
+    Set the Ethereum RPC URL used by the USDC monitor.
+
+    This stores the URL in the database so the monitor can use it without
+    requiring a server restart or environment variable change.
+    The environment variable `CRYPTO_RPC_URL` always takes precedence if set.
+    """
+    url = payload.rpc_url.strip()
+    if not url.startswith(("http://", "https://")):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="RPC URL must start with http:// or https://",
+        )
+    result = await db.execute(
+        select(PlatformConfig).where(PlatformConfig.key == RPC_URL_KEY)
+    )
+    config = result.scalar_one_or_none()
+    if config:
+        config.value = url
+    else:
+        config = PlatformConfig(key=RPC_URL_KEY, value=url)
+        db.add(config)
+    await db.commit()
+    logger.info("Admin set CRYPTO_RPC_URL via admin panel (stored in DB)")
+    return RpcUrlResponse(rpc_url_set=True, source="db")
 
 
 @router.get("/usdc/unmatched", response_model=UnmatchedTransferListResponse)
