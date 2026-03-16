@@ -182,7 +182,7 @@ Or receive them via your `webhook_url` — a POST with the full payload is deliv
 |------|---------|
 | `stripe_topup` | Credits added via Stripe card payment |
 | `usdc_topup` | Credits added via USDC deposit |
-| `bot_usage` | Credits deducted on bot completion (raw AI cost × `CREDIT_MARKUP`) |
+| `bot_usage` | Credits deducted on bot completion ($0.10 flat fee per bot, or raw AI cost × `CREDIT_MARKUP` if flat fee is disabled) |
 
 ### Bots
 | Method | Endpoint | Description |
@@ -315,8 +315,9 @@ Pass `template` in bot creation. Use `prompt_override` for a fully custom prompt
 | `CRYPTO_HD_SEED` | — | 64-char hex seed for HD wallet (generate once, keep secret). Not required if the admin sets a platform wallet via `/admin` |
 | `CRYPTO_RPC_URL` | — | Infura/Alchemy RPC endpoint for USDC monitoring |
 | `USDC_CONTRACT` | `0xA0b8...eB48` | USDC ERC-20 contract address |
-| `CREDIT_MARKUP` | `3.0` | Multiply raw AI cost by this factor when deducting credits |
-| `MIN_CREDITS_USD` | `0.05` | Minimum balance required to create a bot |
+| `BOT_FLAT_FEE_USD` | `0.10` | Flat fee charged per bot usage in USD. Set to `0` to revert to markup-based pricing (raw AI cost × `CREDIT_MARKUP`) |
+| `CREDIT_MARKUP` | `3.0` | Multiply raw AI cost by this factor when deducting credits (only used when `BOT_FLAT_FEE_USD` is `0`) |
+| `MIN_CREDITS_USD` | `0.10` | Minimum balance required to create a bot |
 
 > **USDC wallet configuration:** The platform USDC collection wallet can be set by an admin via `PUT /api/v1/admin/wallet` or the `/admin` web UI. When set, this wallet address is returned to all users at `GET /api/v1/billing/usdc/address`, overriding the HD-derived per-user addresses. This means you can accept USDC without configuring `CRYPTO_HD_SEED` — just set the wallet via the admin panel.
 

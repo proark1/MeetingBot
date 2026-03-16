@@ -17,7 +17,8 @@ logger = logging.getLogger(__name__)
 
 async def check_credits(account_id: str, db: AsyncSession) -> None:
     """Raise HTTP 402 if account has insufficient credits to start a bot."""
-    min_usd = Decimal(str(settings.MIN_CREDITS_USD))
+    flat_fee = Decimal(str(settings.BOT_FLAT_FEE_USD))
+    min_usd = flat_fee if flat_fee > 0 else Decimal(str(settings.MIN_CREDITS_USD))
     result = await db.execute(select(Account.credits_usd).where(Account.id == account_id))
     balance = result.scalar_one_or_none()
     if balance is None or balance < min_usd:
@@ -78,10 +79,16 @@ async def deduct_credits_for_bot(
     if not account_id or account_id == SUPERADMIN_ACCOUNT_ID:
         return
 
-    markup = Decimal(str(settings.CREDIT_MARKUP))
-    amount = Decimal(str(cost_usd)) * markup
-    if amount <= Decimal("0"):
-        amount = Decimal("0.01")  # Minimum deduction per bot run
+    flat_fee = Decimal(str(settings.BOT_FLAT_FEE_USD))
+    if flat_fee > 0:
+        amount = flat_fee
+        description = f"Bot run {bot_id[:8]} (flat fee)"
+    else:
+        markup = Decimal(str(settings.CREDIT_MARKUP))
+        amount = Decimal(str(cost_usd)) * markup
+        if amount <= Decimal("0"):
+            amount = Decimal("0.01")  # Minimum deduction per bot run
+        description = f"Bot run {bot_id[:8]} (AI cost ${cost_usd:.6f} × {settings.CREDIT_MARKUP}x markup)"
 
     from app.db import AsyncSessionLocal
     async with AsyncSessionLocal() as db:
@@ -97,16 +104,13 @@ async def deduct_credits_for_bot(
             account_id=account_id,
             amount_usd=-amount,
             type="bot_usage",
-            description=(
-                f"Bot run {bot_id[:8]} "
-                f"(AI cost ${cost_usd:.6f} × {settings.CREDIT_MARKUP}x markup)"
-            ),
+            description=description,
             reference_id=bot_id,
         )
         db.add(tx)
         await db.commit()
 
     logger.info(
-        "Credits deducted: -$%.4f from account %s for bot %s (cost=%.6f markup=%.1f)",
-        amount, account_id, bot_id, cost_usd, settings.CREDIT_MARKUP,
+        "Credits deducted: -$%.4f from account %s for bot %s",
+        amount, account_id, bot_id,
     )

@@ -64,8 +64,9 @@ class Settings(BaseSettings):
     USDC_CONTRACT: str = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
 
     # Billing
-    CREDIT_MARKUP: float = 3.0        # multiply raw AI cost by this factor when deducting credits
-    MIN_CREDITS_USD: float = 0.05     # minimum balance required to create a bot
+    CREDIT_MARKUP: float = 3.0        # multiply raw AI cost by this factor when deducting credits (unused when flat fee is enabled)
+    BOT_FLAT_FEE_USD: float = 0.10    # flat fee charged per bot usage (0 = use markup-based pricing)
+    MIN_CREDITS_USD: float = 0.10     # minimum balance required to create a bot
 
     # JWT for web UI sessions
     JWT_SECRET: str = "change-me-in-production"
