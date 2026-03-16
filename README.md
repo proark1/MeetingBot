@@ -215,6 +215,8 @@ Or receive them via your `webhook_url` — a POST with the full payload is deliv
 | `GET` | `/api/v1/admin/wallet` | Get the current platform USDC collection wallet address |
 | `PUT` | `/api/v1/admin/wallet` | Set or update the platform USDC collection wallet address. Body: `{wallet_address}` |
 | `GET` | `/api/v1/admin/config` | List all platform configuration values |
+| `POST` | `/api/v1/admin/credit` | Manually credit a user account. Body: `{email, amount_usd, note?}` — use to fix missed USDC deposits |
+| `POST` | `/api/v1/admin/usdc/rescan` | Reset the USDC monitor's block pointer so it rescans from `from_block` on the next cycle. Body: `{from_block}` |
 
 > **Admin access:** Accounts listed in `ADMIN_EMAILS` (comma-separated env var) or accounts with `is_admin=true` in the database can access these endpoints. All other users receive a 403 error.
 

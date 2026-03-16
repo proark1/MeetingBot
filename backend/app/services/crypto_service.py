@@ -139,12 +139,9 @@ async def start_usdc_monitor() -> None:
         logger.info("USDC monitoring disabled — CRYPTO_RPC_URL not set")
         return
 
-    # Monitor can work in platform-wallet mode OR HD-wallet mode
-    platform_wallet = await _get_platform_wallet()
-    if not platform_wallet and not settings.CRYPTO_HD_SEED:
-        logger.info("USDC monitoring disabled — no platform wallet and no CRYPTO_HD_SEED")
-        return
-
+    # Always start the monitor when CRYPTO_RPC_URL is set.
+    # It will pick up platform wallet and HD wallet config dynamically each cycle,
+    # so there's no need to check for them here — the admin can set them later.
     logger.info("Starting USDC transfer monitor (polling every 60s)")
     asyncio.create_task(_monitor_loop())
 
