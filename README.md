@@ -2,7 +2,7 @@
 
 **Version 2.1.0** — A stateless meeting bot API service with multi-tenant billing.
 
-> **Last updated:** 2026-03-16 <!-- auto-updated on each release -->
+> **Last updated:** 2026-03-16 · **API version in Swagger UI:** 2.1.0 <!-- auto-updated on each release -->
 
 Send bots into **Zoom**, **Google Meet**, and **Microsoft Teams** meetings to record, transcribe, and analyse them with **Claude** (Anthropic) or **Gemini** (Google) AI.
 
