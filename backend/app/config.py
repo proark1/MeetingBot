@@ -33,6 +33,27 @@ class Settings(BaseSettings):
     # Webhook delivery timeout
     WEBHOOK_TIMEOUT_SECONDS: int = 10
 
+    # ── Multi-tenant billing ──────────────────────────────────────────────────
+    DATABASE_URL: str = "sqlite+aiosqlite:///./meetingbot.db"
+
+    # Stripe — leave empty to disable card payments
+    STRIPE_SECRET_KEY: str = ""
+    STRIPE_WEBHOOK_SECRET: str = ""
+    STRIPE_TOP_UP_AMOUNTS: str = "10,25,50,100"  # comma-separated USD amounts
+
+    # USDC/ERC-20 — leave CRYPTO_RPC_URL empty to disable crypto payments
+    CRYPTO_HD_SEED: str = ""          # hex seed for HD wallet (generate once, keep secret)
+    CRYPTO_RPC_URL: str = ""          # Infura/Alchemy endpoint, e.g. https://mainnet.infura.io/v3/...
+    USDC_CONTRACT: str = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+
+    # Billing
+    CREDIT_MARKUP: float = 3.0        # multiply raw AI cost by this factor when deducting credits
+    MIN_CREDITS_USD: float = 0.05     # minimum balance required to create a bot
+
+    # JWT for web UI sessions
+    JWT_SECRET: str = "change-me-in-production"
+    JWT_EXPIRE_HOURS: int = 24
+
     model_config = {"env_file": ".env", "extra": "ignore"}
 
 

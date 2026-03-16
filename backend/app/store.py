@@ -56,6 +56,9 @@ class BotSession:
     metadata: dict = field(default_factory=dict)
     is_demo_transcript: bool = False
 
+    # Owning account (None = unauthenticated / superadmin mode)
+    account_id: Optional[str] = None
+
     # AI usage tracking
     ai_usage: list = field(default_factory=list)  # list of usage entry dicts
 
@@ -147,10 +150,13 @@ class Store:
         status: Optional[str] = None,
         limit: int = 50,
         offset: int = 0,
+        account_id: Optional[str] = None,
     ) -> tuple[list[BotSession], int]:
         bots = sorted(self._bots.values(), key=lambda b: b.created_at, reverse=True)
         if status:
             bots = [b for b in bots if b.status == status]
+        if account_id:
+            bots = [b for b in bots if b.account_id == account_id]
         total = len(bots)
         return bots[offset : offset + limit], total
 

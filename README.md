@@ -1,10 +1,10 @@
 # MeetingBot API
 
-**Version 2.0** — A stateless meeting bot API service.
+**Version 2.0** — A stateless meeting bot API service with multi-tenant billing.
 
 Send bots into **Zoom**, **Google Meet**, and **Microsoft Teams** meetings to record, transcribe, and analyse them with **Claude** (Anthropic) or **Gemini** (Google) AI.
 
-**No database required.** Results are returned via webhook or polling. You store the data.
+**Multi-tenant:** Each external service registers an account and gets its own API key. Pre-fund a credit balance via Stripe (card) or USDC (ERC-20) — credits are deducted automatically per bot run.
 
 ---
 
@@ -28,20 +28,47 @@ cd MeetingBot
 
 # Set your API keys
 export ANTHROPIC_API_KEY=sk-ant-...   # or GEMINI_API_KEY
-export API_KEY=your-secret-key        # optional, for auth
+export STRIPE_SECRET_KEY=sk_live_...  # for card payments
+export CRYPTO_HD_SEED=<64-char hex>   # for USDC payments
 
 docker compose up
 ```
 
 API available at `http://localhost:8000`
 Interactive docs at `http://localhost:8000/api/docs`
+Web UI at `http://localhost:8000/register`
 
-### 2. Create a bot
+### 2. Register an account and get an API key
+
+```bash
+curl -X POST http://localhost:8000/api/v1/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email": "you@example.com", "password": "yourpassword"}'
+# → {"account_id": "...", "api_key": "sk_live_..."}
+```
+
+### 3. Top up credits
+
+```bash
+# Via Stripe — returns a checkout URL to complete payment
+curl -X POST http://localhost:8000/api/v1/billing/stripe/checkout \
+  -H "Authorization: Bearer sk_live_..." \
+  -H "Content-Type: application/json" \
+  -d '{"amount_usd": 25}'
+
+# Via USDC — get your unique deposit address (1 USDC = $1 credit)
+curl http://localhost:8000/api/v1/billing/usdc/address \
+  -H "Authorization: Bearer sk_live_..."
+```
+
+Or use the web UI at `/topup`.
+
+### 4. Create a bot
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/bot \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer your-secret-key" \
+  -H "Authorization: Bearer sk_live_..." \
   -d '{
     "meeting_url": "https://meet.google.com/abc-defg-hij",
     "bot_name": "Notetaker",
@@ -110,15 +137,34 @@ Or receive them via your `webhook_url` — a POST with the full payload is deliv
 
 ## API Reference
 
+### Auth & Accounts
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/v1/auth/register` | Create account → returns first API key |
+| `POST` | `/api/v1/auth/login` | Email+password → JWT (for web UI) |
+| `GET` | `/api/v1/auth/me` | Account info + credit balance |
+| `POST` | `/api/v1/auth/keys` | Generate a new API key |
+| `GET` | `/api/v1/auth/keys` | List active API keys |
+| `DELETE` | `/api/v1/auth/keys/{id}` | Revoke an API key |
+
+### Billing
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/v1/billing/balance` | Current balance + last 50 transactions |
+| `POST` | `/api/v1/billing/stripe/checkout` | Create Stripe Checkout session |
+| `POST` | `/api/v1/billing/stripe/webhook` | Stripe webhook (register in Stripe dashboard) |
+| `GET` | `/api/v1/billing/usdc/address` | Get unique USDC/ERC-20 deposit address |
+
+### Bots
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `POST` | `/api/v1/bot` | Create a bot & join a meeting |
-| `GET` | `/api/v1/bot` | List all in-memory bots |
+| `GET` | `/api/v1/bot` | List bots (scoped to your account) |
 | `GET` | `/api/v1/bot/{id}` | Full details (transcript, analysis) |
 | `DELETE` | `/api/v1/bot/{id}` | Stop & remove a bot |
 | `GET` | `/api/v1/bot/{id}/transcript` | Raw transcript only |
 | `GET` | `/api/v1/bot/{id}/recording` | Download WAV audio |
-| `GET` | `/api/v1/bot/{id}/highlight` | Curated highlights (key points, action items, decisions) |
+| `GET` | `/api/v1/bot/{id}/highlight` | Curated highlights |
 | `POST` | `/api/v1/bot/{id}/analyze` | Re-run AI analysis |
 | `POST` | `/api/v1/bot/{id}/ask` | Q&A on the transcript |
 | `POST` | `/api/v1/bot/{id}/followup-email` | Draft follow-up email |
@@ -132,6 +178,14 @@ Or receive them via your `webhook_url` — a POST with the full payload is deliv
 | `GET` | `/api/v1/analytics` | Aggregate stats (bots, durations, AI cost) |
 | `GET` | `/api/v1/action-items/stats` | Aggregate action-item counts by assignee |
 | `GET` | `/api/health` | Health check |
+
+### Web UI
+| Path | Description |
+|------|-------------|
+| `/register` | Create account |
+| `/login` | Login |
+| `/dashboard` | Balance, API keys, transaction history |
+| `/topup` | Add credits (Stripe card or USDC) |
 
 Full interactive docs: `GET /api/docs`
 
@@ -181,11 +235,35 @@ Pass `template` in bot creation. Use `prompt_override` for a fully custom prompt
 
 ## Environment variables
 
+### AI providers
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `ANTHROPIC_API_KEY` | — | Claude API key (takes precedence over Gemini) |
 | `GEMINI_API_KEY` | — | Gemini API key (transcription + analysis) |
-| `API_KEY` | — | Bearer token required on all requests (leave empty to disable) |
+
+### Auth
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `API_KEY` | — | Legacy superadmin key (bypasses per-user auth; leave empty to use accounts only) |
+| `JWT_SECRET` | `change-me-in-production` | Secret for signing web UI JWT tokens |
+| `JWT_EXPIRE_HOURS` | `24` | JWT token lifetime in hours |
+
+### Billing
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DATABASE_URL` | `sqlite+aiosqlite:///./meetingbot.db` | SQLAlchemy async URL (use `postgresql+asyncpg://...` on Railway) |
+| `STRIPE_SECRET_KEY` | — | Stripe secret key (`sk_live_...`) |
+| `STRIPE_WEBHOOK_SECRET` | — | Stripe webhook signing secret (`whsec_...`) |
+| `STRIPE_TOP_UP_AMOUNTS` | `10,25,50,100` | Comma-separated USD top-up options |
+| `CRYPTO_HD_SEED` | — | 64-char hex seed for HD wallet (generate once, keep secret) |
+| `CRYPTO_RPC_URL` | — | Infura/Alchemy RPC endpoint for USDC monitoring |
+| `USDC_CONTRACT` | `0xA0b8...eB48` | USDC ERC-20 contract address |
+| `CREDIT_MARKUP` | `3.0` | Multiply raw AI cost by this factor when deducting credits |
+| `MIN_CREDITS_USD` | `0.05` | Minimum balance required to create a bot |
+
+### Bot settings
+| Variable | Default | Description |
+|----------|---------|-------------|
 | `CORS_ORIGINS` | `*` | Comma-separated allowed origins |
 | `MAX_CONCURRENT_BOTS` | `3` | Max simultaneous browser bots |
 | `BOT_ADMISSION_TIMEOUT` | `300` | Seconds to wait for host to admit the bot |
@@ -247,7 +325,8 @@ docker compose up --build
 
 ### Railway / Heroku
 
-Set environment variables and deploy. No database needed — everything is in-memory.
+Set environment variables and deploy. Accounts/billing data persists in SQLite by default.
+For production, set `DATABASE_URL` to a PostgreSQL connection string provided by Railway.
 
 ### Manual
 

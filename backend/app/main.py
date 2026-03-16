@@ -9,12 +9,9 @@ import logging
 import signal
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Annotated
-
-from fastapi import Depends, FastAPI, HTTPException, Security, status
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
@@ -24,6 +21,10 @@ from app.api.exports import router as exports_router
 from app.api.templates import router as templates_router
 from app.api.ws import router as ws_router
 from app.api.analytics import router as analytics_router
+from app.api.auth import router as auth_router
+from app.api.billing import router as billing_router
+from app.api.ui import router as ui_router
+from app.deps import require_auth
 
 logging.basicConfig(
     level=logging.INFO,
@@ -33,28 +34,15 @@ logger = logging.getLogger(__name__)
 
 FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
 
-# ── Auth ──────────────────────────────────────────────────────────────────────
-
-_bearer = HTTPBearer(auto_error=False)
-
-
-async def require_api_key(
-    credentials: Annotated[HTTPAuthorizationCredentials | None, Security(_bearer)],
-) -> None:
-    """If API_KEY is configured, validate the Bearer token on every API request."""
-    if not settings.API_KEY:
-        return
-    if credentials is None or credentials.credentials != settings.API_KEY:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Invalid or missing API key. Use: Authorization: Bearer <API_KEY>",
-        )
-
-
 # ── Lifespan ──────────────────────────────────────────────────────────────────
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # ── Database init ──────────────────────────────────────────────────────
+    from app.db import create_all_tables
+    await create_all_tables()
+    logger.info("Database tables ready (%s)", settings.DATABASE_URL.split("///")[0])
+
     # Startup warnings
     if not settings.GEMINI_API_KEY and not settings.ANTHROPIC_API_KEY:
         logger.warning(
@@ -63,9 +51,17 @@ async def lifespan(app: FastAPI):
         )
     if not settings.API_KEY:
         logger.warning(
-            "⚠ API_KEY is not set — all /api/v1/* endpoints are UNAUTHENTICATED. "
-            "Set API_KEY in your environment to enable Bearer-token auth."
+            "⚠ API_KEY is not set — using per-user account authentication. "
+            "Register at POST /api/v1/auth/register"
         )
+    if not settings.STRIPE_SECRET_KEY:
+        logger.warning("⚠ STRIPE_SECRET_KEY not set — Stripe card payments disabled")
+    if not settings.CRYPTO_RPC_URL:
+        logger.info("USDC payments disabled — set CRYPTO_RPC_URL to enable")
+
+    # ── USDC monitor ──────────────────────────────────────────────────────
+    from app.services.crypto_service import start_usdc_monitor
+    await start_usdc_monitor()
 
     # Clean up orphaned subprocesses on SIGTERM
     def _handle_sigterm(signum, frame):
@@ -145,13 +141,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-_auth = [Depends(require_api_key)]
+_auth = [Depends(require_auth)]
+app.include_router(auth_router,      prefix="/api/v1")             # no auth on register/login
+app.include_router(billing_router,   prefix="/api/v1")             # billing has its own auth handling
 app.include_router(bots_router,      prefix="/api/v1", dependencies=_auth)
 app.include_router(webhooks_router,  prefix="/api/v1", dependencies=_auth)
 app.include_router(exports_router,   prefix="/api/v1", dependencies=_auth)
 app.include_router(templates_router, prefix="/api/v1", dependencies=_auth)
 app.include_router(analytics_router, prefix="/api/v1", dependencies=_auth)
-app.include_router(ws_router,        prefix="/api/v1")  # WS auth handled separately
+app.include_router(ws_router,        prefix="/api/v1")             # WS auth handled separately
+app.include_router(ui_router)                                       # web UI (no prefix)
 
 
 # ── Health ────────────────────────────────────────────────────────────────────

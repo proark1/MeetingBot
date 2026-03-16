@@ -1,7 +1,8 @@
 """Analytics and action-items aggregate endpoints."""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
+from app.deps import SUPERADMIN_ACCOUNT_ID
 from app.store import store
 
 router = APIRouter(tags=["Analytics"])
@@ -10,9 +11,11 @@ _ACTIVE_STATUSES = ("ready", "scheduled", "queued", "joining", "in_call", "call_
 
 
 @router.get("/analytics")
-async def get_analytics():
+async def get_analytics(request: Request):
     """Aggregate analytics across all bots currently in memory (24-hour window)."""
-    all_bots, total = await store.list_bots(limit=10000)
+    account_id = getattr(request.state, "account_id", None)
+    filter_account = account_id if (account_id and account_id != SUPERADMIN_ACCOUNT_ID) else None
+    all_bots, total = await store.list_bots(limit=10000, account_id=filter_account)
 
     by_status: dict[str, int] = {}
     by_platform: dict[str, int] = {}
@@ -51,9 +54,11 @@ async def get_analytics():
 
 
 @router.get("/action-items/stats")
-async def get_action_items_stats():
+async def get_action_items_stats(request: Request):
     """Aggregate action-item statistics across all bots in memory."""
-    all_bots, _ = await store.list_bots(limit=10000)
+    account_id = getattr(request.state, "account_id", None)
+    filter_account = account_id if (account_id and account_id != SUPERADMIN_ACCOUNT_ID) else None
+    all_bots, _ = await store.list_bots(limit=10000, account_id=filter_account)
 
     items: list[dict] = []
     for bot in all_bots:

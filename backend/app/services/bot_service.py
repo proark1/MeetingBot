@@ -457,6 +457,10 @@ async def run_bot_lifecycle(bot_id: str) -> None:
         await store.mark_terminal(bot_id, "done", ended_at=bot.ended_at or _now())
         bot = await store.get_bot(bot_id)
 
+        # Deduct credits for the completed bot run
+        from app.services.credit_service import deduct_credits_for_bot
+        await deduct_credits_for_bot(bot.account_id, bot_id, bot.ai_total_cost_usd)
+
         # Dispatch done event — both global webhooks and per-bot webhook_url
         done_payload = _build_done_payload(bot)
         await webhook_service.dispatch_event(
@@ -480,6 +484,8 @@ async def run_bot_lifecycle(bot_id: str) -> None:
             try:
                 await store.mark_terminal(bot_id, "cancelled", ended_at=bot.ended_at or _now())
                 bot = await store.get_bot(bot_id)
+                from app.services.credit_service import deduct_credits_for_bot
+                await deduct_credits_for_bot(bot.account_id, bot_id, bot.ai_total_cost_usd)
                 done_payload = _build_done_payload(bot)
                 await webhook_service.dispatch_event(
                     "bot.cancelled",
@@ -508,6 +514,8 @@ async def run_bot_lifecycle(bot_id: str) -> None:
                 )
                 bot = await store.get_bot(bot_id)
                 if bot:
+                    from app.services.credit_service import deduct_credits_for_bot
+                    await deduct_credits_for_bot(bot.account_id, bot_id, bot.ai_total_cost_usd)
                     done_payload = _build_done_payload(bot)
                     await webhook_service.dispatch_event(
                         "bot.error",

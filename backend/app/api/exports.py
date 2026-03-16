@@ -3,9 +3,10 @@
 import io
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response, PlainTextResponse
 
+from app.deps import SUPERADMIN_ACCOUNT_ID
 from app.store import store, BotSession
 
 logger = logging.getLogger(__name__)
@@ -27,9 +28,16 @@ def _fmt_ts(secs: float) -> str:
     return f"{m:02d}:{s:02d}"
 
 
-async def _get_or_404(bot_id: str) -> BotSession:
+async def _get_or_404(bot_id: str, account_id=None) -> BotSession:
     bot = await store.get_bot(bot_id)
     if bot is None:
+        raise HTTPException(status_code=404, detail=f"Bot {bot_id!r} not found")
+    if (
+        account_id
+        and account_id != SUPERADMIN_ACCOUNT_ID
+        and bot.account_id is not None
+        and bot.account_id != account_id
+    ):
         raise HTTPException(status_code=404, detail=f"Bot {bot_id!r} not found")
     return bot
 
@@ -37,9 +45,9 @@ async def _get_or_404(bot_id: str) -> BotSession:
 # ── Markdown export ───────────────────────────────────────────────────────────
 
 @router.get("/{bot_id}/export/markdown", response_class=PlainTextResponse)
-async def export_markdown(bot_id: str):
+async def export_markdown(bot_id: str, request: Request):
     """Export the meeting report as a Markdown document."""
-    bot = await _get_or_404(bot_id)
+    bot = await _get_or_404(bot_id, getattr(request.state, "account_id", None))
     md = _build_markdown(bot)
     filename = f"meeting-{bot_id[:8]}.md"
     return PlainTextResponse(
@@ -52,7 +60,7 @@ async def export_markdown(bot_id: str):
 # ── PDF export ────────────────────────────────────────────────────────────────
 
 @router.get("/{bot_id}/export/pdf")
-async def export_pdf(bot_id: str):
+async def export_pdf(bot_id: str, request: Request):
     """Export the meeting report as a PDF document."""
     try:
         from reportlab.lib.pagesizes import A4  # noqa: F401 (import check)
@@ -62,7 +70,7 @@ async def export_pdf(bot_id: str):
             detail="PDF export requires reportlab — run: pip install reportlab",
         )
 
-    bot = await _get_or_404(bot_id)
+    bot = await _get_or_404(bot_id, getattr(request.state, "account_id", None))
     pdf_bytes = _build_pdf(bot)
     filename = f"meeting-{bot_id[:8]}.pdf"
     return Response(

@@ -6,11 +6,12 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from app.config import settings
+from app.deps import get_current_account_id, SUPERADMIN_ACCOUNT_ID
 from app.schemas.bot import (
     BotCreate, BotListResponse, BotResponse, BotSummary,
     MeetingAnalysis, AIUsageSummary, AIUsageEntry,
@@ -105,9 +106,17 @@ def _to_response(bot: BotSession) -> BotResponse:
     )
 
 
-async def _get_or_404(bot_id: str) -> BotSession:
+async def _get_or_404(bot_id: str, account_id: Optional[str] = None) -> BotSession:
     bot = await store.get_bot(bot_id)
     if bot is None:
+        raise HTTPException(status_code=404, detail=f"Bot {bot_id!r} not found")
+    # Ownership check: per-user accounts can only see their own bots
+    if (
+        account_id
+        and account_id != SUPERADMIN_ACCOUNT_ID
+        and bot.account_id is not None
+        and bot.account_id != account_id
+    ):
         raise HTTPException(status_code=404, detail=f"Bot {bot_id!r} not found")
     return bot
 
@@ -115,7 +124,7 @@ async def _get_or_404(bot_id: str) -> BotSession:
 # ── POST /api/v1/bot ──────────────────────────────────────────────────────────
 
 @router.post("", response_model=BotResponse, status_code=201)
-async def create_bot(payload: BotCreate):
+async def create_bot(payload: BotCreate, request: Request):
     """Create a new meeting bot.
 
     The bot joins the meeting, records audio, transcribes with Gemini/Claude,
@@ -126,6 +135,15 @@ async def create_bot(payload: BotCreate):
     **Platforms supported for real recording:** Google Meet, Zoom, Microsoft Teams.
     Other platforms run in demo mode (AI-generated sample transcript).
     """
+    account_id: Optional[str] = getattr(request.state, "account_id", None)
+
+    # Check credits for per-user accounts (not superadmin / unauthenticated)
+    if account_id and account_id != SUPERADMIN_ACCOUNT_ID:
+        from app.db import AsyncSessionLocal
+        from app.services.credit_service import check_credits
+        async with AsyncSessionLocal() as db:
+            await check_credits(account_id, db)
+
     is_scheduled = (
         payload.join_at is not None
         and payload.join_at.replace(tzinfo=timezone.utc) > _now()
@@ -149,6 +167,7 @@ async def create_bot(payload: BotCreate):
         start_muted=payload.start_muted,
         live_transcription=payload.live_transcription,
         metadata=payload.metadata,
+        account_id=account_id if account_id != SUPERADMIN_ACCOUNT_ID else None,
     )
     await store.create_bot(bot)
 
@@ -171,9 +190,11 @@ async def create_bot(payload: BotCreate):
 # ── GET /api/v1/bot/stats ─────────────────────────────────────────────────────
 
 @router.get("/stats", tags=["Bots"])
-async def get_stats():
+async def get_stats(request: Request):
     """Aggregate counts by status."""
-    all_bots, _ = await store.list_bots(limit=10000)
+    account_id: Optional[str] = getattr(request.state, "account_id", None)
+    filter_account = account_id if (account_id and account_id != SUPERADMIN_ACCOUNT_ID) else None
+    all_bots, _ = await store.list_bots(limit=10000, account_id=filter_account)
     counts: dict[str, int] = {}
     for b in all_bots:
         counts[b.status] = counts.get(b.status, 0) + 1
@@ -192,12 +213,18 @@ async def get_stats():
 
 @router.get("", response_model=BotListResponse)
 async def list_bots(
+    request: Request,
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     status: Optional[str] = Query(default=None, description="Filter by status"),
 ):
     """List bots (lightweight summaries, no transcript/analysis)."""
-    bots, total = await store.list_bots(status=status, limit=limit, offset=offset)
+    account_id: Optional[str] = getattr(request.state, "account_id", None)
+    # Superadmin and unauthenticated see all bots; per-user accounts see only their own
+    filter_account = (
+        account_id if (account_id and account_id != SUPERADMIN_ACCOUNT_ID) else None
+    )
+    bots, total = await store.list_bots(status=status, limit=limit, offset=offset, account_id=filter_account)
     return BotListResponse(
         results=[_to_summary(b) for b in bots],
         total=total,
@@ -209,7 +236,7 @@ async def list_bots(
 # ── GET /api/v1/bot/{id} ──────────────────────────────────────────────────────
 
 @router.get("/{bot_id}", response_model=BotResponse)
-async def get_bot(bot_id: str):
+async def get_bot(bot_id: str, request: Request):
     """Get a bot by ID with full transcript and analysis.
 
     Poll until `status` is `done` (or `error`).
@@ -217,20 +244,22 @@ async def get_bot(bot_id: str):
     **Note:** Results are kept in memory for 24 hours after completion.
     Save the data to your own storage before then.
     """
-    bot = await _get_or_404(bot_id)
+    account_id: Optional[str] = getattr(request.state, "account_id", None)
+    bot = await _get_or_404(bot_id, account_id)
     return _to_response(bot)
 
 
 # ── DELETE /api/v1/bot/{id} ───────────────────────────────────────────────────
 
 @router.delete("/{bot_id}", status_code=204)
-async def delete_bot(bot_id: str):
+async def delete_bot(bot_id: str, request: Request):
     """Stop a running bot and cancel its lifecycle.
 
     If the bot already finished (`done` / `error`), it is removed from memory
     immediately. If still running, it is cancelled (transcript salvaged if possible).
     """
-    bot = await _get_or_404(bot_id)
+    account_id: Optional[str] = getattr(request.state, "account_id", None)
+    bot = await _get_or_404(bot_id, account_id)
 
     task = _running_tasks.get(bot_id)
     if task and not task.done():
@@ -265,13 +294,14 @@ async def _wait_for_transcript(bot: BotSession, timeout: int = 25) -> BotSession
 # ── GET /api/v1/bot/{id}/transcript ──────────────────────────────────────────
 
 @router.get("/{bot_id}/transcript")
-async def get_transcript(bot_id: str):
+async def get_transcript(bot_id: str, request: Request):
     """Get the raw transcript.
 
     If transcription is still running, this request blocks until it finishes
     (up to 25 s) and then returns the result automatically.
     """
-    bot = await _get_or_404(bot_id)
+    account_id: Optional[str] = getattr(request.state, "account_id", None)
+    bot = await _get_or_404(bot_id, account_id)
     bot = await _wait_for_transcript(bot)
     if bot.status not in ("call_ended", "done", "cancelled"):
         raise HTTPException(
@@ -285,10 +315,11 @@ async def get_transcript(bot_id: str):
 # ── GET /api/v1/bot/{id}/recording ───────────────────────────────────────────
 
 @router.get("/{bot_id}/recording")
-async def download_recording(bot_id: str):
+async def download_recording(bot_id: str, request: Request):
     """Download the meeting audio recording (WAV)."""
     import os
-    bot = await _get_or_404(bot_id)
+    account_id: Optional[str] = getattr(request.state, "account_id", None)
+    bot = await _get_or_404(bot_id, account_id)
     if not bot.recording_path or not os.path.exists(bot.recording_path):
         raise HTTPException(status_code=404, detail="Recording not available")
     return FileResponse(
@@ -306,7 +337,7 @@ class AnalyzeRequest(BaseModel):
 
 
 @router.post("/{bot_id}/analyze", response_model=MeetingAnalysis)
-async def analyze_bot(bot_id: str, payload: AnalyzeRequest = AnalyzeRequest()):
+async def analyze_bot(bot_id: str, request: Request, payload: AnalyzeRequest = AnalyzeRequest()):
     """(Re-)run AI analysis on the transcript.
 
     If transcription is still running, this request blocks until it finishes
@@ -314,7 +345,8 @@ async def analyze_bot(bot_id: str, payload: AnalyzeRequest = AnalyzeRequest()):
 
     Use this to switch templates or run a custom prompt on an existing transcript.
     """
-    bot = await _get_or_404(bot_id)
+    account_id: Optional[str] = getattr(request.state, "account_id", None)
+    bot = await _get_or_404(bot_id, account_id)
     bot = await _wait_for_transcript(bot)
     if not bot.transcript:
         raise HTTPException(
@@ -339,13 +371,14 @@ async def analyze_bot(bot_id: str, payload: AnalyzeRequest = AnalyzeRequest()):
 # ── GET /api/v1/bot/{id}/highlight ───────────────────────────────────────────
 
 @router.get("/{bot_id}/highlight", response_model=HighlightResponse)
-async def get_highlights(bot_id: str):
+async def get_highlights(bot_id: str, request: Request):
     """Return curated meeting highlights derived from AI analysis.
 
     Aggregates key points, action items, and decisions into a flat highlight list.
     Returns 425 if analysis is not yet available.
     """
-    bot = await _get_or_404(bot_id)
+    account_id: Optional[str] = getattr(request.state, "account_id", None)
+    bot = await _get_or_404(bot_id, account_id)
     bot = await _wait_for_transcript(bot)
     if not bot.analysis:
         raise HTTPException(
@@ -370,12 +403,13 @@ class AskRequest(BaseModel):
 
 
 @router.post("/{bot_id}/ask")
-async def ask_bot(bot_id: str, payload: AskRequest):
+async def ask_bot(bot_id: str, request: Request, payload: AskRequest):
     """Ask a free-form question about the meeting transcript."""
     question = payload.question.strip()
     if not question:
         raise HTTPException(status_code=422, detail="question is required")
-    bot = await _get_or_404(bot_id)
+    account_id: Optional[str] = getattr(request.state, "account_id", None)
+    bot = await _get_or_404(bot_id, account_id)
     if not bot.transcript:
         raise HTTPException(status_code=425, detail="No transcript available yet")
     answer = await intelligence_service.ask_about_transcript(bot.transcript, question)
@@ -385,9 +419,10 @@ async def ask_bot(bot_id: str, payload: AskRequest):
 # ── POST /api/v1/bot/{id}/followup-email ─────────────────────────────────────
 
 @router.post("/{bot_id}/followup-email")
-async def generate_followup_email(bot_id: str):
+async def generate_followup_email(bot_id: str, request: Request):
     """Generate a draft follow-up email for the meeting."""
-    bot = await _get_or_404(bot_id)
+    account_id: Optional[str] = getattr(request.state, "account_id", None)
+    bot = await _get_or_404(bot_id, account_id)
     if not bot.transcript and not bot.analysis:
         raise HTTPException(status_code=425, detail="No transcript or analysis available yet")
     result = await intelligence_service.generate_followup_email(

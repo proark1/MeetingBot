@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}Top Up — MeetingBot{% endblock %}
+{% block content %}
+
+<div class="row justify-content-center">
+  <div class="col-md-7">
+    <h4 class="mb-4">Add Credits</h4>
+
+    <!-- Amount selector -->
+    <div class="card p-4 mb-4">
+      <h6 class="mb-3">Select amount</h6>
+      <div class="d-flex flex-wrap gap-2" id="amount-selector">
+        {% for amt in amounts %}
+        <button type="button"
+          class="btn btn-outline-primary amount-btn {% if amt == 25 %}active{% endif %}"
+          data-amount="{{ amt }}"
+          onclick="selectAmount({{ amt }})">
+          ${{ amt }}
+        </button>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- Tabs: Card vs USDC -->
+    <ul class="nav nav-tabs mb-3" role="tablist">
+      <li class="nav-item">
+        <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-card">
+          💳 Credit Card
+        </button>
+      </li>
+      {% if usdc_enabled %}
+      <li class="nav-item">
+        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-usdc">
+          🔷 USDC (ERC-20)
+        </button>
+      </li>
+      {% endif %}
+    </ul>
+
+    <div class="tab-content">
+
+      <!-- Stripe card tab -->
+      <div class="tab-pane fade show active" id="tab-card">
+        {% if stripe_enabled %}
+        <div class="card p-4">
+          <p class="text-muted mb-3">You will be redirected to a secure Stripe checkout page.</p>
+          <form id="stripe-form" method="post" action="/topup/stripe">
+            <input type="hidden" name="amount_usd" id="stripe-amount" value="25">
+            <button type="submit" class="btn btn-primary">
+              Pay $<span id="stripe-amount-display">25</span> with Card
+            </button>
+          </form>
+        </div>
+        {% else %}
+        <div class="card p-4 text-muted">
+          Stripe card payments are not configured on this server.
+        </div>
+        {% endif %}
+      </div>
+
+      <!-- USDC tab -->
+      {% if usdc_enabled %}
+      <div class="tab-pane fade" id="tab-usdc">
+        <div class="card p-4">
+          <p class="mb-2">Send <strong>USDC (ERC-20)</strong> to your unique deposit address:</p>
+          <div class="input-group mb-3">
+            <input type="text" class="form-control font-monospace" id="usdc-address"
+              value="{{ usdc_address }}" readonly>
+            <button class="btn btn-outline-secondary" onclick="copyAddress()">Copy</button>
+          </div>
+          <p class="text-muted small mb-1">
+            Contract: <code>{{ usdc_contract }}</code><br>
+            Network: Ethereum Mainnet only<br>
+            1 USDC = $1.00 credit — credited automatically within ~1 minute.
+          </p>
+          <div class="alert alert-warning small mb-0">
+            ⚠ Send USDC only. Other tokens sent to this address will not be credited and cannot be recovered.
+          </div>
+        </div>
+      </div>
+      {% endif %}
+
+    </div>
+  </div>
+</div>
+
+<script>
+function selectAmount(amt) {
+  document.querySelectorAll('.amount-btn').forEach(b => b.classList.remove('active'));
+  document.querySelector(`.amount-btn[data-amount="${amt}"]`).classList.add('active');
+  document.getElementById('stripe-amount').value = amt;
+  document.getElementById('stripe-amount-display').textContent = amt;
+}
+function copyAddress() {
+  navigator.clipboard.writeText(document.getElementById('usdc-address').value);
+  event.target.textContent = 'Copied!';
+  setTimeout(() => event.target.textContent = 'Copy', 2000);
+}
+</script>
+{% endblock %}
