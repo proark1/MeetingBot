@@ -507,6 +507,9 @@ async def admin_page(request: Request, db: AsyncSession = Depends(get_db)):
         flash = _flash("danger", "Invalid Ethereum address.")
     elif err == "invalid_rpc_url":
         flash = _flash("danger", "Invalid RPC URL — must start with http:// or https://")
+    elif err == "rpc_unreachable":
+        reason = request.query_params.get("reason", "connection failed")
+        flash = _flash("danger", f"RPC URL validation failed: {reason}")
     elif err == "account_not_found":
         flash = _flash("danger", "Account not found for that email.")
     elif err == "credit_failed":
@@ -585,6 +588,15 @@ async def admin_rpc_url_submit(
     url = rpc_url.strip()
     if not url.startswith(("http://", "https://")):
         return RedirectResponse("/admin?error=invalid_rpc_url", status_code=303)
+
+    from app.services.crypto_service import test_rpc_url
+    ok, reason = await test_rpc_url(url)
+    if not ok:
+        import urllib.parse
+        return RedirectResponse(
+            f"/admin?error=rpc_unreachable&reason={urllib.parse.quote(reason[:200])}",
+            status_code=303,
+        )
 
     from app.api.admin import RPC_URL_KEY
     result = await db.execute(

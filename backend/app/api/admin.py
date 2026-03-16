@@ -248,6 +248,15 @@ async def set_rpc_url(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="RPC URL must start with http:// or https://",
         )
+
+    from app.services.crypto_service import test_rpc_url
+    ok, reason = await test_rpc_url(url)
+    if not ok:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"RPC URL validation failed: {reason}",
+        )
+
     result = await db.execute(
         select(PlatformConfig).where(PlatformConfig.key == RPC_URL_KEY)
     )

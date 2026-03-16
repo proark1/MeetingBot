@@ -149,6 +149,58 @@ async def _get_rpc_url() -> Optional[str]:
         return config.value if config and config.value else None
 
 
+async def test_rpc_url(url: str) -> tuple[bool, str]:
+    """Test whether an RPC URL is reachable and returns a valid response.
+
+    Makes a lightweight ``eth_blockNumber`` JSON-RPC call.  Returns
+    ``(True, "")`` on success or ``(False, reason)`` on failure.
+    """
+    import json
+    try:
+        import httpx
+    except ImportError:
+        # Fall back to requests if httpx is not installed
+        try:
+            import requests as _requests  # type: ignore
+
+            try:
+                resp = _requests.post(
+                    url,
+                    json={"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1},
+                    timeout=10,
+                    headers={"Content-Type": "application/json"},
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                if "result" in data:
+                    return True, ""
+                if "error" in data:
+                    return False, f"RPC error: {data['error'].get('message', data['error'])}"
+                return False, "Unexpected RPC response format"
+            except Exception as exc:
+                return False, str(exc)
+        except ImportError:
+            logger.warning("Neither httpx nor requests available — skipping RPC URL test")
+            return True, ""
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(
+                url,
+                json={"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1},
+                headers={"Content-Type": "application/json"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            if "result" in data:
+                return True, ""
+            if "error" in data:
+                return False, f"RPC error: {data['error'].get('message', data['error'])}"
+            return False, "Unexpected RPC response format"
+    except Exception as exc:
+        return False, str(exc)
+
+
 async def start_usdc_monitor() -> None:
     """Start the background USDC transfer monitoring task.
 
