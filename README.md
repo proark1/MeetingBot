@@ -366,3 +366,6 @@ pip install -r requirements.txt
 playwright install chromium
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
+
+> **Note:** `requirements.txt` uses `bcrypt>=4.0.0` directly for password hashing.
+> `passlib` is not required.

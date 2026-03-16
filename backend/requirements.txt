@@ -34,7 +34,7 @@ SQLAlchemy[asyncio]>=2.0.0
 aiosqlite>=0.20.0
 
 # Auth (password hashing + JWT)
-passlib[bcrypt]>=1.7.4
+bcrypt>=4.0.0
 python-jose[cryptography]>=3.3.0
 
 # Jinja2 templates for web UI (usually included with fastapi[all], listed explicitly)

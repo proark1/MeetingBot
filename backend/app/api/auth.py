@@ -7,10 +7,10 @@ from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 from typing import Optional
 
+import bcrypt
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from jose import jwt
-from passlib.context import CryptContext
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,15 +23,13 @@ from app.models.account import Account, ApiKey
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
-_pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
 
 def _hash_password(password: str) -> str:
-    return _pwd_ctx.hash(password)
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
 
 def _verify_password(plain: str, hashed: str) -> bool:
-    return _pwd_ctx.verify(plain, hashed)
+    return bcrypt.checkpw(plain.encode(), hashed.encode())
 
 
 def _create_jwt(account_id: str) -> str:
