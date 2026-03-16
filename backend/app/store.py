@@ -60,6 +60,9 @@ class BotSession:
     # Owning account (None = unauthenticated / superadmin mode)
     account_id: Optional[str] = None
 
+    # For business accounts: isolates data per end-user within the account
+    sub_user_id: Optional[str] = None
+
     # AI usage tracking
     ai_usage: list = field(default_factory=list)  # list of usage entry dicts
 
@@ -152,12 +155,15 @@ class Store:
         limit: int = 50,
         offset: int = 0,
         account_id: Optional[str] = None,
+        sub_user_id: Optional[str] = None,
     ) -> tuple[list[BotSession], int]:
         bots = sorted(self._bots.values(), key=lambda b: b.created_at, reverse=True)
         if status:
             bots = [b for b in bots if b.status == status]
         if account_id:
             bots = [b for b in bots if b.account_id == account_id]
+        if sub_user_id is not None:
+            bots = [b for b in bots if b.sub_user_id == sub_user_id]
         total = len(bots)
         return bots[offset : offset + limit], total
 
@@ -214,6 +220,7 @@ class Store:
                 "metadata": bot.metadata,
                 "is_demo_transcript": bot.is_demo_transcript,
                 "account_id": bot.account_id,
+                "sub_user_id": bot.sub_user_id,
                 "ai_usage": bot.ai_usage,
                 "created_at": _dt(bot.created_at),
                 "updated_at": _dt(bot.updated_at),
@@ -231,6 +238,7 @@ class Store:
                     snap = BotSnapshot(
                         id=bot.id,
                         account_id=bot.account_id,
+                        sub_user_id=bot.sub_user_id,
                         status=bot.status,
                         meeting_url=bot.meeting_url,
                         created_at=bot.created_at,
@@ -424,6 +432,7 @@ async def load_persisted_bots() -> int:
                     metadata=d.get("metadata", {}),
                     is_demo_transcript=d.get("is_demo_transcript", False),
                     account_id=d.get("account_id"),
+                    sub_user_id=d.get("sub_user_id"),
                     ai_usage=d.get("ai_usage", []),
                     created_at=_parse_dt(d.get("created_at")) or now,
                     updated_at=_parse_dt(d.get("updated_at")) or now,

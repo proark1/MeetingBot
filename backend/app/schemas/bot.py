@@ -98,6 +98,17 @@ class BotCreate(BaseModel):
         description="Transcribe audio in real-time during the call (15-second chunks).",
     )
 
+    # Business account sub-user isolation — also settable via X-Sub-User header
+    sub_user_id: Optional[str] = Field(
+        default=None,
+        max_length=255,
+        description=(
+            "For business accounts: an opaque identifier for the end-user this bot belongs to. "
+            "When set, only requests with the same sub_user_id (via this field or X-Sub-User header) "
+            "can see this bot's data. Can also be set via the X-Sub-User request header."
+        ),
+    )
+
     # Pass-through metadata — returned as-is in bot responses and webhook payloads
     metadata: dict[str, Any] = Field(
         default={},
@@ -193,6 +204,7 @@ class BotResponse(BaseModel):
 
     analysis_mode: str = "full"
     is_demo_transcript: bool = False
+    sub_user_id: Optional[str] = Field(default=None, description="Business account sub-user identifier (if set).")
     metadata: dict[str, Any] = {}
 
     ai_usage: Optional[AIUsageSummary] = None
@@ -220,6 +232,7 @@ class BotSummary(BaseModel):
     recording_available: bool = False
     analysis_mode: str = "full"
     is_demo_transcript: bool = False
+    sub_user_id: Optional[str] = Field(default=None, description="Business account sub-user identifier (if set).")
     metadata: dict[str, Any] = {}
     ai_total_tokens: int = 0
     ai_total_cost_usd: float = 0.0

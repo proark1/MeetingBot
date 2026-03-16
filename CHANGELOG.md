@@ -4,7 +4,26 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.1.0 — **Last updated:** 2026-03-16
+> **Latest version:** 2.2.0 — **Last updated:** 2026-03-16
+
+---
+
+## [2.2.0] - 2026-03-16
+
+### Added
+- **Business accounts** — new `account_type` field (`personal` or `business`) for platforms integrating MeetingBot on behalf of multiple end-users. Business accounts use a single API key and credit balance but can completely isolate data between end-users via the `X-Sub-User` header
+- **Sub-user data isolation** — pass `X-Sub-User: <user-id>` header (or `sub_user_id` in bot creation body) to scope all bot data to a specific end-user. Users cannot see each other's bots, transcripts, or analyses. Omit the header for an account-wide view
+- **Copy-to-clipboard for API keys** — clipboard icon beside each API key in the dashboard, with visual feedback on copy. Newly created keys show the full key once with a prominent copy button
+- Account type selection on the registration page (Personal / Business)
+- Business account info card on the dashboard with integration examples
+- Account type column in the admin panel's user accounts table
+- `sub_user_id` field in bot creation, bot response, and bot summary schemas
+
+### Changed
+- `POST /api/v1/auth/register` now accepts `account_type` field (`personal` | `business`)
+- `GET /api/v1/auth/me` now returns `account_type` in the response
+- All bot endpoints (`GET`, `DELETE`, transcript, recording, analyze, ask, highlight, follow-up email) now respect `X-Sub-User` header for data isolation
+- Bot list and stats endpoints filter by `sub_user_id` when the header is present
 
 ---
 

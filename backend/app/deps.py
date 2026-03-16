@@ -96,6 +96,19 @@ async def get_current_account_id(
     return api_key.account_id
 
 
+async def get_sub_user_id(request: Request) -> Optional[str]:
+    """Extract X-Sub-User header for business account data isolation.
+
+    Business accounts pass this header to scope bot data per end-user.
+    Returns None for personal accounts or when the header is absent.
+    """
+    sub_user = request.headers.get("X-Sub-User")
+    if sub_user:
+        sub_user = sub_user.strip()[:255]  # limit length
+    request.state.sub_user_id = sub_user or None
+    return sub_user or None
+
+
 async def require_auth(
     account_id: Optional[str] = Depends(get_current_account_id),
 ) -> Optional[str]:

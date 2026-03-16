@@ -14,6 +14,24 @@
           <label class="form-label">Password <small class="text-muted">(min 8 characters)</small></label>
           <input type="password" name="password" class="form-control" minlength="8" required>
         </div>
+        <div class="mb-3">
+          <label class="form-label">Account type</label>
+          <div class="form-check">
+            <input class="form-check-input" type="radio" name="account_type" id="type-personal" value="personal" checked>
+            <label class="form-check-label" for="type-personal">
+              <strong>Personal</strong> — for individual use
+            </label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="radio" name="account_type" id="type-business" value="business">
+            <label class="form-check-label" for="type-business">
+              <strong>Business</strong> — for platforms integrating MeetingBot for multiple end-users
+            </label>
+          </div>
+          <small class="text-muted mt-1 d-block">
+            Business accounts use a single API key but can isolate data per end-user via the <code>X-Sub-User</code> header.
+          </small>
+        </div>
         <button type="submit" class="btn btn-primary w-100">Create account</button>
       </form>
       <hr>

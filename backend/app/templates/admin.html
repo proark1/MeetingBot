@@ -265,6 +265,7 @@
           <thead class="table-light sticky-top">
             <tr>
               <th>Email</th>
+              <th>Type</th>
               <th>Balance</th>
               <th>Wallet</th>
               <th>Joined</th>
@@ -275,6 +276,13 @@
             {% for a in all_accounts %}
             <tr>
               <td class="small">{{ a.email }}</td>
+              <td class="small">
+                {% if a.account_type == "business" %}
+                <span class="badge bg-primary">Business</span>
+                {% else %}
+                <span class="badge bg-secondary">Personal</span>
+                {% endif %}
+              </td>
               <td class="small fw-semibold {% if a.credits_usd < 1 %}text-danger{% else %}text-success{% endif %}">
                 ${{ "%.2f"|format(a.credits_usd) }}
               </td>

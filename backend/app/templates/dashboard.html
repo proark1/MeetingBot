@@ -5,6 +5,9 @@
 <div class="row mb-4">
   <div class="col-md-4">
     <div class="card p-4 text-center">
+      {% if account.account_type == "business" %}
+      <span class="badge bg-primary mb-2">Business Account</span>
+      {% endif %}
       <div class="text-muted small mb-1">Credit Balance</div>
       <div class="display-6 fw-bold {% if balance < 1 %}text-danger{% else %}text-success{% endif %}">
         ${{ "%.4f"|format(balance) }}
@@ -28,7 +31,17 @@
           {% for key in api_keys %}
           <tr>
             <td>{{ key.name }}</td>
-            <td><code>{{ key.key_preview }}</code></td>
+            <td>
+              <code id="key-{{ key.id }}">{{ key.key_preview }}</code>
+              {% if key.full_key %}
+              <button type="button" class="btn btn-sm btn-outline-secondary ms-1 copy-key-btn" data-key="{{ key.full_key }}" title="Copy API key">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
+                  <path d="M4 1.5H3a2 2 0 0 0-2 2V14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V3.5a2 2 0 0 0-2-2h-1v1h1a1 1 0 0 1 1 1V14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1h1v-1z"/>
+                  <path d="M9.5 1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-3a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5h3zm-3-1A1.5 1.5 0 0 0 5 1.5v1A1.5 1.5 0 0 0 6.5 4h3A1.5 1.5 0 0 0 11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3z"/>
+                </svg>
+              </button>
+              {% endif %}
+            </td>
             <td class="text-muted small">{{ key.last_used_at or "Never" }}</td>
             <td>
               <form method="post" action="/dashboard/keys/{{ key.id }}/revoke" style="display:inline">
@@ -46,6 +59,34 @@
     </div>
   </div>
 </div>
+
+{% if account.account_type == "business" %}
+<div class="card p-4 mb-4 border-primary">
+  <div class="d-flex justify-content-between align-items-center mb-2">
+    <h6 class="mb-0"><span class="badge bg-primary me-2">Business</span> Multi-User Data Isolation</h6>
+  </div>
+  <p class="text-muted small mb-2">
+    Your business account supports per-user data isolation. Pass the <code>X-Sub-User</code> header
+    with a unique identifier for each end-user. Bots created with a sub-user ID are only visible
+    to requests using the same identifier.
+  </p>
+  <div class="bg-light p-3 rounded">
+    <p class="mb-1 small fw-bold">Example: Create a bot scoped to a user</p>
+    <pre class="mb-0 small"><code>curl -X POST {{ request.base_url }}api/v1/bot \
+  -H "Authorization: Bearer sk_live_..." \
+  -H "X-Sub-User: user-123" \
+  -H "Content-Type: application/json" \
+  -d '{"meeting_url": "https://meet.google.com/abc-defg-hij"}'</code></pre>
+    <p class="mt-2 mb-1 small fw-bold">Example: List only that user's bots</p>
+    <pre class="mb-0 small"><code>curl {{ request.base_url }}api/v1/bot \
+  -H "Authorization: Bearer sk_live_..." \
+  -H "X-Sub-User: user-123"</code></pre>
+    <p class="mt-2 mb-0 small text-muted">
+      Omit the <code>X-Sub-User</code> header to see all bots across all sub-users (account-wide view).
+    </p>
+  </div>
+</div>
+{% endif %}
 
 <div class="card p-4 mb-4">
   <div class="d-flex justify-content-between align-items-center mb-2">
@@ -98,4 +139,35 @@
   {% endif %}
 </div>
 
+{% if new_key %}
+<div class="alert alert-success alert-dismissible fade show mt-3" role="alert">
+  <strong>New API key created!</strong> Copy it now — it won't be shown again.<br>
+  <code id="new-key-value" class="d-inline-block mt-1" style="font-size:1em">{{ new_key }}</code>
+  <button type="button" class="btn btn-sm btn-outline-success ms-2 copy-key-btn" data-key="{{ new_key }}" title="Copy API key">
+    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
+      <path d="M4 1.5H3a2 2 0 0 0-2 2V14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V3.5a2 2 0 0 0-2-2h-1v1h1a1 1 0 0 1 1 1V14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1h1v-1z"/>
+      <path d="M9.5 1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-3a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5h3zm-3-1A1.5 1.5 0 0 0 5 1.5v1A1.5 1.5 0 0 0 6.5 4h3A1.5 1.5 0 0 0 11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3z"/>
+    </svg>
+  </button>
+  <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>
+{% endif %}
+
+<script>
+document.querySelectorAll('.copy-key-btn').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    var key = this.getAttribute('data-key');
+    navigator.clipboard.writeText(key).then(function() {
+      btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16"><path d="M13.854 3.646a.5.5 0 0 1 0 .708l-7 7a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L6.5 10.293l6.646-6.647a.5.5 0 0 1 .708 0z"/></svg>';
+      btn.classList.remove('btn-outline-secondary', 'btn-outline-success');
+      btn.classList.add('btn-success');
+      setTimeout(function() {
+        btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16"><path d="M4 1.5H3a2 2 0 0 0-2 2V14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V3.5a2 2 0 0 0-2-2h-1v1h1a1 1 0 0 1 1 1V14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1h1v-1z"/><path d="M9.5 1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-3a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5h3zm-3-1A1.5 1.5 0 0 0 5 1.5v1A1.5 1.5 0 0 0 6.5 4h3A1.5 1.5 0 0 0 11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3z"/></svg>';
+        btn.classList.remove('btn-success');
+        btn.classList.add('btn-outline-secondary');
+      }, 2000);
+    });
+  });
+});
+</script>
 {% endblock %}

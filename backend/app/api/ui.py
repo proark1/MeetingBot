@@ -70,6 +70,7 @@ async def register_submit(
     request: Request,
     email: str = Form(...),
     password: str = Form(...),
+    account_type: str = Form(default="personal"),
     db: AsyncSession = Depends(get_db),
 ):
     from app.api.auth import _hash_password, generate_api_key
@@ -93,11 +94,16 @@ async def register_submit(
             "flash": _flash("danger", "Email already registered. Try logging in."),
         })
 
+    # Validate account_type
+    if account_type not in ("personal", "business"):
+        account_type = "personal"
+
     account = Account(
         id=str(uuid.uuid4()),
         email=email,
         hashed_password=_hash_password(password),
         credits_usd=Decimal("0"),
+        account_type=account_type,
     )
     db.add(account)
 
@@ -208,6 +214,10 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
     if request.query_params.get("wallet") == "taken":
         flash = _flash("danger", "This wallet address is already linked to another account.")
 
+    new_key = request.query_params.get("new_key")
+    if new_key and request.query_params.get("created") == "1":
+        flash = _flash("success", "API key created successfully.")
+
     return templates.TemplateResponse("dashboard.html", {
         "request": request,
         "account": account,
@@ -217,6 +227,7 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
         "api_keys": api_keys,
         "transactions": transactions,
         "flash": flash,
+        "new_key": new_key if request.query_params.get("created") == "1" else None,
     })
 
 
@@ -242,7 +253,7 @@ async def create_key_ui(
     db.add(api_key)
     await db.commit()
 
-    return RedirectResponse("/dashboard?created=1", status_code=303)
+    return RedirectResponse(f"/dashboard?created=1&new_key={key_value}", status_code=303)
 
 
 @router.post("/dashboard/keys/{key_id}/revoke", include_in_schema=False)
@@ -442,6 +453,7 @@ async def admin_page(request: Request, db: AsyncSession = Depends(get_db)):
         {
             "id": a.id,
             "email": a.email,
+            "account_type": a.account_type,
             "credits_usd": float(a.credits_usd or 0),
             "wallet_address": a.wallet_address,
             "is_active": a.is_active,

@@ -28,6 +28,8 @@ class Account(Base):
     credits_usd: Mapped[Decimal] = mapped_column(Numeric(12, 6), default=Decimal("0"))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
+    # "personal" (default) or "business" — business accounts can scope data per sub-user
+    account_type: Mapped[str] = mapped_column(String(20), default="personal", nullable=False)
     wallet_address: Mapped[Optional[str]] = mapped_column(String(42), unique=True, nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
@@ -98,6 +100,8 @@ class BotSnapshot(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     account_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
+    # For business accounts: isolates data per end-user within the account
+    sub_user_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False)
     meeting_url: Mapped[str] = mapped_column(String(2048), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

@@ -51,6 +51,51 @@ curl -X POST http://localhost:8000/api/v1/auth/register \
 ```
 
 > **`key_name`** (optional, default `"Default"`) — a label for the first API key created with your account.
+>
+> **`account_type`** (optional, default `"personal"`) — set to `"business"` if you are a platform integrating MeetingBot for multiple end-users.
+
+### Business accounts (multi-user data isolation)
+
+Business accounts are designed for **platforms that integrate MeetingBot on behalf of multiple end-users**. A single business account uses one API key and one credit balance, but can completely isolate data between end-users so they never see each other's bots, transcripts, or analyses.
+
+#### How it works
+
+1. **Register a business account:**
+```bash
+curl -X POST http://localhost:8000/api/v1/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email": "platform@example.com", "password": "yourpassword", "account_type": "business"}'
+```
+
+2. **Pass `X-Sub-User` header on every request** to scope data to a specific end-user:
+```bash
+# Create a bot for user "alice"
+curl -X POST http://localhost:8000/api/v1/bot \
+  -H "Authorization: Bearer sk_live_..." \
+  -H "X-Sub-User: alice" \
+  -H "Content-Type: application/json" \
+  -d '{"meeting_url": "https://meet.google.com/abc-defg-hij"}'
+
+# List only alice's bots — bob's bots are not visible
+curl http://localhost:8000/api/v1/bot \
+  -H "Authorization: Bearer sk_live_..." \
+  -H "X-Sub-User: alice"
+
+# List only bob's bots — alice's bots are not visible
+curl http://localhost:8000/api/v1/bot \
+  -H "Authorization: Bearer sk_live_..." \
+  -H "X-Sub-User: bob"
+```
+
+3. **Omit `X-Sub-User` for an account-wide view** of all bots across all sub-users (admin/platform view).
+
+#### Key points
+
+- **`X-Sub-User`** is an opaque string (max 255 chars) — use any identifier: user ID, email, UUID, etc.
+- The header applies to **all bot endpoints**: create, list, get, delete, transcript, recording, analyze, ask, highlight, follow-up email.
+- **Alternatively**, pass `sub_user_id` in the `POST /api/v1/bot` request body instead of (or in addition to) the header. The body field takes precedence.
+- Credits are shared across all sub-users under the business account — billing is at the account level.
+- Personal accounts can also use `X-Sub-User` for organizational purposes, but it is designed primarily for business accounts.
 
 ### 3. Register your USDC wallet (for crypto top-ups)
 
@@ -160,7 +205,7 @@ Or receive them via your `webhook_url` — a POST with the full payload is deliv
 ### Auth & Accounts
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/api/v1/auth/register` | Create account → returns first API key. Body: `{email, password, key_name?}` |
+| `POST` | `/api/v1/auth/register` | Create account → returns first API key. Body: `{email, password, key_name?, account_type?}`. Set `account_type: "business"` for multi-user platforms |
 | `POST` | `/api/v1/auth/login` | Email+password (OAuth2 **form data**: `username`, `password`) → JWT for web UI |
 | `GET` | `/api/v1/auth/me` | Account info + credit balance |
 | `POST` | `/api/v1/auth/keys` | Generate a new named API key. Body: `{name?}` |
@@ -273,6 +318,7 @@ Raw OpenAPI JSON: `GET /api/openapi.json`
   "tts_provider": "edge",                          // "edge" | "gemini"
   "start_muted": false,
   "live_transcription": false,                     // stream transcript in real-time
+  "sub_user_id": "user-123",                         // business accounts: isolate per end-user
   "metadata": { "your_key": "your_value" }         // pass-through, echoed in responses
 }
 ```

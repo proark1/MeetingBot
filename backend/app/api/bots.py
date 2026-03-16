@@ -13,7 +13,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 from app.config import settings
-from app.deps import get_current_account_id, SUPERADMIN_ACCOUNT_ID
+from app.deps import get_current_account_id, get_sub_user_id, SUPERADMIN_ACCOUNT_ID
 from app.schemas.bot import (
     BotCreate, BotListResponse, BotResponse, BotSummary,
     MeetingAnalysis, AIUsageSummary, AIUsageEntry,
@@ -42,6 +42,12 @@ _running_tasks: dict[str, asyncio.Task] = {}
 _bot_queue: list[str] = []
 
 _ACTIVE_STATUSES = ("ready", "scheduled", "queued", "joining", "in_call", "call_ended")
+
+
+def _get_sub_user_from_request(request: Request) -> Optional[str]:
+    """Extract sub_user_id from X-Sub-User header."""
+    val = request.headers.get("X-Sub-User", "").strip()[:255]
+    return val or None
 
 
 async def _queue_processor() -> None:
@@ -80,6 +86,7 @@ def _to_summary(bot: BotSession) -> BotSummary:
         recording_available=bot.recording_available(),
         analysis_mode=bot.analysis_mode,
         is_demo_transcript=bot.is_demo_transcript,
+        sub_user_id=bot.sub_user_id,
         metadata=bot.metadata,
         ai_total_tokens=bot.ai_total_tokens,
         ai_total_cost_usd=bot.ai_total_cost_usd,
@@ -108,6 +115,7 @@ def _to_response(bot: BotSession) -> BotResponse:
         recording_available=bot.recording_available(),
         analysis_mode=bot.analysis_mode,
         is_demo_transcript=bot.is_demo_transcript,
+        sub_user_id=bot.sub_user_id,
         metadata=bot.metadata,
         ai_usage=AIUsageSummary(
             total_tokens=bot.ai_total_tokens,
@@ -118,7 +126,11 @@ def _to_response(bot: BotSession) -> BotResponse:
     )
 
 
-async def _get_or_404(bot_id: str, account_id: Optional[str] = None) -> BotSession:
+async def _get_or_404(
+    bot_id: str,
+    account_id: Optional[str] = None,
+    sub_user_id: Optional[str] = None,
+) -> BotSession:
     bot = await store.get_bot(bot_id)
     if bot is None:
         raise HTTPException(status_code=404, detail=f"Bot {bot_id!r} not found")
@@ -129,6 +141,9 @@ async def _get_or_404(bot_id: str, account_id: Optional[str] = None) -> BotSessi
         and bot.account_id is not None
         and bot.account_id != account_id
     ):
+        raise HTTPException(status_code=404, detail=f"Bot {bot_id!r} not found")
+    # Sub-user isolation: when sub_user_id is provided, only show matching bots
+    if sub_user_id is not None and bot.sub_user_id != sub_user_id:
         raise HTTPException(status_code=404, detail=f"Bot {bot_id!r} not found")
     return bot
 
@@ -145,10 +160,20 @@ async def create_bot(payload: BotCreate, request: Request):
 
     Poll `GET /api/v1/bot/{id}` until `status` is `done` (or `error`).
 
+    **Business accounts:** Pass `sub_user_id` in the body or the `X-Sub-User` header
+    to scope this bot to a specific end-user. When set, only requests with the same
+    sub-user identifier can access this bot's data.
+
     **Platforms supported for real recording:** Google Meet, Zoom, Microsoft Teams.
     Other platforms run in demo mode (AI-generated sample transcript).
     """
     account_id: Optional[str] = getattr(request.state, "account_id", None)
+
+    # Resolve sub_user_id: body field takes precedence, then X-Sub-User header
+    sub_user_id = payload.sub_user_id
+    if not sub_user_id:
+        header_val = request.headers.get("X-Sub-User", "").strip()[:255]
+        sub_user_id = header_val or None
 
     # Check credits for per-user accounts (not superadmin / unauthenticated)
     if account_id and account_id != SUPERADMIN_ACCOUNT_ID:
@@ -181,6 +206,7 @@ async def create_bot(payload: BotCreate, request: Request):
         live_transcription=payload.live_transcription,
         metadata=payload.metadata,
         account_id=account_id if account_id != SUPERADMIN_ACCOUNT_ID else None,
+        sub_user_id=sub_user_id,
     )
     await store.create_bot(bot)
 
@@ -211,8 +237,9 @@ async def get_stats(request: Request):
     Per-user accounts see only their own bots; superadmin sees all.
     """
     account_id: Optional[str] = getattr(request.state, "account_id", None)
+    sub_user_id = _get_sub_user_from_request(request)
     filter_account = account_id if (account_id and account_id != SUPERADMIN_ACCOUNT_ID) else None
-    all_bots, _ = await store.list_bots(limit=10000, account_id=filter_account)
+    all_bots, _ = await store.list_bots(limit=10000, account_id=filter_account, sub_user_id=sub_user_id)
     counts: dict[str, int] = {}
     for b in all_bots:
         counts[b.status] = counts.get(b.status, 0) + 1
@@ -238,11 +265,12 @@ async def list_bots(
 ):
     """List bots (lightweight summaries, no transcript/analysis)."""
     account_id: Optional[str] = getattr(request.state, "account_id", None)
+    sub_user_id = _get_sub_user_from_request(request)
     # Superadmin and unauthenticated see all bots; per-user accounts see only their own
     filter_account = (
         account_id if (account_id and account_id != SUPERADMIN_ACCOUNT_ID) else None
     )
-    bots, total = await store.list_bots(status=status, limit=limit, offset=offset, account_id=filter_account)
+    bots, total = await store.list_bots(status=status, limit=limit, offset=offset, account_id=filter_account, sub_user_id=sub_user_id)
     return BotListResponse(
         results=[_to_summary(b) for b in bots],
         total=total,
@@ -263,7 +291,8 @@ async def get_bot(bot_id: str, request: Request):
     Save the data to your own storage before then.
     """
     account_id: Optional[str] = getattr(request.state, "account_id", None)
-    bot = await _get_or_404(bot_id, account_id)
+    sub_user_id = _get_sub_user_from_request(request)
+    bot = await _get_or_404(bot_id, account_id, sub_user_id)
     return _to_response(bot)
 
 
@@ -277,7 +306,8 @@ async def delete_bot(bot_id: str, request: Request):
     immediately. If still running, it is cancelled (transcript salvaged if possible).
     """
     account_id: Optional[str] = getattr(request.state, "account_id", None)
-    bot = await _get_or_404(bot_id, account_id)
+    sub_user_id = _get_sub_user_from_request(request)
+    bot = await _get_or_404(bot_id, account_id, sub_user_id)
 
     task = _running_tasks.get(bot_id)
     if task and not task.done():
@@ -319,7 +349,8 @@ async def get_transcript(bot_id: str, request: Request):
     (up to 25 s) and then returns the result automatically.
     """
     account_id: Optional[str] = getattr(request.state, "account_id", None)
-    bot = await _get_or_404(bot_id, account_id)
+    sub_user_id = _get_sub_user_from_request(request)
+    bot = await _get_or_404(bot_id, account_id, sub_user_id)
     bot = await _wait_for_transcript(bot)
     if bot.status not in ("call_ended", "done", "cancelled"):
         raise HTTPException(
@@ -337,7 +368,8 @@ async def download_recording(bot_id: str, request: Request):
     """Download the meeting audio recording (WAV)."""
     import os
     account_id: Optional[str] = getattr(request.state, "account_id", None)
-    bot = await _get_or_404(bot_id, account_id)
+    sub_user_id = _get_sub_user_from_request(request)
+    bot = await _get_or_404(bot_id, account_id, sub_user_id)
     if not bot.recording_path or not os.path.exists(bot.recording_path):
         raise HTTPException(status_code=404, detail="Recording not available")
     return FileResponse(
@@ -364,7 +396,8 @@ async def analyze_bot(bot_id: str, request: Request, payload: AnalyzeRequest = A
     Use this to switch templates or run a custom prompt on an existing transcript.
     """
     account_id: Optional[str] = getattr(request.state, "account_id", None)
-    bot = await _get_or_404(bot_id, account_id)
+    sub_user_id = _get_sub_user_from_request(request)
+    bot = await _get_or_404(bot_id, account_id, sub_user_id)
     bot = await _wait_for_transcript(bot)
     if not bot.transcript:
         raise HTTPException(
@@ -396,7 +429,8 @@ async def get_highlights(bot_id: str, request: Request):
     Returns 425 if analysis is not yet available.
     """
     account_id: Optional[str] = getattr(request.state, "account_id", None)
-    bot = await _get_or_404(bot_id, account_id)
+    sub_user_id = _get_sub_user_from_request(request)
+    bot = await _get_or_404(bot_id, account_id, sub_user_id)
     bot = await _wait_for_transcript(bot)
     if not bot.analysis:
         raise HTTPException(
@@ -427,7 +461,8 @@ async def ask_bot(bot_id: str, request: Request, payload: AskRequest):
     if not question:
         raise HTTPException(status_code=422, detail="question is required")
     account_id: Optional[str] = getattr(request.state, "account_id", None)
-    bot = await _get_or_404(bot_id, account_id)
+    sub_user_id = _get_sub_user_from_request(request)
+    bot = await _get_or_404(bot_id, account_id, sub_user_id)
     if not bot.transcript:
         raise HTTPException(status_code=425, detail="No transcript available yet")
     answer = await intelligence_service.ask_about_transcript(bot.transcript, question)
@@ -440,7 +475,8 @@ async def ask_bot(bot_id: str, request: Request, payload: AskRequest):
 async def generate_followup_email(bot_id: str, request: Request):
     """Generate a draft follow-up email for the meeting."""
     account_id: Optional[str] = getattr(request.state, "account_id", None)
-    bot = await _get_or_404(bot_id, account_id)
+    sub_user_id = _get_sub_user_from_request(request)
+    bot = await _get_or_404(bot_id, account_id, sub_user_id)
     if not bot.transcript and not bot.analysis:
         raise HTTPException(status_code=425, detail="No transcript or analysis available yet")
     result = await intelligence_service.generate_followup_email(

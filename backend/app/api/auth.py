@@ -58,6 +58,14 @@ class RegisterRequest(BaseModel):
         max_length=100,
         description="Label for the first API key generated with your account.",
     )
+    account_type: str = Field(
+        default="personal",
+        description=(
+            "Account type: `personal` (default) for individual users, or `business` for "
+            "platforms integrating MeetingBot on behalf of multiple end-users. Business "
+            "accounts can use the `X-Sub-User` header to isolate data per end-user."
+        ),
+    )
 
     model_config = {
         "json_schema_extra": {
@@ -65,6 +73,7 @@ class RegisterRequest(BaseModel):
                 "email": "you@example.com",
                 "password": "supersecret",
                 "key_name": "Production",
+                "account_type": "personal",
             }
         }
     }
@@ -73,6 +82,7 @@ class RegisterRequest(BaseModel):
 class RegisterResponse(BaseModel):
     account_id: str = Field(description="Unique account UUID.")
     email: str = Field(description="Registered email address.")
+    account_type: str = Field(description="Account type: `personal` or `business`.")
     api_key: str = Field(
         description=(
             "Your first API key (`sk_live_...`). "
@@ -128,6 +138,7 @@ class ApiKeyResponse(BaseModel):
 class AccountResponse(BaseModel):
     id: str = Field(description="Unique account UUID.")
     email: str = Field(description="Registered email address.")
+    account_type: str = Field(description="Account type: `personal` or `business`.")
     credits_usd: float = Field(description="Current prepaid credit balance in USD.")
     wallet_address: Optional[str] = Field(
         default=None,
@@ -162,11 +173,13 @@ async def register(request: Request, payload: RegisterRequest, db: AsyncSession 
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=409, detail="Email already registered")
 
+    acct_type = payload.account_type if payload.account_type in ("personal", "business") else "personal"
     account = Account(
         id=str(uuid.uuid4()),
         email=payload.email,
         hashed_password=_hash_password(payload.password),
         credits_usd=Decimal("0"),
+        account_type=acct_type,
     )
     db.add(account)
 
@@ -181,14 +194,19 @@ async def register(request: Request, payload: RegisterRequest, db: AsyncSession 
     await db.commit()
 
     logger.info("New account registered: %s (%s)", account.email, account.id)
+    msg = "Account created. Use the api_key as your Bearer token: Authorization: Bearer <api_key>"
+    if acct_type == "business":
+        msg += (
+            " — Business account: pass X-Sub-User header with each request "
+            "to isolate data per end-user."
+        )
+
     return RegisterResponse(
         account_id=account.id,
         email=account.email,
+        account_type=acct_type,
         api_key=key_value,
-        message=(
-            "Account created. Use the api_key as your Bearer token: "
-            "Authorization: Bearer <api_key>"
-        ),
+        message=msg,
     )
 
 
@@ -234,6 +252,7 @@ async def get_me(
     return AccountResponse(
         id=account.id,
         email=account.email,
+        account_type=account.account_type,
         credits_usd=float(account.credits_usd or 0),
         wallet_address=account.wallet_address,
         is_active=account.is_active,
