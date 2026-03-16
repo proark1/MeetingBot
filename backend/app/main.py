@@ -162,6 +162,7 @@ app = FastAPI(
         "## Authentication\n"
         "All API calls (except `/api/v1/auth/register` and `/api/v1/auth/login`) require:\n"
         "```\nAuthorization: Bearer sk_live_<your-api-key>\n```\n"
+        "API keys are prefixed with `sk_live_` and shown **once** at creation — copy immediately. "
         "The legacy `API_KEY` environment variable acts as a superadmin bypass and skips "
         "per-user account checks. Leave it unset to enforce per-user auth.\n\n"
 
@@ -169,44 +170,84 @@ app = FastAPI(
         "Register at `POST /api/v1/auth/register` to receive your first `sk_live_...` key. "
         "Generate additional named keys with `POST /api/v1/auth/keys`. "
         "Revoke individual keys with `DELETE /api/v1/auth/keys/{id}`.\n\n"
+        "**Account types:** Pass `account_type: \"personal\"` (default) or `\"business\"` at "
+        "registration. See the **Business accounts** section below.\n\n"
         "**USDC wallet:** Register your Ethereum wallet with `PUT /api/v1/auth/wallet` so "
         "the platform can automatically attribute USDC deposits to your account.\n\n"
 
+        "## Business accounts (multi-user data isolation)\n"
+        "Business accounts are for **platforms integrating MeetingBot on behalf of multiple "
+        "end-users**. A single business account uses one API key and one shared credit balance, "
+        "but isolates all bot data between end-users.\n\n"
+        "**How to use:** Pass the `X-Sub-User: <user-id>` header on every request to scope "
+        "data to a specific end-user. Users with different sub-user IDs cannot see each other's "
+        "bots, transcripts, or analyses. Omit the header for an account-wide view of all bots.\n\n"
+        "**Alternatively**, pass `sub_user_id` in the `POST /api/v1/bot` request body — "
+        "the body field takes precedence over the header.\n\n"
+        "`X-Sub-User` is an opaque string (max 255 chars): user ID, email, UUID, etc.\n\n"
+
         "## Credits & billing\n"
-        "Each bot run deducts credits equal to the raw AI cost × `CREDIT_MARKUP` (default 3×). "
-        "A minimum balance of `MIN_CREDITS_USD` (default $0.05) is required to create a bot.\n\n"
+        "Credits are deducted per bot run. Default: `BOT_FLAT_FEE_USD` = $0.10 flat fee per bot. "
+        "When flat fee is disabled (`BOT_FLAT_FEE_USD=0`), billing uses raw AI cost × "
+        "`CREDIT_MARKUP` (default 3×). "
+        "A minimum balance of `MIN_CREDITS_USD` (default $0.10) is required to create a bot "
+        "(HTTP 402 if below this threshold).\n\n"
         "**Top up via Stripe card:** `POST /api/v1/billing/stripe/checkout` — returns a "
-        "Stripe Checkout URL. Credits are added automatically once payment is confirmed via webhook.\n\n"
+        "Stripe Checkout URL. Credits are applied automatically once payment is confirmed "
+        "via the Stripe webhook. Valid amounts are set by `STRIPE_TOP_UP_AMOUNTS` "
+        "(default: 10, 25, 50, 100 USD).\n\n"
         "**Top up via USDC (ERC-20):** First register your Ethereum wallet via "
         "`PUT /api/v1/auth/wallet`. Then `GET /api/v1/billing/usdc/address` returns the "
-        "platform deposit address. Send USDC **from your registered wallet** to that address; "
-        "the system matches the `from` address to your account. 1 USDC = $1 credit, "
-        "credited automatically within ~1 minute after on-chain confirmation.\n\n"
+        "platform deposit address. Send USDC **from your registered wallet** — the system "
+        "matches the `from` address to your account. 1 USDC = $1 credit, credited "
+        "automatically within ~1 minute of on-chain confirmation.\n\n"
         "**Check balance:** `GET /api/v1/billing/balance` — returns current `credits_usd` and "
-        "the last 50 transactions. Transaction `type` values: `stripe_topup`, `usdc_topup`, `bot_usage`.\n\n"
+        "the last 50 transactions. Transaction `type` values: `stripe_topup`, `usdc_topup`, "
+        "`bot_usage`.\n\n"
 
         "## Admin\n"
-        "Admin endpoints are restricted to designated admin accounts only.\n\n"
-        "- `GET /api/v1/admin/wallet` — view the current platform USDC collection wallet\n"
-        "- `PUT /api/v1/admin/wallet` — set or update the platform wallet address\n"
-        "- `GET /api/v1/admin/config` — list all platform configuration values\n\n"
-        "Admin web UI is available at `/admin`. "
-        "Only accounts with admin privileges can access these endpoints (HTTP 403 for others).\n\n"
+        "Admin endpoints are restricted to accounts in `ADMIN_EMAILS` (env var) or with "
+        "`is_admin=true` in the database. All others receive HTTP 403.\n\n"
+        "- `GET/PUT /api/v1/admin/wallet` — view or set the platform USDC collection wallet\n"
+        "- `GET/PUT /api/v1/admin/rpc-url` — view or set the Ethereum RPC URL (no restart needed)\n"
+        "- `GET /api/v1/admin/config` — list all platform configuration values\n"
+        "- `POST /api/v1/admin/credit` — manually credit a user account\n"
+        "- `GET /api/v1/admin/usdc/unmatched` — list USDC transfers that couldn't be attributed\n"
+        "- `POST /api/v1/admin/usdc/unmatched/{tx_hash}/resolve` — mark unmatched transfer resolved\n"
+        "- `POST /api/v1/admin/usdc/rescan` — reset USDC monitor block pointer for rescan\n\n"
+        "Admin web UI is available at `/admin`.\n\n"
+
+        "## Bot response & analysis\n"
+        "Bot responses include: `id`, `status`, `meeting_platform`, `participants`, `transcript` "
+        "(`[{speaker, text, timestamp}]`), `analysis` (`{summary, key_points, action_items, "
+        "decisions, next_steps, sentiment, topics}`), `chapters` (`[{title, start_time, summary}]`), "
+        "`speaker_stats` (`[{name, talk_time_s, talk_pct, turns}]`), `recording_available`, "
+        "`is_demo_transcript`, `sub_user_id`, `metadata`, and `ai_usage` "
+        "(`{total_tokens, total_cost_usd, primary_model, operations: [{operation, provider, model, "
+        "input_tokens, output_tokens, total_tokens, cost_usd, duration_s}]}`).\n\n"
 
         "## AI providers\n"
         "Set `ANTHROPIC_API_KEY` for Claude (preferred) or `GEMINI_API_KEY` for Gemini. "
-        "Claude is used for both transcription (Haiku) and analysis (Sonnet/Opus).\n\n"
+        "When both are set, Claude takes precedence for transcription and analysis.\n\n"
 
         "## Bot lifecycle\n"
         "`ready` / `scheduled` / `queued` → `joining` → `in_call` → `call_ended` → "
         "`transcribing` → `done` (or `error` / `cancelled`)\n\n"
         "- **`scheduled`** — bot has a future `join_at` time and is waiting\n"
-        "- **`queued`** — concurrency limit reached; bot is waiting for a free slot\n\n"
+        "- **`queued`** — `MAX_CONCURRENT_BOTS` limit reached; waiting for a free slot\n"
+        "- **`done`** — transcript + analysis complete; results available for 24 hours\n\n"
+
+        "## Rate limits\n"
+        "- `POST /api/v1/auth/register` — 3 requests/min per IP\n"
+        "- `POST /api/v1/auth/login` — 5 requests/min per IP\n"
+        "- `POST /api/v1/bot` — 20 requests/min per IP\n\n"
+        "Exceeded limits return HTTP 429.\n\n"
 
         "## Auto-leave\n"
-        "The bot leaves when alone for `BOT_ALONE_TIMEOUT` seconds (default 5 min).\n"
+        "The bot leaves automatically when it has been the only participant for "
+        "`BOT_ALONE_TIMEOUT` seconds (default 5 min).\n"
     ),
-    version="2.1.0",
+    version="2.2.0",
     lifespan=lifespan,
     docs_url="/api/docs",
     redoc_url="/api/redoc",
@@ -244,7 +285,7 @@ app.include_router(ui_router)                                       # web UI (no
 @app.get("/health", tags=["Health"])
 @app.get("/api/health", tags=["Health"])
 async def health():
-    return {"status": "ok", "service": "MeetingBot", "version": "2.1.0"}
+    return {"status": "ok", "service": "MeetingBot", "version": "2.2.0"}
 
 
 # ── Serve frontend ────────────────────────────────────────────────────────────

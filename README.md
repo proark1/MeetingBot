@@ -509,9 +509,11 @@ Or use the admin web UI at `/admin` to manage all settings through a form.
 | `/topup` | Add credits (Stripe card or USDC) |
 | `/admin` | Platform administration — stats, unmatched transfers, user accounts, manual credit, rescan, wallet config, RPC URL (admin only) |
 
-Full interactive docs (with request/response examples): `GET /api/docs`
+Full interactive docs (with request/response examples and try-it-out): `GET /api/docs`
 Alternative ReDoc view: `GET /api/redoc`
 Raw OpenAPI JSON: `GET /api/openapi.json`
+
+> The Swagger UI at `/api/docs` is generated directly from the FastAPI application and always reflects the live API — including all request/response schemas, authentication requirements, rate limits, and business account behaviour documented in the description header.
 
 ---
 
