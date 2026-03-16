@@ -1,8 +1,8 @@
 # MeetingBot API
 
-**Version 2.1.0** — A stateless meeting bot API service with multi-tenant billing.
+**Version 2.2.0** — A stateless meeting bot API service with multi-tenant billing.
 
-> **Last updated:** 2026-03-16 · **API version in Swagger UI:** 2.1.0 <!-- auto-updated on each release -->
+> **Last updated:** 2026-03-16 · **API version in Swagger UI:** 2.2.0 <!-- auto-updated on each release -->
 
 Send bots into **Zoom**, **Google Meet**, and **Microsoft Teams** meetings to record, transcribe, and analyse them with **Claude** (Anthropic) or **Gemini** (Google) AI.
 
@@ -47,12 +47,24 @@ Admin panel at `http://localhost:8000/admin` (admin accounts only)
 curl -X POST http://localhost:8000/api/v1/auth/register \
   -H "Content-Type: application/json" \
   -d '{"email": "you@example.com", "password": "yourpassword", "key_name": "Default"}'
-# → {"account_id": "...", "email": "...", "api_key": "<your-api-key>", "message": "..."}
+```
+
+Response:
+```json
+{
+  "account_id": "550e8400-e29b-41d4-a716-446655440000",
+  "email": "you@example.com",
+  "account_type": "personal",
+  "api_key": "sk_live_<40-char-token>",
+  "message": "Account created. Use the api_key as your Bearer token: Authorization: Bearer <api_key>"
+}
 ```
 
 > **`key_name`** (optional, default `"Default"`) — a label for the first API key created with your account.
 >
-> **`account_type`** (optional, default `"personal"`) — set to `"business"` if you are a platform integrating MeetingBot for multiple end-users.
+> **`account_type`** (optional, default `"personal"`) — set to `"business"` if you are a platform integrating MeetingBot for multiple end-users. See [Business accounts](#business-accounts-multi-user-data-isolation) below.
+
+**API key format:** All keys are prefixed with `sk_live_` followed by 40 URL-safe characters (e.g. `sk_live_AbCdEfGh...`). The full key is shown **once** at creation — copy it immediately. Subsequent `GET /api/v1/auth/keys` calls return only a preview of the first 16 characters.
 
 ### Business accounts (multi-user data isolation)
 
@@ -65,6 +77,17 @@ Business accounts are designed for **platforms that integrate MeetingBot on beha
 curl -X POST http://localhost:8000/api/v1/auth/register \
   -H "Content-Type: application/json" \
   -d '{"email": "platform@example.com", "password": "yourpassword", "account_type": "business"}'
+```
+
+Response includes `"account_type": "business"` and a reminder to use the `X-Sub-User` header:
+```json
+{
+  "account_id": "...",
+  "email": "platform@example.com",
+  "account_type": "business",
+  "api_key": "sk_live_...",
+  "message": "Account created. Use the api_key as your Bearer token ... — Business account: pass X-Sub-User header with each request to isolate data per end-user."
+}
 ```
 
 2. **Pass `X-Sub-User` header on every request** to scope data to a specific end-user:
@@ -87,15 +110,49 @@ curl http://localhost:8000/api/v1/bot \
   -H "X-Sub-User: bob"
 ```
 
-3. **Omit `X-Sub-User` for an account-wide view** of all bots across all sub-users (admin/platform view).
+3. **Omit `X-Sub-User` for an account-wide view** of all bots across all sub-users (platform/admin view).
 
 #### Key points
 
 - **`X-Sub-User`** is an opaque string (max 255 chars) — use any identifier: user ID, email, UUID, etc.
 - The header applies to **all bot endpoints**: create, list, get, delete, transcript, recording, analyze, ask, highlight, follow-up email.
-- **Alternatively**, pass `sub_user_id` in the `POST /api/v1/bot` request body instead of (or in addition to) the header. The body field takes precedence.
+- **Alternatively**, pass `sub_user_id` in the `POST /api/v1/bot` request body instead of (or in addition to) the header. The body field takes precedence over the header.
 - Credits are shared across all sub-users under the business account — billing is at the account level.
-- Personal accounts can also use `X-Sub-User` for organizational purposes, but it is designed primarily for business accounts.
+- When `X-Sub-User` is omitted on a business account, the API returns all bots regardless of sub-user (useful for platform-level dashboards).
+- Personal accounts can also use `X-Sub-User` for organisational purposes, but it is designed primarily for business accounts.
+
+#### Full business account workflow
+
+```bash
+# Step 1: Register platform account
+curl -X POST http://localhost:8000/api/v1/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email": "platform@acme.com", "password": "secure-pass", "account_type": "business"}'
+# → save the returned api_key
+
+# Step 2: Add credits (Stripe)
+curl -X POST http://localhost:8000/api/v1/billing/stripe/checkout \
+  -H "Authorization: Bearer sk_live_<platform-key>" \
+  -H "Content-Type: application/json" \
+  -d '{"amount_usd": 50, "success_url": "https://acme.com/billing/ok"}'
+# → open the returned checkout_url to complete payment
+
+# Step 3: Send bots on behalf of your users
+curl -X POST http://localhost:8000/api/v1/bot \
+  -H "Authorization: Bearer sk_live_<platform-key>" \
+  -H "X-Sub-User: user_abc123" \
+  -H "Content-Type: application/json" \
+  -d '{"meeting_url": "https://zoom.us/j/...", "webhook_url": "https://acme.com/hooks/meeting"}'
+
+# Step 4: Retrieve results for that user only
+curl http://localhost:8000/api/v1/bot/<bot-id> \
+  -H "Authorization: Bearer sk_live_<platform-key>" \
+  -H "X-Sub-User: user_abc123"
+
+# Step 5: Check platform-wide balance and usage
+curl http://localhost:8000/api/v1/billing/balance \
+  -H "Authorization: Bearer sk_live_<platform-key>"
+```
 
 ### 3. Register your USDC wallet (for crypto top-ups)
 
@@ -124,7 +181,7 @@ curl http://localhost:8000/api/v1/billing/usdc/address \
 
 Or use the web UI at `/topup`.
 
-> **USDC deposits — how attribution works:** Each user registers their Ethereum wallet on their account (`PUT /api/v1/auth/wallet`). The admin sets a single platform collection wallet via `/admin`. When a user sends USDC to the platform wallet, the system matches the `from` address to the user's registered wallet and credits their account automatically. If no platform wallet is configured, users get per-user HD-derived addresses (requires `CRYPTO_HD_SEED`).
+> **USDC deposits — how attribution works:** Each user registers their Ethereum wallet on their account (`PUT /api/v1/auth/wallet`). The admin sets a single platform collection wallet via `/admin`. When a user sends USDC to the platform wallet, the system matches the `from` address to the user's registered wallet and credits their account automatically (within ~1 minute of on-chain confirmation). If no platform wallet is configured, users get per-user HD-derived addresses (requires `CRYPTO_HD_SEED`).
 >
 > **Important:** In platform wallet mode, users **must register their wallet before sending USDC**. Transfers from an unregistered address are recorded in the `unmatched_usdc_transfers` table and logged as warnings, but are not credited automatically. Admins can view these via `GET /api/v1/admin/usdc/unmatched` and use `POST /api/v1/admin/credit` to apply the funds manually.
 
@@ -142,13 +199,22 @@ curl -X POST http://localhost:8000/api/v1/bot \
   }'
 ```
 
-Response:
+Response (HTTP 201):
 ```json
 {
   "id": "550e8400-e29b-41d4-a716-446655440000",
   "status": "joining",
   "meeting_url": "https://meet.google.com/abc-defg-hij",
-  "created_at": "2026-03-15T10:00:00Z"
+  "meeting_platform": "google_meet",
+  "bot_name": "Notetaker",
+  "created_at": "2026-03-15T10:00:00Z",
+  "updated_at": "2026-03-15T10:00:00Z",
+  "analysis_mode": "full",
+  "recording_available": false,
+  "is_demo_transcript": false,
+  "sub_user_id": null,
+  "metadata": {},
+  "ai_usage": null
 }
 ```
 
@@ -164,7 +230,121 @@ Or receive them via your `webhook_url` — a POST with the full payload is deliv
 
 ---
 
+## Data objects
+
+### Bot response object
+
+Returned by `GET /api/v1/bot/{id}` and `POST /api/v1/bot`.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Unique bot UUID |
+| `meeting_url` | string | The meeting URL the bot joined |
+| `meeting_platform` | string | Detected platform: `google_meet`, `zoom`, `teams`, or `demo` |
+| `bot_name` | string | Display name shown in the meeting |
+| `status` | string | Current lifecycle status (see [Bot lifecycle](#bot-lifecycle)) |
+| `error_message` | string\|null | Human-readable error if `status` is `error` |
+| `created_at` | ISO-8601 | When the bot was created |
+| `updated_at` | ISO-8601 | Last status change time |
+| `started_at` | ISO-8601\|null | When the bot joined the meeting |
+| `ended_at` | ISO-8601\|null | When the meeting ended |
+| `duration_seconds` | float\|null | Meeting duration in seconds |
+| `participants` | string[] | Names of meeting participants |
+| `transcript` | object[] | Array of `{speaker, text, timestamp}` entries. Available once `status` is `done` |
+| `analysis` | object\|null | AI-generated analysis (see [Analysis object](#analysis-object)). Available once `status` is `done` and `analysis_mode` is `full` |
+| `chapters` | object[] | Array of `{title, start_time, summary}` chapter segments |
+| `speaker_stats` | object[] | Array of `{name, talk_time_s, talk_pct, turns}` per speaker |
+| `recording_available` | boolean | `true` when audio can be downloaded via `GET /bot/{id}/recording` |
+| `analysis_mode` | string | `full` or `transcript_only` |
+| `is_demo_transcript` | boolean | `true` when the platform is unsupported and an AI-generated demo transcript was used |
+| `sub_user_id` | string\|null | Business account sub-user identifier (if set via `X-Sub-User` or `sub_user_id` body field) |
+| `metadata` | object | Arbitrary key-value pairs echoed from bot creation |
+| `ai_usage` | object\|null | AI token usage breakdown (see [AI usage object](#ai-usage-object)) |
+
+### Bot summary object
+
+Returned in the `results` array by `GET /api/v1/bot` (list endpoint). Identical to the Bot response object but **omits** `transcript` and `analysis` to keep the response lightweight.
+
+### Bot list response
+
+`GET /api/v1/bot` returns:
+
+```json
+{
+  "results": [ /* array of Bot summary objects */ ],
+  "total": 42,
+  "limit": 20,
+  "offset": 0
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `results` | Array of Bot summary objects for the current page |
+| `total` | Total number of bots matching the query (for pagination) |
+| `limit` | Number of results requested |
+| `offset` | Pagination offset |
+
+### Analysis object
+
+Returned in the `analysis` field of the Bot response and in webhook payloads.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `summary` | string | One-paragraph meeting summary |
+| `key_points` | string[] | Bulleted list of key discussion points |
+| `action_items` | object[] | Array of `{task, assignee}` items |
+| `decisions` | string[] | Explicit decisions made during the meeting |
+| `next_steps` | string[] | Planned follow-up steps agreed in the meeting |
+| `sentiment` | string | Overall tone: `positive`, `neutral`, or `negative` |
+| `topics` | string[] | Main topics discussed |
+
+### AI usage object
+
+The `ai_usage` field on every bot response provides full cost and token tracking.
+
+```json
+{
+  "total_tokens": 5200,
+  "total_cost_usd": 0.026,
+  "primary_model": "claude-opus-4-6",
+  "operations": [
+    {
+      "operation": "transcription",
+      "provider": "anthropic",
+      "model": "claude-opus-4-6",
+      "input_tokens": 100,
+      "output_tokens": 3000,
+      "total_tokens": 3100,
+      "cost_usd": 0.015,
+      "duration_s": 4.2
+    },
+    {
+      "operation": "analysis",
+      "provider": "anthropic",
+      "model": "claude-opus-4-6",
+      "input_tokens": 1800,
+      "output_tokens": 300,
+      "total_tokens": 2100,
+      "cost_usd": 0.011,
+      "duration_s": 3.1
+    }
+  ]
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `total_tokens` | Cumulative token count across all operations |
+| `total_cost_usd` | Total AI cost in USD before markup |
+| `primary_model` | Model used for the main analysis step |
+| `operations` | Per-operation breakdown (transcription, analysis, followup_email, etc.) |
+
+---
+
 ## Webhook payload
+
+Full payload posted to `webhook_url` when a bot finishes.
 
 ```json
 {
@@ -183,6 +363,7 @@ Or receive them via your `webhook_url` — a POST with the full payload is deliv
       "key_points": ["Auth module complete", "Dashboard work next"],
       "action_items": [{ "task": "Set up staging access", "assignee": "Alice" }],
       "decisions": ["Use virtual scrolling for performance"],
+      "next_steps": ["Alice to provision staging by Friday"],
       "sentiment": "positive",
       "topics": ["sprint review", "authentication"]
     },
@@ -193,7 +374,26 @@ Or receive them via your `webhook_url` — a POST with the full payload is deliv
       { "name": "Alice", "talk_time_s": 120, "talk_pct": 40.0, "turns": 8 }
     ],
     "recording_available": true,
-    "ai_usage": { "total_tokens": 4200, "total_cost_usd": 0.021 }
+    "is_demo_transcript": false,
+    "sub_user_id": null,
+    "metadata": {},
+    "ai_usage": {
+      "total_tokens": 4200,
+      "total_cost_usd": 0.021,
+      "primary_model": "claude-opus-4-6",
+      "operations": [
+        {
+          "operation": "transcription",
+          "provider": "anthropic",
+          "model": "claude-opus-4-6",
+          "input_tokens": 80,
+          "output_tokens": 2500,
+          "total_tokens": 2580,
+          "cost_usd": 0.013,
+          "duration_s": 3.8
+        }
+      ]
+    }
   }
 }
 ```
@@ -203,28 +403,31 @@ Or receive them via your `webhook_url` — a POST with the full payload is deliv
 ## API Reference
 
 ### Auth & Accounts
+
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/api/v1/auth/register` | Create account → returns first API key. Body: `{email, password, key_name?, account_type?}`. Set `account_type: "business"` for multi-user platforms |
-| `POST` | `/api/v1/auth/login` | Email+password (OAuth2 **form data**: `username`, `password`) → JWT for web UI |
-| `GET` | `/api/v1/auth/me` | Account info + credit balance |
-| `POST` | `/api/v1/auth/keys` | Generate a new named API key. Body: `{name?}` |
-| `GET` | `/api/v1/auth/keys` | List active API keys |
-| `DELETE` | `/api/v1/auth/keys/{id}` | Revoke an API key |
-| `GET` | `/api/v1/auth/wallet` | Get your registered Ethereum wallet address |
-| `PUT` | `/api/v1/auth/wallet` | Set or update your Ethereum wallet address. Body: `{wallet_address}`. Required for USDC deposits to the platform wallet |
+| `POST` | `/api/v1/auth/register` | Create account → returns first API key. Body: `{email, password, key_name?, account_type?}`. Set `account_type: "business"` for multi-user platforms. Returns HTTP 409 if email already registered. Rate limit: 3/min per IP |
+| `POST` | `/api/v1/auth/login` | Email+password (OAuth2 **form data**: `username`, `password`) → JWT for web UI. Rate limit: 5/min per IP |
+| `GET` | `/api/v1/auth/me` | Account info + credit balance. Returns `{id, email, account_type, credits_usd, wallet_address, is_active, created_at}` |
+| `POST` | `/api/v1/auth/keys` | Generate a new named API key. Body: `{name?}`. Returns `{id, name, key_preview, is_active, created_at, last_used_at}` — the full key is only shown at creation time |
+| `GET` | `/api/v1/auth/keys` | List active API keys. Returns array of `{id, name, key_preview, is_active, created_at, last_used_at}` |
+| `DELETE` | `/api/v1/auth/keys/{id}` | Revoke an API key. Returns HTTP 204 |
+| `GET` | `/api/v1/auth/wallet` | Get your registered Ethereum wallet address. Returns `{wallet_address, message}` |
+| `PUT` | `/api/v1/auth/wallet` | Set or update your Ethereum wallet address. Body: `{wallet_address}`. Each address can only be linked to one account (returns 409 if already taken). Validates `0x` + 40 hex chars format |
 
 > **Login note:** `POST /api/v1/auth/login` expects **`application/x-www-form-urlencoded`** (not JSON) with fields `username` (your email) and `password`. The returned JWT is for the web UI only; use your `sk_live_...` API key as a Bearer token for all other API calls.
 
 ### Billing
+
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/api/v1/billing/balance` | Current balance + last 50 transactions (each with `id`, `amount_usd`, `type`, `description`, `reference_id`, `created_at`) |
-| `POST` | `/api/v1/billing/stripe/checkout` | Create Stripe Checkout session. Body: `{amount_usd, success_url?, cancel_url?}`. `amount_usd` must be one of the values in `STRIPE_TOP_UP_AMOUNTS`. A pending record is stored immediately; credits are applied on webhook confirmation. |
+| `POST` | `/api/v1/billing/stripe/checkout` | Create Stripe Checkout session. Body: `{amount_usd, success_url?, cancel_url?}`. `amount_usd` must be one of the values in `STRIPE_TOP_UP_AMOUNTS`. Returns `{checkout_url}`. A pending record is stored immediately; credits are applied on webhook confirmation |
 | `POST` | `/api/v1/billing/stripe/webhook` | Stripe webhook receiver — register this URL in your Stripe dashboard for `checkout.session.completed` events |
-| `GET` | `/api/v1/billing/usdc/address` | Get USDC/ERC-20 deposit address (platform wallet if admin-configured, otherwise HD-derived per-user address). 1 USDC = $1 credit, credited within ~1 min |
+| `GET` | `/api/v1/billing/usdc/address` | Get USDC/ERC-20 deposit address (platform wallet if admin-configured, otherwise HD-derived per-user address). Returns `{deposit_address, network, token, rate_usd_per_token, note}`. 1 USDC = $1 credit, credited within ~1 min |
 
 **Transaction types** (the `type` field in balance transactions):
+
 | Type | Meaning |
 |------|---------|
 | `stripe_topup` | Credits added via Stripe card payment |
@@ -232,36 +435,39 @@ Or receive them via your `webhook_url` — a POST with the full payload is deliv
 | `bot_usage` | Credits deducted on bot completion ($0.10 flat fee per bot, or raw AI cost × `CREDIT_MARKUP` if flat fee is disabled) |
 
 ### Bots
+
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/api/v1/bot` | Create a bot & join a meeting |
-| `GET` | `/api/v1/bot` | List bots (scoped to your account). Query params: `limit`, `offset`, `status` |
-| `GET` | `/api/v1/bot/stats` | Aggregate counts by status: `{total, active, done, error, by_status}` |
-| `GET` | `/api/v1/bot/{id}` | Full details (transcript, analysis) |
-| `DELETE` | `/api/v1/bot/{id}` | Stop & remove a bot |
-| `GET` | `/api/v1/bot/{id}/transcript` | Raw transcript only |
-| `GET` | `/api/v1/bot/{id}/recording` | Download WAV audio |
-| `GET` | `/api/v1/bot/{id}/highlight` | Curated highlights |
-| `POST` | `/api/v1/bot/{id}/analyze` | Re-run AI analysis |
-| `POST` | `/api/v1/bot/{id}/ask` | Q&A on the transcript |
-| `POST` | `/api/v1/bot/{id}/followup-email` | Draft follow-up email |
-| `GET` | `/api/v1/bot/{id}/export/markdown` | Export as Markdown |
-| `GET` | `/api/v1/bot/{id}/export/pdf` | Export as PDF |
-| `POST` | `/api/v1/webhook` | Register global webhook |
-| `GET` | `/api/v1/webhook` | List webhooks |
-| `DELETE` | `/api/v1/webhook/{id}` | Remove webhook |
-| `POST` | `/api/v1/webhook/{id}/test` | Test webhook delivery |
-| `GET` | `/api/v1/templates` | List analysis templates |
-| `GET` | `/api/v1/analytics` | Aggregate stats (bots, durations, AI cost) |
-| `GET` | `/api/v1/action-items/stats` | Aggregate action-item counts by assignee |
-| `GET` | `/api/health` or `/health` | Health check |
+| `POST` | `/api/v1/bot` | Create a bot & join a meeting. Returns Bot response object (HTTP 201). Rate limit: 20/min per IP. Requires minimum `MIN_CREDITS_USD` balance (HTTP 402 if insufficient) |
+| `GET` | `/api/v1/bot` | List bots (lightweight summaries, no transcript/analysis). Query params: `limit` (1–100, default 20), `offset` (default 0), `status` (filter by status string). Returns Bot list response |
+| `GET` | `/api/v1/bot/stats` | Aggregate counts: `{total, active, done, error, by_status}`. `active` includes: ready/scheduled/queued/joining/in_call/call_ended |
+| `GET` | `/api/v1/bot/{id}` | Full details (transcript, analysis). Poll until `status` is `done` or `error` |
+| `DELETE` | `/api/v1/bot/{id}` | Stop & remove a bot. HTTP 204. Running bots are cancelled (transcript salvaged if possible); finished bots are removed from memory |
+| `GET` | `/api/v1/bot/{id}/transcript` | Raw transcript only. Blocks up to 25 s if transcription is in progress, then returns automatically. Returns `{bot_id, transcript}`. HTTP 425 (Too Early) if bot is not yet at `call_ended`/`done`/`cancelled` |
+| `GET` | `/api/v1/bot/{id}/recording` | Download WAV audio. HTTP 404 if recording not available |
+| `GET` | `/api/v1/bot/{id}/highlight` | Curated highlights derived from AI analysis. Returns `{bot_id, highlights: [{type, text, detail}]}` where `type` is one of `key_point`, `action_item`, or `decision`. HTTP 425 if analysis not yet available |
+| `POST` | `/api/v1/bot/{id}/analyze` | (Re-)run AI analysis. Body: `{template?, prompt_override?}`. Blocks up to 25 s waiting for transcript. Returns Analysis object. Use to switch templates or apply a custom prompt on an existing transcript |
+| `POST` | `/api/v1/bot/{id}/ask` | Q&A on the transcript. Body: `{question}`. Returns `{bot_id, question, answer}`. HTTP 425 if no transcript yet |
+| `POST` | `/api/v1/bot/{id}/followup-email` | Draft follow-up email. Returns `{bot_id, subject, body}`. HTTP 425 if no transcript or analysis yet |
+| `GET` | `/api/v1/bot/{id}/export/markdown` | Export full report as Markdown file |
+| `GET` | `/api/v1/bot/{id}/export/pdf` | Export full report as PDF file |
+| `POST` | `/api/v1/webhook` | Register global webhook. Body: `{url, events, secret?}` |
+| `GET` | `/api/v1/webhook` | List all registered webhooks |
+| `DELETE` | `/api/v1/webhook/{id}` | Remove webhook. HTTP 204 |
+| `POST` | `/api/v1/webhook/{id}/test` | Test webhook delivery — sends a sample `bot.done` payload |
+| `GET` | `/api/v1/templates` | List analysis templates with names and descriptions |
+| `GET` | `/api/v1/analytics` | Aggregate stats for all bots in memory. Returns `{total_bots, active_bots, by_status, by_platform, success_rate, avg_duration_seconds, total_transcript_entries, total_ai_tokens, total_ai_cost_usd}` |
+| `GET` | `/api/v1/action-items/stats` | Cross-meeting action-item counts. Returns `{total, by_assignee, recent}` where `recent` contains up to 20 most recent action items with `bot_id` and `meeting_url` |
+| `GET` | `/api/v1/search` | Full-text search across all transcripts. Query param: `q`. Returns matching transcript snippets with bot context |
+| `GET` | `/api/v1/health` or `/health` | Health check → `{status: "ok", service: "MeetingBot", version: "2.2.0"}` |
 
 ### Admin (requires admin account)
+
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/api/v1/admin/wallet` | Get the current platform USDC collection wallet address |
 | `PUT` | `/api/v1/admin/wallet` | Set or update the platform USDC collection wallet address. Body: `{wallet_address}` |
-| `GET` | `/api/v1/admin/rpc-url` | Check whether a CRYPTO_RPC_URL is configured (env var or admin-set) |
+| `GET` | `/api/v1/admin/rpc-url` | Check whether a `CRYPTO_RPC_URL` is configured (env var or admin-set) |
 | `PUT` | `/api/v1/admin/rpc-url` | Set the Ethereum RPC URL used by the USDC monitor (stored in DB, no restart needed). Validates connectivity via `eth_blockNumber` before saving. Body: `{rpc_url}` |
 | `GET` | `/api/v1/admin/config` | List all platform configuration values |
 | `POST` | `/api/v1/admin/credit` | Manually credit a user account. Body: `{email, amount_usd, note?}` — use to fix missed USDC deposits |
@@ -270,12 +476,13 @@ Or receive them via your `webhook_url` — a POST with the full payload is deliv
 | `POST` | `/api/v1/admin/usdc/rescan` | Reset the USDC monitor's block pointer so it rescans from `from_block` on the next cycle. Body: `{from_block}` |
 
 ### Admin UI actions (web panel at `/admin`)
+
 | Action | Description |
 |--------|-------------|
 | Enable/Disable account | Toggle `is_active` on any user account (prevents login and API access) |
 | Make Admin / Revoke Admin | Toggle `is_admin` to grant or revoke admin privileges |
 
-> **Admin access:** Accounts listed in `ADMIN_EMAILS` (comma-separated env var) or accounts with `is_admin=true` in the database can access these endpoints. All other users receive a 403 error.
+> **Admin access:** Accounts listed in `ADMIN_EMAILS` (comma-separated env var) or accounts with `is_admin=true` in the database can access these endpoints. All other users receive HTTP 403.
 
 **Set the platform USDC wallet (admin only):**
 ```bash
@@ -293,13 +500,14 @@ curl http://localhost:8000/api/v1/admin/wallet \
 Or use the admin web UI at `/admin` to manage all settings through a form.
 
 ### Web UI
+
 | Path | Description |
 |------|-------------|
-| `/register` | Create account |
+| `/register` | Create account (Personal or Business) |
 | `/login` | Login |
-| `/dashboard` | Balance, API keys, transaction history |
+| `/dashboard` | Balance, API keys, transaction history, wallet registration, business account info |
 | `/topup` | Add credits (Stripe card or USDC) |
-| `/admin` | Platform administration — stats, unmatched transfers, user accounts, manual credit, rescan, wallet config (admin only) |
+| `/admin` | Platform administration — stats, unmatched transfers, user accounts, manual credit, rescan, wallet config, RPC URL (admin only) |
 
 Full interactive docs (with request/response examples): `GET /api/docs`
 Alternative ReDoc view: `GET /api/redoc`
@@ -309,23 +517,25 @@ Raw OpenAPI JSON: `GET /api/openapi.json`
 
 ## Bot creation options
 
+Full set of fields accepted by `POST /api/v1/bot`:
+
 ```json
 {
-  "meeting_url": "https://meet.google.com/...",   // required
-  "bot_name": "MeetingBot",                        // display name in meeting
+  "meeting_url": "https://meet.google.com/...",   // required; blocks private/loopback IPs
+  "bot_name": "MeetingBot",                        // display name in meeting (max 100 chars)
   "webhook_url": "https://your-app.com/hook",      // where to POST results when done
-  "join_at": "2026-03-15T14:00:00Z",               // schedule for future join
+  "join_at": "2026-03-15T14:00:00Z",               // schedule for future join (ISO-8601)
   "analysis_mode": "full",                         // "full" | "transcript_only"
-  "template": "default",                           // see templates below
-  "prompt_override": "Custom AI prompt...",        // overrides template
-  "vocabulary": ["ProductName", "TechTerm"],       // transcription hints
-  "respond_on_mention": true,                      // bot replies when name mentioned
+  "template": "default",                           // see Templates below
+  "prompt_override": "Custom AI prompt...",        // overrides template (max 8000 chars)
+  "vocabulary": ["ProductName", "TechTerm"],       // transcription accuracy hints
+  "respond_on_mention": true,                      // bot replies when name is mentioned
   "mention_response_mode": "text",                 // "text" | "voice" | "both"
-  "tts_provider": "edge",                          // "edge" | "gemini"
-  "start_muted": false,
-  "live_transcription": false,                     // stream transcript in real-time
-  "sub_user_id": "user-123",                         // business accounts: isolate per end-user
-  "metadata": { "your_key": "your_value" }         // pass-through, echoed in responses
+  "tts_provider": "edge",                          // "edge" (fast, free) | "gemini" (natural)
+  "start_muted": false,                            // join with microphone muted
+  "live_transcription": false,                     // stream transcript in 15-s chunks during call
+  "sub_user_id": "user-123",                       // business accounts: scope data to this end-user
+  "metadata": { "your_key": "your_value" }         // pass-through, echoed in all responses
 }
 ```
 
@@ -333,7 +543,7 @@ Raw OpenAPI JSON: `GET /api/openapi.json`
 
 ## Templates
 
-Pass `template` in bot creation. Use `prompt_override` for a fully custom prompt.
+Pass `template` in bot creation. Use `prompt_override` for a fully custom prompt (overrides `template` when both are set).
 
 | Template | Best for |
 |----------|----------|
@@ -350,48 +560,98 @@ Pass `template` in bot creation. Use `prompt_override` for a fully custom prompt
 
 ---
 
+## HTTP status codes
+
+| Code | Meaning |
+|------|---------|
+| `200 OK` | Successful GET |
+| `201 Created` | Bot or API key created |
+| `204 No Content` | Successful DELETE or revoke |
+| `400 Bad Request` | Malformed request body |
+| `401 Unauthorized` | Missing or invalid API key / JWT |
+| `402 Payment Required` | Insufficient credits to create a bot |
+| `403 Forbidden` | Valid credentials but not authorised (e.g. non-admin accessing `/admin`) |
+| `404 Not Found` | Resource not found, or sub-user mismatch (returns 404 rather than 403 to prevent enumeration) |
+| `409 Conflict` | Email already registered, or wallet already linked to another account |
+| `422 Unprocessable Entity` | Validation error (invalid meeting URL, bad wallet address format, etc.) |
+| `425 Too Early` | Transcript or analysis not yet available — retry after the `Retry-After` header value (seconds) |
+| `429 Too Many Requests` | Rate limit exceeded. Limits: register 3/min, login 5/min, create bot 20/min |
+| `503 Service Unavailable` | Database unreachable or service misconfigured |
+
+**Error response body:**
+```json
+{ "detail": "Human-readable error message" }
+```
+
+---
+
 ## Environment variables
 
 ### AI providers
+
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ANTHROPIC_API_KEY` | — | Claude API key (takes precedence over Gemini) |
+| `ANTHROPIC_API_KEY` | — | Claude API key. Takes precedence over Gemini when both are set |
 | `GEMINI_API_KEY` | — | Gemini API key (transcription + analysis) |
 
 ### Auth
+
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `API_KEY` | — | Legacy superadmin key (bypasses per-user auth; leave empty to use accounts only) |
+| `API_KEY` | — | Legacy superadmin key (bypasses per-user auth; leave empty to use per-user accounts) |
 | `JWT_SECRET` | auto-generated | Secret for signing web UI JWT tokens. Generate a stable value with `openssl rand -hex 32`. If unset, a random secret is generated on each startup (sessions are invalidated on every restart) |
 | `JWT_EXPIRE_HOURS` | `24` | JWT token lifetime in hours |
+| `ADMIN_EMAILS` | — | Comma-separated list of email addresses granted admin access on login (e.g. `admin@acme.com,ops@acme.com`). Accounts in this list get admin access without needing `is_admin=true` in the database |
 
-### Billing
+### Database
+
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DATABASE_URL` | `sqlite+aiosqlite:///./meetingbot.db` | SQLAlchemy async URL. The bundled `docker-compose.yml` sets this to PostgreSQL automatically via the `db` service. |
+| `DATABASE_URL` | `sqlite+aiosqlite:///./meetingbot.db` | SQLAlchemy async URL. The bundled `docker-compose.yml` sets this to PostgreSQL automatically via the `db` service. `postgresql://` URLs are automatically translated to `postgresql+asyncpg://` |
+
+### Billing — Stripe
+
+| Variable | Default | Description |
+|----------|---------|-------------|
 | `STRIPE_SECRET_KEY` | — | Stripe secret key (`sk_live_...`) |
 | `STRIPE_WEBHOOK_SECRET` | — | Stripe webhook signing secret (`whsec_...`) |
-| `STRIPE_TOP_UP_AMOUNTS` | `10,25,50,100` | Comma-separated USD top-up options |
-| `CRYPTO_HD_SEED` | — | 64-char hex seed for HD wallet (generate once, keep secret). Not required if the admin sets a platform wallet via `/admin` |
-| `CRYPTO_RPC_URL` | — | Infura/Alchemy RPC endpoint for USDC monitoring |
-| `USDC_CONTRACT` | `0xA0b8...eB48` | USDC ERC-20 contract address |
-| `BOT_FLAT_FEE_USD` | `0.10` | Flat fee charged per bot usage in USD. Set to `0` to revert to markup-based pricing (raw AI cost × `CREDIT_MARKUP`) |
-| `CREDIT_MARKUP` | `3.0` | Multiply raw AI cost by this factor when deducting credits (only used when `BOT_FLAT_FEE_USD` is `0`) |
-| `MIN_CREDITS_USD` | `0.10` | Minimum balance required to create a bot |
+| `STRIPE_TOP_UP_AMOUNTS` | `10,25,50,100` | Comma-separated USD top-up options shown in the UI and validated on checkout |
+
+### Billing — USDC
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CRYPTO_HD_SEED` | — | 64-char hex seed for HD wallet derivation (generate once, keep secret). Not required if the admin sets a platform wallet via `/admin` |
+| `CRYPTO_RPC_URL` | — | Infura/Alchemy Ethereum RPC endpoint for USDC monitoring. Can also be set via `PUT /api/v1/admin/rpc-url` (no restart required) |
+| `USDC_CONTRACT` | `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48` | USDC ERC-20 contract address (Ethereum mainnet) |
 
 > **USDC wallet configuration:** The platform USDC collection wallet can be set by an admin via `PUT /api/v1/admin/wallet` or the `/admin` web UI. When set, this wallet address is returned to all users at `GET /api/v1/billing/usdc/address`, overriding the HD-derived per-user addresses. This means you can accept USDC without configuring `CRYPTO_HD_SEED` — just set the wallet via the admin panel.
 
-### Bot settings
+### Billing — Credit control
+
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CORS_ORIGINS` | `*` | Comma-separated allowed origins |
-| `MAX_CONCURRENT_BOTS` | `3` | Max simultaneous browser bots |
-| `BOT_ADMISSION_TIMEOUT` | `300` | Seconds to wait for host to admit the bot |
-| `BOT_MAX_DURATION` | `7200` | Max meeting duration in seconds |
-| `BOT_ALONE_TIMEOUT` | `300` | Seconds alone before auto-leave |
-| `BOT_JOIN_MAX_RETRIES` | `2` | Join retry attempts |
-| `TRANSCRIPTION_LANGUAGE` | — | BCP-47 language code (e.g. `en`, `es`). Empty = auto |
-| `WEBHOOK_TIMEOUT_SECONDS` | `10` | HTTP timeout for webhook delivery |
+| `BOT_FLAT_FEE_USD` | `0.10` | Flat fee charged per bot run in USD. Set to `0` to switch to markup-based pricing (raw AI cost × `CREDIT_MARKUP`) |
+| `CREDIT_MARKUP` | `3.0` | Multiply raw AI cost by this factor when deducting credits. Only applies when `BOT_FLAT_FEE_USD` is `0` |
+| `MIN_CREDITS_USD` | `0.10` | Minimum balance required to create a bot (HTTP 402 if below this threshold) |
+
+### Bot settings
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MAX_CONCURRENT_BOTS` | `3` | Max simultaneous browser bots. Extras are queued and auto-started when a slot opens |
+| `BOT_ADMISSION_TIMEOUT` | `300` | Seconds to wait for a meeting host to admit the bot before timing out |
+| `BOT_MAX_DURATION` | `7200` | Maximum meeting duration in seconds (2 hours) |
+| `BOT_ALONE_TIMEOUT` | `300` | Seconds the bot will remain alone in a meeting before auto-leaving (5 minutes) |
+| `BOT_JOIN_MAX_RETRIES` | `2` | Number of join retry attempts on failure |
+| `TRANSCRIPTION_LANGUAGE` | — | BCP-47 language code for transcription (e.g. `en`, `es`, `fr`). Leave empty for auto-detection |
+
+### Network
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CORS_ORIGINS` | `*` | Comma-separated allowed origins. Set to specific domains in production (e.g. `https://app.acme.com`) |
+| `WEBHOOK_TIMEOUT_SECONDS` | `10` | HTTP timeout in seconds for webhook delivery attempts |
 
 ---
 
@@ -415,34 +675,48 @@ scheduled (join_at set)                                                         
 | `call_ended` | Meeting ended, audio saved |
 | `transcribing` | Sending audio to AI for transcription |
 | `done` | Transcript + analysis complete, results available |
-| `error` | An unrecoverable error occurred |
+| `error` | An unrecoverable error occurred (see `error_message`) |
 | `cancelled` | Bot was stopped via `DELETE /api/v1/bot/{id}` |
 
 The bot auto-leaves when it has been the only participant for `BOT_ALONE_TIMEOUT` seconds (default 5 min).
+
+**Result retention:** Results are kept in memory for 24 hours after completion. Save them to your own storage before then.
 
 ---
 
 ## Webhooks
 
 ### Per-bot webhook
+
 Pass `webhook_url` when creating a bot. A single POST with full results is sent when the bot reaches a terminal state (`done`, `error`, or `cancelled`).
 
 ### Global webhooks
+
 Register via `POST /api/v1/webhook` to receive all events for all bots. Webhook registrations are persisted to the database and survive server restarts.
 
 **Events:** `bot.joining`, `bot.in_call`, `bot.call_ended`, `bot.transcript_ready`, `bot.analysis_ready`, `bot.done`, `bot.error`, `bot.cancelled`
 
-**HMAC signing:** Pass `secret` when registering. Deliveries include `X-MeetingBot-Signature: sha256=<hmac>`. After 5 consecutive delivery failures the webhook is automatically disabled.
+**Registration:**
+```bash
+curl -X POST http://localhost:8000/api/v1/webhook \
+  -H "Authorization: Bearer sk_live_..." \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://your-app.com/hook", "events": ["bot.done", "bot.error"], "secret": "my-signing-secret"}'
+```
+
+**HMAC signing:** Pass `secret` when registering. All deliveries include an `X-MeetingBot-Signature: sha256=<hmac-sha256>` header computed over the raw request body. Verify this on your server to confirm the payload is authentic.
+
+After **5 consecutive delivery failures** the webhook is automatically disabled. Re-enable it by deleting and re-registering.
 
 ### WebSocket
-Connect to `ws://host/api/v1/ws?token=<your-api-key-or-jwt>` for real-time events.
-Authenticated connections only receive events for their own bots.
-Send `ping` to keep alive. Returns WebSocket close code `4001` if auth is required
-but no token is provided, or `4003` for an invalid token.
 
-> **Rate limits:** `POST /api/v1/auth/register` is limited to 3 requests/min per IP,
-> `POST /api/v1/auth/login` to 5/min, and `POST /api/v1/bot` to 20/min. Exceeded
-> limits return HTTP 429.
+Connect to `ws://host/api/v1/ws?token=<your-api-key-or-jwt>` for real-time events.
+- Authenticated connections only receive events for their own bots.
+- Send `ping` to keep the connection alive.
+- Close code `4001` — auth required but no token provided.
+- Close code `4003` — invalid token.
+
+> **Rate limits:** `POST /api/v1/auth/register` is limited to 3 requests/min per IP, `POST /api/v1/auth/login` to 5/min, and `POST /api/v1/bot` to 20/min. Exceeded limits return HTTP 429.
 
 ---
 
@@ -453,7 +727,7 @@ but no token is provided, or `4003` for an invalid token.
 | Google Meet | ✅ | Full recording + transcription |
 | Zoom | ✅ | Full recording + transcription |
 | Microsoft Teams | ✅ | Full recording + transcription |
-| Others | Demo mode | AI-generated sample transcript |
+| Others | Demo mode | AI-generated sample transcript; `is_demo_transcript: true` in response |
 
 ---
 
@@ -465,9 +739,7 @@ but no token is provided, or `4003` for an invalid token.
 docker compose up --build
 ```
 
-The `docker-compose.yml` automatically starts a **PostgreSQL 16** service and wires the
-`DATABASE_URL` and `JWT_SECRET` from your `.env` file. Copy `.env.example` (or create `.env`)
-with at least:
+The `docker-compose.yml` automatically starts a **PostgreSQL 16** service and wires the `DATABASE_URL` and `JWT_SECRET` from your `.env` file. Copy `.env.example` (or create `.env`) with at least:
 
 ```
 JWT_SECRET=$(openssl rand -hex 32)
@@ -477,18 +749,16 @@ DATABASE_URL=postgresql://meetingbot:${POSTGRES_PASSWORD}@db:5432/meetingbot
 
 ### Railway / Heroku
 
-Set environment variables and deploy. Add a **PostgreSQL plugin** in Railway — the
-`DATABASE_URL` is injected automatically and the app translates it to the correct asyncpg
-driver format with no extra configuration required.
+Set environment variables and deploy. Add a **PostgreSQL plugin** in Railway — the `DATABASE_URL` is injected automatically and the app translates it to the correct asyncpg driver format with no extra configuration required.
 
 ### Manual
 
 ```bash
 cd backend
 pip install -r requirements.txt
+pip install -r requirements-crypto.txt  # For USDC support
 playwright install chromium
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-> **Note:** `requirements.txt` uses `bcrypt>=4.0.0` directly for password hashing.
-> `passlib` is not required.
+> **Note:** `requirements.txt` uses `bcrypt>=4.0.0` directly for password hashing. `passlib` is not required.
