@@ -1,8 +1,8 @@
 # MeetingBot API
 
-**Version 2.2.0** — A stateless meeting bot API service with multi-tenant billing.
+**Version 3.0.0** — A stateless meeting bot API service with multi-tenant billing, cloud storage, email notifications, calendar auto-join, Slack/Notion integrations, and GDPR compliance.
 
-> **Last updated:** 2026-03-16 · **API version in Swagger UI:** 2.2.0 <!-- auto-updated on each release -->
+> **Last updated:** 2026-03-16 · **API version in Swagger UI:** 3.0.0 <!-- auto-updated on each release -->
 
 Send bots into **Zoom**, **Google Meet**, and **Microsoft Teams** meetings to record, transcribe, and analyse them with **Claude** (Anthropic) or **Gemini** (Google) AI.
 
@@ -414,6 +414,35 @@ Full payload posted to `webhook_url` when a bot finishes.
 | `DELETE` | `/api/v1/auth/keys/{id}` | Revoke an API key. Returns HTTP 204 |
 | `GET` | `/api/v1/auth/wallet` | Get your registered Ethereum wallet address. Returns `{wallet_address, message}` |
 | `PUT` | `/api/v1/auth/wallet` | Set or update your Ethereum wallet address. Body: `{wallet_address}`. Each address can only be linked to one account (returns 409 if already taken). Validates `0x` + 40 hex chars format |
+| `GET` | `/api/v1/auth/notify` | Get email notification preferences. Returns `{notify_on_done, notify_email}` |
+| `PUT` | `/api/v1/auth/notify` | Update notification preferences. Body: `{notify_on_done, notify_email?}` |
+| `GET` | `/api/v1/auth/plan` | Get subscription plan and monthly usage. Returns `{plan, monthly_bots_used, monthly_limit, monthly_reset_at}` |
+| `DELETE` | `/api/v1/auth/account` | **GDPR erasure** — permanently delete account and all data. Irreversible. Deletes recordings from cloud storage |
+
+### Integrations (Slack & Notion)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/v1/integrations` | List all integrations for the current account |
+| `POST` | `/api/v1/integrations` | Create integration. Body: `{type: "slack"\|"notion", name?, config}`. Slack config: `{webhook_url}`. Notion config: `{api_token, database_id}` |
+| `PATCH` | `/api/v1/integrations/{id}` | Update integration config |
+| `DELETE` | `/api/v1/integrations/{id}` | Delete integration. HTTP 204 |
+
+When a bot completes, all active integrations fire automatically:
+- **Slack** — posts a rich Block Kit message to the webhook URL (summary, action items, decisions, participants)
+- **Notion** — creates a page in the configured database (summary, action items as to-dos, decisions, transcript)
+
+### Calendar Auto-Join
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/v1/calendar` | List iCal feeds for the current account |
+| `POST` | `/api/v1/calendar` | Add iCal feed. Body: `{name?, ical_url, bot_name?, auto_record?, is_active?}` |
+| `PATCH` | `/api/v1/calendar/{id}` | Update feed settings |
+| `DELETE` | `/api/v1/calendar/{id}` | Delete feed. HTTP 204 |
+| `POST` | `/api/v1/calendar/{id}/sync` | Manually trigger an immediate sync of a feed |
+
+The background poll loop checks all active feeds every `CALENDAR_POLL_INTERVAL_S` seconds (default 5 min). When a meeting with a video URL (Google Meet, Zoom, Teams, etc.) is found starting within 15 minutes, a bot is automatically dispatched to join 60 seconds early.
 
 > **Login note:** `POST /api/v1/auth/login` expects **`application/x-www-form-urlencoded`** (not JSON) with fields `username` (your email) and `password`. The returned JWT is for the web UI only; use your `sk_live_...` API key as a Bearer token for all other API calls.
 
@@ -636,6 +665,54 @@ Pass `template` in bot creation. Use `prompt_override` for a fully custom prompt
 | `BOT_FLAT_FEE_USD` | `0.10` | Flat fee charged per bot run in USD. Set to `0` to switch to markup-based pricing (raw AI cost × `CREDIT_MARKUP`) |
 | `CREDIT_MARKUP` | `3.0` | Multiply raw AI cost by this factor when deducting credits. Only applies when `BOT_FLAT_FEE_USD` is `0` |
 | `MIN_CREDITS_USD` | `0.10` | Minimum balance required to create a bot (HTTP 402 if below this threshold) |
+
+### Cloud storage
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `STORAGE_BACKEND` | `local` | `local` (in-container) or `s3` (AWS S3 / Cloudflare R2 / MinIO) |
+| `S3_BUCKET` | — | S3 bucket name |
+| `S3_ENDPOINT_URL` | — | Custom endpoint for R2 or MinIO (leave empty for AWS S3) |
+| `S3_ACCESS_KEY_ID` | — | S3 access key ID |
+| `S3_SECRET_ACCESS_KEY` | — | S3 secret access key |
+| `S3_REGION` | `us-east-1` | AWS region (ignored for R2/MinIO) |
+| `S3_PUBLIC_URL` | — | Public base URL for recordings (e.g. `https://pub.r2.dev/my-bucket`). When set, download links point here instead of generating presigned URLs |
+
+> When `STORAGE_BACKEND=s3` the recording WAV is uploaded to S3/R2/MinIO immediately after the call ends. The local copy is retained as a fallback but the `recording_path` field in bot responses will be the cloud object key. Use `GET /api/v1/bot/{id}/recording` to download (redirects to a presigned URL or the public URL).
+
+### Email notifications
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `EMAIL_BACKEND` | `none` | `none`, `smtp`, or `sendgrid` |
+| `SMTP_HOST` | — | SMTP server hostname |
+| `SMTP_PORT` | `587` | SMTP port (587 = STARTTLS, 465 = SSL) |
+| `SMTP_USERNAME` | — | SMTP login username |
+| `SMTP_PASSWORD` | — | SMTP login password |
+| `SMTP_FROM_ADDRESS` | — | From address for outgoing emails |
+| `SMTP_USE_TLS` | `true` | Use STARTTLS (`true`) or plain (`false`) |
+| `SENDGRID_API_KEY` | — | SendGrid API key (required when `EMAIL_BACKEND=sendgrid`) |
+
+> Each account can independently enable/disable email notifications and set a custom notification address via `PUT /api/v1/auth/notify`. The platform-level `EMAIL_BACKEND` controls whether the sending infrastructure is available at all.
+
+### Calendar auto-join
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CALENDAR_POLL_INTERVAL_S` | `300` | How often (in seconds) iCal feeds are checked for upcoming meetings. Default: 5 minutes |
+
+> Each account can register multiple iCal feed URLs via `POST /api/v1/calendar`. The background loop polls all active feeds and auto-dispatches a bot 60 seconds before any meeting that has a video URL (Google Meet, Zoom, Teams) starting within 15 minutes.
+
+### Subscription plans
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PLAN_FREE_BOTS_PER_MONTH` | `5` | Monthly bot limit for `free` plan accounts |
+| `PLAN_STARTER_BOTS_PER_MONTH` | `50` | Monthly bot limit for `starter` plan accounts |
+| `PLAN_PRO_BOTS_PER_MONTH` | `500` | Monthly bot limit for `pro` plan accounts |
+| `PLAN_BUSINESS_BOTS_PER_MONTH` | `-1` | Monthly bot limit for `business` plan accounts (`-1` = unlimited) |
+
+> Account plans are managed by admins via `POST /api/v1/admin/credit` (credit top-up also upgrades plan) or directly in the database. The current plan and usage are visible to users at `GET /api/v1/auth/plan`.
 
 ### Bot settings
 

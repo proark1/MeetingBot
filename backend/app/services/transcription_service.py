@@ -19,7 +19,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 _TRANSCRIPTION_PROMPT = """
-Transcribe the audio recording of this meeting.
+Transcribe the audio recording of this meeting with accurate speaker diarization.
 
 Return ONLY a valid JSON array — no markdown fences, no prose outside the array.
 
@@ -29,11 +29,20 @@ Each element of the array must be an object with exactly these keys:
   "text"      — what that speaker said (clean, no filler trimming needed)
   "timestamp" — number of seconds from the start of the recording (float)
 
-Rules:
-- Identify distinct voices and give each a consistent label throughout.
-- If a real name is said in the meeting (e.g. "Thanks, Sarah"), use it.
-- Split long monologues into natural sentence-level entries.
-- Omit silences, background noise, and unintelligible segments.
+Speaker diarization rules:
+- Carefully distinguish distinct voices by their acoustic characteristics (pitch,
+  pace, accent, speaking style) — this is the most critical part.
+- Give each distinct voice a consistent label throughout the ENTIRE recording.
+- If a real name is spoken (e.g. "Thanks, Sarah", "I agree with John"), use that
+  name as the speaker label for that person going forward.
+- When two voices sound similar, pay extra attention to context clues (topic,
+  direction of address) to separate them correctly.
+- Number unnamed speakers as "Participant 1", "Participant 2", etc. — do NOT
+  reuse numbers across different people.
+- Do NOT merge different speakers into the same label unless you are certain
+  they are the same voice.
+- Split long monologues into sentence-level entries for readability.
+- Omit silences, background noise, and completely unintelligible segments.
 - Do not add commentary, summaries, or any text outside the JSON array.
 - IMPORTANT: If the audio is COMPLETELY silent (no speech whatsoever), return an
   empty array: []. If there is ANY recognisable speech, even noisy or imperfect,
@@ -114,6 +123,85 @@ async def _transcribe_chunked(
 
     logger.info("Chunked transcription complete: %d total entries from %d chunks", len(all_entries), len(chunks))
     return all_entries
+
+
+def _normalise_speakers(
+    entries: list[dict],
+    known_participants: list[str] | None,
+) -> list[dict]:
+    """Normalise speaker labels for consistency.
+
+    1. Map generic numeric labels (e.g. "speaker 1", "participant 2", "person 1")
+       to a canonical "Participant N" form.
+    2. If known_participants are provided, fuzzy-match model labels against real
+       names and replace generic labels where a confident match exists.
+    3. Ensure a speaker labelled with only a first name is matched to a full name
+       in known_participants where unambiguous.
+    """
+    if not entries:
+        return entries
+
+    # Regex to recognise generic numeric speaker labels from the model
+    _generic_re = re.compile(
+        r"^(?:speaker|participant|person|voice|unknown|spk|s)\s*[-_]?\s*(\d+)$",
+        re.IGNORECASE,
+    )
+
+    # First pass: build a mapping of raw model labels → canonical "Participant N"
+    label_map: dict[str, str] = {}
+    participant_counter: dict[str, int] = {}  # raw_label → assigned number
+    _next_num = [1]
+
+    def _canonical(raw: str) -> str:
+        m = _generic_re.match(raw.strip())
+        if m:
+            # Normalise so "Speaker 1" and "speaker 1" map to same key
+            key = f"__generic_{m.group(1)}__"
+            if key not in participant_counter:
+                participant_counter[key] = _next_num[0]
+                _next_num[0] += 1
+            return f"Participant {participant_counter[key]}"
+        return raw.strip()
+
+    for entry in entries:
+        raw = entry.get("speaker", "")
+        if raw not in label_map:
+            label_map[raw] = _canonical(raw)
+
+    # Second pass: if known_participants provided, try to match canonical or raw
+    # labels to real names using partial / first-name matching.
+    if known_participants:
+        known_lower = {n.strip().lower(): n.strip() for n in known_participants if n.strip()}
+        known_firstnames: dict[str, str] = {}  # first name → full name (only when unambiguous)
+        for full_name in known_lower.values():
+            parts = full_name.split()
+            if parts:
+                fn = parts[0].lower()
+                if fn not in known_firstnames:
+                    known_firstnames[fn] = full_name
+                else:
+                    known_firstnames[fn] = ""  # ambiguous — don't use
+
+        for raw, canonical in list(label_map.items()):
+            cl = canonical.strip().lower()
+            # Exact match against known names
+            if cl in known_lower:
+                label_map[raw] = known_lower[cl]
+                continue
+            # First-name match (unambiguous)
+            first = cl.split()[0] if cl.split() else ""
+            if first and first in known_firstnames and known_firstnames[first]:
+                label_map[raw] = known_firstnames[first]
+
+    # Apply mapping
+    result = []
+    for entry in entries:
+        new_entry = dict(entry)
+        raw = new_entry.get("speaker", "")
+        new_entry["speaker"] = label_map.get(raw, raw)
+        result.append(new_entry)
+
+    return result
 
 
 async def transcribe_audio(
@@ -275,6 +363,12 @@ async def transcribe_audio(
             logger.warning("Skipped %d malformed transcript entry(ies) from Gemini", skipped)
         if not validated and transcript:
             logger.error("All %d transcript entries were malformed — returning empty", len(transcript))
+
+        # Post-process: normalise speaker names against known_participants and
+        # clean up inconsistent labels from the model (e.g. "speaker 1" vs "Participant 1").
+        if validated:
+            validated = _normalise_speakers(validated, known_participants)
+
         logger.info("Transcription complete: %d valid entries", len(validated))
         return validated
 

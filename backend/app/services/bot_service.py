@@ -204,6 +204,15 @@ async def _do_analysis(bot: BotSession, audio_path: str, use_real_bot: bool) -> 
         if use_real_bot and os.path.exists(audio_path) and os.path.getsize(audio_path) > 0:
             await store.update_bot(bot.id, recording_path=audio_path)
             bot.recording_path = audio_path
+            # Upload to cloud storage asynchronously; keep local path as fallback
+            try:
+                from app.services.storage_service import upload_recording
+                storage_key = await upload_recording(audio_path, bot.id)
+                if storage_key:
+                    await store.update_bot(bot.id, recording_path=storage_key)
+                    bot.recording_path = storage_key
+            except Exception as _exc:
+                logger.warning("Bot %s: cloud upload skipped: %s", bot.id, _exc)
 
         await store.update_bot(
             bot.id,
@@ -250,6 +259,30 @@ def _build_done_payload(bot: BotSession) -> dict:
         },
         "ts": _now().isoformat(),
     }
+
+
+async def _post_completion_notifications(account_id: str, bot_data: dict) -> None:
+    """Send email + integrations after a bot completes.  Never raises."""
+    try:
+        from app.db import AsyncSessionLocal
+        from app.models.account import Account
+        from sqlalchemy import select
+
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(select(Account).where(Account.id == account_id))
+            account = result.scalar_one_or_none()
+
+        if account and account.notify_on_done:
+            from app.services.email_service import notify_meeting_done
+            await notify_meeting_done(account.email, account.notify_email, bot_data)
+    except Exception as exc:
+        logger.warning("Email notification failed for account %s: %s", account_id, exc)
+
+    try:
+        from app.services.integration_service import dispatch_integrations
+        await dispatch_integrations(account_id, bot_data)
+    except Exception as exc:
+        logger.warning("Integration dispatch failed for account %s: %s", account_id, exc)
 
 
 async def run_bot_lifecycle(bot_id: str) -> None:
@@ -468,6 +501,11 @@ async def run_bot_lifecycle(bot_id: str) -> None:
             extra_webhook_url=bot.webhook_url,
             account_id=bot.account_id,
         )
+
+        # Fire integrations (Slack / Notion) and email notification in parallel
+        if bot.account_id:
+            asyncio.create_task(_post_completion_notifications(bot.account_id, done_payload))
+
         logger.info("Bot %s done", bot_id)
 
     except asyncio.CancelledError:

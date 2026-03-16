@@ -31,12 +31,22 @@ class Account(Base):
     # "personal" (default) or "business" — business accounts can scope data per sub-user
     account_type: Mapped[str] = mapped_column(String(20), default="personal", nullable=False)
     wallet_address: Mapped[Optional[str]] = mapped_column(String(42), unique=True, nullable=True, index=True)
+    # Subscription plan: "free" | "starter" | "pro" | "business"
+    plan: Mapped[str] = mapped_column(String(20), default="free", nullable=False)
+    # Monthly usage counters (reset on billing cycle)
+    monthly_bots_used: Mapped[int] = mapped_column(Integer, default=0)
+    monthly_reset_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Email notification preferences
+    notify_on_done: Mapped[bool] = mapped_column(Boolean, default=True)
+    notify_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     api_keys: Mapped[list["ApiKey"]] = relationship(back_populates="account", cascade="all, delete-orphan")
     transactions: Mapped[list["CreditTransaction"]] = relationship(back_populates="account", cascade="all, delete-orphan")
     stripe_topups: Mapped[list["StripeTopUp"]] = relationship(back_populates="account", cascade="all, delete-orphan")
     usdc_deposit: Mapped[Optional["UsdcDeposit"]] = relationship(back_populates="account", uselist=False, cascade="all, delete-orphan")
+    integrations: Mapped[list["Integration"]] = relationship(back_populates="account", cascade="all, delete-orphan")
+    calendar_feeds: Mapped[list["CalendarFeed"]] = relationship(back_populates="account", cascade="all, delete-orphan")
 
 
 class ApiKey(Base):
@@ -165,3 +175,52 @@ class UnmatchedUsdcTransfer(Base):
     detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     resolved: Mapped[bool] = mapped_column(Boolean, default=False)
     resolution_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+class AuditLog(Base):
+    """GDPR-compliant audit trail of account actions."""
+
+    __tablename__ = "audit_logs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    account_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
+    action: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    resource_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    resource_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    ip_address: Mapped[Optional[str]] = mapped_column(String(45), nullable=True)
+    details: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON extra context
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, index=True)
+
+
+class Integration(Base):
+    """Third-party integration config per account (Slack, Notion, etc.)."""
+
+    __tablename__ = "integrations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    account_id: Mapped[str] = mapped_column(String(36), ForeignKey("accounts.id"), nullable=False, index=True)
+    type: Mapped[str] = mapped_column(String(50), nullable=False)  # "slack" | "notion"
+    name: Mapped[str] = mapped_column(String(100), default="")
+    config: Mapped[str] = mapped_column(Text, default="{}")  # JSON: webhook_url, token, channel, etc.
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    account: Mapped["Account"] = relationship(back_populates="integrations")
+
+
+class CalendarFeed(Base):
+    """iCal feed for calendar auto-join."""
+
+    __tablename__ = "calendar_feeds"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    account_id: Mapped[str] = mapped_column(String(36), ForeignKey("accounts.id"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(100), default="My Calendar")
+    ical_url: Mapped[str] = mapped_column(String(2048), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    bot_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    auto_record: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_synced_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    account: Mapped["Account"] = relationship(back_populates="calendar_feeds")

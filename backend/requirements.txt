@@ -47,6 +47,16 @@ stripe>=8.0.0
 # Rate limiting
 slowapi>=0.1.9
 
+# Cloud storage (S3-compatible: AWS S3, Cloudflare R2, MinIO)
+boto3>=1.34.0
+
+# Calendar auto-join (iCal feed parsing)
+icalendar>=6.0.0
+recurring-ical-events>=3.0.0
+
+# Email notifications via SendGrid (optional — SMTP uses stdlib)
+sendgrid>=6.11.0
+
 # USDC/ERC-20 crypto payments — installed separately (see requirements-crypto.txt)
 # web3 and eth-account are large packages; they are installed in a dedicated Docker
 # layer so a build timeout does not break the rest of the application.

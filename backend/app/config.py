@@ -72,6 +72,35 @@ class Settings(BaseSettings):
     JWT_SECRET: str = "change-me-in-production"
     JWT_EXPIRE_HOURS: int = 24
 
+    # ── Cloud storage ─────────────────────────────────────────────────────────
+    STORAGE_BACKEND: str = "local"          # "local" | "s3"
+    S3_BUCKET: str = ""
+    S3_ENDPOINT_URL: str = ""               # custom endpoint for R2/MinIO
+    S3_ACCESS_KEY_ID: str = ""
+    S3_SECRET_ACCESS_KEY: str = ""
+    S3_REGION: str = "us-east-1"
+    S3_PUBLIC_URL: str = ""                 # optional CDN base URL
+
+    # ── Email notifications ────────────────────────────────────────────────────
+    EMAIL_BACKEND: str = "none"             # "none" | "smtp" | "sendgrid"
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USERNAME: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM_ADDRESS: str = ""
+    SMTP_USE_TLS: str = "true"
+    SENDGRID_API_KEY: str = ""
+
+    # ── Calendar auto-join ─────────────────────────────────────────────────────
+    CALENDAR_POLL_INTERVAL_S: int = 300     # how often to poll iCal feeds (5 min)
+
+    # ── Subscription plans ────────────────────────────────────────────────────
+    # Plan bot limits: -1 = unlimited.  Enforced at bot creation.
+    PLAN_FREE_BOTS_PER_MONTH: int = 5
+    PLAN_STARTER_BOTS_PER_MONTH: int = 50
+    PLAN_PRO_BOTS_PER_MONTH: int = 500
+    PLAN_BUSINESS_BOTS_PER_MONTH: int = -1
+
     model_config = {"env_file": ".env", "extra": "ignore"}
 
 

@@ -29,6 +29,8 @@ from app.api.auth import router as auth_router
 from app.api.billing import router as billing_router
 from app.api.ui import router as ui_router
 from app.api.admin import router as admin_router
+from app.api.integrations import router as integrations_router
+from app.api.calendar import router as calendar_router
 from app.deps import require_auth
 
 logging.basicConfig(
@@ -122,12 +124,19 @@ async def lifespan(app: FastAPI):
 
     cleanup_task = asyncio.create_task(_cleanup_loop())
 
+    # Start calendar auto-join poll loop
+    from app.services.calendar_service import calendar_poll_loop
+    calendar_task = asyncio.create_task(
+        calendar_poll_loop(interval_s=settings.CALENDAR_POLL_INTERVAL_S)
+    )
+
     logger.info("MeetingBot ready — API docs at /api/docs")
     yield
 
     # Shutdown
     queue_task.cancel()
     cleanup_task.cancel()
+    calendar_task.cancel()
 
     if _running_tasks:
         logger.info("Cancelling %d running bot task(s)…", len(_running_tasks))
@@ -247,7 +256,7 @@ app = FastAPI(
         "The bot leaves automatically when it has been the only participant for "
         "`BOT_ALONE_TIMEOUT` seconds (default 5 min).\n"
     ),
-    version="2.2.0",
+    version="3.0.0",
     lifespan=lifespan,
     docs_url="/api/docs",
     redoc_url="/api/redoc",
@@ -268,16 +277,18 @@ app.add_middleware(
 )
 
 _auth = [Depends(require_auth)]
-app.include_router(auth_router,      prefix="/api/v1")             # no auth on register/login
-app.include_router(billing_router,   prefix="/api/v1")             # billing has its own auth handling
-app.include_router(bots_router,      prefix="/api/v1", dependencies=_auth)
-app.include_router(webhooks_router,  prefix="/api/v1", dependencies=_auth)
-app.include_router(exports_router,   prefix="/api/v1", dependencies=_auth)
-app.include_router(templates_router, prefix="/api/v1", dependencies=_auth)
-app.include_router(analytics_router, prefix="/api/v1", dependencies=_auth)
-app.include_router(admin_router,     prefix="/api/v1")             # admin has its own auth (require_admin)
-app.include_router(ws_router,        prefix="/api/v1")             # WS auth handled separately
-app.include_router(ui_router)                                       # web UI (no prefix)
+app.include_router(auth_router,         prefix="/api/v1")             # no auth on register/login
+app.include_router(billing_router,      prefix="/api/v1")             # billing has its own auth handling
+app.include_router(bots_router,         prefix="/api/v1", dependencies=_auth)
+app.include_router(webhooks_router,     prefix="/api/v1", dependencies=_auth)
+app.include_router(exports_router,      prefix="/api/v1", dependencies=_auth)
+app.include_router(templates_router,    prefix="/api/v1", dependencies=_auth)
+app.include_router(analytics_router,    prefix="/api/v1", dependencies=_auth)
+app.include_router(integrations_router, prefix="/api/v1", dependencies=_auth)
+app.include_router(calendar_router,     prefix="/api/v1", dependencies=_auth)
+app.include_router(admin_router,        prefix="/api/v1")             # admin has its own auth (require_admin)
+app.include_router(ws_router,           prefix="/api/v1")             # WS auth handled separately
+app.include_router(ui_router)                                          # web UI (no prefix)
 
 
 # ── Health ────────────────────────────────────────────────────────────────────
@@ -285,7 +296,7 @@ app.include_router(ui_router)                                       # web UI (no
 @app.get("/health", tags=["Health"])
 @app.get("/api/health", tags=["Health"])
 async def health():
-    return {"status": "ok", "service": "MeetingBot", "version": "2.2.0"}
+    return {"status": "ok", "service": "MeetingBot", "version": "3.0.0"}
 
 
 # ── Serve frontend ────────────────────────────────────────────────────────────

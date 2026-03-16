@@ -163,6 +163,27 @@ class WalletResponse(BaseModel):
     message: str = Field(description="Status message.")
 
 
+class NotifyPrefsRequest(BaseModel):
+    notify_on_done: bool = Field(description="Send email when a meeting recording is ready.")
+    notify_email: Optional[str] = Field(
+        default=None,
+        description="Override email address for notifications. Defaults to account email if omitted.",
+    )
+
+
+class NotifyPrefsResponse(BaseModel):
+    notify_on_done: bool
+    notify_email: Optional[str]
+    message: str
+
+
+class PlanResponse(BaseModel):
+    plan: str = Field(description="Current subscription plan: free | starter | pro | business.")
+    monthly_bots_used: int = Field(description="Bots run in the current billing period.")
+    monthly_limit: int = Field(description="Monthly bot limit for this plan (-1 = unlimited).")
+    monthly_reset_at: Optional[datetime] = Field(description="When the monthly counter resets.")
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.post("/register", response_model=RegisterResponse, status_code=201)
@@ -417,3 +438,153 @@ async def set_wallet(
         wallet_address=address,
         message="Wallet address saved. USDC sent from this address to the platform wallet will be credited automatically.",
     )
+
+
+# ── Notification preferences ──────────────────────────────────────────────────
+
+@router.get("/notify", response_model=NotifyPrefsResponse)
+async def get_notify_prefs(
+    account_id: Optional[str] = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get email notification preferences."""
+    if not account_id or account_id == SUPERADMIN_ACCOUNT_ID:
+        raise HTTPException(status_code=403, detail="Use per-user authentication")
+
+    result = await db.execute(select(Account).where(Account.id == account_id))
+    account = result.scalar_one_or_none()
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    return NotifyPrefsResponse(
+        notify_on_done=account.notify_on_done,
+        notify_email=account.notify_email,
+        message="Email notifications will be sent to the notify_email address (or account email if not set).",
+    )
+
+
+@router.put("/notify", response_model=NotifyPrefsResponse)
+async def update_notify_prefs(
+    payload: NotifyPrefsRequest,
+    account_id: Optional[str] = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update email notification preferences."""
+    if not account_id or account_id == SUPERADMIN_ACCOUNT_ID:
+        raise HTTPException(status_code=403, detail="Use per-user authentication")
+
+    result = await db.execute(select(Account).where(Account.id == account_id))
+    account = result.scalar_one_or_none()
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    account.notify_on_done = payload.notify_on_done
+    account.notify_email = payload.notify_email
+    await db.commit()
+
+    return NotifyPrefsResponse(
+        notify_on_done=account.notify_on_done,
+        notify_email=account.notify_email,
+        message="Notification preferences updated.",
+    )
+
+
+# ── Subscription plan ─────────────────────────────────────────────────────────
+
+_PLAN_LIMITS: dict[str, int] = {
+    "free":     5,
+    "starter":  50,
+    "pro":      500,
+    "business": -1,
+}
+
+
+@router.get("/plan", response_model=PlanResponse)
+async def get_plan(
+    account_id: Optional[str] = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get the current subscription plan and monthly usage."""
+    if not account_id or account_id == SUPERADMIN_ACCOUNT_ID:
+        raise HTTPException(status_code=403, detail="Use per-user authentication")
+
+    result = await db.execute(select(Account).where(Account.id == account_id))
+    account = result.scalar_one_or_none()
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    plan = account.plan if hasattr(account, "plan") else "free"
+    monthly_bots_used = account.monthly_bots_used if hasattr(account, "monthly_bots_used") else 0
+    limit = _PLAN_LIMITS.get(plan, 5)
+
+    return PlanResponse(
+        plan=plan,
+        monthly_bots_used=monthly_bots_used,
+        monthly_limit=limit,
+        monthly_reset_at=account.monthly_reset_at if hasattr(account, "monthly_reset_at") else None,
+    )
+
+
+# ── GDPR account deletion ─────────────────────────────────────────────────────
+
+@router.delete("/account", status_code=200)
+async def delete_account(
+    account_id: Optional[str] = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Permanently delete the current account and all associated data (GDPR right to erasure).
+
+    This action is **irreversible**.  It deletes:
+    - The account and all API keys
+    - All bot snapshots for this account
+    - All calendar feeds and integrations
+    - All billing records (Stripe top-ups, USDC deposits, credit transactions)
+    - All cloud recordings (if S3 storage is configured)
+
+    An audit log entry is written before deletion so the action is traceable.
+    """
+    if not account_id or account_id == SUPERADMIN_ACCOUNT_ID:
+        raise HTTPException(status_code=403, detail="Use per-user authentication")
+
+    result = await db.execute(select(Account).where(Account.id == account_id))
+    account = result.scalar_one_or_none()
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    account_email = account.email
+
+    # Write audit log entry before deletion
+    try:
+        from app.models.account import AuditLog
+        audit = AuditLog(
+            account_id=account_id,
+            action="account.deleted",
+            resource_type="account",
+            resource_id=account_id,
+            details='{"reason": "GDPR erasure request via API"}',
+        )
+        db.add(audit)
+        await db.flush()
+    except Exception as exc:
+        logger.warning("Could not write GDPR audit log for account %s: %s", account_id, exc)
+
+    # Delete cloud recordings
+    try:
+        from app.services.storage_service import delete_all_recordings_for_account
+        deleted_count = await delete_all_recordings_for_account(account_id)
+        if deleted_count:
+            logger.info("GDPR: deleted %d cloud recordings for account %s", deleted_count, account_id)
+    except Exception as exc:
+        logger.warning("GDPR: cloud recording cleanup failed for %s: %s", account_id, exc)
+
+    # Delete the account row — cascades to api_keys, transactions, stripe_topups,
+    # usdc_deposit, integrations, calendar_feeds (via ORM cascade="all, delete-orphan")
+    await db.delete(account)
+    await db.commit()
+
+    logger.info("GDPR: account %s (%s) permanently deleted", account_id, account_email)
+    return {
+        "message": "Account permanently deleted. All associated data has been erased.",
+        "account_id": account_id,
+    }

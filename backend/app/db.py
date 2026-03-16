@@ -68,3 +68,17 @@ def _migrate_schema(conn) -> None:
         existing = {col["name"] for col in inspector.get_columns("bot_snapshots")}
         if "sub_user_id" not in existing:
             conn.execute(text("ALTER TABLE bot_snapshots ADD COLUMN sub_user_id VARCHAR(255)"))
+
+    # accounts table — columns added in v3.x (plans, notifications, usage counters)
+    if "accounts" in inspector.get_table_names():
+        existing = {col["name"] for col in inspector.get_columns("accounts")}
+        v3_migrations = [
+            ("plan",                 "VARCHAR(20) NOT NULL DEFAULT 'free'"),
+            ("monthly_bots_used",   "INTEGER NOT NULL DEFAULT 0"),
+            ("monthly_reset_at",    "DATETIME"),
+            ("notify_on_done",      "BOOLEAN NOT NULL DEFAULT 1"),
+            ("notify_email",        "VARCHAR(255)"),
+        ]
+        for col_name, col_def in v3_migrations:
+            if col_name not in existing:
+                conn.execute(text(f"ALTER TABLE accounts ADD COLUMN {col_name} {col_def}"))
