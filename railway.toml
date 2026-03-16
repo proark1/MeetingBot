@@ -4,6 +4,7 @@ dockerfilePath = "backend/Dockerfile"
 
 [deploy]
 startCommand = "/app/start.sh"
+releaseCommand = "cd /app && python init_db.py"
 healthcheckPath = "/health"
 healthcheckTimeout = 300
 restartPolicyType = "on_failure"
