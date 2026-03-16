@@ -158,14 +158,15 @@ def _strip_fences(text: str) -> str:
 # ── Claude implementations ─────────────────────────────────────────────────────
 
 async def _claude_complete(prompt: str, max_tokens: int = 4096, temperature: float = 1.0, operation: str = "unknown") -> str:
-    """Call Claude and return the text response. Uses adaptive thinking for complex tasks."""
+    """Call Claude and return the text response. Uses extended thinking for complex tasks."""
     client = _get_anthropic_client()
     model_id = "claude-opus-4-6"
     t0 = time.monotonic()
+    budget_tokens = 8000
     stream = client.messages.stream(
         model=model_id,
-        max_tokens=max_tokens,
-        thinking={"type": "adaptive"},
+        max_tokens=max_tokens + budget_tokens,
+        thinking={"type": "enabled", "budget_tokens": budget_tokens},
         messages=[{"role": "user", "content": prompt}],
     )
     async with stream as s:
