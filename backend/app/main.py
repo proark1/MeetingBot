@@ -31,6 +31,8 @@ from app.api.ui import router as ui_router
 from app.api.admin import router as admin_router
 from app.api.integrations import router as integrations_router
 from app.api.calendar import router as calendar_router
+from app.api.oauth import router as oauth_router
+from app.api.metrics import router as metrics_router, PrometheusMiddleware
 from app.deps import require_auth
 
 logging.basicConfig(
@@ -124,6 +126,11 @@ async def lifespan(app: FastAPI):
 
     cleanup_task = asyncio.create_task(_cleanup_loop())
 
+    # Start webhook retry loop
+    from app.services.webhook_service import webhook_retry_loop
+    webhook_retry_task = asyncio.create_task(webhook_retry_loop())
+    logger.info("Webhook retry loop started")
+
     # Start calendar auto-join poll loop
     from app.services.calendar_service import calendar_poll_loop
     calendar_task = asyncio.create_task(
@@ -136,6 +143,7 @@ async def lifespan(app: FastAPI):
     # Shutdown
     queue_task.cancel()
     cleanup_task.cancel()
+    webhook_retry_task.cancel()
     calendar_task.cancel()
 
     if _running_tasks:
@@ -256,7 +264,7 @@ app = FastAPI(
         "The bot leaves automatically when it has been the only participant for "
         "`BOT_ALONE_TIMEOUT` seconds (default 5 min).\n"
     ),
-    version="3.0.0",
+    version="4.0.0",
     lifespan=lifespan,
     docs_url="/api/docs",
     redoc_url="/api/redoc",
@@ -275,9 +283,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(PrometheusMiddleware)
 
 _auth = [Depends(require_auth)]
+app.include_router(metrics_router)                                     # unauthenticated /metrics
 app.include_router(auth_router,         prefix="/api/v1")             # no auth on register/login
+app.include_router(oauth_router,        prefix="/api/v1")             # SSO OAuth (no prefix auth)
 app.include_router(billing_router,      prefix="/api/v1")             # billing has its own auth handling
 app.include_router(bots_router,         prefix="/api/v1", dependencies=_auth)
 app.include_router(webhooks_router,     prefix="/api/v1", dependencies=_auth)
@@ -296,7 +307,7 @@ app.include_router(ui_router)                                          # web UI 
 @app.get("/health", tags=["Health"])
 @app.get("/api/health", tags=["Health"])
 async def health():
-    return {"status": "ok", "service": "MeetingBot", "version": "3.0.0"}
+    return {"status": "ok", "service": "MeetingBot", "version": "4.0.0"}
 
 
 # ── Serve frontend ────────────────────────────────────────────────────────────

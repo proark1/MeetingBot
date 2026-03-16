@@ -82,3 +82,9 @@ def _migrate_schema(conn) -> None:
         for col_name, col_def in v3_migrations:
             if col_name not in existing:
                 conn.execute(text(f"ALTER TABLE accounts ADD COLUMN {col_name} {col_def}"))
+
+    # webhooks table — v4.x: add account_id for ownership scoping
+    if "webhooks" in inspector.get_table_names():
+        existing = {col["name"] for col in inspector.get_columns("webhooks")}
+        if "account_id" not in existing:
+            conn.execute(text("ALTER TABLE webhooks ADD COLUMN account_id VARCHAR(36)"))

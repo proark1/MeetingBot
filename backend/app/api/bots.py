@@ -94,6 +94,11 @@ def _to_summary(bot: BotSession) -> BotSummary:
     )
 
 
+def _video_available(bot: BotSession) -> bool:
+    import os
+    return bool(bot.video_path and os.path.exists(bot.video_path))
+
+
 def _to_response(bot: BotSession) -> BotResponse:
     return BotResponse(
         id=bot.id,
@@ -113,6 +118,8 @@ def _to_response(bot: BotSession) -> BotResponse:
         chapters=bot.chapters,
         speaker_stats=bot.speaker_stats,
         recording_available=bot.recording_available(),
+        video_available=_video_available(bot),
+        bot_avatar_url=bot.bot_avatar_url,
         analysis_mode=bot.analysis_mode,
         is_demo_transcript=bot.is_demo_transcript,
         sub_user_id=bot.sub_user_id,
@@ -164,6 +171,10 @@ async def create_bot(payload: BotCreate, request: Request):
     to scope this bot to a specific end-user. When set, only requests with the same
     sub-user identifier can access this bot's data.
 
+    **Idempotency:** Supply an `Idempotency-Key` header to safely retry the request.
+    A second call with the same key returns the original bot (with header
+    `X-Idempotency-Replayed: true`) instead of creating a duplicate.
+
     **Platforms supported for real recording:** Google Meet, Zoom, Microsoft Teams.
     Other platforms run in demo mode (AI-generated sample transcript).
     """
@@ -174,6 +185,35 @@ async def create_bot(payload: BotCreate, request: Request):
     if not sub_user_id:
         header_val = request.headers.get("X-Sub-User", "").strip()[:255]
         sub_user_id = header_val or None
+
+    # ── Idempotency key check ─────────────────────────────────────────────────
+    idempotency_key_raw = request.headers.get("Idempotency-Key", "").strip()[:255]
+    if idempotency_key_raw:
+        try:
+            from app.db import AsyncSessionLocal
+            from app.models.account import IdempotencyKey as IKModel
+            from sqlalchemy import select as _iselect
+            async with AsyncSessionLocal() as db:
+                ik_result = await db.execute(
+                    _iselect(IKModel).where(
+                        IKModel.account_id == (account_id or "__anon__"),
+                        IKModel.key == idempotency_key_raw,
+                    )
+                )
+                ik_row = ik_result.scalar_one_or_none()
+                if ik_row and ik_row.expires_at > _now():
+                    existing = await store.get_bot(ik_row.bot_id)
+                    if existing:
+                        from fastapi.responses import JSONResponse
+                        import json
+                        resp_data = _to_response(existing).model_dump(mode="json")
+                        return JSONResponse(
+                            content=resp_data,
+                            status_code=200,
+                            headers={"X-Idempotency-Replayed": "true"},
+                        )
+        except Exception:
+            logger.exception("Idempotency key lookup failed")
 
     # Check credits for per-user accounts (not superadmin / unauthenticated)
     if account_id and account_id != SUPERADMIN_ACCOUNT_ID:
@@ -207,8 +247,28 @@ async def create_bot(payload: BotCreate, request: Request):
         metadata=payload.metadata,
         account_id=account_id if account_id != SUPERADMIN_ACCOUNT_ID else None,
         sub_user_id=sub_user_id,
+        bot_avatar_url=payload.bot_avatar_url,
+        record_video=payload.record_video,
     )
     await store.create_bot(bot)
+
+    # ── Store idempotency key ─────────────────────────────────────────────────
+    if idempotency_key_raw:
+        try:
+            from app.db import AsyncSessionLocal
+            from app.models.account import IdempotencyKey as IKModel
+            from datetime import timedelta
+            async with AsyncSessionLocal() as db:
+                ik = IKModel(
+                    account_id=account_id or "__anon__",
+                    key=idempotency_key_raw,
+                    bot_id=bot.id,
+                    expires_at=_now() + timedelta(hours=settings.IDEMPOTENCY_TTL_HOURS),
+                )
+                db.add(ik)
+                await db.commit()
+        except Exception:
+            logger.exception("Failed to store idempotency key")
 
     active = sum(1 for t in _running_tasks.values() if not t.done())
     if active >= settings.MAX_CONCURRENT_BOTS:
@@ -376,6 +436,28 @@ async def download_recording(bot_id: str, request: Request):
         bot.recording_path,
         media_type="audio/wav",
         filename=f"recording-{bot_id[:8]}.wav",
+    )
+
+
+# ── GET /api/v1/bot/{id}/video ───────────────────────────────────────────────
+
+@router.get("/{bot_id}/video")
+async def download_video(bot_id: str, request: Request):
+    """Download the meeting video recording (MP4).
+
+    Available only when `record_video=true` was set at bot creation and
+    `video_available` is `true` in the bot response.
+    """
+    import os
+    account_id: Optional[str] = getattr(request.state, "account_id", None)
+    sub_user_id = _get_sub_user_from_request(request)
+    bot = await _get_or_404(bot_id, account_id, sub_user_id)
+    if not bot.video_path or not os.path.exists(bot.video_path):
+        raise HTTPException(status_code=404, detail="Video recording not available")
+    return FileResponse(
+        bot.video_path,
+        media_type="video/mp4",
+        filename=f"recording-{bot_id[:8]}.mp4",
     )
 
 

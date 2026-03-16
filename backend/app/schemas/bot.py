@@ -109,6 +109,22 @@ class BotCreate(BaseModel):
         ),
     )
 
+    # Bot persona (white-label / branding)
+    bot_avatar_url: Optional[str] = Field(
+        default=None,
+        max_length=2048,
+        description="URL of the avatar image shown as the bot's profile picture in the meeting.",
+    )
+
+    # Video recording
+    record_video: bool = Field(
+        default=False,
+        description=(
+            "Capture a video recording of the meeting screen (MP4) in addition to audio. "
+            "Download via GET /api/v1/bot/{id}/video once status is `done`."
+        ),
+    )
+
     # Pass-through metadata — returned as-is in bot responses and webhook payloads
     metadata: dict[str, Any] = Field(
         default={},
@@ -201,6 +217,11 @@ class BotResponse(BaseModel):
         default=False,
         description="True when a WAV recording can be downloaded via GET /api/v1/bot/{id}/recording.",
     )
+    video_available: bool = Field(
+        default=False,
+        description="True when an MP4 video recording can be downloaded via GET /api/v1/bot/{id}/video.",
+    )
+    bot_avatar_url: Optional[str] = Field(default=None, description="Bot avatar URL used in the meeting.")
 
     analysis_mode: str = "full"
     is_demo_transcript: bool = False

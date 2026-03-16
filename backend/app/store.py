@@ -41,6 +41,7 @@ class BotSession:
     speaker_stats: list = field(default_factory=list)
     participants: list = field(default_factory=list)
     recording_path: Optional[str] = None
+    video_path: Optional[str] = None
     error_message: Optional[str] = None
 
     # Bot configuration
@@ -56,6 +57,12 @@ class BotSession:
     join_at: Optional[datetime] = None
     metadata: dict = field(default_factory=dict)
     is_demo_transcript: bool = False
+
+    # Bot persona / white-label
+    bot_avatar_url: Optional[str] = None
+
+    # Video recording
+    record_video: bool = False
 
     # Owning account (None = unauthenticated / superadmin mode)
     account_id: Optional[str] = None
@@ -206,6 +213,7 @@ class Store:
                 "speaker_stats": bot.speaker_stats,
                 "participants": bot.participants,
                 "recording_path": bot.recording_path,
+                "video_path": bot.video_path,
                 "error_message": bot.error_message,
                 "analysis_mode": bot.analysis_mode,
                 "template": bot.template,
@@ -219,6 +227,8 @@ class Store:
                 "join_at": _dt(bot.join_at),
                 "metadata": bot.metadata,
                 "is_demo_transcript": bot.is_demo_transcript,
+                "bot_avatar_url": bot.bot_avatar_url,
+                "record_video": bot.record_video,
                 "account_id": bot.account_id,
                 "sub_user_id": bot.sub_user_id,
                 "ai_usage": bot.ai_usage,
@@ -349,6 +359,12 @@ class Store:
                         logger.debug("Deleted recording for expired bot %s", bot_id)
                     except Exception as exc:
                         logger.warning("Could not delete recording %s: %s", bot.recording_path, exc)
+                if bot.video_path and os.path.exists(bot.video_path):
+                    try:
+                        os.remove(bot.video_path)
+                        logger.debug("Deleted video for expired bot %s", bot_id)
+                    except Exception as exc:
+                        logger.warning("Could not delete video %s: %s", bot.video_path, exc)
 
         if expired:
             # Purge expired snapshots from DB too
@@ -418,6 +434,7 @@ async def load_persisted_bots() -> int:
                     speaker_stats=d.get("speaker_stats", []),
                     participants=d.get("participants", []),
                     recording_path=d.get("recording_path"),
+                    video_path=d.get("video_path"),
                     error_message=d.get("error_message"),
                     analysis_mode=d.get("analysis_mode", "full"),
                     template=d.get("template"),
@@ -431,6 +448,8 @@ async def load_persisted_bots() -> int:
                     join_at=_parse_dt(d.get("join_at")),
                     metadata=d.get("metadata", {}),
                     is_demo_transcript=d.get("is_demo_transcript", False),
+                    bot_avatar_url=d.get("bot_avatar_url"),
+                    record_video=d.get("record_video", False),
                     account_id=d.get("account_id"),
                     sub_user_id=d.get("sub_user_id"),
                     ai_usage=d.get("ai_usage", []),

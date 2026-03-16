@@ -8,6 +8,7 @@ import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 from urllib.parse import urlparse, parse_qs, unquote
 
 from app.config import settings
@@ -143,7 +144,7 @@ def _resolve_prompt(bot: BotSession) -> str | None:
     return None
 
 
-async def _do_analysis(bot: BotSession, audio_path: str, use_real_bot: bool) -> None:
+async def _do_analysis(bot: BotSession, audio_path: str, use_real_bot: bool, video_path: Optional[str] = None) -> None:
     """Transcribe (if needed), analyse, and update the bot in-memory."""
     # ── transcript ─────────────────────────────────────────────────────────
     if not bot.transcript:
@@ -214,6 +215,10 @@ async def _do_analysis(bot: BotSession, audio_path: str, use_real_bot: bool) -> 
             except Exception as _exc:
                 logger.warning("Bot %s: cloud upload skipped: %s", bot.id, _exc)
 
+        if video_path and os.path.exists(video_path) and os.path.getsize(video_path) > 0:
+            await store.update_bot(bot.id, video_path=video_path)
+            bot.video_path = video_path
+
         await store.update_bot(
             bot.id,
             analysis=analysis_result,
@@ -232,6 +237,9 @@ async def _do_analysis(bot: BotSession, audio_path: str, use_real_bot: bool) -> 
             bot.recording_path = audio_path
         else:
             await store.update_bot(bot.id, speaker_stats=speaker_stats)
+        if video_path and os.path.exists(video_path) and os.path.getsize(video_path) > 0:
+            await store.update_bot(bot.id, video_path=video_path)
+            bot.video_path = video_path
 
 
 def _build_done_payload(bot: BotSession) -> dict:
@@ -306,6 +314,7 @@ async def run_bot_lifecycle(bot_id: str) -> None:
     set_usage_sink(bot.ai_usage)
 
     audio_path = str(_RECORDINGS_DIR / f"{bot_id}.wav")
+    video_path = str(_RECORDINGS_DIR / f"{bot_id}.mp4") if bot.record_video else None
     use_real_bot = bot.meeting_platform in _REAL_PLATFORMS
 
     try:
@@ -377,6 +386,8 @@ async def run_bot_lifecycle(bot_id: str) -> None:
                     live_transcription=bot.live_transcription,
                     on_live_transcript_entry=on_live_entry,
                     gemini_api_key=settings.GEMINI_API_KEY or "",
+                    record_video=bot.record_video,
+                    video_path=video_path,
                 )
 
                 if bot_result["success"]:
@@ -474,7 +485,7 @@ async def run_bot_lifecycle(bot_id: str) -> None:
         if bot_refreshed:
             bot = bot_refreshed
 
-        await _do_analysis(bot, audio_path, use_real_bot)
+        await _do_analysis(bot, audio_path, use_real_bot, video_path=video_path)
 
 
         # Refresh bot state from store to get latest fields
@@ -514,7 +525,7 @@ async def run_bot_lifecycle(bot_id: str) -> None:
         if bot:
             await store.update_bot(bot_id, status="transcribing")
             try:
-                await _do_analysis(bot, audio_path, use_real_bot)
+                await _do_analysis(bot, audio_path, use_real_bot, video_path=video_path)
                 bot = await store.get_bot(bot_id)
             except Exception:
                 logger.exception("Bot %s: error during cancellation cleanup", bot_id)
@@ -539,7 +550,7 @@ async def run_bot_lifecycle(bot_id: str) -> None:
         if bot:
             await store.update_bot(bot_id, status="transcribing")
             try:
-                await _do_analysis(bot, audio_path, use_real_bot)
+                await _do_analysis(bot, audio_path, use_real_bot, video_path=video_path)
                 bot = await store.get_bot(bot_id)
             except Exception:
                 logger.exception("Bot %s: error during error cleanup", bot_id)

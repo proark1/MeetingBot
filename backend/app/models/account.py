@@ -47,6 +47,7 @@ class Account(Base):
     usdc_deposit: Mapped[Optional["UsdcDeposit"]] = relationship(back_populates="account", uselist=False, cascade="all, delete-orphan")
     integrations: Mapped[list["Integration"]] = relationship(back_populates="account", cascade="all, delete-orphan")
     calendar_feeds: Mapped[list["CalendarFeed"]] = relationship(back_populates="account", cascade="all, delete-orphan")
+    oauth_accounts: Mapped[list["OAuthAccount"]] = relationship(back_populates="account", cascade="all, delete-orphan")
 
 
 class ApiKey(Base):
@@ -224,3 +225,55 @@ class CalendarFeed(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     account: Mapped["Account"] = relationship(back_populates="calendar_feeds")
+
+
+class OAuthAccount(Base):
+    """Links an OAuth identity (Google / Microsoft) to an Account."""
+
+    __tablename__ = "oauth_accounts"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    account_id: Mapped[str] = mapped_column(String(36), ForeignKey("accounts.id"), nullable=False, index=True)
+    provider: Mapped[str] = mapped_column(String(20), nullable=False)   # "google" | "microsoft"
+    provider_user_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    access_token: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    refresh_token: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    token_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+    account: Mapped["Account"] = relationship(back_populates="oauth_accounts")
+
+
+class WebhookDelivery(Base):
+    """Persistent delivery log + retry queue for global webhook deliveries."""
+
+    __tablename__ = "webhook_deliveries"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    webhook_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    bot_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
+    event: Mapped[str] = mapped_column(String(100), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False, index=True)
+    attempt_number: Mapped[int] = mapped_column(Integer, default=1)
+    next_retry_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    response_status_code: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    response_body: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    request_body: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, index=True)
+    delivered_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class IdempotencyKey(Base):
+    """Maps an (account_id, idempotency_key) pair to the bot_id created by that request."""
+
+    __tablename__ = "idempotency_keys"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    account_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
+    key: Mapped[str] = mapped_column(String(255), nullable=False)
+    bot_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

@@ -114,13 +114,85 @@ async def test_webhook(webhook_id: str):
         raise HTTPException(status_code=404, detail=f"Webhook {webhook_id!r} not found")
     await _block_ssrf(wh.url)
 
-    from app.services.webhook_service import _get_client, _deliver_with_retry, _build_body, _sign
+    from app.services.webhook_service import _attempt_delivery, _build_body, _sign
     body = _build_body("bot.test", {"message": "Test delivery from MeetingBot"})
     headers = {"Content-Type": "application/json", "User-Agent": "MeetingBot/1.0"}
     if wh.secret:
         headers["X-MeetingBot-Signature"] = _sign(body, wh.secret)
 
-    status_code = await _deliver_with_retry(_get_client(), wh.url, body, headers)
+    status_code, _ = await _attempt_delivery(wh.url, body, headers)
     if status_code is None:
         raise HTTPException(status_code=502, detail="Test delivery failed — endpoint unreachable or returned 5xx")
     return {"status_code": status_code, "url": wh.url}
+
+
+# ── Delivery log ───────────────────────────────────────────────────────────────
+
+from pydantic import BaseModel as _BM
+from typing import Optional as _Opt
+from datetime import datetime as _dt
+
+
+class DeliveryResponse(_BM):
+    id: str
+    webhook_id: str
+    bot_id: _Opt[str] = None
+    event: str
+    status: str
+    attempt_number: int
+    response_status_code: _Opt[int] = None
+    response_body: _Opt[str] = None
+    error_message: _Opt[str] = None
+    next_retry_at: _Opt[_dt] = None
+    delivered_at: _Opt[_dt] = None
+    created_at: _dt
+
+
+@router.get("/{webhook_id}/deliveries", response_model=list[DeliveryResponse])
+async def list_deliveries(
+    webhook_id: str,
+    limit: int = 50,
+    offset: int = 0,
+):
+    """List delivery log entries for a registered webhook.
+
+    Entries are sorted newest-first. Each entry includes the attempt status,
+    HTTP response code, any error message, and the time of next retry (if pending).
+    """
+    wh = store.get_webhook(webhook_id)
+    if wh is None:
+        raise HTTPException(status_code=404, detail=f"Webhook {webhook_id!r} not found")
+
+    try:
+        from app.db import AsyncSessionLocal
+        from app.models.account import WebhookDelivery
+        from sqlalchemy import select
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(WebhookDelivery)
+                .where(WebhookDelivery.webhook_id == webhook_id)
+                .order_by(WebhookDelivery.created_at.desc())
+                .limit(limit)
+                .offset(offset)
+            )
+            rows = result.scalars().all()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return [
+        DeliveryResponse(
+            id=r.id,
+            webhook_id=r.webhook_id,
+            bot_id=r.bot_id,
+            event=r.event,
+            status=r.status,
+            attempt_number=r.attempt_number,
+            response_status_code=r.response_status_code,
+            response_body=r.response_body,
+            error_message=r.error_message,
+            next_retry_at=r.next_retry_at,
+            delivered_at=r.delivered_at,
+            created_at=r.created_at,
+        )
+        for r in rows
+    ]

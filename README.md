@@ -1,12 +1,27 @@
 # MeetingBot API
 
-**Version 3.0.0** — A stateless meeting bot API service with multi-tenant billing, cloud storage, email notifications, calendar auto-join, Slack/Notion integrations, and GDPR compliance.
+**Version 4.0.0** — A stateless meeting bot API service with multi-tenant billing, Google/Microsoft SSO, Python & JS SDKs, webhook retry/delivery logs, bot persona customization, video recording, Prometheus metrics, idempotency keys, cloud storage, email notifications, calendar auto-join, Slack/Notion integrations, and GDPR compliance.
 
-> **Last updated:** 2026-03-16 · **API version in Swagger UI:** 3.0.0 <!-- auto-updated on each release -->
+> **Last updated:** 2026-03-16 · **API version in Swagger UI:** 4.0.0 <!-- auto-updated on each release -->
 
 Send bots into **Zoom**, **Google Meet**, and **Microsoft Teams** meetings to record, transcribe, and analyse them with **Claude** (Anthropic) or **Gemini** (Google) AI.
 
 **Multi-tenant:** Each external service registers an account and gets its own API key. Pre-fund a credit balance via Stripe (card) or USDC (ERC-20) — credits are deducted automatically per bot run.
+
+---
+
+## What's new in v4.0.0
+
+| Feature | Description |
+|---------|-------------|
+| **Google/Microsoft SSO** | `GET /api/v1/auth/oauth/{google\|microsoft}/authorize` — one-click login, no password required |
+| **Python SDK** | `pip install meetingbot-sdk` — sync + async clients in `sdk/python/` |
+| **JavaScript/TypeScript SDK** | `npm install meetingbot-sdk` — fully typed client in `sdk/js/` |
+| **Webhook retry + delivery logs** | Automatic exponential backoff (up to 5 attempts); `GET /api/v1/webhooks/{id}/deliveries` shows full history |
+| **Bot persona / white-label** | `bot_avatar_url` field on `POST /api/v1/bot` — custom bot avatar for B2B deployments |
+| **Video recording** | `record_video: true` on `POST /api/v1/bot`; download at `GET /api/v1/bot/{id}/video` |
+| **Prometheus metrics** | `GET /metrics` — standard Prometheus scrape endpoint (unauthenticated) |
+| **Idempotency keys** | Pass `Idempotency-Key` header on `POST /api/v1/bot`; replay returns `X-Idempotency-Replayed: true` |
 
 ---
 
@@ -634,6 +649,21 @@ Pass `template` in bot creation. Use `prompt_override` for a fully custom prompt
 | `JWT_EXPIRE_HOURS` | `24` | JWT token lifetime in hours |
 | `ADMIN_EMAILS` | — | Comma-separated list of email addresses granted admin access on login (e.g. `admin@acme.com,ops@acme.com`). Accounts in this list get admin access without needing `is_admin=true` in the database |
 
+### SSO (Google / Microsoft OAuth2)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `GOOGLE_CLIENT_ID` | — | Google OAuth2 client ID (create at console.cloud.google.com) |
+| `GOOGLE_CLIENT_SECRET` | — | Google OAuth2 client secret |
+| `MICROSOFT_CLIENT_ID` | — | Microsoft Entra (Azure AD) application (client) ID |
+| `MICROSOFT_CLIENT_SECRET` | — | Microsoft Entra client secret |
+| `OAUTH_REDIRECT_BASE_URL` | `http://localhost:8000` | Base URL for OAuth callback — set to your public domain in production |
+
+SSO endpoints:
+- `GET /api/v1/auth/oauth/google/authorize` → redirects to Google login
+- `GET /api/v1/auth/oauth/google/callback` → exchanges code, returns `{"api_key": "sk_live_..."}` (or JWT cookie)
+- Same pattern for `microsoft`
+
 ### Database
 
 | Variable | Default | Description |
@@ -679,6 +709,24 @@ Pass `template` in bot creation. Use `prompt_override` for a fully custom prompt
 | `S3_PUBLIC_URL` | — | Public base URL for recordings (e.g. `https://pub.r2.dev/my-bucket`). When set, download links point here instead of generating presigned URLs |
 
 > When `STORAGE_BACKEND=s3` the recording WAV is uploaded to S3/R2/MinIO immediately after the call ends. The local copy is retained as a fallback but the `recording_path` field in bot responses will be the cloud object key. Use `GET /api/v1/bot/{id}/recording` to download (redirects to a presigned URL or the public URL).
+
+### Video recording
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `VIDEO_FPS` | `10` | ffmpeg frame rate for X11grab video capture |
+| `VIDEO_CRF` | `28` | H.264 constant rate factor (lower = better quality, larger file) |
+| `VIDEO_SCALE` | `1280x720` | Capture resolution (`WxH`) |
+
+Enable per-bot with `record_video: true` in `POST /api/v1/bot`. Requires `ffmpeg` installed in the container. Download via `GET /api/v1/bot/{id}/video` (returns `video/mp4`).
+
+### Idempotency
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `IDEMPOTENCY_TTL_HOURS` | `24` | How long idempotency keys are retained. After TTL, the same key may create a new bot |
+
+Pass `Idempotency-Key: <unique-string>` in the `POST /api/v1/bot` request. Replayed requests return the original response with header `X-Idempotency-Replayed: true`.
 
 ### Email notifications
 
@@ -731,6 +779,84 @@ Pass `template` in bot creation. Use `prompt_override` for a fully custom prompt
 |----------|---------|-------------|
 | `CORS_ORIGINS` | `*` | Comma-separated allowed origins. Set to specific domains in production (e.g. `https://app.acme.com`) |
 | `WEBHOOK_TIMEOUT_SECONDS` | `10` | HTTP timeout in seconds for webhook delivery attempts |
+
+---
+
+## SDKs
+
+### Python
+
+```bash
+pip install meetingbot-sdk
+```
+
+```python
+from meetingbot import MeetingBotClient
+
+client = MeetingBotClient(api_key="sk_live_...")
+bot = client.bots.create(meeting_url="https://meet.google.com/xyz-abc-def")
+result = client.bots.wait_for_completion(bot.id)
+print(result.transcript)
+```
+
+Async usage:
+
+```python
+from meetingbot import AsyncMeetingBotClient
+
+async with AsyncMeetingBotClient(api_key="sk_live_...") as client:
+    bot = await client.bots.create(meeting_url="https://meet.google.com/xyz-abc-def")
+    result = await client.bots.wait_for_completion(bot.id)
+```
+
+See [`sdk/python/README.md`](sdk/python/README.md) for full reference.
+
+### JavaScript / TypeScript
+
+```bash
+npm install meetingbot-sdk
+```
+
+```typescript
+import { MeetingBotClient } from "meetingbot-sdk";
+
+const client = new MeetingBotClient({ apiKey: "sk_live_..." });
+const bot = await client.bots.create({ meetingUrl: "https://meet.google.com/xyz" });
+const result = await client.bots.waitForCompletion(bot.id);
+console.log(result.transcript);
+```
+
+See [`sdk/js/README.md`](sdk/js/README.md) for full reference.
+
+---
+
+## Prometheus metrics
+
+`GET /metrics` returns metrics in the Prometheus text exposition format (no authentication required).
+
+Scrape configuration example:
+
+```yaml
+scrape_configs:
+  - job_name: meetingbot
+    static_configs:
+      - targets: ["your-host:8000"]
+```
+
+Available metrics:
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `meetingbot_http_requests_total` | Counter | `method`, `path`, `status_code` | Total HTTP requests |
+| `meetingbot_http_request_duration_seconds` | Histogram | `method`, `path` | Request latency |
+| `meetingbot_bots_created_total` | Counter | `platform` | Bots created by platform |
+| `meetingbot_bots_active` | Gauge | — | Currently active bots |
+| `meetingbot_bots_completed_total` | Counter | `status` | Bots reaching terminal state |
+| `meetingbot_ai_tokens_total` | Counter | `operation`, `provider` | AI tokens consumed |
+| `meetingbot_ai_cost_usd_total` | Counter | `provider` | AI cost in USD |
+| `meetingbot_webhook_deliveries_total` | Counter | `status` | Webhook delivery attempts |
+
+Install `prometheus-client` to enable (included in `requirements.txt`). Graceful degradation if not installed — `/metrics` returns a plain-text stub.
 
 ---
 

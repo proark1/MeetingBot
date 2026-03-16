@@ -3020,6 +3020,8 @@ async def run_browser_bot(
     live_transcription: bool = False,
     on_live_transcript_entry=None,
     gemini_api_key: str = "",
+    record_video: bool = False,
+    video_path: Optional[str] = None,
 ) -> dict:
     """
     Join a meeting as a named guest, record audio, wait for it to end.
@@ -3048,8 +3050,9 @@ async def run_browser_bot(
     pulse_idx:          Optional[str] = None
     pulse_mic_idx:      Optional[str] = None   # null-sink module index
     pulse_mic_virt_idx: Optional[str] = None   # virtual-source module index
-    ffmpeg_proc:   Optional[subprocess.Popen] = None
-    xvfb_proc:     Optional[subprocess.Popen] = None
+    ffmpeg_proc:        Optional[subprocess.Popen] = None
+    ffmpeg_video_proc:  Optional[subprocess.Popen] = None  # screen capture
+    xvfb_proc:          Optional[subprocess.Popen] = None
     t0 = time.monotonic()
 
     # ── Per-bot unique PulseAudio sink names ────────────────────────────────
@@ -3239,6 +3242,38 @@ async def run_browser_bot(
 
             await _screenshot(page, f"{platform}_in_meeting")
             logger.info("Bot is in the meeting — monitoring for end…")
+
+            # ── Optional video recording via ffmpeg X11grab ────────────────────
+            if record_video and video_path and xvfb_proc is not None:
+                try:
+                    from app.config import settings as _cfg
+                    _venv = {**os.environ, "DISPLAY": xvfb_display}
+                    ffmpeg_video_proc = subprocess.Popen(
+                        [
+                            "ffmpeg", "-y",
+                            "-f", "x11grab",
+                            "-r", str(_cfg.VIDEO_FPS),
+                            "-s", _cfg.VIDEO_SCALE,
+                            "-i", xvfb_display,
+                            "-vcodec", "libx264",
+                            "-crf", str(_cfg.VIDEO_CRF),
+                            "-preset", "ultrafast",
+                            video_path,
+                        ],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        env=_venv,
+                    )
+                    time.sleep(0.5)
+                    if ffmpeg_video_proc.poll() is None:
+                        _register_proc(ffmpeg_video_proc)
+                        logger.info("Video recording started → %s", video_path)
+                    else:
+                        logger.warning("Video ffmpeg exited immediately — video recording disabled")
+                        ffmpeg_video_proc = None
+                except Exception as _ve:
+                    logger.warning("Could not start video recording: %s", _ve)
+                    ffmpeg_video_proc = None
 
             # Post-admission mic check: meeting platforms sometimes auto-mute on
             # admit. When start_muted=False, ensure the mic is actually on now
@@ -3494,9 +3529,16 @@ async def run_browser_bot(
                 and os.path.exists(audio_path)
                 and os.path.getsize(audio_path) > 8192
             )
+            has_video = (
+                ffmpeg_video_proc is not None
+                and video_path is not None
+                and os.path.exists(video_path)
+                and os.path.getsize(video_path) > 4096
+            )
             return {
                 "success": True,
                 "audio_path": audio_path if has_audio else None,
+                "video_path": video_path if has_video else None,
                 "error": None,
                 "admitted": True,
                 "duration_seconds": duration,
@@ -3511,6 +3553,7 @@ async def run_browser_bot(
             return {
                 "success": False,
                 "audio_path": None,
+                "video_path": None,
                 "error": str(exc),
                 "admitted": False,
                 "duration_seconds": time.monotonic() - t0,
@@ -3533,6 +3576,8 @@ async def run_browser_bot(
                 with contextlib.suppress(asyncio.CancelledError, Exception):
                     await monitor_task
             await browser.close()
+            if ffmpeg_video_proc:
+                _stop_ffmpeg(ffmpeg_video_proc)
             if ffmpeg_proc:
                 _stop_ffmpeg(ffmpeg_proc)
             if pulse_idx:

@@ -101,6 +101,33 @@ class Settings(BaseSettings):
     PLAN_PRO_BOTS_PER_MONTH: int = 500
     PLAN_BUSINESS_BOTS_PER_MONTH: int = -1
 
+    # ── Google / Microsoft SSO ────────────────────────────────────────────────
+    GOOGLE_CLIENT_ID: str = ""
+    GOOGLE_CLIENT_SECRET: str = ""
+    MICROSOFT_CLIENT_ID: str = ""
+    MICROSOFT_CLIENT_SECRET: str = ""
+    # Base URL used to build OAuth callback URIs.
+    # e.g. "https://app.acme.com" — server appends /api/v1/auth/oauth/{provider}/callback
+    OAUTH_REDIRECT_BASE_URL: str = "http://localhost:8000"
+
+    # ── Bot persona ───────────────────────────────────────────────────────────
+    DEFAULT_BOT_AVATAR_URL: str = ""    # platform-default avatar (per-bot can override)
+
+    # ── Video recording ───────────────────────────────────────────────────────
+    VIDEO_RECORDING_ENABLED: bool = True  # set False to globally disable video
+    VIDEO_CRF: int = 28                   # ffmpeg CRF (lower = better quality, larger file)
+    VIDEO_FPS: int = 15                   # capture framerate
+    VIDEO_SCALE: str = "1280:720"         # output resolution WxH
+
+    # ── Idempotency ───────────────────────────────────────────────────────────
+    IDEMPOTENCY_TTL_HOURS: int = 24       # how long to cache key → bot_id mappings
+
+    # ── Webhook retry ─────────────────────────────────────────────────────────
+    WEBHOOK_MAX_ATTEMPTS: int = 5
+    # Comma-separated backoff delays in seconds (1 min, 5 min, 25 min, 2 h, 10 h)
+    WEBHOOK_RETRY_DELAYS: str = "60,300,1500,7200,36000"
+    WEBHOOK_DELIVERY_RETENTION_DAYS: int = 30  # prune delivery logs older than N days
+
     model_config = {"env_file": ".env", "extra": "ignore"}
 
 
