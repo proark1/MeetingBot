@@ -199,6 +199,15 @@ async def _check_transfers() -> None:
         )
         state = state_result.scalar_one_or_none()
 
+        # Collect the to-addresses we care about so the RPC query is filtered.
+        # Without this filter, get_logs returns ALL USDC transfers on mainnet
+        # (thousands per block), which blows past RPC result-size limits and
+        # causes the monitor to fail without ever crediting anyone.
+        filter_to_addresses: list[str] = []
+        if platform_wallet:
+            filter_to_addresses.append(platform_wallet)  # already lowercased
+        filter_to_addresses.extend(to_addr_to_account.keys())  # HD deposit addrs
+
         # Poll blockchain in thread to avoid blocking event loop
         try:
             from_block, to_block, raw_events = await asyncio.to_thread(
@@ -206,6 +215,7 @@ async def _check_transfers() -> None:
                 settings.CRYPTO_RPC_URL,
                 settings.USDC_CONTRACT,
                 int(state.value) if state and state.value else None,
+                filter_to_addresses or None,
             )
         except Exception as exc:
             logger.error("USDC RPC error: %s", exc)
@@ -282,8 +292,19 @@ async def _check_transfers() -> None:
         await db.commit()
 
 
-def _fetch_usdc_events(rpc_url: str, contract_address: str, from_block: Optional[int]) -> tuple:
-    """Synchronous: fetch USDC Transfer events via web3.py (runs in thread pool)."""
+def _fetch_usdc_events(
+    rpc_url: str,
+    contract_address: str,
+    from_block: Optional[int],
+    to_addresses: Optional[list] = None,
+) -> tuple:
+    """Synchronous: fetch USDC Transfer events via web3.py (runs in thread pool).
+
+    ``to_addresses`` should be a list of lowercase Ethereum addresses to filter
+    on (the ``to`` indexed topic).  Always pass this — without it, the query
+    returns *all* USDC transfers on mainnet (thousands per block), which blows
+    past RPC result-size limits and causes the monitor to silently fail.
+    """
     try:
         from web3 import Web3
     except ImportError:
@@ -303,13 +324,26 @@ def _fetch_usdc_events(rpc_url: str, contract_address: str, from_block: Optional
         abi=_ERC20_TRANSFER_ABI,
     )
 
+    # Build the argument filter for the ``to`` indexed topic.
+    # This converts the query from "all USDC transfers" to "only transfers to
+    # our wallet(s)", reducing results from millions to near-zero per block.
+    argument_filters: dict = {}
+    if to_addresses:
+        checksum_addrs = [Web3.to_checksum_address(a) for a in to_addresses]
+        argument_filters = {"to": checksum_addrs[0] if len(checksum_addrs) == 1 else checksum_addrs}
+
     # Fetch in chunks of 2000 blocks to avoid RPC limits
     all_events = []
     chunk_size = 2000
     scan_from = from_block + 1
     while scan_from <= current_block:
         scan_to = min(scan_from + chunk_size - 1, current_block)
-        events = usdc.events.Transfer().get_logs(fromBlock=scan_from, toBlock=scan_to)
+        if argument_filters:
+            events = usdc.events.Transfer().get_logs(
+                fromBlock=scan_from, toBlock=scan_to, argument_filters=argument_filters
+            )
+        else:
+            events = usdc.events.Transfer().get_logs(fromBlock=scan_from, toBlock=scan_to)
         all_events.extend(events)
         scan_from = scan_to + 1
 

@@ -237,7 +237,7 @@ curl http://localhost:8000/api/v1/admin/wallet \
   -H "Authorization: Bearer sk_live_<admin-api-key>"
 ```
 
-Or use the admin web UI at `/admin` to manage the wallet address through a form.
+Or use the admin web UI at `/admin` to manage all settings through a form.
 
 ### Web UI
 | Path | Description |
@@ -246,7 +246,7 @@ Or use the admin web UI at `/admin` to manage the wallet address through a form.
 | `/login` | Login |
 | `/dashboard` | Balance, API keys, transaction history |
 | `/topup` | Add credits (Stripe card or USDC) |
-| `/admin` | Platform administration — manage USDC collection wallet (admin only) |
+| `/admin` | Platform administration — stats, unmatched transfers, user accounts, manual credit, rescan, wallet config (admin only) |
 
 Full interactive docs (with request/response examples): `GET /api/docs`
 Alternative ReDoc view: `GET /api/redoc`

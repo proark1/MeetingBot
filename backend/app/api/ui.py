@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.db import get_db
 from app.deps import _admin_emails
-from app.models.account import Account, ApiKey, CreditTransaction, PlatformConfig
+from app.models.account import Account, ApiKey, CreditTransaction, PlatformConfig, MonitorState, UnmatchedUsdcTransfer
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["UI"])
@@ -277,8 +277,10 @@ async def save_wallet_ui(
         return RedirectResponse("/login")
 
     import re
-    address = wallet_address.strip()
-    if not re.match(r"^0x[0-9a-fA-F]{40}$", address):
+    # Normalize to lowercase — Ethereum addresses are case-insensitive;
+    # consistent storage ensures the monitor's case-folded lookup always matches.
+    address = wallet_address.strip().lower()
+    if not re.match(r"^0x[0-9a-f]{40}$", address):
         return RedirectResponse("/dashboard?wallet=error", status_code=303)
 
     # Check uniqueness
@@ -387,25 +389,109 @@ async def admin_page(request: Request, db: AsyncSession = Depends(get_db)):
     if not _is_admin(account):
         return RedirectResponse("/dashboard")
 
-    # Load platform wallet
     from app.api.admin import WALLET_KEY
-    result = await db.execute(
+    from sqlalchemy import func, desc
+
+    # Platform wallet
+    wallet_result = await db.execute(
         select(PlatformConfig).where(PlatformConfig.key == WALLET_KEY)
     )
-    wallet_config = result.scalar_one_or_none()
+    wallet_config = wallet_result.scalar_one_or_none()
 
-    # Load all configs
-    all_configs = await db.execute(select(PlatformConfig))
-    configs = [
-        {"key": c.key, "value": c.value}
-        for c in all_configs.scalars().all()
+    # Monitor state
+    monitor_result = await db.execute(
+        select(MonitorState).where(MonitorState.key == "usdc_last_block")
+    )
+    monitor_state = monitor_result.scalar_one_or_none()
+
+    # Stats
+    total_accounts = (await db.execute(select(func.count(Account.id)))).scalar_one()
+    total_credits = (await db.execute(select(func.sum(Account.credits_usd)))).scalar_one() or 0
+    total_usdc_in = (await db.execute(
+        select(func.sum(CreditTransaction.amount_usd)).where(CreditTransaction.type == "usdc_topup")
+    )).scalar_one() or 0
+    total_stripe_in = (await db.execute(
+        select(func.sum(CreditTransaction.amount_usd)).where(CreditTransaction.type == "stripe_topup")
+    )).scalar_one() or 0
+    total_unmatched_pending = (await db.execute(
+        select(func.count(UnmatchedUsdcTransfer.tx_hash)).where(UnmatchedUsdcTransfer.resolved == False)  # noqa: E712
+    )).scalar_one()
+
+    # All user accounts
+    accounts_result = await db.execute(
+        select(Account).order_by(desc(Account.credits_usd))
+    )
+    all_accounts = [
+        {
+            "id": a.id,
+            "email": a.email,
+            "credits_usd": float(a.credits_usd or 0),
+            "wallet_address": a.wallet_address,
+            "is_active": a.is_active,
+            "is_admin": a.is_admin,
+            "created_at": a.created_at.strftime("%Y-%m-%d %H:%M"),
+        }
+        for a in accounts_result.scalars().all()
+    ]
+
+    # Recent transactions (all users, last 50)
+    txns_result = await db.execute(
+        select(CreditTransaction, Account.email)
+        .join(Account, CreditTransaction.account_id == Account.id)
+        .order_by(desc(CreditTransaction.created_at))
+        .limit(50)
+    )
+    recent_txns = [
+        {
+            "created_at": t.created_at.strftime("%Y-%m-%d %H:%M"),
+            "email": email,
+            "type": t.type,
+            "description": t.description,
+            "amount_usd": float(t.amount_usd),
+            "reference_id": t.reference_id,
+        }
+        for t, email in txns_result.all()
+    ]
+
+    # Unmatched USDC transfers (most recent first, pending first)
+    unmatched_result = await db.execute(
+        select(UnmatchedUsdcTransfer).order_by(
+            UnmatchedUsdcTransfer.resolved.asc(),
+            desc(UnmatchedUsdcTransfer.detected_at),
+        )
+    )
+    unmatched_transfers = [
+        {
+            "tx_hash": u.tx_hash,
+            "from_address": u.from_address,
+            "amount_usdc": float(u.amount_usdc),
+            "block_number": u.block_number,
+            "detected_at": u.detected_at.strftime("%Y-%m-%d %H:%M"),
+            "resolved": u.resolved,
+            "resolution_note": u.resolution_note,
+        }
+        for u in unmatched_result.scalars().all()
     ]
 
     flash = None
-    if request.query_params.get("saved") == "1":
-        flash = _flash("success", "Wallet address saved successfully.")
-    if request.query_params.get("error") == "invalid_address":
-        flash = _flash("danger", "Invalid Ethereum address. Must be 0x followed by 40 hex characters.")
+    msg = request.query_params.get("msg")
+    err = request.query_params.get("error")
+    if msg == "wallet_saved":
+        flash = _flash("success", "Wallet address saved.")
+    elif msg == "credit_ok":
+        flash = _flash("success", "Account credited successfully.")
+    elif msg == "rescan_ok":
+        flash = _flash("success", "USDC monitor rescan scheduled.")
+    elif msg == "resolved":
+        flash = _flash("success", "Transfer marked as resolved.")
+    elif err == "invalid_address":
+        flash = _flash("danger", "Invalid Ethereum address.")
+    elif err == "account_not_found":
+        flash = _flash("danger", "Account not found for that email.")
+    elif err == "credit_failed":
+        flash = _flash("danger", "Failed to apply credit — check server logs.")
+    elif err == "invalid_amount":
+        flash = _flash("danger", "Invalid amount.")
 
     return templates.TemplateResponse("admin.html", {
         "request": request,
@@ -416,7 +502,17 @@ async def admin_page(request: Request, db: AsyncSession = Depends(get_db)):
         "crypto_rpc_configured": bool(settings.CRYPTO_RPC_URL),
         "hd_seed_configured": bool(settings.CRYPTO_HD_SEED),
         "stripe_configured": bool(settings.STRIPE_SECRET_KEY),
-        "configs": configs,
+        "monitor_last_block": monitor_state.value if monitor_state else None,
+        "stats": {
+            "total_accounts": total_accounts,
+            "total_credits_usd": float(total_credits),
+            "total_usdc_received": float(total_usdc_in),
+            "total_stripe_received": float(total_stripe_in),
+            "unmatched_pending": total_unmatched_pending,
+        },
+        "all_accounts": all_accounts,
+        "recent_txns": recent_txns,
+        "unmatched_transfers": unmatched_transfers,
         "flash": flash,
     })
 
@@ -432,8 +528,8 @@ async def admin_wallet_submit(
         return RedirectResponse("/dashboard")
 
     import re
-    address = wallet_address.strip()
-    if not re.match(r"^0x[0-9a-fA-F]{40}$", address):
+    address = wallet_address.strip().lower()
+    if not re.match(r"^0x[0-9a-f]{40}$", address):
         return RedirectResponse("/admin?error=invalid_address", status_code=303)
 
     from app.api.admin import WALLET_KEY
@@ -450,4 +546,91 @@ async def admin_wallet_submit(
 
     await db.commit()
     logger.info("Admin updated platform wallet to %s", address)
-    return RedirectResponse("/admin?saved=1", status_code=303)
+    return RedirectResponse("/admin?msg=wallet_saved", status_code=303)
+
+
+@router.post("/admin/credit", include_in_schema=False)
+async def admin_credit_submit(
+    request: Request,
+    email: str = Form(...),
+    amount_usd: float = Form(...),
+    note: str = Form(default=""),
+    db: AsyncSession = Depends(get_db),
+):
+    account = await _get_account_from_request(request, db)
+    if not _is_admin(account):
+        return RedirectResponse("/dashboard")
+
+    if amount_usd <= 0:
+        return RedirectResponse("/admin?error=invalid_amount", status_code=303)
+
+    from decimal import Decimal
+    result = await db.execute(select(Account).where(Account.email == email))
+    target = result.scalar_one_or_none()
+    if not target:
+        return RedirectResponse("/admin?error=account_not_found", status_code=303)
+
+    try:
+        from app.services.credit_service import add_credits
+        await add_credits(
+            account_id=target.id,
+            amount_usd=Decimal(str(amount_usd)),
+            type="usdc_topup",
+            description=f"Admin manual credit: {note or 'Manual credit'}",
+            reference_id=None,
+            db=db,
+        )
+        logger.info("Admin credited $%.4f to %s. Note: %s", amount_usd, email, note)
+    except Exception as exc:
+        logger.error("Admin credit failed: %s", exc)
+        return RedirectResponse("/admin?error=credit_failed", status_code=303)
+
+    return RedirectResponse("/admin?msg=credit_ok", status_code=303)
+
+
+@router.post("/admin/rescan", include_in_schema=False)
+async def admin_rescan_submit(
+    request: Request,
+    from_block: int = Form(...),
+    db: AsyncSession = Depends(get_db),
+):
+    account = await _get_account_from_request(request, db)
+    if not _is_admin(account):
+        return RedirectResponse("/dashboard")
+
+    new_value = str(max(0, from_block - 1))
+    result = await db.execute(
+        select(MonitorState).where(MonitorState.key == "usdc_last_block")
+    )
+    state = result.scalar_one_or_none()
+    if state is None:
+        state = MonitorState(key="usdc_last_block", value=new_value)
+        db.add(state)
+    else:
+        state.value = new_value
+    await db.commit()
+    logger.info("Admin reset USDC monitor last-block to %s (rescan from %d)", new_value, from_block)
+    return RedirectResponse("/admin?msg=rescan_ok", status_code=303)
+
+
+@router.post("/admin/usdc/unmatched/{tx_hash}/resolve", include_in_schema=False)
+async def admin_resolve_unmatched(
+    tx_hash: str,
+    request: Request,
+    note: str = Form(default=""),
+    db: AsyncSession = Depends(get_db),
+):
+    account = await _get_account_from_request(request, db)
+    if not _is_admin(account):
+        return RedirectResponse("/dashboard")
+
+    result = await db.execute(
+        select(UnmatchedUsdcTransfer).where(UnmatchedUsdcTransfer.tx_hash == tx_hash)
+    )
+    transfer = result.scalar_one_or_none()
+    if transfer:
+        transfer.resolved = True
+        transfer.resolution_note = note or "Resolved by admin"
+        await db.commit()
+        logger.info("Admin resolved unmatched transfer %s. Note: %s", tx_hash, transfer.resolution_note)
+    return RedirectResponse("/admin?msg=resolved", status_code=303)
