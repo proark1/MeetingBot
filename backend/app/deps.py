@@ -101,3 +101,33 @@ async def require_auth(
 ) -> Optional[str]:
     """Router-level dependency: authenticate request and return account_id."""
     return account_id
+
+
+# Admin email whitelist — only these emails can access admin endpoints
+ADMIN_EMAILS = {"assad.dar@gmail.com"}
+
+
+async def require_admin(
+    account_id: Optional[str] = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db),
+) -> str:
+    """Require that the current user is an admin. Returns the account_id."""
+    if not account_id or account_id == SUPERADMIN_ACCOUNT_ID:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access requires a per-user account.",
+        )
+
+    from app.models.account import Account
+    result = await db.execute(select(Account).where(Account.id == account_id))
+    account = result.scalar_one_or_none()
+    if not account:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
+
+    if account.email not in ADMIN_EMAILS and not account.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access denied.",
+        )
+
+    return account_id

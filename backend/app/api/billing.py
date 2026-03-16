@@ -246,6 +246,26 @@ async def get_usdc_address(
     """
     _require_account(account_id)
 
+    # First try the admin-configured platform wallet
+    from app.models.account import PlatformConfig
+    from app.api.admin import WALLET_KEY
+    wallet_result = await db.execute(
+        select(PlatformConfig).where(PlatformConfig.key == WALLET_KEY)
+    )
+    wallet_config = wallet_result.scalar_one_or_none()
+
+    if wallet_config and wallet_config.value:
+        return UsdcAddressResponse(
+            deposit_address=wallet_config.value,
+            contract=settings.USDC_CONTRACT,
+            network="Ethereum Mainnet (ERC-20)",
+            note=(
+                "Send USDC only. Other tokens will not be credited. "
+                "Credits are added automatically within ~1 minute after confirmation."
+            ),
+        )
+
+    # Fallback to HD-derived per-user address
     if not settings.CRYPTO_HD_SEED:
         raise HTTPException(
             status_code=503,

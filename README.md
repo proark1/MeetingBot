@@ -192,6 +192,15 @@ Or receive them via your `webhook_url` — a POST with the full payload is deliv
 | `GET` | `/api/v1/action-items/stats` | Aggregate action-item counts by assignee |
 | `GET` | `/api/health` or `/health` | Health check |
 
+### Admin (requires admin account)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/v1/admin/wallet` | Get the current platform USDC collection wallet address |
+| `PUT` | `/api/v1/admin/wallet` | Set or update the platform USDC collection wallet address. Body: `{wallet_address}` |
+| `GET` | `/api/v1/admin/config` | List all platform configuration values |
+
+> **Admin access:** Only the admin account (`assad.dar@gmail.com`) or accounts with `is_admin=true` can access these endpoints. All other users receive a 403 error.
+
 ### Web UI
 | Path | Description |
 |------|-------------|
@@ -199,6 +208,7 @@ Or receive them via your `webhook_url` — a POST with the full payload is deliv
 | `/login` | Login |
 | `/dashboard` | Balance, API keys, transaction history |
 | `/topup` | Add credits (Stripe card or USDC) |
+| `/admin` | Platform administration — manage USDC collection wallet (admin only) |
 
 Full interactive docs (with request/response examples): `GET /api/docs`
 Alternative ReDoc view: `GET /api/redoc`

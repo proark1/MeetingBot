@@ -24,6 +24,7 @@ from app.api.analytics import router as analytics_router
 from app.api.auth import router as auth_router
 from app.api.billing import router as billing_router
 from app.api.ui import router as ui_router
+from app.api.admin import router as admin_router
 from app.deps import require_auth
 
 logging.basicConfig(
@@ -179,6 +180,7 @@ app.include_router(webhooks_router,  prefix="/api/v1", dependencies=_auth)
 app.include_router(exports_router,   prefix="/api/v1", dependencies=_auth)
 app.include_router(templates_router, prefix="/api/v1", dependencies=_auth)
 app.include_router(analytics_router, prefix="/api/v1", dependencies=_auth)
+app.include_router(admin_router,     prefix="/api/v1")             # admin has its own auth (require_admin)
 app.include_router(ws_router,        prefix="/api/v1")             # WS auth handled separately
 app.include_router(ui_router)                                       # web UI (no prefix)
 

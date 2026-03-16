@@ -13,7 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.db import get_db
-from app.models.account import Account, ApiKey, CreditTransaction
+from app.deps import ADMIN_EMAILS
+from app.models.account import Account, ApiKey, CreditTransaction, PlatformConfig
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["UI"])
@@ -204,6 +205,7 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
     return templates.TemplateResponse("dashboard.html", {
         "request": request,
         "account": account,
+        "is_admin": _is_admin(account),
         "balance": float(account.credits_usd or 0),
         "api_keys": api_keys,
         "transactions": transactions,
@@ -266,7 +268,15 @@ async def topup_page(request: Request, db: AsyncSession = Depends(get_db)):
         return RedirectResponse("/login")
 
     usdc_address = None
-    if settings.CRYPTO_HD_SEED:
+    # Check for admin-configured platform wallet first
+    from app.api.admin import WALLET_KEY
+    wallet_result = await db.execute(
+        select(PlatformConfig).where(PlatformConfig.key == WALLET_KEY)
+    )
+    wallet_config = wallet_result.scalar_one_or_none()
+    if wallet_config and wallet_config.value:
+        usdc_address = wallet_config.value
+    elif settings.CRYPTO_HD_SEED:
         try:
             from app.services.crypto_service import get_or_create_deposit_address
             usdc_address = await get_or_create_deposit_address(account.id, db)
@@ -286,9 +296,10 @@ async def topup_page(request: Request, db: AsyncSession = Depends(get_db)):
     return templates.TemplateResponse("topup.html", {
         "request": request,
         "account": account,
+        "is_admin": _is_admin(account),
         "amounts": amounts,
         "stripe_enabled": bool(settings.STRIPE_SECRET_KEY),
-        "usdc_enabled": bool(settings.CRYPTO_HD_SEED),
+        "usdc_enabled": bool(usdc_address),
         "usdc_address": usdc_address,
         "usdc_contract": settings.USDC_CONTRACT,
         "flash": flash,
@@ -323,3 +334,83 @@ async def topup_stripe_submit(
         cancel_url=f"{base_url}/topup?payment=cancelled",
     )
     return RedirectResponse(checkout_url, status_code=303)
+
+
+# ── Admin ────────────────────────────────────────────────────────────────────
+
+def _is_admin(account: Optional[Account]) -> bool:
+    if not account:
+        return False
+    return account.email in ADMIN_EMAILS or account.is_admin
+
+
+@router.get("/admin", response_class=HTMLResponse, include_in_schema=False)
+async def admin_page(request: Request, db: AsyncSession = Depends(get_db)):
+    account = await _get_account_from_request(request, db)
+    if not _is_admin(account):
+        return RedirectResponse("/dashboard")
+
+    # Load platform wallet
+    from app.api.admin import WALLET_KEY
+    result = await db.execute(
+        select(PlatformConfig).where(PlatformConfig.key == WALLET_KEY)
+    )
+    wallet_config = result.scalar_one_or_none()
+
+    # Load all configs
+    all_configs = await db.execute(select(PlatformConfig))
+    configs = [
+        {"key": c.key, "value": c.value}
+        for c in all_configs.scalars().all()
+    ]
+
+    flash = None
+    if request.query_params.get("saved") == "1":
+        flash = _flash("success", "Wallet address saved successfully.")
+    if request.query_params.get("error") == "invalid_address":
+        flash = _flash("danger", "Invalid Ethereum address. Must be 0x followed by 40 hex characters.")
+
+    return templates.TemplateResponse("admin.html", {
+        "request": request,
+        "account": account,
+        "is_admin": True,
+        "wallet_address": wallet_config.value if wallet_config else None,
+        "usdc_contract": settings.USDC_CONTRACT,
+        "crypto_rpc_configured": bool(settings.CRYPTO_RPC_URL),
+        "hd_seed_configured": bool(settings.CRYPTO_HD_SEED),
+        "stripe_configured": bool(settings.STRIPE_SECRET_KEY),
+        "configs": configs,
+        "flash": flash,
+    })
+
+
+@router.post("/admin/wallet", include_in_schema=False)
+async def admin_wallet_submit(
+    request: Request,
+    wallet_address: str = Form(...),
+    db: AsyncSession = Depends(get_db),
+):
+    account = await _get_account_from_request(request, db)
+    if not _is_admin(account):
+        return RedirectResponse("/dashboard")
+
+    import re
+    address = wallet_address.strip()
+    if not re.match(r"^0x[0-9a-fA-F]{40}$", address):
+        return RedirectResponse("/admin?error=invalid_address", status_code=303)
+
+    from app.api.admin import WALLET_KEY
+    result = await db.execute(
+        select(PlatformConfig).where(PlatformConfig.key == WALLET_KEY)
+    )
+    config = result.scalar_one_or_none()
+
+    if config:
+        config.value = address
+    else:
+        config = PlatformConfig(key=WALLET_KEY, value=address)
+        db.add(config)
+
+    await db.commit()
+    logger.info("Admin updated platform wallet to %s", address)
+    return RedirectResponse("/admin?saved=1", status_code=303)

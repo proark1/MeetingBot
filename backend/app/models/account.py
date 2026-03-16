@@ -27,6 +27,7 @@ class Account(Base):
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
     credits_usd: Mapped[Decimal] = mapped_column(Numeric(12, 6), default=Decimal("0"))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     api_keys: Mapped[list["ApiKey"]] = relationship(back_populates="account", cascade="all, delete-orphan")
@@ -96,3 +97,13 @@ class MonitorState(Base):
 
     key: Mapped[str] = mapped_column(String(50), primary_key=True)
     value: Mapped[str] = mapped_column(Text, default="")
+
+
+class PlatformConfig(Base):
+    """Platform-level configuration managed by admins (e.g. USDC collection wallet)."""
+
+    __tablename__ = "platform_config"
+
+    key: Mapped[str] = mapped_column(String(100), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)

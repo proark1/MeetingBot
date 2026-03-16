@@ -31,6 +31,11 @@
         <li class="nav-item">
           <a class="nav-link" href="/api/docs" target="_blank">API Docs</a>
         </li>
+        {% if is_admin %}
+        <li class="nav-item">
+          <a class="nav-link text-warning" href="/admin">Admin</a>
+        </li>
+        {% endif %}
         <li class="nav-item">
           <a class="nav-link" href="/logout">Logout</a>
         </li>
