@@ -520,6 +520,8 @@ The background poll loop checks all active feeds every `CALENDAR_POLL_INTERVAL_S
 | `POST` | `/api/v1/bot/{id}/followup-email` | Draft follow-up email. Returns `{bot_id, subject, body}`. HTTP 425 if no transcript or analysis yet |
 | `GET` | `/api/v1/bot/{id}/export/markdown` | Export full report as Markdown file |
 | `GET` | `/api/v1/bot/{id}/export/pdf` | Export full report as PDF file |
+| `GET` | `/api/v1/bot/{id}/export/json` | Export full session as structured JSON (transcript, analysis, chapters, speaker stats, metadata) |
+| `GET` | `/api/v1/bot/{id}/export/srt` | Export transcript as an SRT subtitle file |
 | `POST` | `/api/v1/webhook` | Register global webhook. Body: `{url, events, secret?}` |
 | `GET` | `/api/v1/webhook` | List all registered webhooks |
 | `DELETE` | `/api/v1/webhook/{id}` | Remove webhook. HTTP 204 |

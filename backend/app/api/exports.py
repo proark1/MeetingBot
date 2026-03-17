@@ -1,10 +1,12 @@
-"""Export endpoints — download meeting reports as PDF or Markdown."""
+"""Export endpoints — download meeting reports as PDF, Markdown, JSON, or SRT."""
 
 import io
 import logging
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response, PlainTextResponse
+from pydantic import BaseModel
+from typing import Any, Dict, List, Optional
 
 from app.deps import SUPERADMIN_ACCOUNT_ID
 from app.store import store, BotSession
@@ -314,3 +316,102 @@ def _build_pdf(bot: BotSession) -> bytes:
 
     doc.build(story)
     return buf.getvalue()
+
+
+# ── JSON export ───────────────────────────────────────────────────────────────
+
+class _ExportJsonResponse(BaseModel):
+    id: str
+    meeting_url: str
+    meeting_platform: Optional[str] = None
+    bot_name: str
+    status: str
+    transcript: List[Dict[str, Any]]
+    analysis: Optional[Dict[str, Any]] = None
+    chapters: List[Dict[str, Any]]
+    speaker_stats: List[Dict[str, Any]]
+    participants: List[str]
+    started_at: Optional[str] = None
+    ended_at: Optional[str] = None
+    duration_seconds: Optional[float] = None
+    metadata: Optional[Dict[str, Any]] = None
+    sub_user_id: Optional[str] = None
+
+
+@router.get("/{bot_id}/export/json", response_model=_ExportJsonResponse)
+async def export_json(bot_id: str, request: Request):
+    """Export the full bot session as structured JSON."""
+    bot = await _get_or_404(bot_id, getattr(request.state, "account_id", None))
+    return _ExportJsonResponse(
+        id=bot.id,
+        meeting_url=bot.meeting_url,
+        meeting_platform=bot.meeting_platform,
+        bot_name=bot.bot_name,
+        status=bot.status,
+        transcript=bot.transcript or [],
+        analysis=bot.analysis,
+        chapters=bot.chapters or [],
+        speaker_stats=bot.speaker_stats or [],
+        participants=bot.participants or [],
+        started_at=bot.started_at.isoformat() if bot.started_at else None,
+        ended_at=bot.ended_at.isoformat() if bot.ended_at else None,
+        duration_seconds=bot.duration_seconds,
+        metadata=bot.metadata or {},
+        sub_user_id=bot.sub_user_id,
+    )
+
+
+# ── SRT export ────────────────────────────────────────────────────────────────
+
+def _srt_timestamp(seconds: float) -> str:
+    """Convert float seconds to SRT timestamp format HH:MM:SS,mmm."""
+    seconds = max(0.0, seconds)
+    ms = int((seconds % 1) * 1000)
+    total_secs = int(seconds)
+    s = total_secs % 60
+    total_mins = total_secs // 60
+    m = total_mins % 60
+    h = total_mins // 60
+    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+
+def _build_srt(bot: BotSession) -> str:
+    transcript = bot.transcript or []
+    if not transcript:
+        return ""
+
+    lines: list[str] = []
+    for i, entry in enumerate(transcript):
+        start = float(entry.get("timestamp", 0))
+        # Use next entry's timestamp as end, or add 5 s for the last entry
+        if i + 1 < len(transcript):
+            end = float(transcript[i + 1].get("timestamp", start + 5))
+        else:
+            end = start + 5.0
+        # Ensure end > start
+        if end <= start:
+            end = start + 2.0
+
+        speaker = entry.get("speaker", "")
+        text = entry.get("text", "").strip()
+        caption = f"{speaker}: {text}" if speaker else text
+
+        lines.append(str(i + 1))
+        lines.append(f"{_srt_timestamp(start)} --> {_srt_timestamp(end)}")
+        lines.append(caption)
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+@router.get("/{bot_id}/export/srt")
+async def export_srt(bot_id: str, request: Request):
+    """Export the meeting transcript as an SRT subtitle file."""
+    bot = await _get_or_404(bot_id, getattr(request.state, "account_id", None))
+    srt_content = _build_srt(bot)
+    filename = f"meeting-{bot_id[:8]}.srt"
+    return PlainTextResponse(
+        content=srt_content,
+        media_type="text/plain",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
