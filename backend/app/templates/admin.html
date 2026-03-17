@@ -7,7 +7,10 @@
     <h1 class="page-title">Platform Administration</h1>
     <p class="page-subtitle">Logged in as <strong>{{ account.email }}</strong></p>
   </div>
-  <a href="/api/docs" target="_blank" class="btn btn-outline-secondary btn-sm">API Docs ↗</a>
+  <div class="d-flex gap-2">
+    <a href="/api/v1/admin/docs" target="_blank" class="btn btn-outline-primary btn-sm">Admin API Docs ↗</a>
+    <a href="/api/docs" target="_blank" class="btn btn-outline-secondary btn-sm">Public API Docs ↗</a>
+  </div>
 </div>
 
 <!-- ── Critical warning: RPC not configured ──────────────────────────────── -->

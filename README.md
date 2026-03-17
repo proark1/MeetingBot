@@ -73,7 +73,8 @@ docker compose up
 ```
 
 API available at `http://localhost:8000`
-Interactive docs at `http://localhost:8000/api/docs`
+Interactive docs at `http://localhost:8000/api/docs` (public endpoints only)
+Admin API docs at `http://localhost:8000/api/v1/admin/docs` (admin accounts only)
 Web UI at `http://localhost:8000/register`
 Admin panel at `http://localhost:8000/admin` (admin accounts only)
 
@@ -575,13 +576,17 @@ Or use the admin web UI at `/admin` to manage all settings through a form.
 | `/login` | Login with email/password or SSO (Google/Microsoft when configured) |
 | `/dashboard` | Balance, API keys, subscription plan & monthly usage, email notifications, USDC wallet, SSO accounts, **Integrations management** (add/pause/delete Slack & Notion), **Calendar feed management** (add/pause/remove iCal feeds with auto-join config), recent bots overview, transaction history, business account multi-user isolation info |
 | `/topup` | Add credits — Stripe card (redirect to secure checkout) or USDC (ERC-20 deposit address with amount selector) |
+| `/bot/{id}` | Session viewer — transcript, AI analysis (summary, key points, action items, decisions, next steps, sentiment, topics), speaker breakdown, chapters, meeting metadata, and download links for audio/video/markdown/PDF |
 | `/admin` | Platform administration — plan breakdown stats, bot activity & platform feature counters (webhooks/integrations/calendar/SSO), system status (Stripe/RPC/HD seed/email/storage/video/SSO), unmatched USDC transfers, user accounts with inline plan management, manual credit, rescan, wallet config, RPC URL (admin only) |
 
-Full interactive docs (with request/response examples and try-it-out): `GET /api/docs`
+Full interactive docs (public endpoints): `GET /api/docs`
 Alternative ReDoc view: `GET /api/redoc`
 Raw OpenAPI JSON: `GET /api/openapi.json`
 
-> The Swagger UI at `/api/docs` is generated directly from the FastAPI application and always reflects the live API — including all request/response schemas, authentication requirements, rate limits, business account behaviour, SSO, webhooks, integrations, calendar auto-join, subscription plans, notification preferences, exports, analytics, idempotency keys, video recording, cloud storage, Prometheus metrics, and WebSocket events documented in the description header.
+> The public Swagger UI at `/api/docs` shows all user-facing endpoints. Admin-only endpoints, platform analytics, and the `ai_usage` cost breakdown field are excluded. Admins can access the full schema — including all admin endpoints, analytics, and AI usage cost data — at `GET /api/v1/admin/docs` (requires admin auth).
+
+Admin API docs (full schema including admin endpoints, analytics & ai_usage): `GET /api/v1/admin/docs`
+Admin raw OpenAPI JSON: `GET /api/v1/admin/openapi.json`
 
 ---
 

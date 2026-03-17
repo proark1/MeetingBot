@@ -538,6 +538,7 @@
           <th>Platform</th>
           <th>Status</th>
           <th>Created</th>
+          <th></th>
         </tr>
       </thead>
       <tbody>
@@ -566,6 +567,7 @@
             {% endif %}
           </td>
           <td style="color:#94a3b8;font-size:12.5px">{{ bot.created_at }}</td>
+          <td><a href="/bot/{{ bot.id }}" class="btn btn-outline-secondary btn-sm" style="font-size:11px;padding:2px 8px">View</a></td>
         </tr>
         {% endfor %}
       </tbody>

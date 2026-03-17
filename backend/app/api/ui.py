@@ -380,6 +380,80 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
     })
 
 
+# ── Bot session / transcript viewer ───────────────────────────────────────────
+
+@router.get("/bot/{bot_id}", response_class=HTMLResponse, include_in_schema=False)
+async def bot_session_page(
+    bot_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    account = await _get_account_from_request(request, db)
+    if not account:
+        return RedirectResponse(f"/login?next=/bot/{bot_id}")
+
+    from app.store import store as _store
+    bot = await _store.get_bot(bot_id)
+
+    if bot is None or bot.account_id != account.id:
+        return templates.TemplateResponse("dashboard.html", {
+            "request": request,
+            "account": account,
+            "is_admin": _is_admin(account),
+            "flash": _flash("danger", "Session not found or you do not have access."),
+            "balance": float(account.credits_usd or 0),
+            "recent_bots": [],
+            "transactions": [],
+            "api_keys": [],
+            "plan": account.plan or "free",
+            "plan_limit": 5,
+            "monthly_bots_used": account.monthly_bots_used or 0,
+            "notify_on_done": account.notify_on_done,
+            "notify_email": account.notify_email or "",
+            "wallet_address": account.wallet_address,
+            "oauth_accounts": [],
+            "google_sso_enabled": bool(settings.GOOGLE_CLIENT_ID),
+            "microsoft_sso_enabled": bool(settings.MICROSOFT_CLIENT_ID),
+            "active_integrations": [],
+            "all_integrations": [],
+            "calendar_feeds": [],
+            "all_calendar_feeds": [],
+        })
+
+    import os as _os
+    _recording_ok = bool(bot.recording_path and _os.path.exists(bot.recording_path))
+    _video_ok = bool(bot.video_path and _os.path.exists(bot.video_path))
+
+    return templates.TemplateResponse("bot.html", {
+        "request": request,
+        "account": account,
+        "is_admin": _is_admin(account),
+        "bot": {
+            "id": bot.id,
+            "meeting_url": bot.meeting_url,
+            "meeting_platform": bot.meeting_platform,
+            "bot_name": bot.bot_name,
+            "status": bot.status,
+            "error_message": bot.error_message,
+            "created_at": bot.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+            "updated_at": bot.updated_at.strftime("%Y-%m-%d %H:%M:%S"),
+            "started_at": bot.started_at.strftime("%Y-%m-%d %H:%M:%S") if bot.started_at else None,
+            "ended_at": bot.ended_at.strftime("%Y-%m-%d %H:%M:%S") if bot.ended_at else None,
+            "duration_seconds": bot.duration_seconds,
+            "participants": bot.participants,
+            "transcript": bot.transcript,
+            "analysis": bot.analysis,
+            "chapters": bot.chapters,
+            "speaker_stats": bot.speaker_stats,
+            "recording_available": _recording_ok,
+            "video_available": _video_ok,
+            "is_demo_transcript": bot.is_demo_transcript,
+            "sub_user_id": bot.sub_user_id,
+            "metadata": bot.metadata,
+        },
+    })
+
+
 @router.post("/dashboard/keys", include_in_schema=False)
 async def create_key_ui(
     request: Request,

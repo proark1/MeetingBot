@@ -5,12 +5,12 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from app.deps import SUPERADMIN_ACCOUNT_ID
 from app.store import store
 
-router = APIRouter(tags=["Analytics"])
+router = APIRouter()
 
 _ACTIVE_STATUSES = ("ready", "scheduled", "queued", "joining", "in_call", "call_ended")
 
 
-@router.get("/analytics")
+@router.get("/analytics", tags=["Analytics"])
 async def get_analytics(request: Request):
     """Aggregate analytics across all bots currently in memory (24-hour window)."""
     account_id = getattr(request.state, "account_id", None)
@@ -53,7 +53,7 @@ async def get_analytics(request: Request):
     }
 
 
-@router.get("/action-items/stats")
+@router.get("/action-items/stats", tags=["Analytics"])
 async def get_action_items_stats(request: Request):
     """Aggregate action-item statistics across all bots in memory."""
     account_id = getattr(request.state, "account_id", None)
