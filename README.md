@@ -565,6 +565,7 @@ Or use the admin web UI at `/admin` to manage all settings through a form.
 
 | Path | Description |
 |------|-------------|
+| `/` | Landing page (marketing homepage) — redirects to `/dashboard` if already logged in |
 | `/register` | Create account (Personal or Business); Google/Microsoft SSO sign-up buttons when configured |
 | `/login` | Login with email/password or SSO (Google/Microsoft when configured) |
 | `/dashboard` | Balance, API keys, subscription plan & monthly usage, email notification preferences, USDC wallet, linked SSO accounts, integrations summary, calendar feeds, transaction history, business account multi-user info |

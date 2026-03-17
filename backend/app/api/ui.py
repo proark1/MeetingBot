@@ -53,15 +53,15 @@ def _flash(type: str, message: str) -> dict:
 
 # ── Root ──────────────────────────────────────────────────────────────────────
 
-@router.get("/", include_in_schema=False)
+@router.get("/", response_class=HTMLResponse, include_in_schema=False)
 async def root(request: Request, db: AsyncSession = Depends(get_db)):
     try:
         account = await _get_account_from_request(request, db)
         if account:
             return RedirectResponse("/dashboard")
     except Exception as exc:
-        logger.warning("Root route DB lookup failed (redirecting to /login): %s", exc)
-    return RedirectResponse("/login")
+        logger.warning("Root route DB lookup failed (serving landing page): %s", exc)
+    return templates.TemplateResponse("landing.html", {"request": request})
 
 
 # ── Register ──────────────────────────────────────────────────────────────────
