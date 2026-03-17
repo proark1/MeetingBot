@@ -2,9 +2,12 @@
 {% block title %}Admin — MeetingBot{% endblock %}
 {% block content %}
 
-<div class="d-flex justify-content-between align-items-center mb-4">
-  <h4 class="mb-0">Platform Administration</h4>
-  <span class="text-muted small">Logged in as {{ account.email }}</span>
+<div class="page-header d-flex justify-content-between align-items-start">
+  <div>
+    <h1 class="page-title">Platform Administration</h1>
+    <p class="page-subtitle">Logged in as <strong>{{ account.email }}</strong></p>
+  </div>
+  <a href="/api/docs" target="_blank" class="btn btn-outline-secondary btn-sm">API Docs ↗</a>
 </div>
 
 <!-- ── Critical warning: RPC not configured ──────────────────────────────── -->
@@ -24,44 +27,44 @@
 <!-- ── Stats row ──────────────────────────────────────────────────────────── -->
 <div class="row g-3 mb-4">
   <div class="col-6 col-md-3">
-    <div class="card p-3 text-center">
-      <div class="fs-2 fw-bold">{{ stats.total_accounts }}</div>
-      <div class="text-muted small">Total Accounts</div>
+    <div class="stat-card">
+      <div class="stat-label">Total Accounts</div>
+      <div class="stat-value mt-1">{{ stats.total_accounts }}</div>
     </div>
   </div>
   <div class="col-6 col-md-3">
-    <div class="card p-3 text-center">
-      <div class="fs-2 fw-bold">${{ "%.2f"|format(stats.total_credits_usd) }}</div>
-      <div class="text-muted small">Credits Outstanding</div>
+    <div class="stat-card">
+      <div class="stat-label">Credits Outstanding</div>
+      <div class="stat-value mt-1">${{ "%.2f"|format(stats.total_credits_usd) }}</div>
     </div>
   </div>
   <div class="col-6 col-md-3">
-    <div class="card p-3 text-center">
-      <div class="fs-2 fw-bold text-success">${{ "%.2f"|format(stats.total_usdc_received + stats.total_stripe_received) }}</div>
-      <div class="text-muted small">Total Revenue</div>
-      <div class="text-muted" style="font-size:.7rem">USDC ${{ "%.2f"|format(stats.total_usdc_received) }} · Stripe ${{ "%.2f"|format(stats.total_stripe_received) }}</div>
+    <div class="stat-card">
+      <div class="stat-label">Total Revenue</div>
+      <div class="stat-value text-success mt-1">${{ "%.2f"|format(stats.total_usdc_received + stats.total_stripe_received) }}</div>
+      <div class="stat-label">USDC ${{ "%.2f"|format(stats.total_usdc_received) }} · Stripe ${{ "%.2f"|format(stats.total_stripe_received) }}</div>
     </div>
   </div>
   <div class="col-6 col-md-3">
-    <div class="card p-3 text-center {% if stats.unmatched_pending > 0 %}border border-warning{% endif %}">
-      <div class="fs-2 fw-bold {% if stats.unmatched_pending > 0 %}text-warning{% endif %}">{{ stats.unmatched_pending }}</div>
-      <div class="text-muted small">Unmatched Transfers</div>
+    <div class="stat-card {% if stats.unmatched_pending > 0 %}border-warning{% endif %}" style="{% if stats.unmatched_pending > 0 %}border-color:#f59e0b{% endif %}">
+      <div class="stat-label">Unmatched Transfers</div>
+      <div class="stat-value mt-1 {% if stats.unmatched_pending > 0 %}text-warning{% endif %}">{{ stats.unmatched_pending }}</div>
       {% if stats.unmatched_pending > 0 %}
-      <div style="font-size:.7rem" class="text-warning">Requires attention ↓</div>
+      <div class="stat-label" style="color:#f59e0b">Requires attention ↓</div>
       {% endif %}
     </div>
   </div>
 </div>
 
 <!-- ── Plan breakdown ─────────────────────────────────────────────────────── -->
-<div class="card p-4 mb-4">
-  <h6 class="mb-3">Subscription Plans</h6>
+<div class="card card-pad mb-4">
+  <div class="section-title mb-3">Subscription Plans</div>
   <div class="row g-3">
-    {% for plan_name, plan_label, badge_class in [("free","Free","secondary"),("starter","Starter","info"),("pro","Pro","primary"),("business","Business","warning")] %}
+    {% for plan_name, plan_label, chip_class in [("free","Free","chip-gray"),("starter","Starter","chip-info"),("pro","Pro","chip-purple"),("business","Business","chip-warning")] %}
     <div class="col-6 col-md-3">
-      <div class="p-3 bg-light rounded text-center">
-        <div class="fs-4 fw-bold">{{ plan_counts.get(plan_name, 0) }}</div>
-        <div class="mt-1"><span class="badge bg-{{ badge_class }} {% if badge_class == 'info' or badge_class == 'warning' %}text-dark{% endif %}">{{ plan_label }}</span></div>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:1rem;text-align:center">
+        <div class="stat-value" style="font-size:1.6rem">{{ plan_counts.get(plan_name, 0) }}</div>
+        <div class="mt-2"><span class="chip {{ chip_class }}">{{ plan_label }}</span></div>
       </div>
     </div>
     {% endfor %}
@@ -69,31 +72,31 @@
 </div>
 
 <!-- ── Bot activity stats ─────────────────────────────────────────────────── -->
-<div class="card p-4 mb-4">
-  <h6 class="mb-3">Bot Activity <span class="text-muted small fw-normal">(24-hour in-memory window)</span></h6>
+<div class="card card-pad mb-4">
+  <div class="section-title mb-3">Bot Activity <span style="font-weight:400;color:#94a3b8;font-size:12px">(24-hour in-memory window)</span></div>
   <div class="row g-3 mb-3">
     <div class="col-6 col-md-3">
-      <div class="p-3 bg-light rounded text-center">
-        <div class="fs-4 fw-bold">{{ bot_stats.total }}</div>
-        <div class="text-muted small">Total Bots</div>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:.85rem;text-align:center">
+        <div class="stat-value" style="font-size:1.5rem">{{ bot_stats.total }}</div>
+        <div class="stat-label">Total Bots</div>
       </div>
     </div>
     <div class="col-6 col-md-3">
-      <div class="p-3 bg-light rounded text-center">
-        <div class="fs-4 fw-bold {% if bot_stats.active > 0 %}text-primary{% endif %}">{{ bot_stats.active }}</div>
-        <div class="text-muted small">Active Now</div>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:.85rem;text-align:center">
+        <div class="stat-value {% if bot_stats.active > 0 %}text-primary{% endif %}" style="font-size:1.5rem">{{ bot_stats.active }}</div>
+        <div class="stat-label">Active Now</div>
       </div>
     </div>
     <div class="col-6 col-md-3">
-      <div class="p-3 bg-light rounded text-center">
-        <div class="fs-4 fw-bold text-success">{{ bot_stats.done }}</div>
-        <div class="text-muted small">Completed</div>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:.85rem;text-align:center">
+        <div class="stat-value text-success" style="font-size:1.5rem">{{ bot_stats.done }}</div>
+        <div class="stat-label">Completed</div>
       </div>
     </div>
     <div class="col-6 col-md-3">
-      <div class="p-3 bg-light rounded text-center">
-        <div class="fs-4 fw-bold {% if bot_stats.error > 0 %}text-danger{% endif %}">{{ bot_stats.error }}</div>
-        <div class="text-muted small">Errors</div>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:.85rem;text-align:center">
+        <div class="stat-value {% if bot_stats.error > 0 %}text-danger{% endif %}" style="font-size:1.5rem">{{ bot_stats.error }}</div>
+        <div class="stat-label">Errors</div>
       </div>
     </div>
   </div>
@@ -158,8 +161,8 @@
 <!-- ── System status + wallet config ─────────────────────────────────────── -->
 <div class="row g-3 mb-4">
   <div class="col-md-5">
-    <div class="card p-4 h-100">
-      <h6 class="mb-3">USDC Collection Wallet</h6>
+    <div class="card card-pad h-100">
+      <div class="section-title mb-3">USDC Collection Wallet</div>
       <form method="post" action="/admin/wallet">
         <div class="mb-2">
           <input
@@ -186,8 +189,8 @@
   </div>
 
   <div class="col-md-4">
-    <div class="card p-4 h-100" id="rpc-section">
-      <h6 class="mb-3">System Status</h6>
+    <div class="card card-pad h-100" id="rpc-section">
+      <div class="section-title mb-3">System Status</div>
       <table class="table table-sm mb-2">
         <tr>
           <td class="text-muted">Crypto RPC</td>
@@ -273,8 +276,8 @@
   </div>
 
   <div class="col-md-3">
-    <div class="card p-4 h-100">
-      <h6 class="mb-3">USDC Rescan</h6>
+    <div class="card card-pad h-100">
+      <div class="section-title mb-3">USDC Rescan</div>
       <p class="text-muted small mb-2">
         Reset the monitor to re-check from a specific block. Use after registering a previously unregistered wallet.
       </p>
@@ -295,12 +298,12 @@
 <div class="card mb-4">
   <div class="card-body p-0">
     <div class="d-flex justify-content-between align-items-center px-4 pt-3 pb-2">
-      <h6 class="mb-0">
+      <div class="section-title">
         Unmatched USDC Transfers
         {% if stats.unmatched_pending > 0 %}
-        <span class="badge bg-warning text-dark ms-1">{{ stats.unmatched_pending }} pending</span>
+        <span class="chip chip-warning ms-1">{{ stats.unmatched_pending }} pending</span>
         {% endif %}
-      </h6>
+      </div>
       <span class="text-muted small">Transfers received at the platform wallet that couldn't be auto-attributed</span>
     </div>
     <div class="table-responsive">
@@ -355,8 +358,8 @@
 <div class="row g-3 mb-4">
 
   <div class="col-md-4">
-    <div class="card p-4 h-100">
-      <h6 class="mb-3">Manual Credit</h6>
+    <div class="card card-pad h-100">
+      <div class="section-title mb-3">Manual Credit</div>
       <p class="text-muted small mb-3">
         Directly add credits to any account — use for missed USDC deposits, refunds, or promotions.
       </p>
@@ -384,7 +387,7 @@
   <div class="col-md-8">
     <div class="card p-0 h-100">
       <div class="px-4 pt-3 pb-2 d-flex justify-content-between align-items-center">
-        <h6 class="mb-0">User Accounts ({{ all_accounts|length }})</h6>
+        <div class="section-title">User Accounts ({{ all_accounts|length }})</div>
         <input type="text" class="form-control form-control-sm w-auto" id="acct-search"
           placeholder="Filter by email…" oninput="filterAccounts(this.value)">
       </div>
@@ -462,7 +465,7 @@
 <!-- ── Recent transactions (all users) ───────────────────────────────────── -->
 <div class="card mb-4">
   <div class="px-4 pt-3 pb-2">
-    <h6 class="mb-0">Recent Transactions — All Users</h6>
+    <div class="section-title">Recent Transactions — All Users</div>
   </div>
   <div class="table-responsive">
     <table class="table table-sm table-hover mb-0">

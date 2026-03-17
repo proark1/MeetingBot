@@ -262,6 +262,59 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
         for f in cal_result.scalars().all()
     ]
 
+    # All integrations (not just active, for full management UI)
+    all_integ_result = await db.execute(
+        select(Integration).where(Integration.account_id == account.id)
+        .order_by(Integration.created_at.desc())
+    )
+    all_integrations = [
+        {
+            "id": i.id,
+            "type": i.type,
+            "name": i.name,
+            "is_active": i.is_active,
+            "created_at": i.created_at.strftime("%Y-%m-%d"),
+        }
+        for i in all_integ_result.scalars().all()
+    ]
+
+    # All calendar feeds
+    all_cal_result = await db.execute(
+        select(CalendarFeed).where(CalendarFeed.account_id == account.id)
+        .order_by(CalendarFeed.created_at.desc())
+    )
+    all_calendar_feeds = [
+        {
+            "id": f.id,
+            "name": f.name,
+            "is_active": f.is_active,
+            "auto_record": f.auto_record,
+            "bot_name": f.bot_name,
+            "last_synced_at": f.last_synced_at.strftime("%Y-%m-%d %H:%M") if f.last_synced_at else None,
+            "created_at": f.created_at.strftime("%Y-%m-%d"),
+        }
+        for f in all_cal_result.scalars().all()
+    ]
+
+    # Recent bots (from in-memory store)
+    recent_bots = []
+    try:
+        from app.store import store as _store
+        bots_list, _total = await _store.list_bots(limit=8, account_id=account.id)
+        recent_bots = [
+            {
+                "id": b.id,
+                "meeting_url": b.meeting_url,
+                "meeting_platform": b.meeting_platform,
+                "status": b.status,
+                "created_at": b.created_at.strftime("%Y-%m-%d %H:%M"),
+                "bot_name": b.bot_name,
+            }
+            for b in bots_list
+        ]
+    except Exception:
+        pass
+
     flash = None
     if request.query_params.get("payment") == "success":
         flash = _flash("success", "Payment successful! Your credits will be added shortly.")
@@ -273,6 +326,24 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
         flash = _flash("danger", "This wallet address is already linked to another account.")
     if request.query_params.get("notify") == "saved":
         flash = _flash("success", "Notification preferences updated.")
+    if request.query_params.get("integ_added") == "1":
+        flash = _flash("success", "Integration added successfully.")
+    if request.query_params.get("integ_deleted") == "1":
+        flash = _flash("success", "Integration removed.")
+    if request.query_params.get("integ_error"):
+        err = request.query_params.get("integ_error")
+        messages = {
+            "invalid_slack_url": "Invalid Slack Webhook URL. Must start with https://hooks.slack.com/",
+            "notion_missing_fields": "Please provide both Notion API token and Database ID.",
+            "invalid_type": "Invalid integration type.",
+        }
+        flash = _flash("danger", messages.get(err, "Integration error."))
+    if request.query_params.get("cal_added") == "1":
+        flash = _flash("success", "Calendar feed added. It will sync within 5 minutes.")
+    if request.query_params.get("cal_deleted") == "1":
+        flash = _flash("success", "Calendar feed removed.")
+    if request.query_params.get("cal_error") == "invalid_url":
+        flash = _flash("danger", "Invalid iCal URL. Must start with http:// or https://")
 
     new_key = request.query_params.get("new_key")
     if new_key and request.query_params.get("created") == "1":
@@ -301,7 +372,11 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
         "microsoft_sso_enabled": bool(settings.MICROSOFT_CLIENT_ID),
         # Integrations & calendar
         "active_integrations": active_integrations,
+        "all_integrations": all_integrations,
         "calendar_feeds": calendar_feeds,
+        "all_calendar_feeds": all_calendar_feeds,
+        # Recent bots
+        "recent_bots": recent_bots,
     })
 
 
@@ -943,3 +1018,173 @@ async def admin_set_account_plan(
         await db.commit()
         logger.info("Admin %s set plan=%s for account %s", admin.email, plan, target.email)
     return RedirectResponse("/admin?msg=account_updated", status_code=303)
+
+
+# ── Integrations UI ───────────────────────────────────────────────────────────
+
+@router.post("/dashboard/integrations/add", include_in_schema=False)
+async def add_integration_ui(
+    request: Request,
+    integ_type: str = Form(...),
+    name: str = Form(default=""),
+    slack_webhook_url: str = Form(default=""),
+    notion_api_token: str = Form(default=""),
+    notion_database_id: str = Form(default=""),
+    db: AsyncSession = Depends(get_db),
+):
+    """Add a Slack or Notion integration from the dashboard UI."""
+    import json, uuid
+    account = await _get_account_from_request(request, db)
+    if not account:
+        return RedirectResponse("/login")
+
+    if integ_type == "slack":
+        url = slack_webhook_url.strip()
+        if not url.startswith("https://hooks.slack.com/"):
+            return RedirectResponse("/dashboard?integ_error=invalid_slack_url#integrations", status_code=303)
+        config = json.dumps({"webhook_url": url})
+        display_name = name.strip() or "Slack"
+    elif integ_type == "notion":
+        token = notion_api_token.strip()
+        db_id = notion_database_id.strip()
+        if not token or not db_id:
+            return RedirectResponse("/dashboard?integ_error=notion_missing_fields#integrations", status_code=303)
+        config = json.dumps({"api_token": token, "database_id": db_id})
+        display_name = name.strip() or "Notion"
+    else:
+        return RedirectResponse("/dashboard?integ_error=invalid_type#integrations", status_code=303)
+
+    from app.models.account import Integration
+    integ = Integration(
+        id=str(uuid.uuid4()),
+        account_id=account.id,
+        type=integ_type,
+        name=display_name,
+        config=config,
+        is_active=True,
+    )
+    db.add(integ)
+    await db.commit()
+    logger.info("Added %s integration for account %s", integ_type, account.email)
+    return RedirectResponse("/dashboard?integ_added=1#integrations", status_code=303)
+
+
+@router.post("/dashboard/integrations/{integ_id}/delete", include_in_schema=False)
+async def delete_integration_ui(
+    integ_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    account = await _get_account_from_request(request, db)
+    if not account:
+        return RedirectResponse("/login")
+
+    from app.models.account import Integration
+    result = await db.execute(
+        select(Integration).where(Integration.id == integ_id, Integration.account_id == account.id)
+    )
+    integ = result.scalar_one_or_none()
+    if integ:
+        await db.delete(integ)
+        await db.commit()
+    return RedirectResponse("/dashboard?integ_deleted=1#integrations", status_code=303)
+
+
+@router.post("/dashboard/integrations/{integ_id}/toggle", include_in_schema=False)
+async def toggle_integration_ui(
+    integ_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    account = await _get_account_from_request(request, db)
+    if not account:
+        return RedirectResponse("/login")
+
+    from app.models.account import Integration
+    result = await db.execute(
+        select(Integration).where(Integration.id == integ_id, Integration.account_id == account.id)
+    )
+    integ = result.scalar_one_or_none()
+    if integ:
+        integ.is_active = not integ.is_active
+        await db.commit()
+    return RedirectResponse("/dashboard#integrations", status_code=303)
+
+
+# ── Calendar feeds UI ─────────────────────────────────────────────────────────
+
+@router.post("/dashboard/calendar/add", include_in_schema=False)
+async def add_calendar_ui(
+    request: Request,
+    name: str = Form(default="My Calendar"),
+    ical_url: str = Form(...),
+    bot_name: str = Form(default=""),
+    auto_record: str = Form(default="on"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Add an iCal calendar feed from the dashboard UI."""
+    import uuid
+    account = await _get_account_from_request(request, db)
+    if not account:
+        return RedirectResponse("/login")
+
+    url = ical_url.strip()
+    if not url.startswith(("http://", "https://")):
+        return RedirectResponse("/dashboard?cal_error=invalid_url#calendar", status_code=303)
+
+    from app.models.account import CalendarFeed
+    feed = CalendarFeed(
+        id=str(uuid.uuid4()),
+        account_id=account.id,
+        name=(name.strip() or "My Calendar")[:100],
+        ical_url=url,
+        bot_name=(bot_name.strip() or None),
+        auto_record=(auto_record == "on"),
+        is_active=True,
+    )
+    db.add(feed)
+    await db.commit()
+    logger.info("Added calendar feed '%s' for account %s", feed.name, account.email)
+    return RedirectResponse("/dashboard?cal_added=1#calendar", status_code=303)
+
+
+@router.post("/dashboard/calendar/{feed_id}/delete", include_in_schema=False)
+async def delete_calendar_ui(
+    feed_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    account = await _get_account_from_request(request, db)
+    if not account:
+        return RedirectResponse("/login")
+
+    from app.models.account import CalendarFeed
+    result = await db.execute(
+        select(CalendarFeed).where(CalendarFeed.id == feed_id, CalendarFeed.account_id == account.id)
+    )
+    feed = result.scalar_one_or_none()
+    if feed:
+        await db.delete(feed)
+        await db.commit()
+    return RedirectResponse("/dashboard?cal_deleted=1#calendar", status_code=303)
+
+
+@router.post("/dashboard/calendar/{feed_id}/toggle", include_in_schema=False)
+async def toggle_calendar_ui(
+    feed_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    account = await _get_account_from_request(request, db)
+    if not account:
+        return RedirectResponse("/login")
+
+    from app.models.account import CalendarFeed
+    result = await db.execute(
+        select(CalendarFeed).where(CalendarFeed.id == feed_id, CalendarFeed.account_id == account.id)
+    )
+    feed = result.scalar_one_or_none()
+    if feed:
+        feed.is_active = not feed.is_active
+        await db.commit()
+    return RedirectResponse("/dashboard#calendar", status_code=303)

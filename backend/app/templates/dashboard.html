@@ -2,192 +2,259 @@
 {% block title %}Dashboard — MeetingBot{% endblock %}
 {% block content %}
 
-<div class="row mb-4">
-  <div class="col-md-4">
-    <div class="card p-4 text-center">
+<!-- ── Page header ─────────────────────────────────────────────────────────── -->
+<div class="d-flex justify-content-between align-items-start page-header">
+  <div>
+    <h1 class="page-title">Dashboard</h1>
+    <p class="page-subtitle">
+      {{ account.email }}
       {% if account.account_type == "business" %}
-      <span class="badge bg-primary mb-2">Business Account</span>
+      <span class="chip chip-info ms-1">Business</span>
       {% endif %}
-      <div class="text-muted small mb-1">Credit Balance</div>
-      <div class="display-6 fw-bold {% if balance < 1 %}text-danger{% else %}text-success{% endif %}">
+    </p>
+  </div>
+  <div class="d-flex gap-2">
+    <a href="/topup" class="btn btn-primary btn-sm">+ Add Credits</a>
+    <a href="/api/docs" target="_blank" class="btn btn-outline-secondary btn-sm">API Docs ↗</a>
+  </div>
+</div>
+
+<!-- ── Top stat row ────────────────────────────────────────────────────────── -->
+<div class="row g-3 mb-4">
+  <!-- Balance -->
+  <div class="col-6 col-lg-3">
+    <div class="stat-card">
+      <div class="stat-label">Credit Balance</div>
+      <div class="stat-value {% if balance < 1.0 %}text-danger{% else %}text-success{% endif %} mt-1">
         ${{ "%.4f"|format(balance) }}
       </div>
-      <a href="/topup" class="btn btn-sm btn-outline-primary mt-3">Top Up</a>
-    </div>
-  </div>
-  <div class="col-md-4">
-    <div class="card p-4 text-center">
-      <div class="text-muted small mb-1">Subscription Plan</div>
-      <div class="fs-4 fw-bold text-capitalize">
-        {% if plan == "free" %}<span class="text-secondary">Free</span>
-        {% elif plan == "starter" %}<span class="text-info">Starter</span>
-        {% elif plan == "pro" %}<span class="text-primary">Pro</span>
-        {% elif plan == "business" %}<span class="text-warning">Business</span>
-        {% else %}<span>{{ plan }}</span>
-        {% endif %}
+      {% if balance < 0.10 %}
+      <div style="margin-top:6px">
+        <a href="/topup" style="font-size:12px;color:#ef4444;text-decoration:none;font-weight:500">⚠ Below minimum — top up →</a>
       </div>
-      <div class="text-muted small mt-1">
-        {% if plan_limit == -1 %}
-        {{ monthly_bots_used }} bots used this month (unlimited)
-        {% else %}
-        {{ monthly_bots_used }} / {{ plan_limit }} bots used this month
-        {% endif %}
-      </div>
-      {% if plan_limit != -1 and monthly_bots_used >= plan_limit %}
-      <div class="text-danger small mt-1 fw-semibold">Monthly limit reached</div>
-      {% elif plan_limit != -1 %}
-      <div class="progress mt-2" style="height:6px">
-        <div class="progress-bar {% if monthly_bots_used / plan_limit > 0.8 %}bg-warning{% else %}bg-success{% endif %}"
-          style="width:{{ [((monthly_bots_used / plan_limit) * 100)|int, 100]|min }}%"></div>
-      </div>
-      {% endif %}
-    </div>
-  </div>
-  <div class="col-md-4">
-    <div class="card p-4 h-100">
-      <div class="d-flex justify-content-between align-items-center mb-3">
-        <h6 class="mb-0">API Keys</h6>
-        <form method="post" action="/dashboard/keys" class="d-flex gap-2">
-          <input type="text" name="name" class="form-control form-control-sm" placeholder="Key name" style="width:130px">
-          <button type="submit" class="btn btn-sm btn-success">+ New</button>
-        </form>
-      </div>
-      {% if api_keys %}
-      <table class="table table-sm mb-0">
-        <thead><tr><th>Name</th><th>Key</th><th>Last used</th><th></th></tr></thead>
-        <tbody>
-          {% for key in api_keys %}
-          <tr>
-            <td>{{ key.name }}</td>
-            <td>
-              <code id="key-{{ key.id }}">{{ key.key_preview }}</code>
-              {% if key.full_key %}
-              <button type="button" class="btn btn-sm btn-outline-secondary ms-1 copy-key-btn" data-key="{{ key.full_key }}" title="Copy API key">
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
-                  <path d="M4 1.5H3a2 2 0 0 0-2 2V14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V3.5a2 2 0 0 0-2-2h-1v1h1a1 1 0 0 1 1 1V14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1h1v-1z"/>
-                  <path d="M9.5 1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-3a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5h3zm-3-1A1.5 1.5 0 0 0 5 1.5v1A1.5 1.5 0 0 0 6.5 4h3A1.5 1.5 0 0 0 11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3z"/>
-                </svg>
-              </button>
-              {% endif %}
-            </td>
-            <td class="text-muted small">{{ key.last_used_at or "Never" }}</td>
-            <td>
-              <form method="post" action="/dashboard/keys/{{ key.id }}/revoke" style="display:inline">
-                <button type="submit" class="btn btn-sm btn-outline-danger"
-                  onclick="return confirm('Revoke this key?')">Revoke</button>
-              </form>
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
       {% else %}
-      <p class="text-muted mb-0">No API keys yet. Create one above.</p>
+      <div style="margin-top:6px;font-size:12px;color:#94a3b8">min $0.10 to create bots</div>
       {% endif %}
+    </div>
+  </div>
+
+  <!-- Plan -->
+  <div class="col-6 col-lg-3">
+    <div class="stat-card">
+      <div class="stat-label">Subscription Plan</div>
+      <div class="d-flex align-items-center gap-2 mt-1">
+        {% if plan == "free" %}
+        <span class="stat-value" style="font-size:1.35rem;color:#64748b">Free</span>
+        {% elif plan == "starter" %}
+        <span class="stat-value" style="font-size:1.35rem;color:#0ea5e9">Starter</span>
+        {% elif plan == "pro" %}
+        <span class="stat-value" style="font-size:1.35rem;color:#6366f1">Pro</span>
+        {% elif plan == "business" %}
+        <span class="stat-value" style="font-size:1.35rem;color:#f59e0b">Business</span>
+        {% else %}
+        <span class="stat-value" style="font-size:1.35rem">{{ plan|title }}</span>
+        {% endif %}
+      </div>
+      <div style="margin-top:8px">
+        {% if plan_limit == -1 %}
+        <div style="font-size:12px;color:#64748b">{{ monthly_bots_used }} bots this month (unlimited)</div>
+        {% else %}
+        <div class="d-flex justify-content-between" style="font-size:12px;color:#64748b;margin-bottom:4px">
+          <span>{{ monthly_bots_used }} / {{ plan_limit }} bots</span>
+          {% if monthly_bots_used >= plan_limit %}<span style="color:#ef4444;font-weight:500">Limit reached</span>{% endif %}
+        </div>
+        <div class="progress">
+          <div class="progress-bar {% if monthly_bots_used / plan_limit > 0.8 %}bg-warning{% else %}bg-success{% endif %}"
+            style="width:{{ [((monthly_bots_used / plan_limit) * 100)|int, 100]|min }}%"></div>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- API Keys count -->
+  <div class="col-6 col-lg-3">
+    <div class="stat-card">
+      <div class="stat-label">API Keys</div>
+      <div class="stat-value mt-1">{{ api_keys|length }}</div>
+      <div style="margin-top:6px;font-size:12px;color:#94a3b8">active keys</div>
+    </div>
+  </div>
+
+  <!-- Recent bots count -->
+  <div class="col-6 col-lg-3">
+    <div class="stat-card">
+      <div class="stat-label">Integrations</div>
+      <div class="stat-value mt-1">{{ all_integrations|length }}</div>
+      <div style="margin-top:6px;font-size:12px;color:#94a3b8">
+        {{ all_calendar_feeds|length }} calendar feed{% if all_calendar_feeds|length != 1 %}s{% endif %}
+      </div>
     </div>
   </div>
 </div>
 
+<!-- ── Business account info ───────────────────────────────────────────────── -->
 {% if account.account_type == "business" %}
-<div class="card p-4 mb-4 border-primary">
-  <div class="d-flex justify-content-between align-items-center mb-2">
-    <h6 class="mb-0"><span class="badge bg-primary me-2">Business</span> Multi-User Data Isolation</h6>
-  </div>
-  <p class="text-muted small mb-2">
-    Your business account supports per-user data isolation. Pass the <code>X-Sub-User</code> header
-    with a unique identifier for each end-user. Bots created with a sub-user ID are only visible
-    to requests using the same identifier.
-  </p>
-  <div class="bg-light p-3 rounded">
-    <p class="mb-1 small fw-bold">Example: Create a bot scoped to a user</p>
-    <pre class="mb-0 small"><code>curl -X POST {{ request.base_url }}api/v1/bot \
+<div class="card card-pad mb-4" style="border-left:3px solid #6366f1">
+  <div class="d-flex align-items-start gap-3">
+    <div style="font-size:20px">🏢</div>
+    <div class="flex-grow-1">
+      <div class="section-title mb-1">Business Account — Multi-User Data Isolation</div>
+      <div class="section-subtitle mb-3">
+        Pass the <code>X-Sub-User</code> header to scope bot data per end-user. Users with different sub-user IDs cannot see each other's bots, transcripts, or analyses.
+      </div>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:.85rem 1rem">
+        <pre style="margin:0;font-size:12px"><code>curl -X POST {{ request.base_url }}api/v1/bot \
   -H "Authorization: Bearer sk_live_..." \
   -H "X-Sub-User: user-123" \
   -H "Content-Type: application/json" \
   -d '{"meeting_url": "https://meet.google.com/abc-defg-hij"}'</code></pre>
-    <p class="mt-2 mb-1 small fw-bold">Example: List only that user's bots</p>
-    <pre class="mb-0 small"><code>curl {{ request.base_url }}api/v1/bot \
-  -H "Authorization: Bearer sk_live_..." \
-  -H "X-Sub-User: user-123"</code></pre>
-    <p class="mt-2 mb-0 small text-muted">
-      Omit the <code>X-Sub-User</code> header to see all bots across all sub-users (account-wide view).
-    </p>
+      </div>
+    </div>
   </div>
 </div>
 {% endif %}
 
-<!-- ── Notification Preferences ──────────────────────────────────────────── -->
+<!-- ── API Keys ────────────────────────────────────────────────────────────── -->
+<div class="card card-pad mb-4">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+      <div class="section-title">API Keys</div>
+      <div class="section-subtitle">Your API keys are prefixed with <code>sk_live_</code>. Copy them immediately — they're only shown once.</div>
+    </div>
+    <form method="post" action="/dashboard/keys" class="d-flex gap-2 ms-3" style="flex-shrink:0">
+      <input type="text" name="name" class="form-control form-control-sm" placeholder="Key name" style="width:130px">
+      <button type="submit" class="btn btn-primary btn-sm">+ New Key</button>
+    </form>
+  </div>
+
+  {% if api_keys %}
+  <div style="overflow-x:auto">
+    <table class="table table-hover">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Key</th>
+          <th>Last used</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for key in api_keys %}
+        <tr>
+          <td style="font-weight:500">{{ key.name }}</td>
+          <td>
+            <code>{{ key.key_preview }}</code>
+            {% if key.full_key %}
+            <button type="button" class="btn btn-xs btn-outline-secondary ms-1 copy-key-btn" data-key="{{ key.full_key }}" title="Copy key">
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 16 16">
+                <path d="M4 1.5H3a2 2 0 0 0-2 2V14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V3.5a2 2 0 0 0-2-2h-1v1h1a1 1 0 0 1 1 1V14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1h1v-1z"/>
+                <path d="M9.5 1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-3a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5h3zm-3-1A1.5 1.5 0 0 0 5 1.5v1A1.5 1.5 0 0 0 6.5 4h3A1.5 1.5 0 0 0 11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3z"/>
+              </svg>
+            </button>
+            {% endif %}
+          </td>
+          <td style="color:#94a3b8;font-size:12.5px">{{ key.last_used_at or "Never" }}</td>
+          <td>
+            <form method="post" action="/dashboard/keys/{{ key.id }}/revoke" style="display:inline">
+              <button type="submit" class="btn btn-xs btn-outline-danger"
+                onclick="return confirm('Revoke this key? This cannot be undone.')">Revoke</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div style="text-align:center;padding:1.5rem 0;color:#94a3b8;font-size:13.5px">
+    No API keys yet. Create one above to start making API calls.
+  </div>
+  {% endif %}
+
+  {% if new_key %}
+  <div class="alert alert-success d-flex align-items-start gap-2 mt-3" style="font-size:13.5px">
+    <span>✓</span>
+    <div>
+      <strong>New API key created</strong> — copy it now, it won't be shown again:<br>
+      <code id="new-key-value" style="font-size:13px;display:inline-block;margin:.35rem 0">{{ new_key }}</code>
+      <button type="button" class="btn btn-xs btn-outline-success ms-2 copy-key-btn" data-key="{{ new_key }}" title="Copy">
+        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 16 16">
+          <path d="M4 1.5H3a2 2 0 0 0-2 2V14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V3.5a2 2 0 0 0-2-2h-1v1h1a1 1 0 0 1 1 1V14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1h1v-1z"/>
+          <path d="M9.5 1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-3a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5h3zm-3-1A1.5 1.5 0 0 0 5 1.5v1A1.5 1.5 0 0 0 6.5 4h3A1.5 1.5 0 0 0 11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3z"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+<!-- ── Notifications + Wallet ──────────────────────────────────────────────── -->
 <div class="row g-3 mb-4">
   <div class="col-md-6">
-    <div class="card p-4 h-100">
-      <h6 class="mb-3">Email Notifications</h6>
-      <p class="text-muted small mb-3">
-        Receive an email when a bot finishes recording and analysis is ready.
-      </p>
+    <div class="card card-pad h-100">
+      <div class="section-title mb-1">Email Notifications</div>
+      <div class="section-subtitle mb-3">Get notified when a bot finishes analysis.</div>
       <form method="post" action="/dashboard/notifications">
         <div class="form-check form-switch mb-2">
           <input class="form-check-input" type="checkbox" role="switch" name="notify_on_done" id="notify-switch"
             {% if notify_on_done %}checked{% endif %}>
-          <label class="form-check-label" for="notify-switch">Notify when bot is done</label>
+          <label class="form-check-label" for="notify-switch" style="font-size:13.5px">Notify when bot is done</label>
         </div>
-        <div class="mb-2">
-          <label class="form-label small fw-semibold">Notification email <span class="text-muted fw-normal">(optional — defaults to account email)</span></label>
+        <div class="mb-3">
+          <label class="form-label">Notification email <span style="font-weight:400;color:#94a3b8">(defaults to account email)</span></label>
           <input type="email" name="notify_email" class="form-control form-control-sm"
             value="{{ notify_email }}" placeholder="{{ account.email }}">
         </div>
-        <button type="submit" class="btn btn-sm btn-primary">Save Preferences</button>
+        <button type="submit" class="btn btn-primary btn-sm">Save Preferences</button>
       </form>
     </div>
   </div>
 
   <div class="col-md-6">
-    <div class="card p-4 h-100">
-      <h6 class="mb-3">USDC Wallet</h6>
-      <p class="text-muted small mb-2">
-        Register your Ethereum wallet so the platform can automatically credit your account when you send USDC.
-      </p>
-      <form method="post" action="/dashboard/wallet" class="d-flex gap-2 align-items-start">
-        <div class="flex-grow-1">
-          <input
-            type="text"
-            name="wallet_address"
-            class="form-control form-control-sm font-monospace"
+    <div class="card card-pad h-100">
+      <div class="section-title mb-1">USDC Wallet</div>
+      <div class="section-subtitle mb-3">Register your Ethereum wallet for automatic USDC credit attribution.</div>
+      <form method="post" action="/dashboard/wallet">
+        <div class="mb-3">
+          <label class="form-label">Ethereum address</label>
+          <input type="text" name="wallet_address" class="form-control form-control-sm font-mono"
             value="{{ wallet_address or '' }}"
             placeholder="0x0000000000000000000000000000000000000000"
-            pattern="0x[0-9a-fA-F]{40}"
-            required
-          >
+            pattern="0x[0-9a-fA-F]{40}" required>
         </div>
-        <button type="submit" class="btn btn-sm btn-primary">Save</button>
+        <button type="submit" class="btn btn-primary btn-sm">Save Wallet</button>
       </form>
       {% if wallet_address %}
-      <div class="mt-2 small text-success">Wallet registered: <code>{{ wallet_address }}</code></div>
+      <div class="mt-2" style="font-size:12.5px;color:#059669">
+        ✓ Registered: <code>{{ wallet_address }}</code>
+      </div>
       {% else %}
-      <div class="mt-2 small text-warning">No wallet set — you won't be able to top up via USDC until you add one.</div>
+      <div class="mt-2" style="font-size:12.5px;color:#f59e0b">
+        ⚠ No wallet set — USDC top-ups won't be attributed automatically.
+      </div>
       {% endif %}
     </div>
   </div>
 </div>
 
-<!-- ── Linked Accounts (SSO) ─────────────────────────────────────────────── -->
+<!-- ── SSO Linked Accounts ─────────────────────────────────────────────────── -->
 {% if google_sso_enabled or microsoft_sso_enabled or oauth_accounts %}
-<div class="card p-4 mb-4">
-  <h6 class="mb-3">Linked Accounts</h6>
+<div class="card card-pad mb-4">
+  <div class="section-title mb-3">Linked Accounts (SSO)</div>
   {% if oauth_accounts %}
   <div class="d-flex flex-wrap gap-2 mb-3">
     {% for oa in oauth_accounts %}
-    <span class="badge bg-light text-dark border d-flex align-items-center gap-1 p-2">
+    <span class="chip chip-gray" style="padding:5px 12px;font-size:12.5px">
       {% if oa.provider == "google" %}
-      <svg width="14" height="14" viewBox="0 0 48 48" fill="none"><path d="M43.611 20.083H42V20H24V28H35.303C33.654 32.657 29.223 36 24 36C17.373 36 12 30.627 12 24C12 17.373 17.373 12 24 12C27.059 12 29.842 13.154 31.961 15.039L37.618 9.382C34.046 6.053 29.268 4 24 4C12.955 4 4 12.955 4 24C4 35.045 12.955 44 24 44C35.045 44 44 35.045 44 24C44 22.659 43.862 21.35 43.611 20.083Z" fill="#FFC107"/><path d="M6.306 14.691L12.877 19.51C14.655 15.108 18.961 12 24 12C27.059 12 29.842 13.154 31.961 15.039L37.618 9.382C34.046 6.053 29.268 4 24 4C16.318 4 9.656 8.337 6.306 14.691Z" fill="#FF3D00"/><path d="M24 44C29.166 44 33.86 42.023 37.409 38.808L31.219 33.57C29.21 35.099 26.715 36 24 36C18.798 36 14.381 32.683 12.717 28.054L6.195 33.079C9.505 39.556 16.227 44 24 44Z" fill="#4CAF50"/><path d="M43.611 20.083H42V20H24V28H35.303C34.511 30.237 33.072 32.165 31.216 33.572L31.219 33.57L37.409 38.808C36.971 39.205 44 34 44 24C44 22.659 43.862 21.35 43.611 20.083Z" fill="#1976D2"/></svg>
+      <svg width="13" height="13" viewBox="0 0 48 48" fill="none"><path d="M43.611 20.083H42V20H24V28H35.303C33.654 32.657 29.223 36 24 36C17.373 36 12 30.627 12 24C12 17.373 17.373 12 24 12C27.059 12 29.842 13.154 31.961 15.039L37.618 9.382C34.046 6.053 29.268 4 24 4C12.955 4 4 12.955 4 24C4 35.045 12.955 44 24 44C35.045 44 44 35.045 44 24C44 22.659 43.862 21.35 43.611 20.083Z" fill="#FFC107"/><path d="M6.306 14.691L12.877 19.51C14.655 15.108 18.961 12 24 12C27.059 12 29.842 13.154 31.961 15.039L37.618 9.382C34.046 6.053 29.268 4 24 4C16.318 4 9.656 8.337 6.306 14.691Z" fill="#FF3D00"/><path d="M24 44C29.166 44 33.86 42.023 37.409 38.808L31.219 33.57C29.21 35.099 26.715 36 24 36C18.798 36 14.381 32.683 12.717 28.054L6.195 33.079C9.505 39.556 16.227 44 24 44Z" fill="#4CAF50"/><path d="M43.611 20.083H42V20H24V28H35.303C34.511 30.237 33.072 32.165 31.216 33.572L31.219 33.57L37.409 38.808C36.971 39.205 44 34 44 24C44 22.659 43.862 21.35 43.611 20.083Z" fill="#1976D2"/></svg>
       Google
       {% elif oa.provider == "microsoft" %}
-      <svg width="14" height="14" viewBox="0 0 23 23"><path fill="#f3f3f3" d="M0 0h23v23H0z"/><path fill="#f35325" d="M1 1h10v10H1z"/><path fill="#81bc06" d="M12 1h10v10H12z"/><path fill="#05a6f0" d="M1 12h10v10H1z"/><path fill="#ffba08" d="M12 12h10v10H12z"/></svg>
+      <svg width="13" height="13" viewBox="0 0 23 23"><path fill="#f3f3f3" d="M0 0h23v23H0z"/><path fill="#f35325" d="M1 1h10v10H1z"/><path fill="#81bc06" d="M12 1h10v10H12z"/><path fill="#05a6f0" d="M1 12h10v10H1z"/><path fill="#ffba08" d="M12 12h10v10H12z"/></svg>
       Microsoft
-      {% else %}
-      {{ oa.provider|title }}
-      {% endif %}
-      {% if oa.email %}<span class="text-muted">· {{ oa.email }}</span>{% endif %}
-      <span class="badge bg-success ms-1">Linked</span>
+      {% else %}{{ oa.provider|title }}{% endif %}
+      {% if oa.email %}<span style="color:#94a3b8">· {{ oa.email }}</span>{% endif %}
+      <span class="chip chip-success ms-1" style="padding:1px 6px;font-size:11px">Linked</span>
     </span>
     {% endfor %}
   </div>
@@ -196,7 +263,7 @@
     {% if google_sso_enabled %}
     {% set google_linked = oauth_accounts | selectattr("provider", "equalto", "google") | list %}
     {% if not google_linked %}
-    <a href="/api/v1/auth/oauth/google/authorize?redirect=1" class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1">
+    <a href="/api/v1/auth/oauth/google/authorize?redirect=1" class="btn btn-outline-secondary btn-sm d-flex align-items-center gap-1">
       <svg width="14" height="14" viewBox="0 0 48 48" fill="none"><path d="M43.611 20.083H42V20H24V28H35.303C33.654 32.657 29.223 36 24 36C17.373 36 12 30.627 12 24C12 17.373 17.373 12 24 12C27.059 12 29.842 13.154 31.961 15.039L37.618 9.382C34.046 6.053 29.268 4 24 4C12.955 4 4 12.955 4 24C4 35.045 12.955 44 24 44C35.045 44 44 35.045 44 24C44 22.659 43.862 21.35 43.611 20.083Z" fill="#FFC107"/></svg>
       Link Google
     </a>
@@ -205,143 +272,414 @@
     {% if microsoft_sso_enabled %}
     {% set ms_linked = oauth_accounts | selectattr("provider", "equalto", "microsoft") | list %}
     {% if not ms_linked %}
-    <a href="/api/v1/auth/oauth/microsoft/authorize?redirect=1" class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1">
+    <a href="/api/v1/auth/oauth/microsoft/authorize?redirect=1" class="btn btn-outline-secondary btn-sm d-flex align-items-center gap-1">
       <svg width="14" height="14" viewBox="0 0 23 23"><path fill="#f3f3f3" d="M0 0h23v23H0z"/><path fill="#f35325" d="M1 1h10v10H1z"/><path fill="#81bc06" d="M12 1h10v10H12z"/><path fill="#05a6f0" d="M1 12h10v10H1z"/><path fill="#ffba08" d="M12 12h10v10H12z"/></svg>
       Link Microsoft
     </a>
     {% endif %}
     {% endif %}
+    {% if not oauth_accounts and not google_sso_enabled and not microsoft_sso_enabled %}
+    <span style="font-size:13px;color:#94a3b8">No SSO providers configured on this server.</span>
+    {% endif %}
   </div>
-  {% if not oauth_accounts and not google_sso_enabled and not microsoft_sso_enabled %}
-  <p class="text-muted small mb-0">No SSO providers are configured on this server.</p>
-  {% endif %}
 </div>
 {% endif %}
 
-<!-- ── Integrations ───────────────────────────────────────────────────────── -->
-<div class="row g-3 mb-4">
-  <div class="col-md-6">
-    <div class="card p-4 h-100">
-      <div class="d-flex justify-content-between align-items-center mb-2">
-        <h6 class="mb-0">Integrations</h6>
-        <a href="/api/docs#/Integrations" target="_blank" class="btn btn-sm btn-outline-secondary">Manage via API</a>
-      </div>
-      <p class="text-muted small mb-2">
-        Push meeting notes automatically to Slack, Notion, and more after each bot session.
-      </p>
-      {% if active_integrations %}
-      <div class="d-flex flex-wrap gap-1">
-        {% for integ in active_integrations %}
-        <span class="badge bg-light text-dark border">
-          {% if integ.type == "slack" %}
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="#E01E5A"><path d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zM6.313 15.165a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313zM8.834 5.042a2.528 2.528 0 0 1-2.521-2.52A2.528 2.528 0 0 1 8.834 0a2.528 2.528 0 0 1 2.521 2.522v2.52H8.834zM8.834 6.313a2.528 2.528 0 0 1 2.521 2.521 2.528 2.528 0 0 1-2.521 2.521H2.522A2.528 2.528 0 0 1 0 8.834a2.528 2.528 0 0 1 2.522-2.521h6.312zM18.956 8.834a2.528 2.528 0 0 1 2.522-2.521A2.528 2.528 0 0 1 24 8.834a2.528 2.528 0 0 1-2.522 2.521h-2.522V8.834zM17.688 8.834a2.528 2.528 0 0 1-2.523 2.521 2.527 2.527 0 0 1-2.52-2.521V2.522A2.527 2.527 0 0 1 15.165 0a2.528 2.528 0 0 1 2.523 2.522v6.312zM15.165 18.956a2.528 2.528 0 0 1 2.523 2.522A2.528 2.528 0 0 1 15.165 24a2.527 2.527 0 0 1-2.52-2.522v-2.522h2.52zM15.165 17.688a2.527 2.527 0 0 1-2.52-2.523 2.526 2.526 0 0 1 2.52-2.52h6.313A2.527 2.527 0 0 1 24 15.165a2.528 2.528 0 0 1-2.522 2.523h-6.313z"/></svg>
-          {% elif integ.type == "notion" %}📝
-          {% endif %}
-          {{ integ.name or integ.type|title }}
-        </span>
+<!-- ── Integrations ────────────────────────────────────────────────────────── -->
+<div id="integrations" class="card card-pad mb-4">
+  <div class="d-flex justify-content-between align-items-start mb-3">
+    <div>
+      <div class="section-title">Integrations</div>
+      <div class="section-subtitle">Automatically push meeting summaries and action items to Slack or Notion after each bot session.</div>
+    </div>
+    <div class="d-flex gap-2">
+      <button class="btn btn-primary btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#add-integ-form">
+        + Add Integration
+      </button>
+    </div>
+  </div>
+
+  <!-- Add integration form (collapsible) -->
+  <div class="collapse mb-3" id="add-integ-form">
+    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:1.25rem">
+      <div class="section-title mb-3">Add new integration</div>
+      <form method="post" action="/dashboard/integrations/add">
+        <div class="row g-3">
+          <div class="col-md-3">
+            <label class="form-label">Type</label>
+            <select name="integ_type" id="integ-type-select" class="form-select form-select-sm" onchange="toggleIntegFields(this.value)">
+              <option value="slack">Slack</option>
+              <option value="notion">Notion</option>
+            </select>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Display name <span style="font-weight:400;color:#94a3b8">(optional)</span></label>
+            <input type="text" name="name" class="form-control form-control-sm" placeholder="e.g. Team Channel">
+          </div>
+          <!-- Slack fields -->
+          <div class="col-md-6" id="slack-fields">
+            <label class="form-label">Slack Webhook URL</label>
+            <input type="url" name="slack_webhook_url" class="form-control form-control-sm"
+              placeholder="https://hooks.slack.com/services/...">
+            <div class="form-text">From Slack App → Incoming Webhooks. <a href="https://api.slack.com/messaging/webhooks" target="_blank" style="color:#6366f1">How to get it ↗</a></div>
+          </div>
+          <!-- Notion fields -->
+          <div class="col-md-3 d-none" id="notion-token-field">
+            <label class="form-label">Notion API Token</label>
+            <input type="password" name="notion_api_token" class="form-control form-control-sm" placeholder="secret_...">
+          </div>
+          <div class="col-md-3 d-none" id="notion-db-field">
+            <label class="form-label">Database ID</label>
+            <input type="text" name="notion_database_id" class="form-control form-control-sm" placeholder="abc123...">
+            <div class="form-text">32-char ID from your Notion database URL.</div>
+          </div>
+        </div>
+        <div class="mt-3 d-flex gap-2">
+          <button type="submit" class="btn btn-primary btn-sm">Add Integration</button>
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="collapse" data-bs-target="#add-integ-form">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Integrations list -->
+  {% if all_integrations %}
+  <div style="overflow-x:auto">
+    <table class="table table-hover">
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Name</th>
+          <th>Status</th>
+          <th>Added</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for integ in all_integrations %}
+        <tr>
+          <td>
+            {% if integ.type == "slack" %}
+            <span class="d-flex align-items-center gap-1">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="#E01E5A"><path d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zM6.313 15.165a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313zM8.834 5.042a2.528 2.528 0 0 1-2.521-2.52A2.528 2.528 0 0 1 8.834 0a2.528 2.528 0 0 1 2.521 2.522v2.52H8.834zM8.834 6.313a2.528 2.528 0 0 1 2.521 2.521 2.528 2.528 0 0 1-2.521 2.521H2.522A2.528 2.528 0 0 1 0 8.834a2.528 2.528 0 0 1 2.522-2.521h6.312zM18.956 8.834a2.528 2.528 0 0 1 2.522-2.521A2.528 2.528 0 0 1 24 8.834a2.528 2.528 0 0 1-2.522 2.521h-2.522V8.834zM17.688 8.834a2.528 2.528 0 0 1-2.523 2.521 2.527 2.527 0 0 1-2.52-2.521V2.522A2.527 2.527 0 0 1 15.165 0a2.528 2.528 0 0 1 2.523 2.522v6.312zM15.165 18.956a2.528 2.528 0 0 1 2.523 2.522A2.528 2.528 0 0 1 15.165 24a2.527 2.527 0 0 1-2.52-2.522v-2.522h2.52zM15.165 17.688a2.527 2.527 0 0 1-2.52-2.523 2.526 2.526 0 0 1 2.52-2.52h6.313A2.527 2.527 0 0 1 24 15.165a2.528 2.528 0 0 1-2.522 2.523h-6.313z"/></svg>
+              Slack
+            </span>
+            {% elif integ.type == "notion" %}
+            <span class="d-flex align-items-center gap-1">📝 Notion</span>
+            {% else %}{{ integ.type|title }}{% endif %}
+          </td>
+          <td style="font-weight:500">{{ integ.name or "—" }}</td>
+          <td>
+            {% if integ.is_active %}
+            <span class="chip chip-success">Active</span>
+            {% else %}
+            <span class="chip chip-gray">Paused</span>
+            {% endif %}
+          </td>
+          <td style="color:#94a3b8;font-size:12.5px">{{ integ.created_at }}</td>
+          <td>
+            <div class="d-flex gap-1">
+              <form method="post" action="/dashboard/integrations/{{ integ.id }}/toggle" style="display:inline">
+                <button type="submit" class="btn btn-xs btn-outline-secondary">
+                  {% if integ.is_active %}Pause{% else %}Enable{% endif %}
+                </button>
+              </form>
+              <form method="post" action="/dashboard/integrations/{{ integ.id }}/delete" style="display:inline">
+                <button type="submit" class="btn btn-xs btn-outline-danger"
+                  onclick="return confirm('Delete this integration?')">Delete</button>
+              </form>
+            </div>
+          </td>
+        </tr>
         {% endfor %}
-      </div>
-      <div class="text-muted small mt-2">{{ active_integrations|length }} active integration{% if active_integrations|length != 1 %}s{% endif %}</div>
-      {% else %}
-      <div class="text-muted small">No integrations configured. Use the API to add Slack or Notion.</div>
-      <div class="mt-2 p-2 bg-light rounded small">
-        <code>POST /api/v1/integrations</code> — <span class="text-muted">create Slack or Notion integration</span>
-      </div>
-      {% endif %}
-    </div>
+      </tbody>
+    </table>
   </div>
-
-  <div class="col-md-6">
-    <div class="card p-4 h-100">
-      <div class="d-flex justify-content-between align-items-center mb-2">
-        <h6 class="mb-0">Calendar Auto-Join</h6>
-        <a href="/api/docs#/Calendar" target="_blank" class="btn btn-sm btn-outline-secondary">Manage via API</a>
-      </div>
-      <p class="text-muted small mb-2">
-        Connect an iCal feed (Google Calendar, Outlook) to automatically dispatch bots to upcoming meetings.
-      </p>
-      {% if calendar_feeds %}
-      <table class="table table-sm mb-0">
-        <thead><tr><th>Name</th><th>Status</th><th>Last synced</th></tr></thead>
-        <tbody>
-          {% for feed in calendar_feeds %}
-          <tr>
-            <td class="small">{{ feed.name }}</td>
-            <td>
-              {% if feed.is_active %}
-              <span class="badge bg-success">Active</span>
-              {% else %}
-              <span class="badge bg-secondary">Paused</span>
-              {% endif %}
-            </td>
-            <td class="small text-muted">{{ feed.last_synced_at or "Never" }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-      {% else %}
-      <div class="text-muted small">No calendar feeds configured. Use the API to add one.</div>
-      <div class="mt-2 p-2 bg-light rounded small">
-        <code>POST /api/v1/calendar</code> — <span class="text-muted">add an iCal feed for auto-join</span>
-      </div>
-      {% endif %}
-    </div>
-  </div>
-</div>
-
-<!-- ── Recent Transactions ────────────────────────────────────────────────── -->
-<div class="card p-4">
-  <h6 class="mb-3">Recent Transactions</h6>
-  {% if transactions %}
-  <table class="table table-sm mb-0">
-    <thead><tr><th>Date</th><th>Type</th><th>Description</th><th class="text-end">Amount</th></tr></thead>
-    <tbody>
-      {% for tx in transactions %}
-      <tr>
-        <td class="text-muted small">{{ tx.created_at[:19].replace("T", " ") }}</td>
-        <td><span class="badge bg-secondary">{{ tx.type }}</span></td>
-        <td class="small">{{ tx.description }}</td>
-        <td class="text-end {% if tx.amount_usd > 0 %}tx-credit{% else %}tx-debit{% endif %} fw-bold">
-          {% if tx.amount_usd > 0 %}+{% endif %}${{ "%.4f"|format(tx.amount_usd) }}
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
   {% else %}
-  <p class="text-muted mb-0">No transactions yet.</p>
+  <div style="text-align:center;padding:2rem 0">
+    <div style="font-size:28px;margin-bottom:.5rem">🔌</div>
+    <div style="font-size:13.5px;color:#64748b;margin-bottom:1rem">No integrations yet. Connect Slack or Notion to auto-post meeting summaries.</div>
+    <button class="btn btn-outline-primary btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#add-integ-form">
+      + Add your first integration
+    </button>
+  </div>
   {% endif %}
 </div>
 
-{% if new_key %}
-<div class="alert alert-success alert-dismissible fade show mt-3" role="alert">
-  <strong>New API key created!</strong> Copy it now — it won't be shown again.<br>
-  <code id="new-key-value" class="d-inline-block mt-1" style="font-size:1em">{{ new_key }}</code>
-  <button type="button" class="btn btn-sm btn-outline-success ms-2 copy-key-btn" data-key="{{ new_key }}" title="Copy API key">
-    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
-      <path d="M4 1.5H3a2 2 0 0 0-2 2V14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V3.5a2 2 0 0 0-2-2h-1v1h1a1 1 0 0 1 1 1V14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1h1v-1z"/>
-      <path d="M9.5 1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-3a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5h3zm-3-1A1.5 1.5 0 0 0 5 1.5v1A1.5 1.5 0 0 0 6.5 4h3A1.5 1.5 0 0 0 11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3z"/>
-    </svg>
-  </button>
-  <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-</div>
-{% endif %}
+<!-- ── Calendar Auto-Join ──────────────────────────────────────────────────── -->
+<div id="calendar" class="card card-pad mb-4">
+  <div class="d-flex justify-content-between align-items-start mb-3">
+    <div>
+      <div class="section-title">Calendar Auto-Join</div>
+      <div class="section-subtitle">Connect an iCal feed — bots automatically join meetings starting within the next 10 minutes.</div>
+    </div>
+    <button class="btn btn-primary btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#add-cal-form">
+      + Add Calendar
+    </button>
+  </div>
 
+  <!-- Add calendar form (collapsible) -->
+  <div class="collapse mb-3" id="add-cal-form">
+    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:1.25rem">
+      <div class="section-title mb-3">Add iCal calendar feed</div>
+      <form method="post" action="/dashboard/calendar/add">
+        <div class="row g-3">
+          <div class="col-md-4">
+            <label class="form-label">Calendar name</label>
+            <input type="text" name="name" class="form-control form-control-sm" placeholder="My Work Calendar" value="My Calendar">
+          </div>
+          <div class="col-md-5">
+            <label class="form-label">iCal URL</label>
+            <input type="url" name="ical_url" class="form-control form-control-sm"
+              placeholder="https://calendar.google.com/calendar/ical/..." required>
+            <div class="form-text">Google Calendar: Settings → Integrate calendar → Secret address in iCal format</div>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Bot name <span style="font-weight:400;color:#94a3b8">(optional)</span></label>
+            <input type="text" name="bot_name" class="form-control form-control-sm" placeholder="MeetingBot">
+          </div>
+          <div class="col-12">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="auto_record" id="auto-record-check" checked>
+              <label class="form-check-label" for="auto-record-check" style="font-size:13.5px">
+                Auto-record meetings (bot joins automatically when meeting starts)
+              </label>
+            </div>
+          </div>
+        </div>
+        <div class="mt-3 d-flex gap-2">
+          <button type="submit" class="btn btn-primary btn-sm">Add Calendar</button>
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="collapse" data-bs-target="#add-cal-form">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Calendar feeds list -->
+  {% if all_calendar_feeds %}
+  <div style="overflow-x:auto">
+    <table class="table table-hover">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Status</th>
+          <th>Auto-record</th>
+          <th>Bot name</th>
+          <th>Last synced</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for feed in all_calendar_feeds %}
+        <tr>
+          <td style="font-weight:500">{{ feed.name }}</td>
+          <td>
+            {% if feed.is_active %}
+            <span class="chip chip-success">Active</span>
+            {% else %}
+            <span class="chip chip-gray">Paused</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if feed.auto_record %}
+            <span class="chip chip-info">On</span>
+            {% else %}
+            <span class="chip chip-gray">Off</span>
+            {% endif %}
+          </td>
+          <td style="color:#64748b;font-size:13px">{{ feed.bot_name or "MeetingBot" }}</td>
+          <td style="color:#94a3b8;font-size:12.5px">{{ feed.last_synced_at or "Never" }}</td>
+          <td>
+            <div class="d-flex gap-1">
+              <form method="post" action="/dashboard/calendar/{{ feed.id }}/toggle" style="display:inline">
+                <button type="submit" class="btn btn-xs btn-outline-secondary">
+                  {% if feed.is_active %}Pause{% else %}Enable{% endif %}
+                </button>
+              </form>
+              <form method="post" action="/dashboard/calendar/{{ feed.id }}/delete" style="display:inline">
+                <button type="submit" class="btn btn-xs btn-outline-danger"
+                  onclick="return confirm('Remove this calendar feed?')">Remove</button>
+              </form>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div style="text-align:center;padding:2rem 0">
+    <div style="font-size:28px;margin-bottom:.5rem">📅</div>
+    <div style="font-size:13.5px;color:#64748b;margin-bottom:1rem">No calendar feeds yet. Add an iCal feed to auto-join meetings.</div>
+    <button class="btn btn-outline-primary btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#add-cal-form">
+      + Add your first calendar
+    </button>
+  </div>
+  {% endif %}
+</div>
+
+<!-- ── Quick Start / Recent Bots ──────────────────────────────────────────── -->
+<div class="card card-pad mb-4">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+      <div class="section-title">Recent Bots</div>
+      <div class="section-subtitle">Bots from the last 24 hours. Results are kept in memory for 24 h.</div>
+    </div>
+    <a href="/api/docs#/Bots/create_bot_api_v1_bot_post" target="_blank" class="btn btn-outline-secondary btn-sm">Create Bot via API →</a>
+  </div>
+
+  {% if recent_bots %}
+  <div style="overflow-x:auto">
+    <table class="table table-hover">
+      <thead>
+        <tr>
+          <th>Bot ID</th>
+          <th>Meeting</th>
+          <th>Platform</th>
+          <th>Status</th>
+          <th>Created</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for bot in recent_bots %}
+        <tr>
+          <td><code style="font-size:12px">{{ bot.id[:12] }}…</code></td>
+          <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+            <span title="{{ bot.meeting_url }}" style="font-size:12.5px;color:#64748b">{{ bot.meeting_url[:40] }}{% if bot.meeting_url|length > 40 %}…{% endif %}</span>
+          </td>
+          <td>
+            <span class="chip chip-gray">{{ bot.meeting_platform|title }}</span>
+          </td>
+          <td>
+            {% if bot.status == "done" %}
+            <span class="chip chip-success">Done</span>
+            {% elif bot.status == "error" %}
+            <span class="chip chip-danger">Error</span>
+            {% elif bot.status == "cancelled" %}
+            <span class="chip chip-gray">Cancelled</span>
+            {% elif bot.status in ["joining", "in_call", "call_ended", "transcribing"] %}
+            <span class="chip chip-info">{{ bot.status|replace("_"," ")|title }}</span>
+            {% elif bot.status in ["ready", "queued", "scheduled"] %}
+            <span class="chip chip-warning">{{ bot.status|title }}</span>
+            {% else %}
+            <span class="chip chip-gray">{{ bot.status }}</span>
+            {% endif %}
+          </td>
+          <td style="color:#94a3b8;font-size:12.5px">{{ bot.created_at }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div style="background:#f8fafc;border-radius:10px;padding:1.5rem">
+    <div class="section-title mb-2">Create your first bot</div>
+    <div class="section-subtitle mb-3">Use your API key to send a bot into a meeting. Results are returned via webhook or poll.</div>
+    <pre style="margin:0"><code>curl -X POST {{ request.base_url }}api/v1/bot \
+  -H "Authorization: Bearer sk_live_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "meeting_url": "https://zoom.us/j/123456789",
+    "webhook_url": "https://yourapp.com/webhook"
+  }'</code></pre>
+  </div>
+  {% endif %}
+</div>
+
+<!-- ── Transactions ────────────────────────────────────────────────────────── -->
+<div class="card card-pad">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <div class="section-title">Recent Transactions</div>
+    <a href="/topup" class="btn btn-outline-secondary btn-sm">Add Credits</a>
+  </div>
+  {% if transactions %}
+  <div style="overflow-x:auto">
+    <table class="table table-hover">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th class="text-end">Amount</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for tx in transactions %}
+        <tr>
+          <td style="color:#94a3b8;font-size:12.5px;white-space:nowrap">{{ tx.created_at[:19].replace("T", " ") }}</td>
+          <td>
+            {% if tx.type == "stripe_topup" %}
+            <span class="chip chip-success">Stripe</span>
+            {% elif tx.type == "usdc_topup" %}
+            <span class="chip chip-info">USDC</span>
+            {% elif tx.type == "bot_usage" %}
+            <span class="chip chip-gray">Bot</span>
+            {% else %}
+            <span class="chip chip-gray">{{ tx.type }}</span>
+            {% endif %}
+          </td>
+          <td style="font-size:13px;color:#374151">{{ tx.description }}</td>
+          <td class="text-end {% if tx.amount_usd > 0 %}tx-credit{% else %}tx-debit{% endif %}">
+            {% if tx.amount_usd > 0 %}+{% endif %}${{ "%.4f"|format(tx.amount_usd) }}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div style="text-align:center;padding:1.5rem 0;color:#94a3b8;font-size:13.5px">
+    No transactions yet. <a href="/topup" style="color:#6366f1">Add credits</a> to get started.
+  </div>
+  {% endif %}
+</div>
+
+{% endblock %}
+
+{% block scripts %}
 <script>
-document.querySelectorAll('.copy-key-btn').forEach(function(btn) {
+// Copy-to-clipboard for API keys
+document.querySelectorAll('.copy-key-btn').forEach(btn => {
   btn.addEventListener('click', function() {
-    var key = this.getAttribute('data-key');
-    navigator.clipboard.writeText(key).then(function() {
-      btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16"><path d="M13.854 3.646a.5.5 0 0 1 0 .708l-7 7a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L6.5 10.293l6.646-6.647a.5.5 0 0 1 .708 0z"/></svg>';
-      btn.classList.remove('btn-outline-secondary', 'btn-outline-success');
-      btn.classList.add('btn-success');
-      setTimeout(function() {
-        btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16"><path d="M4 1.5H3a2 2 0 0 0-2 2V14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V3.5a2 2 0 0 0-2-2h-1v1h1a1 1 0 0 1 1 1V14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1h1v-1z"/><path d="M9.5 1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-3a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5h3zm-3-1A1.5 1.5 0 0 0 5 1.5v1A1.5 1.5 0 0 0 6.5 4h3A1.5 1.5 0 0 0 11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3z"/></svg>';
-        btn.classList.remove('btn-success');
-        btn.classList.add('btn-outline-secondary');
+    const key = this.getAttribute('data-key');
+    navigator.clipboard.writeText(key).then(() => {
+      const orig = this.innerHTML;
+      this.innerHTML = '✓';
+      this.classList.add('btn-success');
+      this.classList.remove('btn-outline-secondary', 'btn-outline-success');
+      setTimeout(() => {
+        this.innerHTML = orig;
+        this.classList.remove('btn-success');
+        this.classList.add('btn-outline-secondary');
       }, 2000);
     });
   });
+});
+
+// Toggle Slack vs Notion integration fields
+function toggleIntegFields(type) {
+  const slackFields = document.getElementById('slack-fields');
+  const notionToken = document.getElementById('notion-token-field');
+  const notionDb = document.getElementById('notion-db-field');
+  if (type === 'slack') {
+    slackFields.classList.remove('d-none');
+    notionToken.classList.add('d-none');
+    notionDb.classList.add('d-none');
+  } else {
+    slackFields.classList.add('d-none');
+    notionToken.classList.remove('d-none');
+    notionDb.classList.remove('d-none');
+  }
+}
+
+// Auto-open relevant section if hash present
+document.addEventListener('DOMContentLoaded', () => {
+  const hash = window.location.hash;
+  if (hash === '#integrations') {
+    document.getElementById('integrations')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } else if (hash === '#calendar') {
+    document.getElementById('calendar')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
 });
 </script>
 {% endblock %}

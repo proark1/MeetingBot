@@ -2,7 +2,7 @@
 
 **Version 2.2.0** — A stateless meeting bot API service with multi-tenant billing, business account support, Google/Microsoft SSO, Python & JS SDKs, webhook retry/delivery logs, bot persona customization, video recording, Prometheus metrics, idempotency keys, cloud storage, email notifications, calendar auto-join, Slack/Notion integrations, and GDPR compliance.
 
-> **Last updated:** 2026-03-16 · **API version in Swagger UI:** 2.2.0 <!-- auto-updated on each release -->
+> **Last updated:** 2026-03-17 · **API version in Swagger UI:** 2.2.0 <!-- auto-updated on each release -->
 
 Send bots into **Zoom**, **Google Meet**, and **Microsoft Teams** meetings to record, transcribe, and analyse them with **Claude** (Anthropic) or **Gemini** (Google) AI.
 
@@ -39,6 +39,10 @@ Send bots into **Zoom**, **Google Meet**, and **Microsoft Teams** meetings to re
 | **`sub_user_id` field** | Available on bot creation, bot response, and bot summary schemas; body field takes precedence over the header |
 | **Copy-to-clipboard for API keys** | Clipboard icon beside each API key in the dashboard; newly created keys display the full key once with a prominent copy button |
 | **Account type on registration** | Account type selection (Personal / Business) on the registration page and in the admin panel user table |
+| **Integrations management UI** | Add and manage Slack and Notion integrations directly from the dashboard — no API calls required |
+| **Calendar feed management UI** | Add, pause, and remove iCal calendar feeds directly from the dashboard with auto-join configuration |
+| **Redesigned Web UI** | Modern Inter-font design system across all pages: login, register, dashboard, top-up, and admin — responsive, accessible, and polished |
+| **Dashboard bots overview** | Recent 24-hour bots with status indicators shown directly on the dashboard |
 
 ---
 
@@ -568,8 +572,8 @@ Or use the admin web UI at `/admin` to manage all settings through a form.
 | `/` | Landing page (marketing homepage) — redirects to `/dashboard` if already logged in |
 | `/register` | Create account (Personal or Business); Google/Microsoft SSO sign-up buttons when configured |
 | `/login` | Login with email/password or SSO (Google/Microsoft when configured) |
-| `/dashboard` | Balance, API keys, subscription plan & monthly usage, email notification preferences, USDC wallet, linked SSO accounts, integrations summary, calendar feeds, transaction history, business account multi-user info |
-| `/topup` | Add credits (Stripe card or USDC) |
+| `/dashboard` | Balance, API keys, subscription plan & monthly usage, email notifications, USDC wallet, SSO accounts, **Integrations management** (add/pause/delete Slack & Notion), **Calendar feed management** (add/pause/remove iCal feeds with auto-join config), recent bots overview, transaction history, business account multi-user isolation info |
+| `/topup` | Add credits — Stripe card (redirect to secure checkout) or USDC (ERC-20 deposit address with amount selector) |
 | `/admin` | Platform administration — plan breakdown stats, bot activity & platform feature counters (webhooks/integrations/calendar/SSO), system status (Stripe/RPC/HD seed/email/storage/video/SSO), unmatched USDC transfers, user accounts with inline plan management, manual credit, rescan, wallet config, RPC URL (admin only) |
 
 Full interactive docs (with request/response examples and try-it-out): `GET /api/docs`
