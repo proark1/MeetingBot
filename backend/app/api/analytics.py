@@ -1,6 +1,6 @@
 """Analytics and action-items aggregate endpoints."""
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from app.deps import SUPERADMIN_ACCOUNT_ID
 from app.store import store
@@ -76,4 +76,49 @@ async def get_action_items_stats(request: Request):
         "total": len(items),
         "by_assignee": by_assignee,
         "recent": items[:20],
+    }
+
+
+@router.get("/search", tags=["Search"])
+async def search_transcripts(
+    q: str = Query(..., min_length=1, description="Search query — matched case-insensitively against transcript text."),
+    limit: int = Query(50, ge=1, le=200, description="Maximum number of matching snippets to return."),
+    request: Request = None,
+):
+    """Full-text search across all transcripts in the 24-hour memory window.
+
+    Returns up to `limit` transcript snippets whose text contains the query
+    string (case-insensitive), each annotated with its source bot context.
+
+    Results are ordered by bot creation time (newest first).
+    """
+    account_id = getattr(request.state, "account_id", None)
+    filter_account = account_id if (account_id and account_id != SUPERADMIN_ACCOUNT_ID) else None
+    all_bots, _ = await store.list_bots(limit=10000, account_id=filter_account)
+
+    q_lower = q.lower()
+    matches: list[dict] = []
+
+    for bot in all_bots:
+        for entry in bot.transcript:
+            text = entry.get("text", "") or ""
+            if q_lower in text.lower():
+                matches.append({
+                    "bot_id": bot.id,
+                    "meeting_url": bot.meeting_url,
+                    "meeting_platform": bot.meeting_platform,
+                    "bot_status": bot.status,
+                    "speaker": entry.get("speaker"),
+                    "text": text,
+                    "timestamp": entry.get("timestamp"),
+                })
+                if len(matches) >= limit:
+                    break
+        if len(matches) >= limit:
+            break
+
+    return {
+        "query": q,
+        "total": len(matches),
+        "results": matches,
     }

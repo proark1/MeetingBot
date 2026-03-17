@@ -521,6 +521,7 @@ The background poll loop checks all active feeds every `CALENDAR_POLL_INTERVAL_S
 | `DELETE` | `/api/v1/webhook/{id}` | Remove webhook. HTTP 204 |
 | `POST` | `/api/v1/webhook/{id}/test` | Test webhook delivery — sends a sample `bot.done` payload |
 | `GET` | `/api/v1/templates` | List analysis templates with names and descriptions |
+| `GET` | `/api/v1/templates/default-prompt` | Return the raw default analysis prompt used when no `template` or `prompt_override` is set |
 | `GET` | `/api/v1/analytics` | Aggregate stats for all bots in memory. Returns `{total_bots, active_bots, by_status, by_platform, success_rate, avg_duration_seconds, total_transcript_entries, total_ai_tokens, total_ai_cost_usd}` |
 | `GET` | `/api/v1/action-items/stats` | Cross-meeting action-item counts. Returns `{total, by_assignee, recent}` where `recent` contains up to 20 most recent action items with `bot_id` and `meeting_url` |
 | `GET` | `/api/v1/search` | Full-text search across all transcripts. Query param: `q`. Returns matching transcript snippets with bot context |

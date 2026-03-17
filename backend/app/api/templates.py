@@ -82,3 +82,15 @@ async def list_templates():
     For a fully custom prompt, use `prompt_override` instead of `template`.
     """
     return {"templates": _TEMPLATES}
+
+
+@router.get("/default-prompt", tags=["Templates"])
+async def get_default_prompt():
+    """Return the raw default analysis prompt used when no template or prompt_override is supplied.
+
+    This is the exact system prompt sent to the AI model when `template` is omitted
+    and `prompt_override` is not set. Useful for building custom prompts based on
+    the default structure.
+    """
+    from app.services.intelligence_service import _ANALYSIS_PROMPT
+    return {"prompt": _ANALYSIS_PROMPT}
