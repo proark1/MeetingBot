@@ -55,9 +55,12 @@ def _flash(type: str, message: str) -> dict:
 
 @router.get("/", include_in_schema=False)
 async def root(request: Request, db: AsyncSession = Depends(get_db)):
-    account = await _get_account_from_request(request, db)
-    if account:
-        return RedirectResponse("/dashboard")
+    try:
+        account = await _get_account_from_request(request, db)
+        if account:
+            return RedirectResponse("/dashboard")
+    except Exception as exc:
+        logger.warning("Root route DB lookup failed (redirecting to /login): %s", exc)
     return RedirectResponse("/login")
 
 

@@ -18,6 +18,8 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
+from fastapi.responses import JSONResponse as _JSONResponse
+
 from app.config import settings
 from app.api.bots import router as bots_router, _queue_processor, _running_tasks
 from app.api.webhooks import router as webhooks_router
@@ -429,6 +431,24 @@ app.add_middleware(
 )
 app.add_middleware(PrometheusMiddleware)
 
+
+@app.exception_handler(Exception)
+async def _unhandled_exception_handler(request, exc):
+    """Log full traceback for unhandled exceptions so production errors are diagnosable."""
+    import traceback
+    logger.error(
+        "Unhandled %s on %s %s:\n%s",
+        type(exc).__name__,
+        request.method,
+        request.url.path,
+        traceback.format_exc(),
+    )
+    return _JSONResponse(
+        status_code=500,
+        content={"detail": "Internal Server Error"},
+    )
+
+
 _auth = [Depends(require_auth)]
 app.include_router(metrics_router)                                     # unauthenticated /metrics
 app.include_router(auth_router,         prefix="/api/v1")             # no auth on register/login
@@ -459,12 +479,12 @@ async def health():
 if FRONTEND_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
 
-    @app.get("/", include_in_schema=False)
     @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_frontend(full_path: str = ""):
+        # Skip paths already handled by ui_router (/, /login, /register, etc.)
+        # and API paths
         if full_path.startswith("api/"):
-            from fastapi.responses import JSONResponse
-            return JSONResponse(
+            return _JSONResponse(
                 status_code=404,
                 content={"detail": f"API endpoint not found: /{full_path}"},
             )
