@@ -1,0 +1,1538 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "MeetingBot API",
+    "version": "2.2.0",
+    "description": "Send bots into Zoom, Google Meet, and Microsoft Teams meetings to record, transcribe, and analyse them with Claude (Anthropic) or Gemini (Google) AI.\n\nMulti-tenant: each external service registers an account and gets its own API key. Pre-fund a credit balance via Stripe (card) or USDC (ERC-20) — credits are deducted automatically per bot run.\n\n**Authentication:** Pass your `sk_live_...` API key as a Bearer token on every request:\n```\nAuthorization: Bearer sk_live_<your-key>\n```\n\n**Business accounts:** Upgrade to a business account to isolate data per end-user. Pass `X-Sub-User: <user-id>` on every request — different sub-users cannot see each other's bots.\n\n**Interactive docs:** Public Swagger UI at `/api/docs` · Admin full schema at `/api/v1/admin/docs` (admin only)."
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8000",
+      "description": "Local development"
+    }
+  ],
+  "security": [
+    { "BearerAuth": [] }
+  ],
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "API key obtained from `POST /api/v1/auth/register` or `POST /api/v1/auth/keys`. Format: `sk_live_<40-char-token>`."
+      }
+    },
+    "schemas": {
+      "RegisterRequest": {
+        "type": "object",
+        "required": ["email", "password"],
+        "properties": {
+          "email": { "type": "string", "format": "email", "description": "Email address for the new account." },
+          "password": { "type": "string", "minLength": 8, "description": "Password (minimum 8 characters)." },
+          "key_name": { "type": "string", "default": "Default", "maxLength": 100, "description": "Label for the first API key generated with your account." },
+          "account_type": {
+            "type": "string",
+            "default": "personal",
+            "enum": ["personal", "business"],
+            "description": "Account type: `personal` (default) for individual users, or `business` for platforms integrating MeetingBot on behalf of multiple end-users. Business accounts can use the `X-Sub-User` header to isolate data per end-user."
+          }
+        },
+        "example": {
+          "email": "you@example.com",
+          "password": "supersecret",
+          "key_name": "Production",
+          "account_type": "personal"
+        }
+      },
+      "RegisterResponse": {
+        "type": "object",
+        "properties": {
+          "account_id": { "type": "string", "description": "Unique account UUID." },
+          "email": { "type": "string", "description": "Registered email address." },
+          "account_type": { "type": "string", "enum": ["personal", "business"], "description": "Account type." },
+          "api_key": { "type": "string", "description": "Your first API key (`sk_live_...`). Include it on every request as `Authorization: Bearer <api_key>`. Shown only once." },
+          "message": { "type": "string", "description": "Human-readable instructions." }
+        }
+      },
+      "LoginResponse": {
+        "type": "object",
+        "properties": {
+          "access_token": { "type": "string", "description": "JWT token for web UI session." },
+          "token_type": { "type": "string", "default": "bearer" },
+          "account_id": { "type": "string", "description": "The authenticated account UUID." }
+        }
+      },
+      "AccountResponse": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "description": "Unique account UUID." },
+          "email": { "type": "string", "description": "Registered email address." },
+          "account_type": { "type": "string", "enum": ["personal", "business"], "description": "Account type." },
+          "credits_usd": { "type": "number", "description": "Current prepaid credit balance in USD." },
+          "wallet_address": { "type": "string", "nullable": true, "description": "Registered Ethereum wallet address for USDC deposits, or null if not set." },
+          "is_active": { "type": "boolean", "description": "False if the account has been disabled by an admin." },
+          "created_at": { "type": "string", "format": "date-time", "description": "Account creation time (UTC)." }
+        }
+      },
+      "ApiKeyResponse": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "description": "Unique key UUID (used to revoke the key)." },
+          "name": { "type": "string", "description": "Human-readable label." },
+          "key_preview": { "type": "string", "description": "First 16 characters of the key followed by `...`. The full key is only shown once at creation." },
+          "is_active": { "type": "boolean", "description": "False if the key has been revoked." },
+          "created_at": { "type": "string", "format": "date-time", "description": "When the key was created (UTC)." },
+          "last_used_at": { "type": "string", "format": "date-time", "nullable": true, "description": "Last time this key was used for an authenticated request (UTC), or null if never used." }
+        }
+      },
+      "CreateKeyRequest": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "default": "New Key", "maxLength": 100, "description": "Human-readable label for this API key (e.g. 'Production', 'CI/CD')." }
+        },
+        "example": { "name": "Production" }
+      },
+      "WalletRequest": {
+        "type": "object",
+        "required": ["wallet_address"],
+        "properties": {
+          "wallet_address": {
+            "type": "string",
+            "description": "Your Ethereum wallet address (0x..., 42 characters). USDC sent from this address to the platform wallet will be credited to your account.",
+            "example": "0xAbCdEf0123456789AbCdEf0123456789AbCdEf01"
+          }
+        }
+      },
+      "WalletResponse": {
+        "type": "object",
+        "properties": {
+          "wallet_address": { "type": "string", "nullable": true, "description": "Your registered wallet address, or null if not set." },
+          "message": { "type": "string", "description": "Status message." }
+        }
+      },
+      "NotifyPrefsRequest": {
+        "type": "object",
+        "required": ["notify_on_done"],
+        "properties": {
+          "notify_on_done": { "type": "boolean", "description": "Send email when a meeting recording is ready." },
+          "notify_email": { "type": "string", "nullable": true, "description": "Override email address for notifications. Defaults to account email if omitted." }
+        }
+      },
+      "NotifyPrefsResponse": {
+        "type": "object",
+        "properties": {
+          "notify_on_done": { "type": "boolean" },
+          "notify_email": { "type": "string", "nullable": true },
+          "message": { "type": "string" }
+        }
+      },
+      "PlanResponse": {
+        "type": "object",
+        "properties": {
+          "plan": { "type": "string", "enum": ["free", "starter", "pro", "business"], "description": "Current subscription plan." },
+          "monthly_bots_used": { "type": "integer", "description": "Bots run in the current billing period." },
+          "monthly_limit": { "type": "integer", "description": "Monthly bot limit for this plan (-1 = unlimited)." },
+          "monthly_reset_at": { "type": "string", "format": "date-time", "nullable": true, "description": "When the monthly counter resets." }
+        }
+      },
+      "AccountTypeRequest": {
+        "type": "object",
+        "required": ["account_type"],
+        "properties": {
+          "account_type": {
+            "type": "string",
+            "enum": ["personal", "business"],
+            "description": "Account type: `personal` for individual users, or `business` for platforms integrating MeetingBot on behalf of multiple end-users. Business accounts can pass `X-Sub-User` to isolate data per end-user."
+          }
+        },
+        "example": { "account_type": "business" }
+      },
+      "AccountTypeResponse": {
+        "type": "object",
+        "properties": {
+          "account_type": { "type": "string", "enum": ["personal", "business"], "description": "Updated account type." },
+          "message": { "type": "string", "description": "Human-readable confirmation." }
+        }
+      },
+      "BotCreate": {
+        "type": "object",
+        "required": ["meeting_url"],
+        "properties": {
+          "meeting_url": { "type": "string", "format": "uri", "description": "Full URL of the Zoom, Google Meet, or Teams meeting. Private/loopback IPs are rejected." },
+          "bot_name": { "type": "string", "default": "MeetingBot", "maxLength": 100, "description": "Display name shown in the meeting." },
+          "webhook_url": { "type": "string", "nullable": true, "description": "HTTPS URL to POST the full meeting results to once the bot finishes. Leave empty to poll GET /api/v1/bot/{id} instead." },
+          "join_at": { "type": "string", "format": "date-time", "nullable": true, "description": "ISO-8601 datetime to schedule the bot join. Omit to join immediately." },
+          "analysis_mode": {
+            "type": "string",
+            "enum": ["full", "transcript_only"],
+            "default": "full",
+            "description": "`full` — AI summary, key points, action items, decisions, sentiment, topics, chapters. `transcript_only` — skip all AI analysis, return only the raw transcript."
+          },
+          "template": {
+            "type": "string",
+            "nullable": true,
+            "enum": ["default", "sales", "standup", "1on1", "retro", "kickoff", "allhands", "postmortem", "interview", "design-review"],
+            "description": "Built-in analysis template. Leave empty for the default general-purpose template."
+          },
+          "prompt_override": { "type": "string", "nullable": true, "maxLength": 8000, "description": "Custom analysis prompt. Overrides `template` when both are provided." },
+          "vocabulary": { "type": "array", "items": { "type": "string" }, "nullable": true, "description": "Domain-specific terms to improve transcription accuracy (product names, jargon, etc.)." },
+          "respond_on_mention": { "type": "boolean", "default": true, "description": "When true, the bot monitors live captions and replies when its name is mentioned." },
+          "mention_response_mode": { "type": "string", "enum": ["text", "voice", "both"], "default": "text", "description": "`text` — chat message. `voice` — TTS. `both` — chat + TTS." },
+          "tts_provider": { "type": "string", "enum": ["edge", "gemini"], "default": "edge", "description": "`edge` — Microsoft Edge TTS (fast, free). `gemini` — Google Gemini TTS (more natural)." },
+          "start_muted": { "type": "boolean", "default": false, "description": "Join with microphone muted." },
+          "live_transcription": { "type": "boolean", "default": false, "description": "Transcribe audio in real-time during the call (15-second chunks via webhook)." },
+          "sub_user_id": { "type": "string", "nullable": true, "maxLength": 255, "description": "For business accounts: an opaque identifier for the end-user this bot belongs to. Also settable via the `X-Sub-User` request header. Body field takes precedence over the header." },
+          "bot_avatar_url": { "type": "string", "nullable": true, "maxLength": 2048, "description": "URL of the avatar image shown as the bot's profile picture in the meeting." },
+          "record_video": { "type": "boolean", "default": false, "description": "Capture a video recording (MP4) in addition to audio. Download via GET /api/v1/bot/{id}/video once status is `done`." },
+          "metadata": { "type": "object", "default": {}, "description": "Arbitrary key-value pairs stored with the bot and echoed in all responses." }
+        },
+        "example": {
+          "meeting_url": "https://meet.google.com/abc-defg-hij",
+          "bot_name": "Notetaker",
+          "webhook_url": "https://your-app.com/webhook/meeting-done",
+          "template": "default"
+        }
+      },
+      "MeetingAnalysis": {
+        "type": "object",
+        "properties": {
+          "summary": { "type": "string", "description": "One-paragraph meeting summary." },
+          "key_points": { "type": "array", "items": { "type": "string" }, "description": "Key discussion points." },
+          "action_items": { "type": "array", "items": { "type": "object" }, "description": "Array of {task, assignee} items." },
+          "decisions": { "type": "array", "items": { "type": "string" }, "description": "Explicit decisions made during the meeting." },
+          "next_steps": { "type": "array", "items": { "type": "string" }, "description": "Planned follow-up steps agreed in the meeting." },
+          "sentiment": { "type": "string", "enum": ["positive", "neutral", "negative"], "description": "Overall meeting tone." },
+          "topics": { "type": "array", "items": { "type": "string" }, "description": "Main topics discussed." }
+        }
+      },
+      "BotResponse": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "description": "Unique bot UUID." },
+          "meeting_url": { "type": "string", "description": "The meeting URL the bot joined." },
+          "meeting_platform": { "type": "string", "enum": ["google_meet", "zoom", "teams", "demo"], "description": "Detected meeting platform." },
+          "bot_name": { "type": "string", "description": "Display name shown in the meeting." },
+          "status": {
+            "type": "string",
+            "enum": ["ready", "scheduled", "queued", "joining", "in_call", "call_ended", "transcribing", "done", "error", "cancelled"],
+            "description": "Current lifecycle status. Poll until `done` or `error`, or use `webhook_url` for push delivery."
+          },
+          "error_message": { "type": "string", "nullable": true, "description": "Human-readable error if status is `error`." },
+          "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": { "type": "string", "format": "date-time" },
+          "started_at": { "type": "string", "format": "date-time", "nullable": true },
+          "ended_at": { "type": "string", "format": "date-time", "nullable": true },
+          "duration_seconds": { "type": "number", "nullable": true, "description": "Meeting duration in seconds." },
+          "participants": { "type": "array", "items": { "type": "string" }, "description": "Names of meeting participants." },
+          "transcript": { "type": "array", "items": { "type": "object" }, "description": "Array of {speaker, text, timestamp} entries. Available once status is `done`." },
+          "analysis": { "$ref": "#/components/schemas/MeetingAnalysis", "nullable": true, "description": "AI-generated analysis. Available once status is `done` (analysis_mode=full)." },
+          "chapters": { "type": "array", "items": { "type": "object" }, "description": "Array of {title, start_time, summary} chapter segments." },
+          "speaker_stats": { "type": "array", "items": { "type": "object" }, "description": "Array of {name, talk_time_s, talk_pct, turns} per speaker." },
+          "recording_available": { "type": "boolean", "description": "True when audio can be downloaded via GET /api/v1/bot/{id}/recording." },
+          "video_available": { "type": "boolean", "description": "True when an MP4 video can be downloaded via GET /api/v1/bot/{id}/video." },
+          "bot_avatar_url": { "type": "string", "nullable": true, "description": "Bot avatar URL used in the meeting." },
+          "analysis_mode": { "type": "string", "enum": ["full", "transcript_only"] },
+          "is_demo_transcript": { "type": "boolean", "description": "True when the platform is unsupported and an AI-generated demo transcript was used." },
+          "sub_user_id": { "type": "string", "nullable": true, "description": "Business account sub-user identifier (if set via `X-Sub-User` or `sub_user_id` body field)." },
+          "metadata": { "type": "object", "description": "Arbitrary key-value pairs echoed from bot creation." }
+        }
+      },
+      "BotSummary": {
+        "type": "object",
+        "description": "Lightweight representation returned by the list endpoint (no transcript/analysis).",
+        "properties": {
+          "id": { "type": "string" },
+          "meeting_url": { "type": "string" },
+          "meeting_platform": { "type": "string" },
+          "bot_name": { "type": "string" },
+          "status": { "type": "string" },
+          "error_message": { "type": "string", "nullable": true },
+          "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": { "type": "string", "format": "date-time" },
+          "started_at": { "type": "string", "format": "date-time", "nullable": true },
+          "ended_at": { "type": "string", "format": "date-time", "nullable": true },
+          "duration_seconds": { "type": "number", "nullable": true },
+          "participants": { "type": "array", "items": { "type": "string" } },
+          "recording_available": { "type": "boolean" },
+          "analysis_mode": { "type": "string" },
+          "is_demo_transcript": { "type": "boolean" },
+          "sub_user_id": { "type": "string", "nullable": true },
+          "metadata": { "type": "object" },
+          "ai_total_tokens": { "type": "integer" },
+          "ai_total_cost_usd": { "type": "number" },
+          "ai_primary_model": { "type": "string", "nullable": true }
+        }
+      },
+      "BotListResponse": {
+        "type": "object",
+        "properties": {
+          "results": { "type": "array", "items": { "$ref": "#/components/schemas/BotSummary" } },
+          "total": { "type": "integer", "description": "Total number of bots matching the query (for pagination)." },
+          "limit": { "type": "integer" },
+          "offset": { "type": "integer" }
+        }
+      },
+      "BotStatsResponse": {
+        "type": "object",
+        "properties": {
+          "total": { "type": "integer", "description": "Total number of bots in memory (24-hour window)." },
+          "active": { "type": "integer", "description": "Bots currently in an active state (ready/scheduled/queued/joining/in_call/call_ended)." },
+          "done": { "type": "integer", "description": "Bots that completed successfully." },
+          "error": { "type": "integer", "description": "Bots that ended in an error state." },
+          "by_status": { "type": "object", "description": "Count of bots broken down by each status string." }
+        }
+      },
+      "HighlightResponse": {
+        "type": "object",
+        "properties": {
+          "bot_id": { "type": "string" },
+          "highlights": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "type": { "type": "string", "enum": ["key_point", "action_item", "decision"] },
+                "text": { "type": "string" },
+                "detail": { "type": "object" }
+              }
+            }
+          }
+        }
+      },
+      "AskRequest": {
+        "type": "object",
+        "required": ["question"],
+        "properties": {
+          "question": { "type": "string", "description": "Question to answer using the meeting transcript as context." }
+        }
+      },
+      "AskResponse": {
+        "type": "object",
+        "properties": {
+          "bot_id": { "type": "string" },
+          "question": { "type": "string" },
+          "answer": { "type": "string" }
+        }
+      },
+      "AnalyzeRequest": {
+        "type": "object",
+        "properties": {
+          "template": { "type": "string", "nullable": true, "description": "Built-in analysis template to use." },
+          "prompt_override": { "type": "string", "nullable": true, "maxLength": 8000, "description": "Custom analysis prompt. Overrides `template` when both are provided." }
+        }
+      },
+      "FollowupEmailResponse": {
+        "type": "object",
+        "properties": {
+          "bot_id": { "type": "string" },
+          "subject": { "type": "string" },
+          "body": { "type": "string" }
+        }
+      },
+      "BalanceResponse": {
+        "type": "object",
+        "properties": {
+          "credits_usd": { "type": "number", "description": "Current prepaid credit balance in USD." },
+          "transactions": {
+            "type": "array",
+            "description": "Last 50 transactions.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": { "type": "string" },
+                "amount_usd": { "type": "number" },
+                "type": { "type": "string", "enum": ["stripe_topup", "usdc_topup", "bot_usage"] },
+                "description": { "type": "string" },
+                "reference_id": { "type": "string", "nullable": true },
+                "created_at": { "type": "string", "format": "date-time" }
+              }
+            }
+          }
+        }
+      },
+      "StripeCheckoutRequest": {
+        "type": "object",
+        "required": ["amount_usd"],
+        "properties": {
+          "amount_usd": { "type": "number", "description": "Top-up amount in USD. Must be one of the values in STRIPE_TOP_UP_AMOUNTS (default: 10, 25, 50, 100)." },
+          "success_url": { "type": "string", "nullable": true, "description": "URL to redirect after successful payment." },
+          "cancel_url": { "type": "string", "nullable": true, "description": "URL to redirect if the user cancels." }
+        }
+      },
+      "StripeCheckoutResponse": {
+        "type": "object",
+        "properties": {
+          "checkout_url": { "type": "string", "description": "Stripe Checkout URL. Redirect the user to this URL to complete payment." }
+        }
+      },
+      "UsdcAddressResponse": {
+        "type": "object",
+        "properties": {
+          "deposit_address": { "type": "string", "description": "Ethereum address to send USDC to. Platform wallet if admin-configured; otherwise HD-derived per-user address." },
+          "network": { "type": "string", "description": "Ethereum network (e.g. mainnet)." },
+          "token": { "type": "string", "description": "Token symbol (USDC)." },
+          "rate_usd_per_token": { "type": "number", "description": "Exchange rate: 1 USDC = $1 credit." },
+          "note": { "type": "string", "description": "Additional instructions." }
+        }
+      },
+      "WebhookCreate": {
+        "type": "object",
+        "required": ["url", "events"],
+        "properties": {
+          "url": { "type": "string", "format": "uri", "description": "HTTPS URL to receive webhook POST requests." },
+          "events": { "type": "array", "items": { "type": "string" }, "description": "Event types to subscribe to (e.g. `['bot.done', 'bot.error']`)." },
+          "secret": { "type": "string", "nullable": true, "description": "Optional HMAC secret for verifying webhook signatures." }
+        }
+      },
+      "WebhookResponse": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "url": { "type": "string" },
+          "events": { "type": "array", "items": { "type": "string" } },
+          "is_active": { "type": "boolean" },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "IntegrationCreate": {
+        "type": "object",
+        "required": ["type", "config"],
+        "properties": {
+          "type": { "type": "string", "enum": ["slack", "notion"], "description": "Integration type." },
+          "name": { "type": "string", "nullable": true, "description": "Human-readable label for this integration." },
+          "config": {
+            "type": "object",
+            "description": "Integration-specific configuration. Slack: `{webhook_url}`. Notion: `{api_token, database_id}`."
+          }
+        }
+      },
+      "IntegrationResponse": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "type": { "type": "string" },
+          "name": { "type": "string", "nullable": true },
+          "is_active": { "type": "boolean" },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "CalendarFeedCreate": {
+        "type": "object",
+        "required": ["ical_url"],
+        "properties": {
+          "name": { "type": "string", "nullable": true, "description": "Human-readable label." },
+          "ical_url": { "type": "string", "format": "uri", "description": "iCal feed URL." },
+          "bot_name": { "type": "string", "nullable": true, "description": "Bot display name for auto-joined meetings." },
+          "auto_record": { "type": "boolean", "default": true, "description": "Automatically record meetings found in this feed." },
+          "is_active": { "type": "boolean", "default": true }
+        }
+      },
+      "CalendarFeedResponse": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string", "nullable": true },
+          "ical_url": { "type": "string" },
+          "bot_name": { "type": "string", "nullable": true },
+          "auto_record": { "type": "boolean" },
+          "is_active": { "type": "boolean" },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "SearchResponse": {
+        "type": "object",
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "bot_id": { "type": "string" },
+                "meeting_url": { "type": "string" },
+                "snippet": { "type": "string" },
+                "speaker": { "type": "string" },
+                "timestamp": { "type": "number" }
+              }
+            }
+          },
+          "total": { "type": "integer" }
+        }
+      },
+      "TemplateItem": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "description": { "type": "string" }
+        }
+      },
+      "HealthResponse": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "string", "example": "ok" },
+          "service": { "type": "string", "example": "MeetingBot" },
+          "version": { "type": "string", "example": "2.2.0" }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "detail": { "type": "string", "description": "Human-readable error description." }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": ["Health"],
+        "summary": "Health check",
+        "operationId": "health_check",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Service is healthy",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HealthResponse" } } }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/register": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Register a new account",
+        "description": "Create a new account and return the first API key. Rate limit: 3/min per IP. Returns HTTP 409 if email already registered.\n\nSet `account_type: \"business\"` if you are a platform integrating MeetingBot on behalf of multiple end-users.",
+        "operationId": "auth_register",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RegisterRequest" } } }
+        },
+        "responses": {
+          "201": {
+            "description": "Account created",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RegisterResponse" } } }
+          },
+          "409": { "description": "Email already registered", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "422": { "description": "Validation error" }
+        }
+      }
+    },
+    "/api/v1/auth/login": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Login (web UI JWT)",
+        "description": "Authenticate and receive a JWT for web UI sessions.\n\n**Request format:** `application/x-www-form-urlencoded` (OAuth2 password flow). Send `username` (your email) and `password` as form fields — **not** JSON.\n\nThe returned JWT is only for the browser-based web UI. For API calls, use your `sk_live_...` API key.",
+        "operationId": "auth_login",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "required": ["username", "password"],
+                "properties": {
+                  "username": { "type": "string", "description": "Your email address." },
+                  "password": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authenticated",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/LoginResponse" } } }
+          },
+          "401": { "description": "Invalid email or password" }
+        }
+      }
+    },
+    "/api/v1/auth/me": {
+      "get": {
+        "tags": ["Auth"],
+        "summary": "Get current account info",
+        "description": "Returns the current account's info and credit balance.",
+        "operationId": "auth_me",
+        "responses": {
+          "200": {
+            "description": "Account info",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AccountResponse" } } }
+          },
+          "401": { "description": "Unauthorized" }
+        }
+      }
+    },
+    "/api/v1/auth/keys": {
+      "get": {
+        "tags": ["Auth"],
+        "summary": "List API keys",
+        "description": "List all active API keys for the current account.",
+        "operationId": "auth_list_keys",
+        "responses": {
+          "200": {
+            "description": "List of API keys",
+            "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/ApiKeyResponse" } } } }
+          }
+        }
+      },
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Create API key",
+        "description": "Generate a new named API key for the current account.",
+        "operationId": "auth_create_key",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateKeyRequest" } } }
+        },
+        "responses": {
+          "201": {
+            "description": "API key created. The full key is only shown once — copy it immediately.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiKeyResponse" } } }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/keys/{key_id}": {
+      "delete": {
+        "tags": ["Auth"],
+        "summary": "Revoke API key",
+        "operationId": "auth_revoke_key",
+        "parameters": [
+          { "name": "key_id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "204": { "description": "Key revoked" },
+          "404": { "description": "Key not found" }
+        }
+      }
+    },
+    "/api/v1/auth/wallet": {
+      "get": {
+        "tags": ["Auth"],
+        "summary": "Get registered wallet address",
+        "description": "Get your registered Ethereum wallet address for USDC deposits.",
+        "operationId": "auth_get_wallet",
+        "responses": {
+          "200": {
+            "description": "Wallet info",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WalletResponse" } } }
+          }
+        }
+      },
+      "put": {
+        "tags": ["Auth"],
+        "summary": "Set wallet address",
+        "description": "Set or update your Ethereum wallet address for USDC deposits. When you send USDC from this wallet to the platform collection wallet, the system automatically attributes the deposit to your account. Each wallet address can only be linked to one account.",
+        "operationId": "auth_set_wallet",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WalletRequest" } } }
+        },
+        "responses": {
+          "200": { "description": "Wallet saved", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WalletResponse" } } } },
+          "409": { "description": "Wallet address already linked to another account" },
+          "422": { "description": "Invalid Ethereum address format" }
+        }
+      }
+    },
+    "/api/v1/auth/notify": {
+      "get": {
+        "tags": ["Auth"],
+        "summary": "Get notification preferences",
+        "operationId": "auth_get_notify",
+        "responses": {
+          "200": { "description": "Notification prefs", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/NotifyPrefsResponse" } } } }
+        }
+      },
+      "put": {
+        "tags": ["Auth"],
+        "summary": "Update notification preferences",
+        "operationId": "auth_set_notify",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/NotifyPrefsRequest" } } }
+        },
+        "responses": {
+          "200": { "description": "Preferences updated", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/NotifyPrefsResponse" } } } }
+        }
+      }
+    },
+    "/api/v1/auth/plan": {
+      "get": {
+        "tags": ["Auth"],
+        "summary": "Get subscription plan",
+        "description": "Get the current subscription plan and monthly bot usage.",
+        "operationId": "auth_get_plan",
+        "responses": {
+          "200": { "description": "Plan info", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PlanResponse" } } } }
+        }
+      }
+    },
+    "/api/v1/auth/account-type": {
+      "put": {
+        "tags": ["Auth"],
+        "summary": "Switch account type",
+        "description": "Switch the current account between `personal` and `business` types.\n\n- **personal** — standard single-user account (default).\n- **business** — multi-tenant mode; pass `X-Sub-User: <id>` on every request to isolate bots, transcripts, and analyses per end-user.\n\nSwitching type does **not** affect existing bot data or credits.",
+        "operationId": "auth_set_account_type",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AccountTypeRequest" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Account type updated",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AccountTypeResponse" } } }
+          },
+          "401": { "description": "Unauthorized" },
+          "422": { "description": "account_type must be 'personal' or 'business'" }
+        }
+      }
+    },
+    "/api/v1/auth/account": {
+      "delete": {
+        "tags": ["Auth"],
+        "summary": "Delete account (GDPR erasure)",
+        "description": "Permanently delete the current account and all associated data (GDPR right to erasure).\n\nThis action is **irreversible**. It deletes: the account and all API keys, all bot snapshots, all calendar feeds and integrations, all billing records, and all cloud recordings.",
+        "operationId": "auth_delete_account",
+        "responses": {
+          "200": { "description": "Account permanently deleted" },
+          "401": { "description": "Unauthorized" }
+        }
+      }
+    },
+    "/api/v1/bot": {
+      "post": {
+        "tags": ["Bots"],
+        "summary": "Create a bot",
+        "description": "Launch a bot to join a meeting. Returns immediately with `status: ready` (or `scheduled` if `join_at` is set). Rate limit: 20/min per IP. Requires minimum credit balance (HTTP 402 if insufficient).\n\nFor business accounts, pass `X-Sub-User: <user-id>` to scope the bot to a specific end-user.",
+        "operationId": "bot_create",
+        "parameters": [
+          { "name": "X-Sub-User", "in": "header", "required": false, "schema": { "type": "string", "maxLength": 255 }, "description": "Business accounts: opaque end-user identifier. Scopes this bot and all its data to that user." },
+          { "name": "Idempotency-Key", "in": "header", "required": false, "schema": { "type": "string" }, "description": "Unique key for safe retries — the same key returns the original response without creating a duplicate bot." }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BotCreate" } } }
+        },
+        "responses": {
+          "201": { "description": "Bot created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BotResponse" } } } },
+          "402": { "description": "Insufficient credits" },
+          "422": { "description": "Validation error (e.g. invalid meeting URL)" }
+        }
+      },
+      "get": {
+        "tags": ["Bots"],
+        "summary": "List bots",
+        "description": "List bots (lightweight summaries, no transcript/analysis). For business accounts, pass `X-Sub-User` to filter by end-user; omit to list all bots across all sub-users.",
+        "operationId": "bot_list",
+        "parameters": [
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 20, "minimum": 1, "maximum": 100 }, "description": "Number of results per page." },
+          { "name": "offset", "in": "query", "schema": { "type": "integer", "default": 0 }, "description": "Pagination offset." },
+          { "name": "status", "in": "query", "schema": { "type": "string" }, "description": "Filter by status string." },
+          { "name": "X-Sub-User", "in": "header", "required": false, "schema": { "type": "string" }, "description": "Business accounts: filter to a specific end-user." }
+        ],
+        "responses": {
+          "200": { "description": "Bot list", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BotListResponse" } } } }
+        }
+      }
+    },
+    "/api/v1/bot/stats": {
+      "get": {
+        "tags": ["Bots"],
+        "summary": "Bot aggregate stats",
+        "description": "Aggregate bot counts by status. `active` includes: ready/scheduled/queued/joining/in_call/call_ended.",
+        "operationId": "bot_stats",
+        "responses": {
+          "200": { "description": "Stats", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BotStatsResponse" } } } }
+        }
+      }
+    },
+    "/api/v1/bot/{id}": {
+      "get": {
+        "tags": ["Bots"],
+        "summary": "Get bot details",
+        "description": "Full bot details including transcript and analysis. Poll until `status` is `done` or `error`.",
+        "operationId": "bot_get",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "X-Sub-User", "in": "header", "required": false, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Bot details", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BotResponse" } } } },
+          "404": { "description": "Bot not found" }
+        }
+      },
+      "delete": {
+        "tags": ["Bots"],
+        "summary": "Stop and remove bot",
+        "description": "Stop and remove a bot. Running bots are cancelled (transcript salvaged if possible); finished bots are removed from memory.",
+        "operationId": "bot_delete",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "204": { "description": "Bot removed" },
+          "404": { "description": "Bot not found" }
+        }
+      }
+    },
+    "/api/v1/bot/{id}/transcript": {
+      "get": {
+        "tags": ["Bots"],
+        "summary": "Get raw transcript",
+        "description": "Raw transcript only. Blocks up to 25 s if transcription is in progress, then returns automatically. Returns HTTP 425 (Too Early) if the bot has not yet reached `call_ended`/`done`/`cancelled`.",
+        "operationId": "bot_transcript",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Transcript",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "bot_id": { "type": "string" }, "transcript": { "type": "array", "items": { "type": "object" } } } } } }
+          },
+          "425": { "description": "Too Early — bot is still joining or in-call" }
+        }
+      }
+    },
+    "/api/v1/bot/{id}/recording": {
+      "get": {
+        "tags": ["Bots"],
+        "summary": "Download audio recording",
+        "description": "Download WAV audio recording. HTTP 404 if recording not available.",
+        "operationId": "bot_recording",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "WAV audio file", "content": { "audio/wav": {} } },
+          "404": { "description": "Recording not available" }
+        }
+      }
+    },
+    "/api/v1/bot/{id}/video": {
+      "get": {
+        "tags": ["Bots"],
+        "summary": "Download video recording",
+        "description": "Download MP4 video recording. Only available if `record_video: true` was set at creation. HTTP 404 if not available.",
+        "operationId": "bot_video",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "MP4 video file", "content": { "video/mp4": {} } },
+          "404": { "description": "Video recording not available" }
+        }
+      }
+    },
+    "/api/v1/bot/{id}/highlight": {
+      "get": {
+        "tags": ["Bots"],
+        "summary": "Get curated highlights",
+        "description": "Curated highlights derived from AI analysis. Returns key points, action items, and decisions. HTTP 425 if analysis is not yet available.",
+        "operationId": "bot_highlight",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Highlights", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HighlightResponse" } } } },
+          "425": { "description": "Too Early — analysis not yet available" }
+        }
+      }
+    },
+    "/api/v1/bot/{id}/analyze": {
+      "post": {
+        "tags": ["Bots"],
+        "summary": "(Re-)run AI analysis",
+        "description": "Run or re-run AI analysis on the transcript. Blocks up to 25 s waiting for transcript. Use to switch templates or apply a custom prompt on an existing transcript.",
+        "operationId": "bot_analyze",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AnalyzeRequest" } } }
+        },
+        "responses": {
+          "200": { "description": "Analysis result", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/MeetingAnalysis" } } } },
+          "425": { "description": "Too Early — no transcript yet" }
+        }
+      }
+    },
+    "/api/v1/bot/{id}/ask": {
+      "post": {
+        "tags": ["Bots"],
+        "summary": "Ask a question about the transcript",
+        "description": "Q&A on the meeting transcript. HTTP 425 if no transcript yet.",
+        "operationId": "bot_ask",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AskRequest" } } }
+        },
+        "responses": {
+          "200": { "description": "Answer", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AskResponse" } } } },
+          "425": { "description": "Too Early — no transcript yet" }
+        }
+      }
+    },
+    "/api/v1/bot/{id}/followup-email": {
+      "post": {
+        "tags": ["Bots"],
+        "summary": "Draft follow-up email",
+        "description": "Draft a follow-up email based on the meeting transcript and analysis. HTTP 425 if no transcript or analysis yet.",
+        "operationId": "bot_followup_email",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Follow-up email draft", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/FollowupEmailResponse" } } } },
+          "425": { "description": "Too Early — no transcript or analysis yet" }
+        }
+      }
+    },
+    "/api/v1/bot/{id}/export/markdown": {
+      "get": {
+        "tags": ["Bots"],
+        "summary": "Export report as Markdown",
+        "description": "Export the full meeting report as a Markdown file.",
+        "operationId": "bot_export_markdown",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Markdown file", "content": { "text/markdown": {} } }
+        }
+      }
+    },
+    "/api/v1/bot/{id}/export/pdf": {
+      "get": {
+        "tags": ["Bots"],
+        "summary": "Export report as PDF",
+        "description": "Export the full meeting report as a PDF file.",
+        "operationId": "bot_export_pdf",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "PDF file", "content": { "application/pdf": {} } }
+        }
+      }
+    },
+    "/api/v1/billing/balance": {
+      "get": {
+        "tags": ["Billing"],
+        "summary": "Get balance and transactions",
+        "description": "Returns current credit balance and the last 50 transactions.",
+        "operationId": "billing_balance",
+        "responses": {
+          "200": { "description": "Balance", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BalanceResponse" } } } }
+        }
+      }
+    },
+    "/api/v1/billing/stripe/checkout": {
+      "post": {
+        "tags": ["Billing"],
+        "summary": "Create Stripe Checkout session",
+        "description": "Create a Stripe Checkout session to top up credits via card payment. `amount_usd` must be one of the values in `STRIPE_TOP_UP_AMOUNTS`. Credits are applied after Stripe confirms the payment via webhook.",
+        "operationId": "billing_stripe_checkout",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/StripeCheckoutRequest" } } }
+        },
+        "responses": {
+          "200": { "description": "Checkout URL", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/StripeCheckoutResponse" } } } }
+        }
+      }
+    },
+    "/api/v1/billing/stripe/webhook": {
+      "post": {
+        "tags": ["Billing"],
+        "summary": "Stripe webhook receiver",
+        "description": "Register this URL in your Stripe dashboard for `checkout.session.completed` events. Stripe will POST payment confirmations here, which automatically credit the account.",
+        "operationId": "billing_stripe_webhook",
+        "security": [],
+        "responses": {
+          "200": { "description": "Webhook received" }
+        }
+      }
+    },
+    "/api/v1/billing/usdc/address": {
+      "get": {
+        "tags": ["Billing"],
+        "summary": "Get USDC deposit address",
+        "description": "Get the USDC/ERC-20 deposit address for this account. Platform wallet if admin-configured, otherwise HD-derived per-user address. 1 USDC = $1 credit, credited within ~1 minute of on-chain confirmation.\n\n**Important:** Register your sending wallet via `PUT /api/v1/auth/wallet` before sending USDC. Deposits from unregistered wallets are recorded as unmatched transfers and require admin resolution.",
+        "operationId": "billing_usdc_address",
+        "responses": {
+          "200": { "description": "USDC deposit address", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UsdcAddressResponse" } } } }
+        }
+      }
+    },
+    "/api/v1/webhook": {
+      "post": {
+        "tags": ["Webhooks"],
+        "summary": "Register webhook",
+        "description": "Register a global webhook to receive bot events. Webhooks are retried with exponential back-off on failure and delivery logs are stored.",
+        "operationId": "webhook_create",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WebhookCreate" } } }
+        },
+        "responses": {
+          "201": { "description": "Webhook registered", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WebhookResponse" } } } }
+        }
+      },
+      "get": {
+        "tags": ["Webhooks"],
+        "summary": "List webhooks",
+        "operationId": "webhook_list",
+        "responses": {
+          "200": { "description": "Webhooks", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/WebhookResponse" } } } } }
+        }
+      }
+    },
+    "/api/v1/webhook/{webhook_id}": {
+      "delete": {
+        "tags": ["Webhooks"],
+        "summary": "Delete webhook",
+        "operationId": "webhook_delete",
+        "parameters": [
+          { "name": "webhook_id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "204": { "description": "Webhook deleted" },
+          "404": { "description": "Webhook not found" }
+        }
+      }
+    },
+    "/api/v1/webhook/{webhook_id}/test": {
+      "post": {
+        "tags": ["Webhooks"],
+        "summary": "Test webhook delivery",
+        "description": "Send a sample `bot.done` payload to the webhook URL to verify connectivity.",
+        "operationId": "webhook_test",
+        "parameters": [
+          { "name": "webhook_id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Test payload sent" },
+          "404": { "description": "Webhook not found" }
+        }
+      }
+    },
+    "/api/v1/integrations": {
+      "get": {
+        "tags": ["Integrations"],
+        "summary": "List integrations",
+        "description": "List all Slack and Notion integrations for the current account.",
+        "operationId": "integrations_list",
+        "responses": {
+          "200": { "description": "Integrations", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/IntegrationResponse" } } } } }
+        }
+      },
+      "post": {
+        "tags": ["Integrations"],
+        "summary": "Create integration",
+        "description": "Create a Slack or Notion integration. When a bot completes, all active integrations fire automatically:\n- **Slack** — posts a rich Block Kit message (summary, action items, decisions, participants)\n- **Notion** — creates a page in the configured database (summary, action items as to-dos, decisions, transcript)",
+        "operationId": "integrations_create",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/IntegrationCreate" } } }
+        },
+        "responses": {
+          "201": { "description": "Integration created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/IntegrationResponse" } } } }
+        }
+      }
+    },
+    "/api/v1/integrations/{integration_id}": {
+      "patch": {
+        "tags": ["Integrations"],
+        "summary": "Update integration",
+        "operationId": "integrations_update",
+        "parameters": [
+          { "name": "integration_id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object" } } }
+        },
+        "responses": {
+          "200": { "description": "Integration updated", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/IntegrationResponse" } } } }
+        }
+      },
+      "delete": {
+        "tags": ["Integrations"],
+        "summary": "Delete integration",
+        "operationId": "integrations_delete",
+        "parameters": [
+          { "name": "integration_id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "204": { "description": "Integration deleted" }
+        }
+      }
+    },
+    "/api/v1/calendar": {
+      "get": {
+        "tags": ["Calendar"],
+        "summary": "List calendar feeds",
+        "description": "List iCal feeds for the current account. Feeds are polled every `CALENDAR_POLL_INTERVAL_S` seconds (default 5 min). Meetings with a video URL starting within 15 minutes automatically get a bot dispatched to join 60 seconds early.",
+        "operationId": "calendar_list",
+        "responses": {
+          "200": { "description": "Calendar feeds", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/CalendarFeedResponse" } } } } }
+        }
+      },
+      "post": {
+        "tags": ["Calendar"],
+        "summary": "Add calendar feed",
+        "operationId": "calendar_create",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CalendarFeedCreate" } } }
+        },
+        "responses": {
+          "201": { "description": "Feed added", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CalendarFeedResponse" } } } }
+        }
+      }
+    },
+    "/api/v1/calendar/{feed_id}": {
+      "patch": {
+        "tags": ["Calendar"],
+        "summary": "Update calendar feed",
+        "operationId": "calendar_update",
+        "parameters": [
+          { "name": "feed_id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object" } } }
+        },
+        "responses": {
+          "200": { "description": "Feed updated", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CalendarFeedResponse" } } } }
+        }
+      },
+      "delete": {
+        "tags": ["Calendar"],
+        "summary": "Delete calendar feed",
+        "operationId": "calendar_delete",
+        "parameters": [
+          { "name": "feed_id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "204": { "description": "Feed deleted" }
+        }
+      }
+    },
+    "/api/v1/calendar/{feed_id}/sync": {
+      "post": {
+        "tags": ["Calendar"],
+        "summary": "Manually sync calendar feed",
+        "description": "Trigger an immediate sync of the feed without waiting for the next poll interval.",
+        "operationId": "calendar_sync",
+        "parameters": [
+          { "name": "feed_id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Sync triggered" }
+        }
+      }
+    },
+    "/api/v1/templates": {
+      "get": {
+        "tags": ["Templates"],
+        "summary": "List analysis templates",
+        "description": "List all available analysis templates with names and descriptions.",
+        "operationId": "templates_list",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Templates",
+            "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/TemplateItem" } } } }
+          }
+        }
+      }
+    },
+    "/api/v1/templates/default-prompt": {
+      "get": {
+        "tags": ["Templates"],
+        "summary": "Get default analysis prompt",
+        "description": "Return the raw default analysis prompt used when no `template` or `prompt_override` is set. Useful for inspecting or extending the default prompt.",
+        "operationId": "templates_default_prompt",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Default prompt text",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "prompt": { "type": "string" } } } } }
+          }
+        }
+      }
+    },
+    "/api/v1/search": {
+      "get": {
+        "tags": ["Search"],
+        "summary": "Full-text search across transcripts",
+        "description": "Search across all transcript text for the given query. Returns matching snippets with bot context.",
+        "operationId": "search",
+        "parameters": [
+          { "name": "q", "in": "query", "required": true, "schema": { "type": "string" }, "description": "Search query." }
+        ],
+        "responses": {
+          "200": { "description": "Search results", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SearchResponse" } } } }
+        }
+      }
+    },
+    "/api/v1/admin/wallet": {
+      "get": {
+        "tags": ["Admin"],
+        "summary": "[Admin] Get platform USDC wallet",
+        "description": "Get the current platform USDC collection wallet address. **Requires admin account.**",
+        "operationId": "admin_get_wallet",
+        "responses": {
+          "200": {
+            "description": "Platform wallet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "wallet_address": { "type": "string", "nullable": true, "description": "Platform USDC collection wallet address (ERC-20). Null if not set." }
+                  }
+                }
+              }
+            }
+          },
+          "403": { "description": "Admin access required" }
+        }
+      },
+      "put": {
+        "tags": ["Admin"],
+        "summary": "[Admin] Set platform USDC wallet",
+        "description": "Set or update the platform USDC collection wallet address. **Requires admin account.**",
+        "operationId": "admin_set_wallet",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["wallet_address"],
+                "properties": {
+                  "wallet_address": { "type": "string", "description": "Ethereum address (0x..., 42 characters).", "example": "0xAbCdEf0123456789AbCdEf0123456789AbCdEf01" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Wallet updated" },
+          "403": { "description": "Admin access required" },
+          "422": { "description": "Invalid Ethereum address" }
+        }
+      }
+    },
+    "/api/v1/admin/rpc-url": {
+      "get": {
+        "tags": ["Admin"],
+        "summary": "[Admin] Check RPC URL status",
+        "description": "Check whether a `CRYPTO_RPC_URL` is configured (env var or admin-set). **Requires admin account.**",
+        "operationId": "admin_get_rpc_url",
+        "responses": {
+          "200": {
+            "description": "RPC URL status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "rpc_url_set": { "type": "boolean" },
+                    "source": { "type": "string", "enum": ["env", "db", "none"] }
+                  }
+                }
+              }
+            }
+          },
+          "403": { "description": "Admin access required" }
+        }
+      },
+      "put": {
+        "tags": ["Admin"],
+        "summary": "[Admin] Set Ethereum RPC URL",
+        "description": "Set the Ethereum RPC URL used by the USDC monitor. Stored in DB (no restart needed). The env var `CRYPTO_RPC_URL` always takes precedence if set. URL is validated via `eth_blockNumber` before saving. **Requires admin account.**",
+        "operationId": "admin_set_rpc_url",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["rpc_url"],
+                "properties": {
+                  "rpc_url": { "type": "string", "description": "Ethereum JSON-RPC endpoint URL.", "example": "https://mainnet.infura.io/v3/YOUR_KEY" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "RPC URL saved" },
+          "403": { "description": "Admin access required" },
+          "422": { "description": "Invalid or unreachable RPC URL" }
+        }
+      }
+    },
+    "/api/v1/admin/config": {
+      "get": {
+        "tags": ["Admin"],
+        "summary": "[Admin] List all platform config",
+        "description": "List all platform configuration key-value pairs. **Requires admin account.**",
+        "operationId": "admin_get_config",
+        "responses": {
+          "200": {
+            "description": "Platform config",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "configs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": { "type": "string" },
+                          "value": { "type": "string" },
+                          "updated_at": { "type": "string", "format": "date-time", "nullable": true }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": { "description": "Admin access required" }
+        }
+      }
+    },
+    "/api/v1/admin/credit": {
+      "post": {
+        "tags": ["Admin"],
+        "summary": "[Admin] Manually credit account",
+        "description": "Manually credit a user account. Use to fix missed USDC deposits that the monitor failed to detect (e.g. user sent from an unregistered wallet). **Requires admin account.**",
+        "operationId": "admin_credit",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["email", "amount_usd"],
+                "properties": {
+                  "email": { "type": "string", "format": "email", "description": "Email of the account to credit." },
+                  "amount_usd": { "type": "number", "exclusiveMinimum": 0, "description": "Amount in USD to credit (must be positive)." },
+                  "note": { "type": "string", "nullable": true, "description": "Optional admin note recorded in the transaction description." }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Account credited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "account_id": { "type": "string" },
+                    "email": { "type": "string" },
+                    "credited_usd": { "type": "number" },
+                    "new_balance_usd": { "type": "number" }
+                  }
+                }
+              }
+            }
+          },
+          "403": { "description": "Admin access required" },
+          "404": { "description": "Account not found" }
+        }
+      }
+    },
+    "/api/v1/admin/accounts/{account_id}/set-account-type": {
+      "post": {
+        "tags": ["Admin"],
+        "summary": "[Admin] Set account type",
+        "description": "Set the account type (`personal` or `business`) for any user account.\n\n- **personal** — standard single-user account.\n- **business** — multi-tenant mode; the account can use `X-Sub-User` to isolate data per end-user.\n\n**Requires admin account.** Also available as a dropdown in the admin panel UI at `/admin`.",
+        "operationId": "admin_set_account_type",
+        "parameters": [
+          { "name": "account_id", "in": "path", "required": true, "schema": { "type": "string" }, "description": "UUID of the account to update." }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["account_type"],
+                "properties": {
+                  "account_type": {
+                    "type": "string",
+                    "enum": ["personal", "business"],
+                    "description": "Account type to set.",
+                    "example": "business"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Account type updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "account_id": { "type": "string" },
+                    "email": { "type": "string" },
+                    "account_type": { "type": "string", "enum": ["personal", "business"] },
+                    "message": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "403": { "description": "Admin access required" },
+          "404": { "description": "Account not found" },
+          "422": { "description": "account_type must be 'personal' or 'business'" }
+        }
+      }
+    },
+    "/api/v1/admin/usdc/unmatched": {
+      "get": {
+        "tags": ["Admin"],
+        "summary": "[Admin] List unmatched USDC transfers",
+        "description": "List USDC transfers that arrived at the platform wallet but could not be attributed to any user account (sender wallet not registered).\n\nTo resolve: 1) identify the user by `from_address`, 2) credit their account via `POST /admin/credit`, 3) mark resolved via `POST /admin/usdc/unmatched/{tx_hash}/resolve`.\n\n**Requires admin account.**",
+        "operationId": "admin_list_unmatched",
+        "parameters": [
+          { "name": "resolved", "in": "query", "required": false, "schema": { "type": "boolean" }, "description": "Filter by resolved status. Omit for all, `false` for pending only (default), `true` for resolved only." }
+        ],
+        "responses": {
+          "200": {
+            "description": "Unmatched transfers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "transfers": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "tx_hash": { "type": "string" },
+                          "from_address": { "type": "string" },
+                          "to_address": { "type": "string" },
+                          "amount_usdc": { "type": "number" },
+                          "block_number": { "type": "integer" },
+                          "detected_at": { "type": "string", "format": "date-time" },
+                          "resolved": { "type": "boolean" },
+                          "resolution_note": { "type": "string", "nullable": true }
+                        }
+                      }
+                    },
+                    "total": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          },
+          "403": { "description": "Admin access required" }
+        }
+      }
+    },
+    "/api/v1/admin/usdc/unmatched/{tx_hash}/resolve": {
+      "post": {
+        "tags": ["Admin"],
+        "summary": "[Admin] Resolve unmatched USDC transfer",
+        "description": "Mark an unmatched USDC transfer as resolved after the account has been manually credited. Call this after `POST /admin/credit`. **Requires admin account.**",
+        "operationId": "admin_resolve_unmatched",
+        "parameters": [
+          { "name": "tx_hash", "in": "path", "required": true, "schema": { "type": "string" }, "description": "Ethereum transaction hash." }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "note": { "type": "string", "nullable": true, "description": "Optional note describing the resolution action taken." }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Transfer marked resolved" },
+          "403": { "description": "Admin access required" },
+          "404": { "description": "Transaction not found" }
+        }
+      }
+    },
+    "/api/v1/admin/usdc/rescan": {
+      "post": {
+        "tags": ["Admin"],
+        "summary": "[Admin] Rescan USDC blockchain from block",
+        "description": "Reset the USDC monitor's last-processed block so it rescans from a given block on the next cycle (≤60 s). Duplicate transactions are skipped automatically via idempotency checks. **Requires admin account.**",
+        "operationId": "admin_rescan_usdc",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["from_block"],
+                "properties": {
+                  "from_block": { "type": "integer", "minimum": 0, "description": "Block number to start rescanning from." }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Rescan queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "from_block": { "type": "integer" },
+                    "message": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "403": { "description": "Admin access required" }
+        }
+      }
+    }
+  },
+  "tags": [
+    { "name": "Health", "description": "Service health check" },
+    { "name": "Auth", "description": "Account registration, login, API key management, and account settings" },
+    { "name": "Bots", "description": "Bot lifecycle — create, monitor, retrieve results, export" },
+    { "name": "Billing", "description": "Credit balance, Stripe card payments, and USDC crypto deposits" },
+    { "name": "Webhooks", "description": "Global webhook registration and delivery logs" },
+    { "name": "Integrations", "description": "Slack and Notion integrations — auto-post results on bot completion" },
+    { "name": "Calendar", "description": "iCal feed auto-join — automatically dispatch bots to upcoming meetings" },
+    { "name": "Templates", "description": "Built-in analysis templates" },
+    { "name": "Search", "description": "Full-text search across transcripts" },
+    { "name": "Admin", "description": "Platform administration — requires admin account. Full schema at /api/v1/admin/openapi.json" }
+  ]
+}

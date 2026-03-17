@@ -13,6 +13,7 @@ Send bots into **Zoom**, **Google Meet**, and **Microsoft Teams** meetings to re
 ## Recent changes (2026-03-17)
 
 ### New features
+- **Account type switching** — Users can switch their own account between `personal` and `business` at any time via `PUT /api/v1/auth/account-type` without affecting existing bot data or credits. Admins can change any account's type via `POST /api/v1/admin/accounts/{id}/set-account-type`. Both operations are also available through the dashboard UI (account type chip with switcher) and the admin panel (inline account type dropdown on each user row).
 - **Split API documentation** — `/api/docs` (public Swagger UI) exposes only user-facing endpoints. Admin-only routes, platform analytics, and `ai_usage` cost fields are hidden from the public schema. Admins access the full schema — including all admin endpoints and AI cost data — at `/api/v1/admin/docs` (requires admin auth).
 - **`/bot/{id}` session viewer** — new web UI page showing transcript, AI analysis (summary, key points, action items, decisions, next steps, sentiment, topics), speaker stats, chapter breakdown, meeting metadata, and download links for audio/video/markdown/PDF.
 - **`GET /api/v1/templates/default-prompt`** — returns the raw default analysis prompt for inspection or extension.
@@ -36,6 +37,7 @@ Send bots into **Zoom**, **Google Meet**, and **Microsoft Teams** meetings to re
 | **`sub_user_id` field** | Available on bot creation, bot response, and bot summary schemas; body field takes precedence over the header |
 | **Copy-to-clipboard for API keys** | Clipboard icon beside each API key in the dashboard; newly created keys display the full key once with a prominent copy button |
 | **Account type on registration** | Account type selection (Personal / Business) on the registration page and in the admin panel user table |
+| **Account type self-service switching** | `PUT /api/v1/auth/account-type` — switch between `personal` and `business` at any time; no data loss, no credit impact. Dashboard shows a type chip with a one-click switcher. Admins can change any account's type via the admin panel dropdown or `POST /api/v1/admin/accounts/{id}/set-account-type` |
 | **Integrations management UI** | Add and manage Slack and Notion integrations directly from the dashboard — no API calls required |
 | **Calendar feed management UI** | Add, pause, and remove iCal calendar feeds directly from the dashboard with auto-join configuration |
 | **Redesigned Web UI** | Modern Inter-font design system across all pages: login, register, dashboard, top-up, and admin — responsive, accessible, and polished |
@@ -551,6 +553,7 @@ The background poll loop checks all active feeds every `CALENDAR_POLL_INTERVAL_S
 | Enable/Disable account | Toggle `is_active` on any user account (prevents login and API access) |
 | Make Admin / Revoke Admin | Toggle `is_admin` to grant or revoke admin privileges |
 | Set Plan | Inline dropdown to change any account's subscription plan (free/starter/pro/business) |
+| Set Account Type | Inline dropdown to switch any account between `personal` and `business` modes — backed by `POST /api/v1/admin/accounts/{id}/set-account-type` |
 
 > **Admin access:** Accounts listed in `ADMIN_EMAILS` (comma-separated env var) or accounts with `is_admin=true` in the database can access these endpoints. All other users receive HTTP 403.
 
@@ -576,7 +579,7 @@ Or use the admin web UI at `/admin` to manage all settings through a form.
 | `/` | Landing page (marketing homepage) — redirects to `/dashboard` if already logged in |
 | `/register` | Create account (Personal or Business); Google/Microsoft SSO sign-up buttons when configured |
 | `/login` | Login with email/password or SSO (Google/Microsoft when configured) |
-| `/dashboard` | Balance, API keys, subscription plan & monthly usage, email notifications, USDC wallet, SSO accounts, **Integrations management** (add/pause/delete Slack & Notion), **Calendar feed management** (add/pause/remove iCal feeds with auto-join config), recent bots overview, transaction history, business account multi-user isolation info |
+| `/dashboard` | Balance, API keys, subscription plan & monthly usage, email notifications, USDC wallet, SSO accounts, **account type switcher** (Personal ↔ Business with X-Sub-User usage info), **Integrations management** (add/pause/delete Slack & Notion), **Calendar feed management** (add/pause/remove iCal feeds with auto-join config), recent bots overview, transaction history, business account multi-user isolation info |
 | `/topup` | Add credits — Stripe card (redirect to secure checkout) or USDC (ERC-20 deposit address with amount selector) |
 | `/bot/{id}` | Session viewer — transcript, AI analysis (summary, key points, action items, decisions, next steps, sentiment, topics), speaker breakdown, chapters, meeting metadata, and download links for audio/video/markdown/PDF |
 | `/admin` | Platform administration — plan breakdown stats, bot activity & platform feature counters (webhooks/integrations/calendar/SSO), system status (Stripe/RPC/HD seed/email/storage/video/SSO), unmatched USDC transfers, user accounts with inline plan management, manual credit, rescan, wallet config, RPC URL (admin only) |
