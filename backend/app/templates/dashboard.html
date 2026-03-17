@@ -189,6 +189,37 @@
   {% endif %}
 </div>
 
+<!-- ── Account Type ─────────────────────────────────────────────────────────── -->
+<div class="card card-pad mb-4">
+  <div class="d-flex align-items-start gap-3">
+    <div class="flex-grow-1">
+      <div class="section-title mb-1">Account Type</div>
+      <div class="section-subtitle mb-3">
+        Choose how your account operates. Switch at any time — existing data and credits are not affected.
+      </div>
+      <form method="post" action="/dashboard/account-type">
+        <div class="d-flex gap-2 flex-wrap">
+          <label class="account-type-option {% if account.account_type != 'business' %}selected{% endif %}" style="flex:1;min-width:220px">
+            <input type="radio" name="account_type" value="personal" {% if account.account_type != 'business' %}checked{% endif %} onchange="this.form.submit()">
+            <div class="p-3" style="border:2px solid {% if account.account_type != 'business' %}#6366f1{% else %}#e2e8f0{% endif %};border-radius:10px;cursor:pointer;transition:border-color .15s">
+              <div style="font-weight:600;font-size:14px;color:#1e293b;margin-bottom:4px">Personal</div>
+              <div style="font-size:12.5px;color:#64748b;line-height:1.4">Standard single-user account. All bots belong directly to you.</div>
+            </div>
+          </label>
+          <label class="account-type-option {% if account.account_type == 'business' %}selected{% endif %}" style="flex:1;min-width:220px">
+            <input type="radio" name="account_type" value="business" {% if account.account_type == 'business' %}checked{% endif %} onchange="this.form.submit()">
+            <div class="p-3" style="border:2px solid {% if account.account_type == 'business' %}#6366f1{% else %}#e2e8f0{% endif %};border-radius:10px;cursor:pointer;transition:border-color .15s">
+              <div style="font-weight:600;font-size:14px;color:#1e293b;margin-bottom:4px">Business <span class="chip chip-info ms-1" style="font-size:10px;padding:1px 7px">Multi-tenant</span></div>
+              <div style="font-size:12.5px;color:#64748b;line-height:1.4">For platforms embedding MeetingBot. Pass <code>X-Sub-User</code> to isolate data per end-user.</div>
+            </div>
+          </label>
+        </div>
+        <noscript><button type="submit" class="btn btn-primary btn-sm mt-2">Save</button></noscript>
+      </form>
+    </div>
+  </div>
+</div>
+
 <!-- ── Notifications + Wallet ──────────────────────────────────────────────── -->
 <div class="row g-3 mb-4">
   <div class="col-md-6">
@@ -639,6 +670,18 @@
 {% endblock %}
 
 {% block scripts %}
+<script>
+// Account type radio card styling
+document.querySelectorAll('.account-type-option input[type=radio]').forEach(radio => {
+  radio.style.display = 'none';
+  radio.addEventListener('change', function() {
+    document.querySelectorAll('.account-type-option > div').forEach(card => {
+      card.style.borderColor = '#e2e8f0';
+    });
+    this.closest('.account-type-option').querySelector('div').style.borderColor = '#6366f1';
+  });
+});
+</script>
 <script>
 // Copy-to-clipboard for API keys
 document.querySelectorAll('.copy-key-btn').forEach(btn => {

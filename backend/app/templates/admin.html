@@ -413,11 +413,12 @@
             <tr class="{% if not a.is_active %}table-secondary{% endif %}">
               <td class="small">{{ a.email }}</td>
               <td class="small">
-                {% if a.account_type == "business" %}
-                <span class="badge bg-primary">Business</span>
-                {% else %}
-                <span class="badge bg-secondary">Personal</span>
-                {% endif %}
+                <form method="post" action="/admin/accounts/{{ a.id }}/set-account-type" class="d-inline">
+                  <select name="account_type" onchange="this.form.submit()" class="form-select form-select-sm py-0" style="width:100px;font-size:.75rem">
+                    <option value="personal" {% if a.account_type != 'business' %}selected{% endif %}>Personal</option>
+                    <option value="business" {% if a.account_type == 'business' %}selected{% endif %}>Business</option>
+                  </select>
+                </form>
               </td>
               <td class="small">
                 <form method="post" action="/admin/accounts/{{ a.id }}/set-plan" class="d-inline">

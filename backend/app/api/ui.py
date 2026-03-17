@@ -326,6 +326,8 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
         flash = _flash("danger", "This wallet address is already linked to another account.")
     if request.query_params.get("notify") == "saved":
         flash = _flash("success", "Notification preferences updated.")
+    if request.query_params.get("acct_type") == "saved":
+        flash = _flash("success", "Account type updated successfully.")
     if request.query_params.get("integ_added") == "1":
         flash = _flash("success", "Integration added successfully.")
     if request.query_params.get("integ_deleted") == "1":
@@ -546,6 +548,23 @@ async def update_notifications_ui(
     account.notify_email = notify_email.strip() or None
     await db.commit()
     return RedirectResponse("/dashboard?notify=saved", status_code=303)
+
+
+@router.post("/dashboard/account-type", include_in_schema=False)
+async def update_account_type_ui(
+    request: Request,
+    account_type: str = Form(...),
+    db: AsyncSession = Depends(get_db),
+):
+    account = await _get_account_from_request(request, db)
+    if not account:
+        return RedirectResponse("/login")
+
+    if account_type in ("personal", "business"):
+        account.account_type = account_type
+        await db.commit()
+        logger.info("Account %s changed account_type to %s via dashboard", account.id, account_type)
+    return RedirectResponse("/dashboard?acct_type=saved", status_code=303)
 
 
 # ── Top Up ────────────────────────────────────────────────────────────────────
@@ -1091,6 +1110,30 @@ async def admin_set_account_plan(
         target.plan = plan
         await db.commit()
         logger.info("Admin %s set plan=%s for account %s", admin.email, plan, target.email)
+    return RedirectResponse("/admin?msg=account_updated", status_code=303)
+
+
+@router.post("/admin/accounts/{account_id}/set-account-type", include_in_schema=False)
+async def admin_set_account_type(
+    account_id: str,
+    request: Request,
+    account_type: str = Form(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Set the account type (personal / business) for a user account."""
+    admin = await _get_account_from_request(request, db)
+    if not _is_admin(admin):
+        return RedirectResponse("/dashboard")
+
+    if account_type not in ("personal", "business"):
+        return RedirectResponse("/admin?error=invalid_account_type", status_code=303)
+
+    result = await db.execute(select(Account).where(Account.id == account_id))
+    target = result.scalar_one_or_none()
+    if target:
+        target.account_type = account_type
+        await db.commit()
+        logger.info("Admin %s set account_type=%s for account %s", admin.email, account_type, target.email)
     return RedirectResponse("/admin?msg=account_updated", status_code=303)
 
 

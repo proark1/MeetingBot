@@ -396,6 +396,58 @@ async def rescan_usdc_from_block(
     )
 
 
+# ── Account type management ───────────────────────────────────────────────────
+
+class SetAccountTypeRequest(BaseModel):
+    account_type: str = Field(
+        description="Account type to set: `personal` or `business`.",
+        examples=["business"],
+    )
+
+
+class SetAccountTypeResponse(BaseModel):
+    account_id: str
+    email: str
+    account_type: str = Field(description="New account type.")
+    message: str
+
+
+@router.post("/accounts/{account_id}/set-account-type", response_model=SetAccountTypeResponse)
+async def set_account_type(
+    account_id: str,
+    payload: SetAccountTypeRequest,
+    db: AsyncSession = Depends(get_db),
+    _admin: str = Depends(require_admin),
+):
+    """
+    Set the account type (`personal` or `business`) for any user account.
+
+    - **personal** — standard single-user account.
+    - **business** — multi-tenant mode; the account can use `X-Sub-User` to
+      isolate data per end-user.
+    """
+    if payload.account_type not in ("personal", "business"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="account_type must be 'personal' or 'business'.",
+        )
+
+    result = await db.execute(select(Account).where(Account.id == account_id))
+    account = result.scalar_one_or_none()
+    if account is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found.")
+
+    account.account_type = payload.account_type
+    await db.commit()
+    logger.info("Admin set account_type=%s for account %s (%s)", payload.account_type, account.id, account.email)
+    return SetAccountTypeResponse(
+        account_id=account.id,
+        email=account.email,
+        account_type=account.account_type,
+        message=f"Account type updated to '{payload.account_type}'.",
+    )
+
+
 # ── Admin API docs ─────────────────────────────────────────────────────────────
 
 @router.get("/docs", include_in_schema=False, response_class=HTMLResponse)

@@ -454,6 +454,7 @@ Full payload posted to `webhook_url` when a bot finishes.
 | `GET` | `/api/v1/auth/notify` | Get email notification preferences. Returns `{notify_on_done, notify_email}` |
 | `PUT` | `/api/v1/auth/notify` | Update notification preferences. Body: `{notify_on_done, notify_email?}` |
 | `GET` | `/api/v1/auth/plan` | Get subscription plan and monthly usage. Returns `{plan, monthly_bots_used, monthly_limit, monthly_reset_at}` |
+| `PUT` | `/api/v1/auth/account-type` | Switch account type. Body: `{account_type: "personal"\|"business"}`. Returns `{account_type, message}`. No effect on existing data or credits |
 | `DELETE` | `/api/v1/auth/account` | **GDPR erasure** — permanently delete account and all data. Irreversible. Deletes recordings from cloud storage |
 
 ### Integrations (Slack & Notion)
@@ -538,6 +539,7 @@ The background poll loop checks all active feeds every `CALENDAR_POLL_INTERVAL_S
 | `PUT` | `/api/v1/admin/rpc-url` | Set the Ethereum RPC URL used by the USDC monitor (stored in DB, no restart needed). Validates connectivity via `eth_blockNumber` before saving. Body: `{rpc_url}` |
 | `GET` | `/api/v1/admin/config` | List all platform configuration values |
 | `POST` | `/api/v1/admin/credit` | Manually credit a user account. Body: `{email, amount_usd, note?}` — use to fix missed USDC deposits |
+| `POST` | `/api/v1/admin/accounts/{id}/set-account-type` | Change any user's account type. Body: `{account_type: "personal"\|"business"}`. Returns `{account_id, email, account_type, message}` |
 | `GET` | `/api/v1/admin/usdc/unmatched` | List USDC transfers received at the platform wallet that couldn't be attributed to any account (sender wallet not registered). Query: `?resolved=false` (default) / `?resolved=true` / omit for all |
 | `POST` | `/api/v1/admin/usdc/unmatched/{tx_hash}/resolve` | Mark an unmatched transfer as resolved after crediting the account. Body: `{note?}` |
 | `POST` | `/api/v1/admin/usdc/rescan` | Reset the USDC monitor's block pointer so it rescans from `from_block` on the next cycle. Body: `{from_block}` |

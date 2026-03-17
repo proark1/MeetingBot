@@ -525,6 +525,74 @@ async def get_plan(
     )
 
 
+# ── Account type ──────────────────────────────────────────────────────────────
+
+class AccountTypeRequest(BaseModel):
+    account_type: str = Field(
+        description=(
+            "Account type: `personal` for individual users, or `business` for platforms "
+            "integrating MeetingBot on behalf of multiple end-users. Business accounts can "
+            "pass `X-Sub-User` to isolate data per end-user."
+        ),
+    )
+
+    model_config = {"json_schema_extra": {"example": {"account_type": "business"}}}
+
+
+class AccountTypeResponse(BaseModel):
+    account_type: str = Field(description="Updated account type: `personal` or `business`.")
+    message: str = Field(description="Human-readable confirmation.")
+
+
+@router.put("/account-type", response_model=AccountTypeResponse)
+async def set_account_type(
+    payload: AccountTypeRequest,
+    account_id: Optional[str] = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Switch the current account between `personal` and `business` types.
+
+    - **personal** — standard single-user account (default).
+    - **business** — multi-tenant mode; pass `X-Sub-User: <id>` on every request
+      to isolate bots, transcripts, and analyses per end-user.
+
+    Switching type does **not** affect existing bot data or credits.
+    """
+    if not account_id or account_id == SUPERADMIN_ACCOUNT_ID:
+        raise HTTPException(status_code=403, detail="Use per-user authentication")
+
+    if payload.account_type not in ("personal", "business"):
+        raise HTTPException(
+            status_code=422,
+            detail="account_type must be 'personal' or 'business'.",
+        )
+
+    result = await db.execute(select(Account).where(Account.id == account_id))
+    account = result.scalar_one_or_none()
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    if account.account_type == payload.account_type:
+        return AccountTypeResponse(
+            account_type=account.account_type,
+            message=f"Account type is already '{account.account_type}'. No change made.",
+        )
+
+    account.account_type = payload.account_type
+    await db.commit()
+
+    logger.info("Account %s changed account_type to %s", account_id, payload.account_type)
+    if payload.account_type == "business":
+        msg = (
+            "Switched to Business account. Pass X-Sub-User: <user-id> on each request "
+            "to isolate data per end-user."
+        )
+    else:
+        msg = "Switched to Personal account."
+    return AccountTypeResponse(account_type=payload.account_type, message=msg)
+
+
 # ── GDPR account deletion ─────────────────────────────────────────────────────
 
 @router.delete("/account", status_code=200)
