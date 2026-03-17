@@ -18,6 +18,15 @@ Send bots into **Zoom**, **Google Meet**, and **Microsoft Teams** meetings to re
   and `load_persisted_webhooks()` in `asyncio.wait_for()` so the server always
   becomes ready (and `/health` always responds) even when the database is
   temporarily unavailable at boot.
+- **DB startup retry** — `create_all_tables()` is now retried up to 5 times
+  with a 5 s delay between attempts (max ~95 s total). This handles the common
+  Railway case where the PostgreSQL container starts in parallel with the app
+  container and isn't ready on the first connection attempt — without this,
+  the DB was initialised "successfully" (exception swallowed) but the schema
+  was never created, causing every UI page to return 500.
+- **`.dockerignore`** — SQLite `*.db` / `*.db-wal` / `*.db-shm` files are now
+  excluded from the Docker build context so a developer's local database is
+  never bundled into the production image.
 
 ---
 

@@ -47,19 +47,28 @@ FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # ── Database init ──────────────────────────────────────────────────────
+    # ── Database init (with retry) ────────────────────────────────────────
+    # Retry up to 5 times with a 5 s delay so a slow-starting PostgreSQL
+    # (common in Railway where the DB and app containers boot in parallel)
+    # doesn't permanently break all DB-backed endpoints.
     from app.db import create_all_tables
-    try:
-        await asyncio.wait_for(create_all_tables(), timeout=30.0)
-        logger.info("Database tables ready (%s)", settings.DATABASE_URL.split("///")[0])
-    except asyncio.TimeoutError:
+    _db_ready = False
+    for _attempt in range(1, 6):
+        try:
+            await asyncio.wait_for(create_all_tables(), timeout=15.0)
+            _db_ready = True
+            logger.info("Database tables ready (%s)", settings.DATABASE_URL.split("///")[0])
+            break
+        except asyncio.TimeoutError:
+            logger.warning("DB init attempt %d/5 timed out after 15 s", _attempt)
+        except Exception as _exc:
+            logger.warning("DB init attempt %d/5 failed: %s", _attempt, _exc)
+        if _attempt < 5:
+            await asyncio.sleep(5)
+    if not _db_ready:
         logger.error(
-            "Database initialization timed out after 30s — check DATABASE_URL / DB connectivity. "
-            "DB-backed endpoints will fail until the database is reachable."
-        )
-    except Exception as exc:
-        logger.error(
-            "Database initialization failed: %s — DB-backed endpoints will fail.", exc
+            "Database initialization failed after 5 attempts — "
+            "check DATABASE_URL / DB connectivity. DB-backed endpoints will fail."
         )
 
     # ── Startup validation ────────────────────────────────────────────────
