@@ -13,9 +13,11 @@ def _engine_kwargs() -> dict:
         # Railway's private-network URL works with ssl=False; the public URL needs ssl=True.
         # We default to ssl=False (private network) but allow override via DATABASE_URL
         # query string — e.g. append ?ssl=require to DATABASE_URL for external clients.
+        # timeout=10: fail fast if the DB is unreachable instead of hanging forever.
+        connect_args: dict = {"timeout": 10}
         if "ssl=require" in url or "sslmode=require" in url:
-            return {"connect_args": {"ssl": True}}
-        return {}
+            connect_args["ssl"] = True
+        return {"connect_args": connect_args}
     return {}
 
 

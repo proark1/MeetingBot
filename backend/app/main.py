@@ -49,8 +49,18 @@ FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
 async def lifespan(app: FastAPI):
     # ── Database init ──────────────────────────────────────────────────────
     from app.db import create_all_tables
-    await create_all_tables()
-    logger.info("Database tables ready (%s)", settings.DATABASE_URL.split("///")[0])
+    try:
+        await asyncio.wait_for(create_all_tables(), timeout=30.0)
+        logger.info("Database tables ready (%s)", settings.DATABASE_URL.split("///")[0])
+    except asyncio.TimeoutError:
+        logger.error(
+            "Database initialization timed out after 30s — check DATABASE_URL / DB connectivity. "
+            "DB-backed endpoints will fail until the database is reachable."
+        )
+    except Exception as exc:
+        logger.error(
+            "Database initialization failed: %s — DB-backed endpoints will fail.", exc
+        )
 
     # ── Startup validation ────────────────────────────────────────────────
     if settings.JWT_SECRET == "change-me-in-production":
@@ -92,14 +102,20 @@ async def lifespan(app: FastAPI):
 
     # ── Load persisted bots ───────────────────────────────────────────────
     from app.store import load_persisted_bots, load_persisted_webhooks
-    restored = await load_persisted_bots()
-    if restored:
-        logger.info("Restored %d bot(s) from previous run", restored)
+    try:
+        restored = await asyncio.wait_for(load_persisted_bots(), timeout=15.0)
+        if restored:
+            logger.info("Restored %d bot(s) from previous run", restored)
+    except Exception as exc:
+        logger.warning("Could not restore persisted bots: %s", exc)
 
     # ── Load persisted webhooks ───────────────────────────────────────────
-    restored_webhooks = await load_persisted_webhooks()
-    if restored_webhooks:
-        logger.info("Restored %d webhook(s) from previous run", restored_webhooks)
+    try:
+        restored_webhooks = await asyncio.wait_for(load_persisted_webhooks(), timeout=15.0)
+        if restored_webhooks:
+            logger.info("Restored %d webhook(s) from previous run", restored_webhooks)
+    except Exception as exc:
+        logger.warning("Could not restore persisted webhooks: %s", exc)
 
     # ── USDC monitor ──────────────────────────────────────────────────────
     from app.services.crypto_service import start_usdc_monitor

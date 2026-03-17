@@ -10,6 +10,17 @@ Send bots into **Zoom**, **Google Meet**, and **Microsoft Teams** meetings to re
 
 ---
 
+## Reliability improvements (2026-03-17)
+
+- **Startup hang fix** — asyncpg now uses a 10 s connection timeout so an
+  unreachable PostgreSQL instance fails fast instead of blocking indefinitely.
+  The lifespan startup wraps `create_all_tables()`, `load_persisted_bots()`,
+  and `load_persisted_webhooks()` in `asyncio.wait_for()` so the server always
+  becomes ready (and `/health` always responds) even when the database is
+  temporarily unavailable at boot.
+
+---
+
 ## What's new in v2.2.0
 
 | Feature | Description |
