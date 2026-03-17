@@ -10,23 +10,20 @@ Send bots into **Zoom**, **Google Meet**, and **Microsoft Teams** meetings to re
 
 ---
 
-## Reliability improvements (2026-03-17)
+## Recent changes (2026-03-17)
 
-- **Startup hang fix** — asyncpg now uses a 10 s connection timeout so an
-  unreachable PostgreSQL instance fails fast instead of blocking indefinitely.
-  The lifespan startup wraps `create_all_tables()`, `load_persisted_bots()`,
-  and `load_persisted_webhooks()` in `asyncio.wait_for()` so the server always
-  becomes ready (and `/health` always responds) even when the database is
-  temporarily unavailable at boot.
-- **DB startup retry** — `create_all_tables()` is now retried up to 5 times
-  with a 5 s delay between attempts (max ~95 s total). This handles the common
-  Railway case where the PostgreSQL container starts in parallel with the app
-  container and isn't ready on the first connection attempt — without this,
-  the DB was initialised "successfully" (exception swallowed) but the schema
-  was never created, causing every UI page to return 500.
-- **`.dockerignore`** — SQLite `*.db` / `*.db-wal` / `*.db-shm` files are now
-  excluded from the Docker build context so a developer's local database is
-  never bundled into the production image.
+### New features
+- **Split API documentation** — `/api/docs` (public Swagger UI) exposes only user-facing endpoints. Admin-only routes, platform analytics, and `ai_usage` cost fields are hidden from the public schema. Admins access the full schema — including all admin endpoints and AI cost data — at `/api/v1/admin/docs` (requires admin auth).
+- **`/bot/{id}` session viewer** — new web UI page showing transcript, AI analysis (summary, key points, action items, decisions, next steps, sentiment, topics), speaker stats, chapter breakdown, meeting metadata, and download links for audio/video/markdown/PDF.
+- **`GET /api/v1/templates/default-prompt`** — returns the raw default analysis prompt for inspection or extension.
+- **`GET /api/v1/search`** — full-text search across all transcripts; query param `q`.
+- **Modern landing page** — marketing homepage at `/`; authenticated users are auto-redirected to `/dashboard`.
+- **Dashboard redesign** — full account management without leaving the page: API key copy-to-clipboard, Slack/Notion integrations, iCal calendar feeds, notification preferences, and recent bots overview.
+
+### Reliability fixes
+- **Startup hang fix** — asyncpg now uses a 10 s connection timeout so an unreachable PostgreSQL instance fails fast. The lifespan startup wraps `create_all_tables()`, `load_persisted_bots()`, and `load_persisted_webhooks()` in `asyncio.wait_for()` so the server always becomes ready (and `/health` always responds) even when the database is temporarily unavailable at boot.
+- **DB startup retry** — `create_all_tables()` is retried up to 5 times with a 5 s delay between attempts (handles Railway where the PostgreSQL container starts in parallel with the app container).
+- **`.dockerignore`** — SQLite `*.db` / `*.db-wal` / `*.db-shm` files excluded from the Docker build context so a local database is never bundled into the production image.
 
 ---
 
@@ -43,6 +40,9 @@ Send bots into **Zoom**, **Google Meet**, and **Microsoft Teams** meetings to re
 | **Calendar feed management UI** | Add, pause, and remove iCal calendar feeds directly from the dashboard with auto-join configuration |
 | **Redesigned Web UI** | Modern Inter-font design system across all pages: login, register, dashboard, top-up, and admin — responsive, accessible, and polished |
 | **Dashboard bots overview** | Recent 24-hour bots with status indicators shown directly on the dashboard |
+| **Bot session viewer** | New `/bot/{id}` page — transcript, AI analysis, speaker stats, chapters, and download links (audio/video/PDF/markdown) |
+| **Split API docs** | Public `/api/docs` hides admin routes and cost fields; full schema (including AI usage costs) at `/api/v1/admin/docs` (admin only) |
+| **Landing page** | Public marketing homepage at `/` with feature highlights and sign-up CTA; auto-redirects authenticated users to the dashboard |
 
 ---
 

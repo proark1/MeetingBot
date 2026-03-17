@@ -378,6 +378,9 @@ _PUBLIC_DESCRIPTION = (
     "| `/dashboard` | Balance, API keys, plan & usage, notification prefs, USDC wallet, "
     "linked SSO accounts, integrations summary, calendar feeds, transactions |\n"
     "| `/topup` | Add credits via Stripe card or USDC |\n"
+    "| `/bot/{id}` | Session viewer — transcript, AI analysis (summary, key points, action items, "
+    "decisions, next steps, sentiment, topics), speaker breakdown, chapters, meeting metadata, "
+    "and download links for audio/video/markdown/PDF |\n"
 )
 
 _limiter = Limiter(key_func=get_remote_address)
@@ -601,6 +604,9 @@ app = FastAPI(
         "| `/dashboard` | Balance, API keys, plan & usage, notification prefs, USDC wallet, "
         "linked SSO accounts, integrations summary, calendar feeds, transactions |\n"
         "| `/topup` | Add credits via Stripe card or USDC |\n"
+        "| `/bot/{id}` | Session viewer — transcript, AI analysis (summary, key points, action items, "
+        "decisions, next steps, sentiment, topics), speaker breakdown, chapters, meeting metadata, "
+        "and download links for audio/video/markdown/PDF |\n"
         "| `/admin` | Platform admin — plan stats, bot activity, system status, "
         "user accounts with inline plan management, unmatched USDC transfers, manual credit |\n"
     ),
