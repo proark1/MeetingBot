@@ -29,18 +29,23 @@
       <nav>
         <a class="nav-item active" data-page="bots" href="#">
           <span class="nav-icon">📋</span> Reports
+          <span class="kbd-hint">1</span>
         </a>
         <a class="nav-item" data-page="search" href="#">
           <span class="nav-icon">🔍</span> Search
+          <span class="kbd-hint">2</span>
         </a>
         <a class="nav-item" data-page="action-items" href="#">
           <span class="nav-icon">✅</span> Action Items
+          <span class="kbd-hint">3</span>
         </a>
         <a class="nav-item" data-page="templates" href="#">
           <span class="nav-icon">📝</span> Templates
+          <span class="kbd-hint">4</span>
         </a>
         <a class="nav-item" data-page="analytics" href="#">
           <span class="nav-icon">📊</span> Analytics
+          <span class="kbd-hint">5</span>
         </a>
         <a class="nav-item" data-page="speakers" href="#">
           <span class="nav-icon">👥</span> Speakers
@@ -60,6 +65,15 @@
           <span class="ws-dot"></span>
           <span class="ws-label">Connecting…</span>
         </div>
+        <button class="notif-bell" id="btn-notif-toggle" title="Toggle browser notifications">
+          <span class="notif-bell-icon">🔔</span>
+          <span id="notif-label">Notifications off</span>
+        </button>
+        <button class="theme-toggle" id="btn-theme-toggle" title="Toggle dark mode">
+          <span class="theme-toggle-icon" id="theme-icon">🌙</span>
+          <span id="theme-label">Dark mode</span>
+          <span class="kbd-hint">T</span>
+        </button>
       </div>
     </aside>
 
@@ -73,6 +87,7 @@
             <h1>Reports</h1>
             <p class="subtitle">All meeting recordings and transcripts, newest first</p>
           </div>
+          <button class="btn btn-ghost btn-sm" id="btn-cmd-palette" title="Command palette (Ctrl+K)">⌘K</button>
           <button class="btn btn-primary" id="btn-new-bot">+ New Bot</button>
         </div>
 
@@ -527,6 +542,19 @@
       <div class="modal-footer">
         <button class="btn btn-ghost" data-close="modal-followup-email">Close</button>
         <button class="btn btn-primary" id="btn-copy-email">Copy to Clipboard</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Command Palette -->
+  <div class="cmd-palette-backdrop hidden" id="cmd-palette">
+    <div class="cmd-palette">
+      <input class="cmd-palette-input" id="cmd-palette-input" type="text" placeholder="Type a command or search…" autocomplete="off" />
+      <div class="cmd-palette-list" id="cmd-palette-list"></div>
+      <div class="cmd-palette-footer">
+        <span>↑↓ navigate</span>
+        <span>↵ select</span>
+        <span>esc close</span>
       </div>
     </div>
   </div>

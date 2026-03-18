@@ -89,20 +89,7 @@ function showPage(id) {
   });
 }
 
-document.querySelectorAll(".nav-item[data-page]").forEach((el) => {
-  el.addEventListener("click", (e) => {
-    if (el.getAttribute("target") === "_blank") return;
-    e.preventDefault();
-    const page = el.dataset.page;
-    if (page === "bots")      { showPage("bots"); loadBots(); }
-    if (page === "webhooks")  { showPage("webhooks"); loadWebhooks(); }
-    if (page === "debug")     { showPage("debug"); loadDebugFiles(); }
-    if (page === "search")       { showPage("search"); }
-    if (page === "action-items") { showPage("action-items"); loadActionItems(); }
-    if (page === "templates")    { showPage("templates"); loadTemplates(); }
-    if (page === "analytics")    { showPage("analytics"); loadAnalytics(); }
-  });
-});
+// Nav clicks are handled via hash routing (see bottom of file)
 
 // ── Modals ─────────────────────────────────────────────────────────────────
 
@@ -1284,11 +1271,7 @@ function exportTranscriptMd(bot) {
 
 // ── Back button ────────────────────────────────────────────────────────────
 
-document.getElementById("btn-back-bots").addEventListener("click", () => {
-  _currentBotId = null;
-  showPage("bots");
-  loadBots();
-});
+// Back button handled via hash routing (see bottom of file)
 
 // ── Webhooks ───────────────────────────────────────────────────────────────
 
@@ -1867,16 +1850,7 @@ document.getElementById("speaker-search")?.addEventListener("input", _debounce((
   loadSpeakers(e.target.value.trim());
 }, 300));
 
-// Wire speakers nav
-document.querySelectorAll(".nav-item[data-page]").forEach((el) => {
-  if (el.dataset.page === "speakers") {
-    el.addEventListener("click", (e) => {
-      e.preventDefault();
-      showPage("speakers");
-      loadSpeakers();
-    });
-  }
-});
+// Speakers nav handled via hash routing (see bottom of file)
 
 // Patch renderBotDetail to also show action buttons
 (function () {
@@ -1888,7 +1862,353 @@ document.querySelectorAll(".nav-item[data-page]").forEach((el) => {
   };
 })();
 
+// ── Dark Mode ──────────────────────────────────────────────────────────────
+
+function getThemePref() {
+  const stored = localStorage.getItem("meetingbot-theme");
+  if (stored) return stored;
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute("data-theme", theme);
+  localStorage.setItem("meetingbot-theme", theme);
+  const icon = document.getElementById("theme-icon");
+  const label = document.getElementById("theme-label");
+  if (icon) icon.textContent = theme === "dark" ? "☀️" : "🌙";
+  if (label) label.textContent = theme === "dark" ? "Light mode" : "Dark mode";
+}
+
+function toggleTheme() {
+  const current = document.documentElement.getAttribute("data-theme") || "light";
+  applyTheme(current === "dark" ? "light" : "dark");
+}
+
+document.getElementById("btn-theme-toggle")?.addEventListener("click", toggleTheme);
+
+// Listen for OS theme changes
+window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (e) => {
+  if (!localStorage.getItem("meetingbot-theme")) {
+    applyTheme(e.matches ? "dark" : "light");
+  }
+});
+
+// ── Browser Notifications ──────────────────────────────────────────────────
+
+let _notificationsEnabled = localStorage.getItem("meetingbot-notif") === "on";
+
+function updateNotifUI() {
+  const label = document.getElementById("notif-label");
+  if (label) label.textContent = _notificationsEnabled ? "Notifications on" : "Notifications off";
+  const btn = document.getElementById("btn-notif-toggle");
+  if (btn) btn.title = _notificationsEnabled ? "Browser notifications enabled" : "Click to enable browser notifications";
+}
+
+document.getElementById("btn-notif-toggle")?.addEventListener("click", async () => {
+  if (!_notificationsEnabled) {
+    if (!("Notification" in window)) {
+      showToast("Your browser doesn't support notifications", "error");
+      return;
+    }
+    const perm = await Notification.requestPermission();
+    if (perm === "granted") {
+      _notificationsEnabled = true;
+      localStorage.setItem("meetingbot-notif", "on");
+      showToast("Notifications enabled — you'll be notified when bots finish", "success");
+    } else {
+      showToast("Notification permission denied", "error");
+    }
+  } else {
+    _notificationsEnabled = false;
+    localStorage.setItem("meetingbot-notif", "off");
+    showToast("Notifications disabled", "info");
+  }
+  updateNotifUI();
+});
+
+function sendBrowserNotification(title, body) {
+  if (!_notificationsEnabled || !("Notification" in window) || Notification.permission !== "granted") return;
+  try { new Notification(title, { body, icon: "/static/favicon.ico" }); } catch (_) {}
+}
+
+// Enhance handleServerEvent to send browser notifications
+const _origHandleServerEvent = handleServerEvent;
+window.handleServerEvent = function(event, data) {
+  _origHandleServerEvent(event, data);
+
+  if (event === "bot.done" && _notificationsEnabled) {
+    sendBrowserNotification(
+      "Meeting Complete",
+      `Bot finished — transcript and analysis are ready.`
+    );
+  }
+  if (event === "bot.error" && _notificationsEnabled) {
+    sendBrowserNotification(
+      "Bot Error",
+      data.error_message || "A bot encountered an error."
+    );
+  }
+};
+
+// ── Hash-based Routing ─────────────────────────────────────────────────────
+
+const PAGE_LOADERS = {
+  bots:          () => loadBots(),
+  search:        () => {},
+  "action-items":() => loadActionItems(),
+  templates:     () => loadTemplates(),
+  analytics:     () => loadAnalytics(),
+  speakers:      () => loadSpeakers(),
+  webhooks:      () => loadWebhooks(),
+  debug:         () => loadDebugFiles(),
+};
+
+function navigateTo(page, botId) {
+  if (botId) {
+    location.hash = `#bot/${botId}`;
+  } else {
+    location.hash = `#${page}`;
+  }
+}
+
+function handleHashChange() {
+  const hash = location.hash.slice(1) || "bots";
+
+  if (hash.startsWith("bot/")) {
+    const botId = hash.slice(4);
+    _currentBotId = botId;
+    showPage("bot-detail");
+    renderBotDetailLoading();
+    refreshBotDetail(botId);
+    return;
+  }
+
+  if (PAGE_LOADERS[hash]) {
+    showPage(hash);
+    PAGE_LOADERS[hash]();
+  } else {
+    showPage("bots");
+    loadBots();
+  }
+}
+
+window.addEventListener("hashchange", handleHashChange);
+
+// Patch showBotDetail to update hash
+const _origShowBotDetail = showBotDetail;
+window.showBotDetail = function(botId) {
+  location.hash = `#bot/${botId}`;
+};
+
+// Patch nav clicks to use hash routing
+document.querySelectorAll(".nav-item[data-page]").forEach((el) => {
+  el.addEventListener("click", (e) => {
+    if (el.getAttribute("target") === "_blank") return;
+    e.preventDefault();
+    const page = el.dataset.page;
+    location.hash = `#${page}`;
+  });
+});
+
+// Patch back button to navigate via hash
+document.getElementById("btn-back-bots").addEventListener("click", () => {
+  _currentBotId = null;
+  location.hash = "#bots";
+});
+
+// ── Command Palette ────────────────────────────────────────────────────────
+
+const CMD_ACTIONS = [
+  { icon: "📋", label: "Reports",      action: () => navigateTo("bots"),          keys: "1" },
+  { icon: "🔍", label: "Search",       action: () => navigateTo("search"),        keys: "2" },
+  { icon: "✅", label: "Action Items",  action: () => navigateTo("action-items"),  keys: "3" },
+  { icon: "📝", label: "Templates",    action: () => navigateTo("templates"),     keys: "4" },
+  { icon: "📊", label: "Analytics",    action: () => navigateTo("analytics"),     keys: "5" },
+  { icon: "👥", label: "Speakers",     action: () => navigateTo("speakers")       },
+  { icon: "🔔", label: "Webhooks",     action: () => navigateTo("webhooks")       },
+  { icon: "🐛", label: "Debug",        action: () => navigateTo("debug")          },
+  { icon: "▶",  label: "Deploy New Bot",action: () => document.getElementById("btn-new-bot")?.click(), keys: "N" },
+  { icon: "🌙", label: "Toggle Theme", action: toggleTheme, keys: "T" },
+  { icon: "↻",  label: "Refresh",      action: () => { loadBots(); loadStats(); }, keys: "R" },
+];
+
+let _cmdActiveIdx = 0;
+let _cmdFiltered = [];
+
+function openCmdPalette() {
+  const el = document.getElementById("cmd-palette");
+  const input = document.getElementById("cmd-palette-input");
+  if (!el || !input) return;
+  el.classList.remove("hidden");
+  input.value = "";
+  input.focus();
+  _cmdActiveIdx = 0;
+  renderCmdList("");
+}
+
+function closeCmdPalette() {
+  document.getElementById("cmd-palette")?.classList.add("hidden");
+}
+
+function renderCmdList(query) {
+  const listEl = document.getElementById("cmd-palette-list");
+  if (!listEl) return;
+  const q = query.toLowerCase().trim();
+  _cmdFiltered = q
+    ? CMD_ACTIONS.filter(a => a.label.toLowerCase().includes(q))
+    : CMD_ACTIONS;
+  _cmdActiveIdx = Math.min(_cmdActiveIdx, Math.max(_cmdFiltered.length - 1, 0));
+
+  listEl.innerHTML = _cmdFiltered.map((a, i) => `
+    <div class="cmd-palette-item${i === _cmdActiveIdx ? " active" : ""}" data-cmd-idx="${i}">
+      <span class="cmd-palette-item-icon">${a.icon}</span>
+      <span class="cmd-palette-item-label">${esc(a.label)}</span>
+      ${a.keys ? `<span class="cmd-palette-item-hint">${a.keys}</span>` : ""}
+    </div>`).join("") || '<div class="cmd-palette-item" style="color:var(--text-muted)">No matches</div>';
+
+  listEl.querySelectorAll("[data-cmd-idx]").forEach(el => {
+    el.addEventListener("click", () => {
+      const idx = parseInt(el.dataset.cmdIdx);
+      if (_cmdFiltered[idx]) {
+        closeCmdPalette();
+        _cmdFiltered[idx].action();
+      }
+    });
+  });
+}
+
+document.getElementById("cmd-palette-input")?.addEventListener("input", (e) => {
+  _cmdActiveIdx = 0;
+  renderCmdList(e.target.value);
+});
+
+document.getElementById("cmd-palette-input")?.addEventListener("keydown", (e) => {
+  if (e.key === "ArrowDown") {
+    e.preventDefault();
+    _cmdActiveIdx = Math.min(_cmdActiveIdx + 1, _cmdFiltered.length - 1);
+    renderCmdList(document.getElementById("cmd-palette-input").value);
+  } else if (e.key === "ArrowUp") {
+    e.preventDefault();
+    _cmdActiveIdx = Math.max(_cmdActiveIdx - 1, 0);
+    renderCmdList(document.getElementById("cmd-palette-input").value);
+  } else if (e.key === "Enter") {
+    e.preventDefault();
+    if (_cmdFiltered[_cmdActiveIdx]) {
+      closeCmdPalette();
+      _cmdFiltered[_cmdActiveIdx].action();
+    }
+  } else if (e.key === "Escape") {
+    closeCmdPalette();
+  }
+});
+
+document.getElementById("cmd-palette")?.addEventListener("click", (e) => {
+  if (e.target.id === "cmd-palette") closeCmdPalette();
+});
+
+document.getElementById("btn-cmd-palette")?.addEventListener("click", openCmdPalette);
+
+// ── Keyboard Shortcuts ─────────────────────────────────────────────────────
+
+document.addEventListener("keydown", (e) => {
+  // Don't trigger shortcuts when typing in inputs
+  const tag = document.activeElement?.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+  if (e.ctrlKey || e.metaKey) {
+    if (e.key === "k" || e.key === "K") {
+      e.preventDefault();
+      openCmdPalette();
+      return;
+    }
+  }
+
+  // Single-key shortcuts (only when no modifier except shift)
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+  const key = e.key;
+  if (key === "1") { e.preventDefault(); navigateTo("bots"); }
+  else if (key === "2") { e.preventDefault(); navigateTo("search"); }
+  else if (key === "3") { e.preventDefault(); navigateTo("action-items"); }
+  else if (key === "4") { e.preventDefault(); navigateTo("templates"); }
+  else if (key === "5") { e.preventDefault(); navigateTo("analytics"); }
+  else if (key === "n" || key === "N") {
+    e.preventDefault();
+    document.getElementById("btn-new-bot")?.click();
+  }
+  else if (key === "t") {
+    e.preventDefault();
+    toggleTheme();
+  }
+  else if (key === "r" || key === "R") {
+    e.preventDefault();
+    loadBots(); loadStats();
+    showToast("Refreshed", "info");
+  }
+  else if (key === "?") {
+    e.preventDefault();
+    openCmdPalette();
+  }
+});
+
+// ── Skeleton Loading ───────────────────────────────────────────────────────
+
+function renderSkeletonCards(count = 4) {
+  return Array(count).fill(0).map(() => `
+    <div class="skeleton-card">
+      <div class="skeleton skeleton-line skeleton-line-medium"></div>
+      <div class="skeleton skeleton-line skeleton-line-long"></div>
+      <div class="skeleton skeleton-line skeleton-line-short"></div>
+    </div>`).join("");
+}
+
+function renderSkeletonStats() {
+  return `<div class="stats-bar" style="margin-bottom:1.5rem">
+    ${Array(4).fill(0).map(() => '<div class="skeleton skeleton-stat"></div>').join("")}
+  </div>`;
+}
+
+// Patch loadBots to use skeleton loading instead of plain text
+const _origLoadBots = loadBots;
+window.loadBots = async function(filter, search, page) {
+  filter = filter ?? _currentFilter;
+  search = search ?? _currentSearch;
+  page = page ?? _currentPage;
+
+  _currentFilter = filter;
+  _currentSearch = search;
+  _currentPage = page;
+  const seq = ++_loadBotsSeq;
+
+  const listEl = document.getElementById("bot-list");
+  listEl.innerHTML = renderSkeletonCards(3);
+
+  try {
+    const params = new URLSearchParams({ limit: PAGE_SIZE, offset: page * PAGE_SIZE });
+    if (filter) params.set("status", filter);
+    if (search) params.set("search", search);
+    const data = await apiFetch("GET", `/bot?${params}`);
+    if (seq !== _loadBotsSeq) return;
+    _totalBots = data.count;
+    renderBotList(data.results);
+    renderPagination();
+    _startLiveTimers();
+  } catch (e) {
+    if (seq !== _loadBotsSeq) return;
+    listEl.innerHTML = `<div class="empty">Error: ${esc(e.message)}</div>`;
+  }
+
+  await loadStats();
+};
+
 // ── Init ───────────────────────────────────────────────────────────────────
 
+applyTheme(getThemePref());
+updateNotifUI();
 connectWS();
-loadBots();
+
+// Route from hash on initial load
+if (location.hash && location.hash.length > 1) {
+  handleHashChange();
+} else {
+  loadBots();
+}
