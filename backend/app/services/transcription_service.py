@@ -53,10 +53,57 @@ Speaker diarization rules:
 _CHUNK_THRESHOLD_S = 2100   # 35 min — below this, transcribe as a single file
 _CHUNK_SIZE_S      = 1800   # 30 min per chunk
 
+# Silence detection — peak amplitude below this threshold (out of 32 768 for
+# 16-bit PCM) means the WAV is effectively silent.  Sending a silent recording
+# to an LLM risks hallucinated transcripts; we return [] instead.
+_SILENCE_PEAK_THRESHOLD = 200   # ~0.6 % of full scale; quiet speech is typically 1 000+
+_SILENCE_SAMPLE_FRAMES  = 16_000  # ~1 s at 16 kHz — checked at several offsets
+
 
 def _estimate_duration_s(file_path: str) -> float:
     """Rough duration estimate from file size (16 kHz mono PCM = 32 000 bytes/s)."""
     return os.path.getsize(file_path) / 32_000
+
+
+def _check_audio_has_speech(audio_path: str) -> tuple[bool, float]:
+    """
+    Return (has_speech, peak_amplitude) for a WAV file.
+
+    Samples frames at multiple offsets across the file (10%, 25%, 50%, 75%, 90%)
+    and returns the highest peak found.  Uses only stdlib — no extra deps.
+
+    Returns ``(True, peak)`` if speech is likely present, or ``(False, peak)``
+    if the recording is below the silence threshold.  On any error returns
+    ``(True, -1.0)`` so that uncertain files are still sent for transcription.
+    """
+    import wave
+    import array as _array
+
+    try:
+        with wave.open(audio_path, "rb") as wf:
+            if wf.getsampwidth() != 2:          # only handle 16-bit PCM
+                return True, -1.0
+            total_frames = wf.getnframes()
+            if total_frames == 0:
+                return False, 0.0
+
+            peak = 0
+            for frac in (0.10, 0.25, 0.50, 0.75, 0.90):
+                seek = min(int(total_frames * frac), max(0, total_frames - _SILENCE_SAMPLE_FRAMES))
+                wf.setpos(seek)
+                raw = wf.readframes(_SILENCE_SAMPLE_FRAMES)
+                if raw:
+                    samples = _array.array("h", raw)
+                    local_peak = max(abs(s) for s in samples) if samples else 0
+                    peak = max(peak, local_peak)
+                    if peak >= _SILENCE_PEAK_THRESHOLD:
+                        break   # already found audible content
+
+            return peak >= _SILENCE_PEAK_THRESHOLD, float(peak)
+
+    except Exception as exc:
+        logger.debug("Audio silence check error (will proceed with transcription): %s", exc)
+        return True, -1.0   # on error, assume speech is present (safer)
 
 
 async def _split_audio(audio_path: str, chunk_s: int = _CHUNK_SIZE_S) -> list[str]:
@@ -234,6 +281,22 @@ async def transcribe_audio(
     if size < 8_000:
         logger.warning("Audio file is too small (%d bytes) — skipping transcription", size)
         return []
+
+    # ── Silence detection ────────────────────────────────────────────────────
+    # Check whether the WAV contains audible content before paying AI API cost.
+    # A completely silent recording (e.g. from a PulseAudio routing failure)
+    # would cause Gemini to hallucinate a transcript; we return [] instead.
+    has_speech, peak = _check_audio_has_speech(audio_path)
+    if not has_speech:
+        logger.warning(
+            "Audio file appears to be silent (peak amplitude %.0f/32768 < threshold %d) — "
+            "returning empty transcript instead of risking hallucination. "
+            "If speech was expected, check PulseAudio / Chrome audio routing.",
+            peak, _SILENCE_PEAK_THRESHOLD,
+        )
+        return []
+
+    logger.debug("Audio silence check passed (peak amplitude: %.0f/32768)", peak)
 
     # For long recordings, split into chunks and transcribe sequentially
     estimated_s = _estimate_duration_s(audio_path)
