@@ -48,6 +48,7 @@ class Account(Base):
     integrations: Mapped[list["Integration"]] = relationship(back_populates="account", cascade="all, delete-orphan")
     calendar_feeds: Mapped[list["CalendarFeed"]] = relationship(back_populates="account", cascade="all, delete-orphan")
     oauth_accounts: Mapped[list["OAuthAccount"]] = relationship(back_populates="account", cascade="all, delete-orphan")
+    keyword_alerts: Mapped[list["KeywordAlert"]] = relationship(back_populates="account", cascade="all, delete-orphan")
 
 
 class ApiKey(Base):
@@ -277,3 +278,103 @@ class IdempotencyKey(Base):
     bot_id: Mapped[str] = mapped_column(String(36), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class RetentionPolicy(Base):
+    """Per-account or global data retention configuration."""
+
+    __tablename__ = "retention_policies"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    # NULL = global policy; non-null = per-account override
+    account_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, unique=True, index=True)
+    # Days to retain bot data (transcripts, analysis, recordings). -1 = keep forever.
+    bot_retention_days: Mapped[int] = mapped_column(Integer, default=90)
+    # Days to retain audio/video recordings specifically (may be shorter than bot data).
+    recording_retention_days: Mapped[int] = mapped_column(Integer, default=30)
+    # Auto-delete transcripts after N days (0 = never auto-delete transcript separately).
+    transcript_retention_days: Mapped[int] = mapped_column(Integer, default=90)
+    # Whether to delete PII from transcripts (replace speaker names with anonymous IDs).
+    anonymize_speakers: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
+class KeywordAlert(Base):
+    """Keyword-triggered webhook alert configuration per account."""
+
+    __tablename__ = "keyword_alerts"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    account_id: Mapped[str] = mapped_column(String(36), ForeignKey("accounts.id"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(100), default="")
+    # JSON list of keyword strings to watch for (case-insensitive).
+    keywords: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    # Optional additional webhook URL to POST the alert to (beyond global webhooks).
+    webhook_url: Mapped[Optional[str]] = mapped_column(String(2048), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Track how many times each alert has fired.
+    trigger_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_triggered_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    account: Mapped["Account"] = relationship(back_populates="keyword_alerts")
+
+
+class Workspace(Base):
+    """Team workspace — shared context for multiple accounts/members."""
+
+    __tablename__ = "workspaces"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    slug: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
+    owner_account_id: Mapped[str] = mapped_column(String(36), ForeignKey("accounts.id"), nullable=False, index=True)
+    # JSON settings: default_bot_name, require_consent, etc.
+    settings: Mapped[str] = mapped_column(Text, default="{}")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+    members: Mapped[list["WorkspaceMember"]] = relationship(back_populates="workspace", cascade="all, delete-orphan")
+
+
+class WorkspaceMember(Base):
+    """Membership record linking an account to a workspace with a role."""
+
+    __tablename__ = "workspace_members"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    workspace_id: Mapped[str] = mapped_column(String(36), ForeignKey("workspaces.id"), nullable=False, index=True)
+    account_id: Mapped[str] = mapped_column(String(36), ForeignKey("accounts.id"), nullable=False, index=True)
+    # "admin" | "member" | "viewer"
+    role: Mapped[str] = mapped_column(String(20), default="member", nullable=False)
+    invited_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    workspace: Mapped["Workspace"] = relationship(back_populates="members")
+
+
+class SamlConfig(Base):
+    """SAML 2.0 SSO configuration for enterprise workspaces."""
+
+    __tablename__ = "saml_configs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    # Organisation slug (used in the SSO URL: /auth/saml/{org_slug}/authorize)
+    org_slug: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
+    # Display name shown on login page
+    org_name: Mapped[str] = mapped_column(String(100), default="")
+    # SAML IdP metadata URL (for auto-discovery) OR raw XML (stored in metadata_xml)
+    idp_metadata_url: Mapped[Optional[str]] = mapped_column(String(2048), nullable=True)
+    idp_metadata_xml: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # SP entity ID and ACS URL are derived from org_slug at runtime
+    # Attribute mapping — JSON: {"email": "...", "first_name": "...", "last_name": "..."}
+    attribute_mapping: Mapped[str] = mapped_column(Text, default='{"email": "email"}')
+    # Workspace to add new SSO users to automatically
+    workspace_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    # Default role for new SSO-provisioned users
+    default_role: Mapped[str] = mapped_column(String(20), default="member")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)

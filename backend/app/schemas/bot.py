@@ -5,6 +5,12 @@ from typing import Any, Literal, Optional
 from pydantic import BaseModel, Field, field_validator, AnyHttpUrl
 
 
+class KeywordAlertConfig(BaseModel):
+    """Per-bot keyword alert specification."""
+    keyword: str = Field(description="The trigger keyword or phrase (case-insensitive).")
+    webhook_url: Optional[str] = Field(default=None, description="Optional webhook URL to notify in addition to global webhooks.")
+
+
 def _reject_private_url(v: Any) -> str:
     """Reject meeting URLs that target localhost or private IP addresses."""
     from urllib.parse import urlparse
@@ -122,6 +128,56 @@ class BotCreate(BaseModel):
         description=(
             "Capture a video recording of the meeting screen (MP4) in addition to audio. "
             "Download via GET /api/v1/bot/{id}/video once status is `done`."
+        ),
+    )
+
+    # ── Consent / recording announcement ──────────────────────────────────────
+    consent_enabled: bool = Field(
+        default=False,
+        description=(
+            "When true, the bot announces the recording at the start of the meeting "
+            "and monitors for opt-out requests. Participants who say or type the opt-out "
+            "phrase are removed from the transcript."
+        ),
+    )
+    consent_message: Optional[str] = Field(
+        default=None,
+        max_length=500,
+        description="Custom consent announcement text. Overrides the platform default when set.",
+    )
+
+    # ── Keyword alerts ─────────────────────────────────────────────────────────
+    keyword_alerts: list[KeywordAlertConfig] = Field(
+        default=[],
+        description=(
+            "List of keyword/phrase triggers. When any keyword is detected in the transcript, "
+            "a `bot.keyword_alert` webhook event is fired. Account-level KeywordAlert rules "
+            "defined at /api/v1/keyword-alerts are also applied automatically."
+        ),
+    )
+
+    # ── Follow-up email ────────────────────────────────────────────────────────
+    auto_followup_email: bool = Field(
+        default=False,
+        description=(
+            "When true, automatically generate and send a follow-up email draft to the account's "
+            "notification email after the meeting analysis is complete."
+        ),
+    )
+
+    # ── Workspace ──────────────────────────────────────────────────────────────
+    workspace_id: Optional[str] = Field(
+        default=None,
+        max_length=36,
+        description="Associate this bot with a team workspace (see /api/v1/workspaces).",
+    )
+
+    # ── Transcription provider ─────────────────────────────────────────────────
+    transcription_provider: Literal["gemini", "whisper"] = Field(
+        default="gemini",
+        description=(
+            "`gemini` — Gemini Files API (default, requires GEMINI_API_KEY). "
+            "`whisper` — local OpenAI Whisper model (privacy-preserving, requires WHISPER_ENABLED=true)."
         ),
     )
 

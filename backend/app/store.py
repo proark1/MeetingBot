@@ -70,6 +70,25 @@ class BotSession:
     # For business accounts: isolates data per end-user within the account
     sub_user_id: Optional[str] = None
 
+    # ── Consent / opt-out ──────────────────────────────────────────────────────
+    consent_enabled: bool = False       # announce recording and honour opt-out requests
+    consent_message: Optional[str] = None   # custom consent announcement text
+    opted_out_participants: list = field(default_factory=list)  # names of participants who opted out
+
+    # ── Keyword alerts ─────────────────────────────────────────────────────────
+    # Per-bot keyword list — supplements account-level KeywordAlert rules.
+    keyword_alerts: list = field(default_factory=list)  # [{"keyword": str, "webhook_url": str|None}]
+
+    # ── Follow-up email ────────────────────────────────────────────────────────
+    auto_followup_email: bool = False   # auto-generate & send follow-up email on completion
+    followup_email: Optional[dict] = None  # {"subject": ..., "body": ...} cached draft
+
+    # ── Workspace ──────────────────────────────────────────────────────────────
+    workspace_id: Optional[str] = None
+
+    # ── Transcription provider ─────────────────────────────────────────────────
+    transcription_provider: str = "gemini"  # "gemini" | "whisper"
+
     # AI usage tracking
     ai_usage: list = field(default_factory=list)  # list of usage entry dicts
 
@@ -231,6 +250,14 @@ class Store:
                 "record_video": bot.record_video,
                 "account_id": bot.account_id,
                 "sub_user_id": bot.sub_user_id,
+                "consent_enabled": bot.consent_enabled,
+                "consent_message": bot.consent_message,
+                "opted_out_participants": bot.opted_out_participants,
+                "keyword_alerts": bot.keyword_alerts,
+                "auto_followup_email": bot.auto_followup_email,
+                "followup_email": bot.followup_email,
+                "workspace_id": bot.workspace_id,
+                "transcription_provider": bot.transcription_provider,
                 "ai_usage": bot.ai_usage,
                 "created_at": _dt(bot.created_at),
                 "updated_at": _dt(bot.updated_at),
@@ -452,6 +479,14 @@ async def load_persisted_bots() -> int:
                     record_video=d.get("record_video", False),
                     account_id=d.get("account_id"),
                     sub_user_id=d.get("sub_user_id"),
+                    consent_enabled=d.get("consent_enabled", False),
+                    consent_message=d.get("consent_message"),
+                    opted_out_participants=d.get("opted_out_participants", []),
+                    keyword_alerts=d.get("keyword_alerts", []),
+                    auto_followup_email=d.get("auto_followup_email", False),
+                    followup_email=d.get("followup_email"),
+                    workspace_id=d.get("workspace_id"),
+                    transcription_provider=d.get("transcription_provider", "gemini"),
                     ai_usage=d.get("ai_usage", []),
                     created_at=_parse_dt(d.get("created_at")) or now,
                     updated_at=_parse_dt(d.get("updated_at")) or now,

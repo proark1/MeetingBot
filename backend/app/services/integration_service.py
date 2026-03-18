@@ -292,6 +292,9 @@ async def dispatch_integrations(account_id: str, bot_data: dict) -> None:
                 if api_token and database_id:
                     tasks.append(_post_to_notion(api_token, database_id, bot_data))
 
+            # CRM types are handled by crm_service.dispatch_crm_integrations
+            # (called separately from bot_service._post_completion_notifications)
+
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
 

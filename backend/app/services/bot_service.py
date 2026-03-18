@@ -144,6 +144,31 @@ def _resolve_prompt(bot: BotSession) -> str | None:
     return None
 
 
+async def _transcribe_audio_for_bot(bot: BotSession, audio_path: str) -> list:
+    """Transcribe audio using the bot's configured transcription_provider."""
+    provider = getattr(bot, "transcription_provider", "gemini") or "gemini"
+
+    if provider == "whisper":
+        try:
+            from app.services.whisper_service import transcribe_with_whisper, is_whisper_available
+            if is_whisper_available():
+                logger.info("Bot %s: using Whisper transcription", bot.id)
+                transcript = await transcribe_with_whisper(
+                    audio_path,
+                    language=settings.TRANSCRIPTION_LANGUAGE or None,
+                )
+                if transcript:
+                    return transcript
+                logger.warning("Bot %s: Whisper returned empty transcript — falling back to Gemini", bot.id)
+            else:
+                logger.warning("Bot %s: Whisper requested but not available — falling back to Gemini", bot.id)
+        except Exception as exc:
+            logger.warning("Bot %s: Whisper failed (%s) — falling back to Gemini", bot.id, exc)
+
+    # Default / fallback: Gemini transcription
+    return await transcribe_audio(audio_path)
+
+
 async def _do_analysis(bot: BotSession, audio_path: str, use_real_bot: bool, video_path: Optional[str] = None) -> None:
     """Transcribe (if needed), analyse, and update the bot in-memory."""
     # ── transcript ─────────────────────────────────────────────────────────
@@ -152,7 +177,7 @@ async def _do_analysis(bot: BotSession, audio_path: str, use_real_bot: bool, vid
 
         if use_real_bot and os.path.exists(audio_path) and os.path.getsize(audio_path) > 0:
             logger.info("Bot %s: transcribing partial audio (%d bytes)", bot.id, os.path.getsize(audio_path))
-            transcript = await transcribe_audio(audio_path)
+            transcript = await _transcribe_audio_for_bot(bot, audio_path)
 
         if not transcript:
             logger.warning("Bot %s: no usable audio captured — transcript will be empty", bot.id)
@@ -163,6 +188,14 @@ async def _do_analysis(bot: BotSession, audio_path: str, use_real_bot: bool, vid
                 error_message=current + " No audio was captured or transcription returned no content.",
             )
         else:
+            # ── Consent processing ────────────────────────────────────────
+            if bot.consent_enabled:
+                try:
+                    from app.services.consent_service import process_consent
+                    transcript = await process_consent(bot.id, transcript)
+                except Exception as exc:
+                    logger.warning("Bot %s: consent processing failed: %s", bot.id, exc)
+
             await store.update_bot(bot.id, transcript=transcript)
             bot.transcript = transcript
 
@@ -229,6 +262,19 @@ async def _do_analysis(bot: BotSession, audio_path: str, use_real_bot: bool, vid
 
         await webhook_service.dispatch_event("bot.analysis_ready", {"bot_id": bot.id, "account_id": bot.account_id}, account_id=bot.account_id)
 
+        # ── Keyword alert scanning ────────────────────────────────────────
+        try:
+            from app.services.keyword_alert_service import scan_and_fire_alerts
+            per_bot_alerts = getattr(bot, "keyword_alerts", []) or []
+            await scan_and_fire_alerts(
+                bot_id=bot.id,
+                account_id=bot.account_id,
+                transcript=bot.transcript or [],
+                per_bot_alerts=per_bot_alerts,
+            )
+        except Exception as exc:
+            logger.warning("Bot %s: keyword alert scan failed: %s", bot.id, exc)
+
     elif analysis_mode == "transcript_only":
         logger.info("Bot %s: analysis_mode=transcript_only — skipping AI analysis", bot.id)
         speaker_stats = _compute_speaker_stats(bot.transcript)
@@ -269,7 +315,7 @@ def _build_done_payload(bot: BotSession) -> dict:
     }
 
 
-async def _post_completion_notifications(account_id: str, bot_data: dict) -> None:
+async def _post_completion_notifications(account_id: str, bot_data: dict, bot=None) -> None:
     """Send email + integrations after a bot completes.  Never raises."""
     try:
         from app.db import AsyncSessionLocal
@@ -286,11 +332,42 @@ async def _post_completion_notifications(account_id: str, bot_data: dict) -> Non
     except Exception as exc:
         logger.warning("Email notification failed for account %s: %s", account_id, exc)
 
+    # Auto follow-up email generation and send
+    if bot and bot.auto_followup_email:
+        try:
+            from app.services.intelligence_service import generate_followup_email
+            followup = await generate_followup_email(
+                transcript=bot.transcript or [],
+                analysis=bot.analysis or {},
+                participants=bot.participants or [],
+            )
+            await store.update_bot(bot.id, followup_email=followup)
+            # Send it to the notification email
+            from app.db import AsyncSessionLocal
+            from app.models.account import Account
+            from sqlalchemy import select
+            from app.services.email_service import send_email
+            async with AsyncSessionLocal() as session:
+                result = await session.execute(select(Account).where(Account.id == account_id))
+                account = result.scalar_one_or_none()
+            if account:
+                recipient = account.notify_email or account.email
+                await send_email(recipient, followup.get("subject", "Meeting Follow-up"), followup.get("body", ""))
+        except Exception as exc:
+            logger.warning("Auto follow-up email failed for bot %s: %s", bot.id, exc)
+
     try:
         from app.services.integration_service import dispatch_integrations
         await dispatch_integrations(account_id, bot_data)
     except Exception as exc:
         logger.warning("Integration dispatch failed for account %s: %s", account_id, exc)
+
+    # CRM integrations (HubSpot, Salesforce)
+    try:
+        from app.services.crm_service import dispatch_crm_integrations
+        await dispatch_crm_integrations(account_id, bot_data)
+    except Exception as exc:
+        logger.warning("CRM integration dispatch failed for account %s: %s", account_id, exc)
 
 
 async def run_bot_lifecycle(bot_id: str) -> None:
@@ -418,11 +495,36 @@ async def run_bot_lifecycle(bot_id: str) -> None:
             await store.update_bot(bot_id, status="transcribing")
             logger.info("Bot %s transcribing audio…", bot_id)
 
-            transcript = await transcribe_audio(
-                audio_path,
-                known_participants=scraped_participants,
-                language=settings.TRANSCRIPTION_LANGUAGE or None,
-            )
+            # Route to the configured transcription provider (Whisper or Gemini)
+            _provider = getattr(bot, "transcription_provider", "gemini") or "gemini"
+            if _provider == "whisper":
+                from app.services.whisper_service import transcribe_with_whisper, is_whisper_available
+                if is_whisper_available():
+                    transcript = await transcribe_with_whisper(
+                        audio_path,
+                        language=settings.TRANSCRIPTION_LANGUAGE or None,
+                        known_participants=scraped_participants,
+                    )
+                    if not transcript:
+                        logger.warning("Bot %s: Whisper returned empty — falling back to Gemini", bot_id)
+                        transcript = await transcribe_audio(
+                            audio_path,
+                            known_participants=scraped_participants,
+                            language=settings.TRANSCRIPTION_LANGUAGE or None,
+                        )
+                else:
+                    logger.warning("Bot %s: Whisper not available — using Gemini", bot_id)
+                    transcript = await transcribe_audio(
+                        audio_path,
+                        known_participants=scraped_participants,
+                        language=settings.TRANSCRIPTION_LANGUAGE or None,
+                    )
+            else:
+                transcript = await transcribe_audio(
+                    audio_path,
+                    known_participants=scraped_participants,
+                    language=settings.TRANSCRIPTION_LANGUAGE or None,
+                )
 
             if live_transcript_entries:
                 if len(transcript) < 3:
@@ -513,9 +615,9 @@ async def run_bot_lifecycle(bot_id: str) -> None:
             account_id=bot.account_id,
         )
 
-        # Fire integrations (Slack / Notion) and email notification in parallel
+        # Fire integrations (Slack / Notion / CRM) and email notification in parallel
         if bot.account_id:
-            asyncio.create_task(_post_completion_notifications(bot.account_id, done_payload))
+            asyncio.create_task(_post_completion_notifications(bot.account_id, done_payload, bot=bot))
 
         logger.info("Bot %s done", bot_id)
 

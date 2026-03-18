@@ -35,6 +35,12 @@ from app.api.integrations import router as integrations_router
 from app.api.calendar import router as calendar_router
 from app.api.oauth import router as oauth_router
 from app.api.metrics import router as metrics_router, PrometheusMiddleware
+# New feature routers
+from app.api.retention import router as retention_router
+from app.api.keyword_alerts import router as keyword_alerts_router
+from app.api.workspaces import router as workspaces_router
+from app.api.saml import router as saml_router
+from app.api.mcp import router as mcp_router
 from app.deps import require_auth
 from typing import Any
 
@@ -165,6 +171,77 @@ async def lifespan(app: FastAPI):
         calendar_poll_loop(interval_s=settings.CALENDAR_POLL_INTERVAL_S)
     )
 
+    # Start retention enforcement loop (daily)
+    async def _retention_loop():
+        while True:
+            await asyncio.sleep(86400)  # every 24 hours
+            try:
+                await _enforce_retention_policies()
+            except Exception as exc:
+                logger.error("Retention enforcement error: %s", exc)
+
+    async def _enforce_retention_policies():
+        """Delete recordings and bot snapshots beyond their retention period."""
+        import os
+        from datetime import datetime, timezone, timedelta
+        from app.db import AsyncSessionLocal
+        from app.models.account import BotSnapshot, RetentionPolicy
+        from sqlalchemy import select, delete as _sqldelete
+
+        now = datetime.now(timezone.utc)
+        logger.info("Running retention policy enforcement…")
+
+        async with AsyncSessionLocal() as db:
+            # Load global policy (account_id IS NULL)
+            g_result = await db.execute(
+                select(RetentionPolicy).where(RetentionPolicy.account_id.is_(None))
+            )
+            global_policy = g_result.scalar_one_or_none()
+            global_bot_days = settings.DEFAULT_BOT_RETENTION_DAYS if not global_policy else global_policy.bot_retention_days
+            global_rec_days = settings.DEFAULT_RECORDING_RETENTION_DAYS if not global_policy else global_policy.recording_retention_days
+
+            # Find snapshots past their global retention window
+            if global_bot_days != -1:
+                cutoff = now - timedelta(days=global_bot_days)
+                result = await db.execute(
+                    select(BotSnapshot).where(BotSnapshot.created_at < cutoff)
+                )
+                expired_snaps = result.scalars().all()
+                for snap in expired_snaps:
+                    # Check for per-account override
+                    acc_result = await db.execute(
+                        select(RetentionPolicy).where(RetentionPolicy.account_id == snap.account_id)
+                    )
+                    acc_policy = acc_result.scalar_one_or_none()
+                    eff_days = acc_policy.bot_retention_days if acc_policy else global_bot_days
+                    eff_rec_days = acc_policy.recording_retention_days if acc_policy else global_rec_days
+
+                    if eff_days == -1:
+                        continue  # this account keeps data forever
+
+                    snap_cutoff = now - timedelta(days=eff_days)
+                    if snap.created_at > snap_cutoff:
+                        continue  # not yet expired under account policy
+
+                    # Try to delete recording files
+                    try:
+                        import json as _json
+                        data = _json.loads(snap.data or "{}")
+                        for path_key in ("recording_path", "video_path"):
+                            fpath = data.get(path_key)
+                            if fpath and os.path.exists(fpath):
+                                os.remove(fpath)
+                                logger.debug("Retention: deleted %s", fpath)
+                    except Exception as exc:
+                        logger.warning("Retention: could not clean up files for snapshot %s: %s", snap.id, exc)
+
+                    await db.execute(_sqldelete(BotSnapshot).where(BotSnapshot.id == snap.id))
+
+                await db.commit()
+                logger.info("Retention enforcement complete")
+
+    retention_task = asyncio.create_task(_retention_loop())
+
     logger.info("MeetingBot ready — API docs at /api/docs")
     yield
 
@@ -173,6 +250,7 @@ async def lifespan(app: FastAPI):
     cleanup_task.cancel()
     webhook_retry_task.cancel()
     calendar_task.cancel()
+    retention_task.cancel()
 
     if _running_tasks:
         logger.info("Cancelling %d running bot task(s)…", len(_running_tasks))
@@ -693,20 +771,25 @@ async def _unhandled_exception_handler(request, exc):
 
 
 _auth = [Depends(require_auth)]
-app.include_router(metrics_router)                                     # unauthenticated /metrics
-app.include_router(auth_router,         prefix="/api/v1")             # no auth on register/login
-app.include_router(oauth_router,        prefix="/api/v1")             # SSO OAuth (no prefix auth)
-app.include_router(billing_router,      prefix="/api/v1")             # billing has its own auth handling
-app.include_router(bots_router,         prefix="/api/v1", dependencies=_auth)
-app.include_router(webhooks_router,     prefix="/api/v1", dependencies=_auth)
-app.include_router(exports_router,      prefix="/api/v1", dependencies=_auth)
-app.include_router(templates_router,    prefix="/api/v1", dependencies=_auth)
-app.include_router(analytics_router,    prefix="/api/v1", dependencies=_auth)
-app.include_router(integrations_router, prefix="/api/v1", dependencies=_auth)
-app.include_router(calendar_router,     prefix="/api/v1", dependencies=_auth)
-app.include_router(admin_router,        prefix="/api/v1")             # admin has its own auth (require_admin)
-app.include_router(ws_router,           prefix="/api/v1")             # WS auth handled separately
-app.include_router(ui_router)                                          # web UI (no prefix)
+app.include_router(metrics_router)                                       # unauthenticated /metrics
+app.include_router(auth_router,           prefix="/api/v1")              # no auth on register/login
+app.include_router(oauth_router,          prefix="/api/v1")              # SSO OAuth (no prefix auth)
+app.include_router(saml_router,           prefix="/api/v1")              # SAML SSO (own auth logic)
+app.include_router(billing_router,        prefix="/api/v1")              # billing has its own auth handling
+app.include_router(bots_router,           prefix="/api/v1", dependencies=_auth)
+app.include_router(webhooks_router,       prefix="/api/v1", dependencies=_auth)
+app.include_router(exports_router,        prefix="/api/v1", dependencies=_auth)
+app.include_router(templates_router,      prefix="/api/v1", dependencies=_auth)
+app.include_router(analytics_router,      prefix="/api/v1", dependencies=_auth)
+app.include_router(integrations_router,   prefix="/api/v1", dependencies=_auth)
+app.include_router(calendar_router,       prefix="/api/v1", dependencies=_auth)
+app.include_router(retention_router,      prefix="/api/v1", dependencies=_auth)
+app.include_router(keyword_alerts_router, prefix="/api/v1", dependencies=_auth)
+app.include_router(workspaces_router,     prefix="/api/v1", dependencies=_auth)
+app.include_router(mcp_router,            prefix="/api/v1", dependencies=_auth)
+app.include_router(admin_router,          prefix="/api/v1")              # admin has its own auth (require_admin)
+app.include_router(ws_router,             prefix="/api/v1")              # WS auth handled separately
+app.include_router(ui_router)                                             # web UI (no prefix)
 
 
 # ── Health ────────────────────────────────────────────────────────────────────

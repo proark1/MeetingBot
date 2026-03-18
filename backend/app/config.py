@@ -128,6 +128,49 @@ class Settings(BaseSettings):
     WEBHOOK_RETRY_DELAYS: str = "60,300,1500,7200,36000"
     WEBHOOK_DELIVERY_RETENTION_DAYS: int = 30  # prune delivery logs older than N days
 
+    # ── Consent announcement ───────────────────────────────────────────────────
+    CONSENT_ANNOUNCEMENT_ENABLED: bool = False  # set True to enable by default
+    CONSENT_MESSAGE: str = (
+        "This meeting is being recorded and transcribed by an AI bot. "
+        "To opt out, type 'opt out' in the chat or say 'opt out' clearly."
+    )
+    CONSENT_OPT_OUT_PHRASE: str = "opt out"  # case-insensitive phrase to trigger opt-out
+
+    # ── Data retention ─────────────────────────────────────────────────────────
+    # Global defaults — overridable per account via the /auth/retention endpoint.
+    DEFAULT_BOT_RETENTION_DAYS: int = 90       # days to keep bot data in DB (-1 = forever)
+    DEFAULT_RECORDING_RETENTION_DAYS: int = 30  # days to keep audio/video files
+    RECORDING_RETENTION_DAYS: int = 30          # alias used by existing code / docs
+
+    # ── Keyword alerts ─────────────────────────────────────────────────────────
+    KEYWORD_ALERTS_ENABLED: bool = True  # set False to globally disable
+
+    # ── HubSpot CRM integration ────────────────────────────────────────────────
+    HUBSPOT_API_KEY: str = ""           # HubSpot private app access token
+
+    # ── Salesforce CRM integration ─────────────────────────────────────────────
+    SALESFORCE_CLIENT_ID: str = ""
+    SALESFORCE_CLIENT_SECRET: str = ""
+    SALESFORCE_USERNAME: str = ""
+    SALESFORCE_PASSWORD: str = ""
+    SALESFORCE_SECURITY_TOKEN: str = ""
+    SALESFORCE_INSTANCE_URL: str = ""   # e.g. https://yourorg.salesforce.com
+
+    # ── Local Whisper transcription ────────────────────────────────────────────
+    WHISPER_ENABLED: bool = False       # set True to use local Whisper instead of Gemini
+    WHISPER_MODEL: str = "base"         # Whisper model size: tiny, base, small, medium, large
+    WHISPER_DEVICE: str = "cpu"         # "cpu" or "cuda" for GPU acceleration
+
+    # ── Team workspaces ────────────────────────────────────────────────────────
+    WORKSPACES_ENABLED: bool = True
+
+    # ── SAML SSO ───────────────────────────────────────────────────────────────
+    SAML_ENABLED: bool = False
+    SAML_SP_BASE_URL: str = ""          # e.g. https://app.meetingbot.io (used in SP metadata)
+
+    # ── MCP server ─────────────────────────────────────────────────────────────
+    MCP_ENABLED: bool = True
+
     model_config = {"env_file": ".env", "extra": "ignore"}
 
 

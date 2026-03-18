@@ -103,3 +103,14 @@ def _migrate_schema(conn) -> None:
         if "account_id" not in existing:
             _log.info("Adding column webhooks.account_id")
             conn.execute(text("ALTER TABLE webhooks ADD COLUMN account_id VARCHAR(36)"))
+
+    # bot_snapshots — v5.x: add consent_opted_out, keyword_alerts_fired fields
+    if "bot_snapshots" in inspector.get_table_names():
+        existing = {col["name"] for col in inspector.get_columns("bot_snapshots")}
+        for col_name, col_def in [
+            ("consent_given", f"BOOLEAN NOT NULL DEFAULT {_bool_false}"),
+            ("opted_out_participants", "TEXT"),
+        ]:
+            if col_name not in existing:
+                _log.info("Adding column bot_snapshots.%s", col_name)
+                conn.execute(text(f"ALTER TABLE bot_snapshots ADD COLUMN {col_name} {col_def}"))

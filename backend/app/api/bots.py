@@ -227,6 +227,18 @@ async def create_bot(payload: BotCreate, request: Request):
         and payload.join_at.replace(tzinfo=timezone.utc) > _now()
     )
 
+    from app.config import settings as _settings
+
+    # Resolve consent: per-bot override > platform default
+    consent_enabled = payload.consent_enabled or _settings.CONSENT_ANNOUNCEMENT_ENABLED
+    consent_message = payload.consent_message  # None = use platform default
+
+    # Convert keyword alert configs to plain dicts for storage
+    keyword_alerts_dicts = [
+        {"keyword": ka.keyword, "webhook_url": ka.webhook_url}
+        for ka in (payload.keyword_alerts or [])
+    ]
+
     bot = BotSession(
         id=str(uuid.uuid4()),
         meeting_url=str(payload.meeting_url),
@@ -249,6 +261,13 @@ async def create_bot(payload: BotCreate, request: Request):
         sub_user_id=sub_user_id,
         bot_avatar_url=payload.bot_avatar_url,
         record_video=payload.record_video,
+        # New fields
+        consent_enabled=consent_enabled,
+        consent_message=consent_message,
+        keyword_alerts=keyword_alerts_dicts,
+        auto_followup_email=payload.auto_followup_email,
+        workspace_id=payload.workspace_id,
+        transcription_provider=payload.transcription_provider,
     )
     await store.create_bot(bot)
 

@@ -10,9 +10,21 @@ Send bots into **Zoom**, **Google Meet**, and **Microsoft Teams** meetings to re
 
 ---
 
-## Recent changes (2026-03-17)
+## Recent changes (2026-03-18)
 
 ### New features
+- **Consent announcement + opt-out** — Set `consent_enabled: true` on a bot to announce recording at join. Transcripts are scanned for opt-out phrases; opted-out participants' content is redacted. Configure globally via `CONSENT_ANNOUNCEMENT_ENABLED` and `CONSENT_OPT_OUT_PHRASE` env vars.
+- **Auto-delete retention policies** — `GET/PUT /api/v1/retention` to configure per-account bot/recording/transcript retention days. A background task enforces policies nightly. Defaults controlled via `DEFAULT_BOT_RETENTION_DAYS` (90), `DEFAULT_RECORDING_RETENTION_DAYS` (30).
+- **Keyword alerts** — `POST /api/v1/keyword-alerts` to register keywords. A `bot.keyword_alert` webhook event fires whenever a keyword is detected in a transcript. Per-bot alerts can also be specified at creation via `keyword_alerts: [{"keyword": "...", "webhook_url": "..."}]`.
+- **Follow-up email draft** — Set `auto_followup_email: true` on bot creation to automatically generate and send a follow-up email when the meeting ends. Also available on-demand via `POST /api/v1/bot/{id}/followup-email`.
+- **Cross-meeting search** — `GET /api/v1/search?q=...` now searches the full historical archive (DB-persisted bots), not just the 24-hour in-memory window. Filter by `platform` and `include_archived`.
+- **HubSpot / Salesforce CRM integration** — Register a `hubspot` or `salesforce` integration via `POST /api/v1/integrations`. Meeting summaries are automatically posted as HubSpot Note engagements or Salesforce Tasks after each meeting.
+- **Local Whisper transcription** — Set `transcription_provider: "whisper"` on bot creation (or `WHISPER_ENABLED=true` globally) to transcribe with `faster-whisper` / `openai-whisper` locally. Falls back to Gemini if unavailable.
+- **Team workspaces** — `POST /api/v1/workspaces` creates a shared workspace. Invite members with roles (`admin`/`member`/`viewer`). Bots tagged with a `workspace_id` are visible to all workspace members.
+- **MCP server** — `GET /api/v1/mcp/schema` returns the server manifest; `POST /api/v1/mcp/call` executes tools: `list_meetings`, `get_meeting`, `search_meetings`, `get_action_items`, `get_meeting_brief`.
+- **SAML 2.0 SSO** — Set `SAML_ENABLED=true` + `SAML_SP_BASE_URL`. Register IdP configs at `POST /api/v1/auth/saml/configs` (admin). Users authenticate at `GET /api/v1/auth/saml/{org_slug}/authorize`.
+
+### Previous changes (2026-03-17)
 - **Account type switching** — Users can switch their own account between `personal` and `business` at any time via `PUT /api/v1/auth/account-type` without affecting existing bot data or credits. Admins can change any account's type via `POST /api/v1/admin/accounts/{id}/set-account-type`. Both operations are also available through the dashboard UI (account type chip with switcher) and the admin panel (inline account type dropdown on each user row).
 - **Split API documentation** — `/api/docs` (public Swagger UI) exposes only user-facing endpoints. Admin-only routes, platform analytics, and `ai_usage` cost fields are hidden from the public schema. Admins access the full schema — including all admin endpoints and AI cost data — at `/api/v1/admin/docs` (requires admin auth).
 - **`/bot/{id}` session viewer** — new web UI page showing transcript, AI analysis (summary, key points, action items, decisions, next steps, sentiment, topics), speaker stats, chapter breakdown, meeting metadata, and download links for audio/video/markdown/PDF.
