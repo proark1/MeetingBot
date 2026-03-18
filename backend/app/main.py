@@ -21,6 +21,8 @@ from slowapi.util import get_remote_address
 from fastapi.responses import JSONResponse as _JSONResponse
 
 from app.config import settings
+from fastapi.openapi.docs import get_swagger_ui_html as _get_swagger_ui_html
+from fastapi.openapi.utils import get_openapi as _get_openapi_util
 from app.api.bots import router as bots_router, _queue_processor, _running_tasks
 from app.api.webhooks import router as webhooks_router
 from app.api.exports import router as exports_router
@@ -401,10 +403,45 @@ _PUBLIC_DESCRIPTION = (
     "Default: `local` — recordings are stored on disk with automatic cleanup after "
     "`RECORDING_RETENTION_DAYS` days.\n\n"
 
+    "## Consent & recording announcement\n"
+    "Set `consent_enabled: true` on bot creation to have the bot announce recording at join. "
+    "Transcripts are scanned for the opt-out phrase (default: `'opt out'`) — opted-out "
+    "participants' content is automatically redacted. Configure globally via "
+    "`CONSENT_ANNOUNCEMENT_ENABLED` and `CONSENT_OPT_OUT_PHRASE` env vars.\n\n"
+
+    "## Data retention policies\n"
+    "`GET/PUT /api/v1/retention` — configure per-account retention days for bots, recordings, "
+    "and transcripts. Use `-1` for keep-forever. Platform defaults: "
+    "`DEFAULT_BOT_RETENTION_DAYS` (90 days), `DEFAULT_RECORDING_RETENTION_DAYS` (30 days). "
+    "A background task enforces policies nightly.\n\n"
+
+    "## Keyword alerts\n"
+    "`POST /api/v1/keyword-alerts` — register a keyword. When it is detected in any completed "
+    "transcript, a `bot.keyword_alert` webhook event fires. Keywords can also be set per-bot "
+    "at creation via `keyword_alerts: [{keyword, webhook_url?}]`.\n\n"
+
+    "## Workspaces\n"
+    "`POST /api/v1/workspaces` — create a shared workspace. Invite members with roles "
+    "(`admin` / `member` / `viewer`). Tag bots with `workspace_id` at creation to make "
+    "them visible to all workspace members. `WORKSPACES_ENABLED=true` (default).\n\n"
+
+    "## MCP (Model Context Protocol)\n"
+    "`GET /api/v1/mcp/schema` returns the server manifest. "
+    "`POST /api/v1/mcp/call` executes tools: `list_meetings`, `get_meeting`, "
+    "`search_meetings`, `get_action_items`, `get_meeting_brief`. "
+    "Enable/disable with `MCP_ENABLED` (default `true`).\n\n"
+
+    "## SAML 2.0 SSO\n"
+    "Set `SAML_ENABLED=true` and `SAML_SP_BASE_URL` to enable enterprise SSO. "
+    "Admins register IdP configs at `POST /api/v1/auth/saml/configs`. "
+    "Users authenticate at `GET /api/v1/auth/saml/{org_slug}/authorize`.\n\n"
+
     "## Exports\n"
     "Export meeting reports in multiple formats:\n"
     "- `GET /api/v1/bot/{id}/export/markdown` — Markdown report with transcript, summary, and action items\n"
-    "- `GET /api/v1/bot/{id}/export/pdf` — PDF report (same content)\n\n"
+    "- `GET /api/v1/bot/{id}/export/pdf` — PDF report (same content)\n"
+    "- `GET /api/v1/bot/{id}/export/json` — Full session as structured JSON\n"
+    "- `GET /api/v1/bot/{id}/export/srt` — Transcript as SRT subtitle file\n\n"
 
     "## Analysis templates\n"
     "Use predefined templates to customize analysis output:\n"
@@ -599,10 +636,45 @@ app = FastAPI(
         "Default: `local` — recordings are stored on disk with automatic cleanup after "
         "`RECORDING_RETENTION_DAYS` days.\n\n"
 
+        "## Consent & recording announcement\n"
+        "Set `consent_enabled: true` on bot creation to announce recording at join. "
+        "Transcripts are scanned for the opt-out phrase — opted-out participants' content is "
+        "redacted. Configure globally via `CONSENT_ANNOUNCEMENT_ENABLED` and "
+        "`CONSENT_OPT_OUT_PHRASE` env vars.\n\n"
+
+        "## Data retention policies\n"
+        "`GET/PUT /api/v1/retention` — configure per-account retention days for bots, recordings, "
+        "and transcripts. Use `-1` for keep-forever. Platform defaults: "
+        "`DEFAULT_BOT_RETENTION_DAYS` (90 days), `DEFAULT_RECORDING_RETENTION_DAYS` (30 days). "
+        "A background task enforces policies nightly.\n\n"
+
+        "## Keyword alerts\n"
+        "`POST /api/v1/keyword-alerts` — register a keyword. When detected in a completed transcript "
+        "a `bot.keyword_alert` webhook event fires. Set per-bot via "
+        "`keyword_alerts: [{keyword, webhook_url?}]` at creation.\n\n"
+
+        "## Workspaces\n"
+        "`POST /api/v1/workspaces` — create a shared workspace. Invite members with roles "
+        "(`admin` / `member` / `viewer`). Tag bots with `workspace_id` to share with workspace members. "
+        "Enable/disable with `WORKSPACES_ENABLED` (default `true`).\n\n"
+
+        "## MCP (Model Context Protocol)\n"
+        "`GET /api/v1/mcp/schema` returns the server manifest. "
+        "`POST /api/v1/mcp/call` executes tools: `list_meetings`, `get_meeting`, "
+        "`search_meetings`, `get_action_items`, `get_meeting_brief`. "
+        "Enable/disable with `MCP_ENABLED` (default `true`).\n\n"
+
+        "## SAML 2.0 SSO\n"
+        "Set `SAML_ENABLED=true` and `SAML_SP_BASE_URL`. Admins register IdP configs at "
+        "`POST /api/v1/auth/saml/configs`. Users authenticate at "
+        "`GET /api/v1/auth/saml/{org_slug}/authorize`.\n\n"
+
         "## Exports\n"
         "Export meeting reports in multiple formats:\n"
         "- `GET /api/v1/bot/{id}/export/markdown` — Markdown report with transcript, summary, and action items\n"
-        "- `GET /api/v1/bot/{id}/export/pdf` — PDF report (same content)\n\n"
+        "- `GET /api/v1/bot/{id}/export/pdf` — PDF report (same content)\n"
+        "- `GET /api/v1/bot/{id}/export/json` — Full session as structured JSON\n"
+        "- `GET /api/v1/bot/{id}/export/srt` — Transcript as SRT subtitle file\n\n"
 
         "## Analytics\n"
         "`GET /api/v1/analytics` — platform-wide bot statistics including sentiment distribution, "
@@ -616,7 +688,8 @@ app = FastAPI(
 
         "## Admin\n"
         "Admin endpoints are restricted to accounts in `ADMIN_EMAILS` (env var) or with "
-        "`is_admin=true` in the database. All others receive HTTP 403.\n\n"
+        "`is_admin=true` in the database. All others receive HTTP 403. "
+        "Full interactive docs at `GET /api/v1/admin/docs`.\n\n"
         "**USDC & billing:**\n"
         "- `GET/PUT /api/v1/admin/wallet` — view or set the platform USDC collection wallet\n"
         "- `GET/PUT /api/v1/admin/rpc-url` — view or set the Ethereum RPC URL (no restart needed)\n"
@@ -625,16 +698,19 @@ app = FastAPI(
         "- `GET /api/v1/admin/usdc/unmatched` — list USDC transfers that couldn't be attributed\n"
         "- `POST /api/v1/admin/usdc/unmatched/{tx_hash}/resolve` — mark unmatched transfer resolved\n"
         "- `POST /api/v1/admin/usdc/rescan` — reset USDC monitor block pointer for rescan\n\n"
+        "**Account management:**\n"
+        "- `POST /api/v1/admin/accounts/{account_id}/set-account-type` — change any account's type\n"
+        "- `POST /api/v1/auth/saml/configs` — register SAML IdP config (admin only)\n\n"
         "**Admin web UI** at `/admin` provides:\n"
         "- Platform stats (accounts, credits, revenue, unmatched transfers)\n"
         "- Subscription plan breakdown (Free/Starter/Pro/Business counts)\n"
         "- Bot activity stats + platform feature counters (webhooks, integrations, calendar feeds, SSO)\n"
-        "- System status indicators (Stripe, RPC, HD seed, Email, Storage, Video, Google SSO, Microsoft SSO)\n"
-        "- Inline plan management — change any account's plan via a dropdown (`POST /admin/accounts/{id}/set-plan`)\n"
+        "- System status indicators (Stripe, RPC, HD seed, Email, Storage, Video, Google SSO, Microsoft SSO, SAML, Whisper)\n"
+        "- Inline plan management — change any account's plan via a dropdown\n"
         "- Monthly bot usage per account\n"
         "- Manual credit form, USDC rescan, wallet & RPC configuration\n"
         "- Unmatched USDC transfer resolution\n"
-        "- User account enable/disable/admin-toggle\n\n"
+        "- User account enable/disable/admin-toggle/account-type-switch\n\n"
 
         "## Prometheus metrics\n"
         "`GET /metrics` — Prometheus-compatible metrics endpoint (unauthenticated). "
@@ -751,6 +827,33 @@ def _make_public_openapi() -> dict[str, Any]:
 
 
 app.openapi = _make_public_openapi
+
+
+# ── Admin API docs (unauthenticated — actual endpoints still require admin auth) ─
+# These two routes are intentionally public so the browser Swagger UI can load
+# the OpenAPI schema without needing the Authorization header.  Security is
+# enforced on every individual admin data endpoint via require_admin.
+
+@app.get("/api/v1/admin/docs", include_in_schema=False, response_class=HTMLResponse)
+async def admin_api_docs():
+    """Swagger UI for the full admin API (includes all endpoints and ai_usage data)."""
+    from fastapi.responses import HTMLResponse as _HTMLResponse
+    return _get_swagger_ui_html(
+        openapi_url="/api/v1/admin/openapi.json",
+        title="MeetingBot Admin API",
+        swagger_favicon_url="",
+    )
+
+
+@app.get("/api/v1/admin/openapi.json", include_in_schema=False)
+async def admin_openapi_schema():
+    """Full OpenAPI schema — includes admin-only endpoints, platform analytics, and ai_usage fields."""
+    return _get_openapi_util(
+        title="MeetingBot Admin API",
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+    )
 
 
 @app.exception_handler(Exception)

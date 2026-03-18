@@ -448,25 +448,6 @@ async def set_account_type(
     )
 
 
-# ── Admin API docs ─────────────────────────────────────────────────────────────
-
-@router.get("/docs", include_in_schema=False, response_class=HTMLResponse)
-async def admin_api_docs(request: Request):
-    """Swagger UI for the full admin API — includes all endpoints and ai_usage data."""
-    return get_swagger_ui_html(
-        openapi_url="/api/v1/admin/openapi.json",
-        title="MeetingBot Admin API",
-        swagger_favicon_url="",
-    )
-
-
-@router.get("/openapi.json", include_in_schema=False)
-async def admin_openapi_schema(request: Request):
-    """Full OpenAPI schema including admin-only endpoints, platform analytics, and ai_usage fields."""
-    schema = _fastapi_get_openapi(
-        title="MeetingBot Admin API",
-        version=request.app.version,
-        description=request.app.description,
-        routes=request.app.routes,
-    )
-    return schema
+# Admin API docs are registered directly on the app in main.py (outside the
+# require_admin router) so the Swagger UI can load the OpenAPI schema without
+# needing the browser to send an Authorization header.

@@ -2,7 +2,7 @@
 
 **Version 2.2.0** — A stateless meeting bot API service with multi-tenant billing, business account support, Google/Microsoft SSO, Python & JS SDKs, webhook retry/delivery logs, bot persona customization, video recording, Prometheus metrics, idempotency keys, cloud storage, email notifications, calendar auto-join, Slack/Notion integrations, and GDPR compliance.
 
-> **Last updated:** 2026-03-17 · **API version in Swagger UI:** 2.2.0 <!-- auto-updated on each release -->
+> **Last updated:** 2026-03-18 · **API version in Swagger UI:** 2.2.0 <!-- auto-updated on each release -->
 
 Send bots into **Zoom**, **Google Meet**, and **Microsoft Teams** meetings to record, transcribe, and analyse them with **Claude** (Anthropic) or **Gemini** (Google) AI.
 
@@ -471,18 +471,66 @@ Full payload posted to `webhook_url` when a bot finishes.
 | `PUT` | `/api/v1/auth/account-type` | Switch account type. Body: `{account_type: "personal"\|"business"}`. Returns `{account_type, message}`. No effect on existing data or credits |
 | `DELETE` | `/api/v1/auth/account` | **GDPR erasure** — permanently delete account and all data. Irreversible. Deletes recordings from cloud storage |
 
-### Integrations (Slack & Notion)
+### Integrations (Slack, Notion, HubSpot, Salesforce)
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/api/v1/integrations` | List all integrations for the current account |
-| `POST` | `/api/v1/integrations` | Create integration. Body: `{type: "slack"\|"notion", name?, config}`. Slack config: `{webhook_url}`. Notion config: `{api_token, database_id}` |
+| `POST` | `/api/v1/integrations` | Create integration. Body: `{type: "slack"\|"notion"\|"hubspot"\|"salesforce"\|"linear"\|"jira", name?, config}` |
 | `PATCH` | `/api/v1/integrations/{id}` | Update integration config |
 | `DELETE` | `/api/v1/integrations/{id}` | Delete integration. HTTP 204 |
+
+Integration config by type:
+- **Slack** — `config.webhook_url` (Incoming Webhook URL)
+- **Notion** — `config.api_token` + `config.database_id`
+- **HubSpot** — `config.access_token` (private app access token); meeting summaries are posted as HubSpot Note engagements
+- **Salesforce** — `config.instance_url` + `config.access_token`; meeting summaries are posted as Salesforce Tasks
+- **Linear** — `config.api_key` + `config.team_id`
+- **Jira** — `config.base_url` + `config.api_token` + `config.project_key`
 
 When a bot completes, all active integrations fire automatically:
 - **Slack** — posts a rich Block Kit message to the webhook URL (summary, action items, decisions, participants)
 - **Notion** — creates a page in the configured database (summary, action items as to-dos, decisions, transcript)
+- **HubSpot / Salesforce** — posts meeting notes as CRM engagements/tasks
+
+### Retention Policies
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/v1/retention` | Get per-account retention policy. Returns `{bot_retention_days, recording_retention_days, transcript_retention_days}` |
+| `PUT` | `/api/v1/retention` | Set retention policy. Body: `{bot_retention_days?, recording_retention_days?, transcript_retention_days?}`. Use `-1` for keep-forever |
+
+A background task enforces policies nightly. Platform-wide defaults are set via `DEFAULT_BOT_RETENTION_DAYS` (90 days) and `DEFAULT_RECORDING_RETENTION_DAYS` (30 days) env vars. Per-account policies override the global defaults.
+
+### Keyword Alerts
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/v1/keyword-alerts` | List all registered keyword alerts for the current account |
+| `POST` | `/api/v1/keyword-alerts` | Register keyword alert. Body: `{keyword, webhook_url?}` |
+| `DELETE` | `/api/v1/keyword-alerts/{id}` | Delete keyword alert. HTTP 204 |
+
+When a keyword is detected in a completed transcript, a `bot.keyword_alert` webhook event fires. Keywords can also be set per-bot at creation time via `keyword_alerts: [{"keyword": "...", "webhook_url": "..."}]`.
+
+### Workspaces
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/v1/workspaces` | List all workspaces the current account belongs to |
+| `POST` | `/api/v1/workspaces` | Create a workspace. Body: `{name, description?}` |
+| `PATCH` | `/api/v1/workspaces/{id}` | Update workspace name or description |
+| `DELETE` | `/api/v1/workspaces/{id}` | Delete workspace. HTTP 204 |
+
+Tag bots with a `workspace_id` at creation to make them visible to all workspace members. Invite members with roles: `admin`, `member`, or `viewer`.
+
+### MCP (Model Context Protocol)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/v1/mcp/schema` | Returns the MCP server manifest with available tools |
+| `POST` | `/api/v1/mcp/call` | Execute an MCP tool. Body: `{tool, params}` |
+
+Available MCP tools: `list_meetings`, `get_meeting`, `search_meetings`, `get_action_items`, `get_meeting_brief`. Enable/disable with `MCP_ENABLED` env var (default `true`).
 
 ### Calendar Auto-Join
 
@@ -542,10 +590,15 @@ The background poll loop checks all active feeds every `CALENDAR_POLL_INTERVAL_S
 | `GET` | `/api/v1/templates/default-prompt` | Return the raw default analysis prompt used when no `template` or `prompt_override` is set |
 | `GET` | `/api/v1/analytics` | Aggregate stats for all bots in memory. Returns `{total_bots, active_bots, by_status, by_platform, success_rate, avg_duration_seconds, total_transcript_entries, total_ai_tokens, total_ai_cost_usd}` |
 | `GET` | `/api/v1/action-items/stats` | Cross-meeting action-item counts. Returns `{total, by_assignee, recent}` where `recent` contains up to 20 most recent action items with `bot_id` and `meeting_url` |
-| `GET` | `/api/v1/search` | Full-text search across all transcripts. Query param: `q`. Returns matching transcript snippets with bot context |
+| `GET` | `/api/v1/search` | Full-text search across all transcripts (DB-persisted + in-memory). Query params: `q` (required), `platform?`, `include_archived?`. Returns matching transcript snippets with bot context |
+| `GET` | `/api/v1/bot/{id}/brief` | Pre-meeting brief: AI-generated agenda and background for an upcoming meeting. HTTP 425 if no transcript yet |
+| `GET` | `/api/v1/bot/{id}/recurring` | Recurring meeting intelligence: links to previous meetings at the same URL and surfaces recurring action items |
+| `GET` | `/api/v1/bot/{id}/video` | Download screen recording as MP4. HTTP 404 if not available. Enable per-bot with `record_video: true` |
 | `GET` | `/api/v1/health` or `/health` | Health check → `{"status": "ok", "service": "MeetingBot", "version": "2.2.0"}` |
 
 ### Admin (requires admin account)
+
+> **Admin access:** Accounts with their email listed in `ADMIN_EMAILS` env var (comma-separated) or with `is_admin=true` in the database can access these endpoints. All others receive HTTP 403. See the full interactive admin API docs at `GET /api/v1/admin/docs`.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -555,10 +608,11 @@ The background poll loop checks all active feeds every `CALENDAR_POLL_INTERVAL_S
 | `PUT` | `/api/v1/admin/rpc-url` | Set the Ethereum RPC URL used by the USDC monitor (stored in DB, no restart needed). Validates connectivity via `eth_blockNumber` before saving. Body: `{rpc_url}` |
 | `GET` | `/api/v1/admin/config` | List all platform configuration values |
 | `POST` | `/api/v1/admin/credit` | Manually credit a user account. Body: `{email, amount_usd, note?}` — use to fix missed USDC deposits |
-| `POST` | `/api/v1/admin/accounts/{id}/set-account-type` | Change any user's account type. Body: `{account_type: "personal"\|"business"}`. Returns `{account_id, email, account_type, message}` |
+| `POST` | `/api/v1/admin/accounts/{account_id}/set-account-type` | Change any user's account type. Body: `{account_type: "personal"\|"business"}`. Returns `{account_id, email, account_type, message}` |
 | `GET` | `/api/v1/admin/usdc/unmatched` | List USDC transfers received at the platform wallet that couldn't be attributed to any account (sender wallet not registered). Query: `?resolved=false` (default) / `?resolved=true` / omit for all |
 | `POST` | `/api/v1/admin/usdc/unmatched/{tx_hash}/resolve` | Mark an unmatched transfer as resolved after crediting the account. Body: `{note?}` |
 | `POST` | `/api/v1/admin/usdc/rescan` | Reset the USDC monitor's block pointer so it rescans from `from_block` on the next cycle. Body: `{from_block}` |
+| `POST` | `/api/v1/auth/saml/configs` | **(Admin only)** Register a SAML IdP configuration for an organisation. Body: `{org_slug, idp_metadata_url, ...}`. Requires `SAML_ENABLED=true` |
 
 ### Admin UI actions (web panel at `/admin`)
 
@@ -629,7 +683,15 @@ Full set of fields accepted by `POST /api/v1/bot`:
   "start_muted": false,                            // join with microphone muted
   "live_transcription": false,                     // stream transcript in 15-s chunks during call
   "sub_user_id": "user-123",                       // business accounts: scope data to this end-user
-  "metadata": { "your_key": "your_value" }         // pass-through, echoed in all responses
+  "metadata": { "your_key": "your_value" },        // pass-through, echoed in all responses
+  "consent_enabled": false,                        // announce recording at join; redact opted-out participants
+  "record_video": false,                           // capture screen recording (MP4 via ffmpeg)
+  "workspace_id": "ws-uuid",                       // tag this bot to a workspace (visible to all members)
+  "transcription_provider": "gemini",              // "gemini" | "anthropic" | "whisper" (local)
+  "auto_followup_email": false,                    // auto-generate & send follow-up email on completion
+  "keyword_alerts": [                              // per-bot keyword monitoring
+    { "keyword": "budget", "webhook_url": "https://your-app.com/alert" }
+  ]
 }
 ```
 
@@ -827,6 +889,80 @@ Pass `Idempotency-Key: <unique-string>` in the `POST /api/v1/bot` request. Repla
 |----------|---------|-------------|
 | `CORS_ORIGINS` | `*` | Comma-separated allowed origins. Set to specific domains in production (e.g. `https://app.acme.com`) |
 | `WEBHOOK_TIMEOUT_SECONDS` | `10` | HTTP timeout in seconds for webhook delivery attempts |
+| `WEBHOOK_MAX_ATTEMPTS` | `5` | Max delivery attempts per webhook before auto-disabling |
+| `WEBHOOK_RETRY_DELAYS` | `60,300,1500,7200,36000` | Backoff delays in seconds between retry attempts |
+| `WEBHOOK_DELIVERY_RETENTION_DAYS` | `30` | Days to retain webhook delivery logs |
+
+### Consent & recording announcement
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CONSENT_ANNOUNCEMENT_ENABLED` | `false` | Set `true` to globally enable recording announcements for all bots |
+| `CONSENT_MESSAGE` | (built-in) | Message read/typed when the bot joins to announce recording |
+| `CONSENT_OPT_OUT_PHRASE` | `opt out` | Case-insensitive phrase that triggers transcript redaction for that participant |
+
+Per-bot override: set `consent_enabled: true` in `POST /api/v1/bot`.
+
+### Data retention
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DEFAULT_BOT_RETENTION_DAYS` | `90` | Days to keep bot data in the database (`-1` = keep forever) |
+| `DEFAULT_RECORDING_RETENTION_DAYS` | `30` | Days to keep audio/video recording files on disk (`-1` = keep forever) |
+
+Per-account overrides via `GET/PUT /api/v1/retention`. A background task enforces policies nightly.
+
+### Keyword alerts
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `KEYWORD_ALERTS_ENABLED` | `true` | Set `false` to globally disable keyword alert processing |
+
+### Local Whisper transcription
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `WHISPER_ENABLED` | `false` | Set `true` to default to local Whisper transcription instead of Gemini |
+| `WHISPER_MODEL` | `base` | Model size: `tiny`, `base`, `small`, `medium`, `large` (larger = more accurate, slower) |
+| `WHISPER_DEVICE` | `cpu` | `cpu` or `cuda` for GPU-accelerated transcription |
+
+Per-bot override: set `transcription_provider: "whisper"` in `POST /api/v1/bot`. Falls back to Gemini if `faster-whisper` / `openai-whisper` is not installed.
+
+### Team workspaces
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `WORKSPACES_ENABLED` | `true` | Set `false` to disable the workspaces feature |
+
+### SAML 2.0 SSO
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SAML_ENABLED` | `false` | Set `true` to enable SAML 2.0 identity provider support |
+| `SAML_SP_BASE_URL` | — | Base URL of this service (e.g. `https://app.meetingbot.io`) — used in SP metadata and ACS URL |
+
+SAML endpoints (when `SAML_ENABLED=true`):
+- `POST /api/v1/auth/saml/configs` — **(admin only)** register an IdP config for an org slug
+- `GET /api/v1/auth/saml/{org_slug}/authorize` — redirect users to the IdP login
+- `POST /api/v1/auth/saml/{org_slug}/acs` — SAML assertion consumer service (ACS) callback
+
+### MCP server
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MCP_ENABLED` | `true` | Set `false` to disable MCP server endpoints |
+
+### CRM integrations
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `HUBSPOT_API_KEY` | — | HubSpot private app access token (platform-level fallback; per-account config via `POST /api/v1/integrations`) |
+| `SALESFORCE_CLIENT_ID` | — | Salesforce connected app client ID |
+| `SALESFORCE_CLIENT_SECRET` | — | Salesforce connected app client secret |
+| `SALESFORCE_USERNAME` | — | Salesforce username |
+| `SALESFORCE_PASSWORD` | — | Salesforce password |
+| `SALESFORCE_SECURITY_TOKEN` | — | Salesforce security token (appended to password for API auth) |
+| `SALESFORCE_INSTANCE_URL` | — | Salesforce instance URL (e.g. `https://yourorg.salesforce.com`) |
 
 ---
 
