@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -837,7 +837,6 @@ app.openapi = _make_public_openapi
 @app.get("/api/v1/admin/docs", include_in_schema=False, response_class=HTMLResponse)
 async def admin_api_docs():
     """Swagger UI for the full admin API (includes all endpoints and ai_usage data)."""
-    from fastapi.responses import HTMLResponse as _HTMLResponse
     return _get_swagger_ui_html(
         openapi_url="/api/v1/admin/openapi.json",
         title="MeetingBot Admin API",
