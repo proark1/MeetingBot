@@ -229,6 +229,135 @@ async def notify_meeting_done(account_email: str, notify_email: Optional[str], b
     await send_email(recipient, subject, html_body)
 
 
+async def send_weekly_digest() -> int:
+    """Send a weekly digest email to all accounts with notify_on_done=True.
+
+    Queries BotSnapshots from the past 7 days, groups by account, and sends a
+    summary email with meeting stats, decisions, and open action items.
+    Returns the number of emails sent.
+    """
+    if not is_email_enabled():
+        logger.debug("Email disabled — skipping weekly digest")
+        return 0
+
+    from datetime import datetime, timezone, timedelta
+    import json as _json
+    from app.db import AsyncSessionLocal
+    from app.models.account import Account, BotSnapshot, ActionItem
+    from sqlalchemy import select
+
+    now = datetime.now(timezone.utc)
+    week_ago = now - timedelta(days=7)
+    sent = 0
+
+    try:
+        async with AsyncSessionLocal() as db:
+            acct_result = await db.execute(
+                select(Account).where(Account.notify_on_done == True)  # noqa: E712
+            )
+            accounts = acct_result.scalars().all()
+
+            for account in accounts:
+                recipient = account.notify_email or account.email
+                if not recipient:
+                    continue
+
+                snap_result = await db.execute(
+                    select(BotSnapshot).where(
+                        BotSnapshot.account_id == account.id,
+                        BotSnapshot.created_at >= week_ago,
+                        BotSnapshot.status == "done",
+                    )
+                )
+                snapshots = snap_result.scalars().all()
+                if not snapshots:
+                    continue
+
+                total_meetings = len(snapshots)
+                total_duration = 0.0
+                all_decisions: list[str] = []
+                all_action_items: list[dict] = []
+                platform_counts: dict[str, int] = {}
+
+                for snap in snapshots:
+                    try:
+                        data = _json.loads(snap.data or "{}")
+                    except Exception:
+                        continue
+                    total_duration += data.get("duration_seconds") or 0
+                    analysis = data.get("analysis") or {}
+                    all_decisions.extend((analysis.get("decisions") or [])[:3])
+                    all_action_items.extend((analysis.get("action_items") or [])[:5])
+                    plat = data.get("meeting_platform", "unknown")
+                    platform_counts[plat] = platform_counts.get(plat, 0) + 1
+
+                ai_result = await db.execute(
+                    select(ActionItem).where(
+                        ActionItem.account_id == account.id,
+                        ActionItem.status == "open",
+                    )
+                )
+                open_ai_count = len(ai_result.scalars().all())
+
+                hours = int(total_duration // 3600)
+                minutes = int((total_duration % 3600) // 60)
+                duration_str = f"{hours}h {minutes}m" if hours else f"{minutes}m"
+                platform_str = ", ".join(
+                    f"{p.replace('_', ' ').title()} ({c})" for p, c in platform_counts.items()
+                )
+                week_range = f"{week_ago.strftime('%b %d')} – {now.strftime('%b %d, %Y')}"
+
+                decisions_html = ""
+                if all_decisions:
+                    items = "".join(f"<li>{d}</li>" for d in all_decisions[:6])
+                    decisions_html = (
+                        "<h3 style='color:#222;font-size:15px;margin:16px 0 6px'>Key Decisions</h3>"
+                        f"<ul style='margin:0 0 16px;padding-left:20px'>{items}</ul>"
+                    )
+
+                ai_html = ""
+                if all_action_items:
+                    items = "".join(
+                        f"<li>{ai.get('task', ai) if isinstance(ai, dict) else ai}"
+                        f"{(' — <em>' + ai['assignee'] + '</em>') if isinstance(ai, dict) and ai.get('assignee') else ''}</li>"
+                        for ai in all_action_items[:6]
+                    )
+                    ai_html = (
+                        "<h3 style='color:#222;font-size:15px;margin:16px 0 6px'>Action Items (sample)</h3>"
+                        f"<ul style='margin:0 0 16px;padding-left:20px'>{items}</ul>"
+                    )
+
+                html_body = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head>
+<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#1a1a1a;background:#f5f5f5;margin:0;padding:20px;">
+<div style="background:white;border-radius:8px;padding:24px 32px;max-width:600px;margin:0 auto;box-shadow:0 1px 3px rgba(0,0,0,.1)">
+  <h2 style="margin-top:0;color:#111">Your Weekly Meeting Digest</h2>
+  <p style="color:#555;font-size:14px;margin-top:-8px">{week_range}</p>
+  <div style="background:#f9f9f9;border-radius:6px;padding:12px 16px;margin:16px 0;font-size:14px">
+    <span style="display:inline-block;margin-right:20px;color:#555">📅 <strong>{total_meetings}</strong> meeting{'s' if total_meetings != 1 else ''}</span>
+    <span style="display:inline-block;margin-right:20px;color:#555">⏱ <strong>{duration_str}</strong> total</span>
+    <span style="display:inline-block;color:#555">✅ <strong>{open_ai_count}</strong> open action item{'s' if open_ai_count != 1 else ''}</span>
+  </div>
+  {f'<p style="font-size:14px;color:#555"><strong>Platforms:</strong> {platform_str}</p>' if platform_str else ''}
+  {decisions_html}
+  {ai_html}
+  <div style="font-size:12px;color:#888;margin-top:24px;padding-top:16px;border-top:1px solid #eee">
+    JustHereToListen.io &mdash; You receive this because you enabled meeting notifications.
+  </div>
+</div>
+</body></html>"""
+
+                subject = f"📋 Weekly digest — {total_meetings} meeting{'s' if total_meetings != 1 else ''} ({week_range})"
+                if await send_email(recipient, subject, html_body):
+                    sent += 1
+
+    except Exception as exc:
+        logger.error("Weekly digest failed: %s", exc)
+
+    logger.info("Weekly digest: sent %d email(s)", sent)
+    return sent
+
+
 async def notify_meeting_error(account_email: str, notify_email: Optional[str], bot_id: str, error: str) -> None:
     """Send a 'meeting error' notification email."""
     recipient = notify_email or account_email

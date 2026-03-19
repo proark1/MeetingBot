@@ -1624,6 +1624,9 @@ async def share_meeting(token: str, request: Request):
         "decisions": analysis.get("decisions", []),
         "topics": analysis.get("topics", []),
         "sentiment": analysis.get("sentiment", "neutral"),
+        "risks_blockers": analysis.get("risks_blockers", []),
+        "unresolved_items": analysis.get("unresolved_items", []),
+        "next_meeting": analysis.get("next_meeting"),
         "transcript": bot.transcript,
         "created_at": bot.created_at,
     })

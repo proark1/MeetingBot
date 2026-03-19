@@ -143,7 +143,27 @@ def _build_markdown(bot: BotSession) -> str:
 
     topics = analysis.get("topics", [])
     if topics:
-        lines += [f"**Topics:** {', '.join(topics)}", ""]
+        topic_names = [
+            t.get("name", t) if isinstance(t, dict) else t
+            for t in topics
+        ]
+        lines += [f"**Topics:** {', '.join(topic_names)}", ""]
+
+    risks = analysis.get("risks_blockers", [])
+    if risks:
+        lines += ["## Risks & Blockers", ""]
+        lines += [f"- {r}" for r in risks]
+        lines.append("")
+
+    unresolved = analysis.get("unresolved_items", [])
+    if unresolved:
+        lines += ["## Unresolved Items", ""]
+        lines += [f"- {u}" for u in unresolved]
+        lines.append("")
+
+    next_meeting = analysis.get("next_meeting")
+    if next_meeting:
+        lines += [f"**Next Meeting:** {next_meeting}", ""]
 
     chapters = bot.chapters or []
     if chapters:
@@ -267,6 +287,13 @@ def _build_pdf(bot: BotSession) -> bytes:
             story.append(Paragraph(f"☐  {task}{suffix}", body))
 
     _section("Next Steps", analysis.get("next_steps", []))
+    _section("Risks & Blockers", analysis.get("risks_blockers", []))
+    _section("Unresolved Items", analysis.get("unresolved_items", []))
+
+    next_meeting = analysis.get("next_meeting")
+    if next_meeting:
+        story.append(Paragraph("Next Meeting", h2))
+        story.append(Paragraph(str(next_meeting), body))
 
     speaker_stats = bot.speaker_stats or []
     if speaker_stats:
@@ -415,3 +442,105 @@ async def export_srt(bot_id: str, request: Request):
         media_type="text/plain",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+# ── Google Drive export ────────────────────────────────────────────────────────
+
+class DriveExportRequest(BaseModel):
+    access_token: str = ""
+    folder_id: Optional[str] = None
+    format: str = "markdown"  # "markdown" | "pdf"
+
+
+class DriveExportResponse(BaseModel):
+    file_id: str
+    file_name: str
+    web_view_link: str
+
+
+@router.post("/{bot_id}/export/drive", response_model=DriveExportResponse)
+async def export_to_drive(bot_id: str, body: DriveExportRequest, request: Request):
+    """Upload the meeting report to Google Drive.
+
+    Requires a valid Google OAuth2 access token with `drive.file` scope.
+    The token can also be provided via the `Authorization: Bearer <token>` header.
+    """
+    import httpx as _httpx
+
+    bot = await _get_or_404(bot_id, getattr(request.state, "account_id", None))
+
+    # Accept token from body or Authorization header (stripped of "Bearer " prefix)
+    token = body.access_token
+    if not token:
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:]
+    if not token:
+        raise HTTPException(status_code=400, detail="access_token is required (body or Authorization header)")
+
+    if body.format == "pdf":
+        try:
+            content = _build_pdf(bot)
+        except Exception:
+            raise HTTPException(status_code=501, detail="PDF export requires reportlab — run: pip install reportlab")
+        mime_type = "application/pdf"
+        filename = f"meeting-{bot_id[:8]}.pdf"
+    else:
+        content_str = _build_markdown(bot)
+        content = content_str.encode("utf-8")
+        mime_type = "text/markdown"
+        filename = f"meeting-{bot_id[:8]}.md"
+
+    # Metadata part
+    metadata: dict[str, Any] = {"name": filename, "mimeType": mime_type}
+    if body.folder_id:
+        metadata["parents"] = [body.folder_id]
+
+    import json as _json
+
+    try:
+        async with _httpx.AsyncClient(timeout=30) as client:
+            response = await client.post(
+                "https://www.googleapis.com/upload/drive/v3/files",
+                params={"uploadType": "multipart", "fields": "id,name,webViewLink"},
+                content=_build_multipart_body(
+                    _json.dumps(metadata).encode(),
+                    content,
+                    mime_type,
+                ),
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "multipart/related; boundary=meetingbot_boundary",
+                },
+            )
+    except Exception as exc:
+        logger.error("Drive upload request failed: %s", exc)
+        raise HTTPException(status_code=502, detail=f"Drive upload failed: {exc}")
+
+    if response.status_code not in (200, 201):
+        raise HTTPException(
+            status_code=502,
+            detail=f"Google Drive API returned {response.status_code}: {response.text[:200]}",
+        )
+
+    data = response.json()
+    return DriveExportResponse(
+        file_id=data.get("id", ""),
+        file_name=data.get("name", filename),
+        web_view_link=data.get("webViewLink", ""),
+    )
+
+
+def _build_multipart_body(metadata_bytes: bytes, content_bytes: bytes, mime_type: str) -> bytes:
+    boundary = b"meetingbot_boundary"
+    crlf = b"\r\n"
+    body = (
+        b"--" + boundary + crlf
+        + b"Content-Type: application/json; charset=UTF-8" + crlf + crlf
+        + metadata_bytes + crlf
+        + b"--" + boundary + crlf
+        + b"Content-Type: " + mime_type.encode() + crlf + crlf
+        + content_bytes + crlf
+        + b"--" + boundary + b"--"
+    )
+    return body

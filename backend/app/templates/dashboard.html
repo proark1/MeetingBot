@@ -831,7 +831,7 @@
           <div class="mt-3">
             <label class="form-label">Events <span style="color:#94a3b8;font-weight:400">(leave all unchecked to receive every event)</span></label>
             <div id="wh-events-group" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:0.25rem 1.5rem;padding:0.5rem;border:1px solid #e2e8f0;border-radius:6px;background:#f8fafc">
-              {% for ev in ["bot.joining","bot.in_call","bot.call_ended","bot.transcript_ready","bot.analysis_ready","bot.done","bot.error","bot.cancelled","bot.keyword_alert","bot.live_transcript","bot.live_transcript_translated","bot.recurring_intel_ready"] %}
+              {% for ev in ["bot.joining","bot.in_call","bot.call_ended","bot.transcript_ready","bot.analysis_ready","bot.done","bot.error","bot.cancelled","bot.keyword_alert","bot.live_transcript","bot.live_transcript_translated","bot.recurring_intel_ready","bot.test"] %}
               <label class="form-check-label" style="display:flex;align-items:center;gap:0.4rem;font-size:12px;cursor:pointer">
                 <input type="checkbox" class="form-check-input wh-event-cb" value="{{ ev }}" style="margin-top:0">
                 <code style="font-size:11px">{{ ev }}</code>

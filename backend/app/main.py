@@ -273,6 +273,26 @@ async def lifespan(app: FastAPI):
 
     retention_task = asyncio.create_task(_supervised("retention_loop", _retention_loop))
 
+    # Weekly digest — fires every Monday at 08:00 UTC
+    async def _weekly_digest_loop():
+        from datetime import datetime, timezone, timedelta
+        while True:
+            now = datetime.now(timezone.utc)
+            days_until_monday = (7 - now.weekday()) % 7
+            if days_until_monday == 0 and now.hour >= 8:
+                days_until_monday = 7  # already past today's 08:00 window
+            next_run = now.replace(hour=8, minute=0, second=0, microsecond=0) + timedelta(days=days_until_monday)
+            sleep_s = (next_run - now).total_seconds()
+            logger.info("Weekly digest: next run in %.0f s (%s UTC)", sleep_s, next_run.strftime("%Y-%m-%d %H:%M"))
+            await asyncio.sleep(sleep_s)
+            from app.services.email_service import send_weekly_digest
+            try:
+                await send_weekly_digest()
+            except Exception as exc:
+                logger.error("Weekly digest error: %s", exc)
+
+    digest_task = asyncio.create_task(_supervised("weekly_digest", _weekly_digest_loop))
+
     logger.info("JustHereToListen.io ready — API docs at /api/docs")
     yield
 
@@ -282,6 +302,7 @@ async def lifespan(app: FastAPI):
     webhook_retry_task.cancel()
     calendar_task.cancel()
     retention_task.cancel()
+    digest_task.cancel()
 
     if _running_tasks:
         logger.info("Cancelling %d running bot task(s)…", len(_running_tasks))

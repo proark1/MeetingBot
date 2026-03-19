@@ -128,6 +128,34 @@
   </div>
   {% endif %}
 
+  <!-- Risks & Blockers -->
+  {% if risks_blockers %}
+  <div class="card">
+    <div class="section-title">Risks &amp; Blockers</div>
+    <ul style="margin:0;padding-left:1.25rem;color:#dc2626">
+      {% for r in risks_blockers %}<li style="font-size:13.5px;margin-bottom:.35rem">{{ r }}</li>{% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  <!-- Unresolved Items -->
+  {% if unresolved_items %}
+  <div class="card">
+    <div class="section-title">Unresolved Items</div>
+    <ul style="margin:0;padding-left:1.25rem;color:#92400e">
+      {% for u in unresolved_items %}<li style="font-size:13.5px;margin-bottom:.35rem">{{ u }}</li>{% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  <!-- Next Meeting -->
+  {% if next_meeting %}
+  <div class="card">
+    <div class="section-title">Next Meeting</div>
+    <span class="chip" style="background:#eff6ff;color:#1d4ed8">📅 {{ next_meeting }}</span>
+  </div>
+  {% endif %}
+
   <!-- Transcript -->
   {% if transcript %}
   <div class="card">

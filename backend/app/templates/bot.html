@@ -235,7 +235,7 @@
     <div class="section-subtitle mb-2" style="font-weight:600;color:#0f172a">Topics</div>
     <div class="d-flex flex-wrap gap-2">
       {% for topic in bot.analysis.topics %}
-      <span class="chip chip-gray">{{ topic }}</span>
+      <span class="chip chip-gray">{{ topic.name if topic is mapping else topic }}</span>
       {% endfor %}
     </div>
   </div>
@@ -282,13 +282,42 @@
   {% endif %}
 
   {% if bot.analysis.next_steps %}
-  <div>
+  <div class="mb-3">
     <div class="section-subtitle mb-2" style="font-weight:600;color:#0f172a">Next Steps</div>
     <ul style="margin:0;padding-left:1.25rem;color:#334155">
       {% for step in bot.analysis.next_steps %}
       <li style="margin-bottom:4px">{{ step }}</li>
       {% endfor %}
     </ul>
+  </div>
+  {% endif %}
+
+  {% if bot.analysis.risks_blockers %}
+  <div class="mb-3">
+    <div class="section-subtitle mb-2" style="font-weight:600;color:#0f172a">Risks &amp; Blockers</div>
+    <ul style="margin:0;padding-left:1.25rem;color:#dc2626">
+      {% for item in bot.analysis.risks_blockers %}
+      <li style="margin-bottom:4px">{{ item }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  {% if bot.analysis.unresolved_items %}
+  <div class="mb-3">
+    <div class="section-subtitle mb-2" style="font-weight:600;color:#0f172a">Unresolved Items</div>
+    <ul style="margin:0;padding-left:1.25rem;color:#92400e">
+      {% for item in bot.analysis.unresolved_items %}
+      <li style="margin-bottom:4px">{{ item }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  {% if bot.analysis.next_meeting %}
+  <div class="mb-3">
+    <div class="section-subtitle mb-1" style="font-weight:600;color:#0f172a">Next Meeting</div>
+    <span class="chip chip-gray" style="background:#eff6ff;color:#1d4ed8">📅 {{ bot.analysis.next_meeting }}</span>
   </div>
   {% endif %}
 </div>

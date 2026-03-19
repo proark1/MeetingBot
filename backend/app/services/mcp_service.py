@@ -406,7 +406,7 @@ async def _tool_create_bot(args: dict, account_id: Optional[str]) -> dict:
         template=payload.template,
         respond_on_mention=payload.respond_on_mention,
     )
-    await store.new_bot(bot)
+    await store.create_bot(bot)
     use_real_bot = bool(settings.USE_REAL_BOT)
     import asyncio as _asyncio
     task = _asyncio.create_task(bot_service.run_bot_lifecycle(bot_id, use_real_bot))
