@@ -178,8 +178,8 @@ async def login_submit(
 
 @router.get("/logout", include_in_schema=False)
 async def logout():
-    response = RedirectResponse("/login")
-    response.delete_cookie(_COOKIE)
+    response = RedirectResponse("/login", status_code=303)
+    response.delete_cookie(_COOKIE, httponly=True, samesite="lax")
     return response
 
 
