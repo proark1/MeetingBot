@@ -118,6 +118,18 @@ async def create_webhook(payload: WebhookCreate, request: _Request):
     """
     await _block_ssrf(payload.url)
     wh = await store.new_webhook(url=payload.url, events=payload.events, secret=payload.secret)
+
+    import asyncio as _asyncio
+    from app.services.audit_log_service import log_event as _audit
+    _asyncio.create_task(_audit(
+        account_id=None,
+        action="webhook.created",
+        resource_type="webhook",
+        resource_id=wh.id,
+        ip_address=request.client.host if request.client else None,
+        details={"url": wh.url, "events": wh.events},
+    ))
+
     return _to_response(wh)
 
 
@@ -139,6 +151,15 @@ async def get_webhook(webhook_id: str):
 async def delete_webhook(webhook_id: str):
     if not await store.delete_webhook(webhook_id):
         raise HTTPException(status_code=404, detail=f"Webhook {webhook_id!r} not found")
+
+    import asyncio as _asyncio
+    from app.services.audit_log_service import log_event as _audit
+    _asyncio.create_task(_audit(
+        account_id=None,
+        action="webhook.deleted",
+        resource_type="webhook",
+        resource_id=webhook_id,
+    ))
 
 
 @router.post("/{webhook_id}/test")

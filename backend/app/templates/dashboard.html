@@ -1431,7 +1431,7 @@ async function _handleIntegToggle() {
   const btn = this;
   btn.disabled = true;
   try {
-    const data = await apiFetch(`/dashboard/integrations/${btn.dataset.toggleInteg}`, { method: 'POST' });
+    const data = await apiFetch(`/dashboard/integrations/${btn.dataset.toggleInteg}/toggle`, { method: 'POST' });
     btn.textContent = data.is_active ? 'Pause' : 'Enable';
     const row = btn.closest('tr');
     const chip = row?.querySelector('.chip');
@@ -1503,7 +1503,7 @@ async function _handleCalToggle() {
   const btn = this;
   btn.disabled = true;
   try {
-    const data = await apiFetch(`/dashboard/calendar/${btn.dataset.toggleCal}`, { method: 'POST' });
+    const data = await apiFetch(`/dashboard/calendar/${btn.dataset.toggleCal}/toggle`, { method: 'POST' });
     btn.textContent = data.is_active ? 'Pause' : 'Enable';
     const row = btn.closest('tr');
     const chip = row?.querySelector('.chip');

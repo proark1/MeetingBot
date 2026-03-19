@@ -77,19 +77,25 @@ def _migrate_schema(conn) -> None:
                 _log.info("Adding column accounts.%s", col_name)
                 conn.execute(text(f"ALTER TABLE accounts ADD COLUMN {col_name} {col_def}"))
 
-    # api_keys table — last_used_at added in v2.x
+    # api_keys table — last_used_at added in v2.x; mode added in v5.x (test key support)
     if "api_keys" in inspector.get_table_names():
         existing = {col["name"] for col in inspector.get_columns("api_keys")}
         if "last_used_at" not in existing:
             _log.info("Adding column api_keys.last_used_at")
             conn.execute(text(f"ALTER TABLE api_keys ADD COLUMN last_used_at {_dt_type}"))
+        if "mode" not in existing:
+            _log.info("Adding column api_keys.mode")
+            conn.execute(text("ALTER TABLE api_keys ADD COLUMN mode VARCHAR(10) NOT NULL DEFAULT 'live'"))
 
-    # bot_snapshots — sub_user_id added in v2.1
+    # bot_snapshots — sub_user_id added in v2.1; expires_at added in v3.x
     if "bot_snapshots" in inspector.get_table_names():
         existing = {col["name"] for col in inspector.get_columns("bot_snapshots")}
         if "sub_user_id" not in existing:
             _log.info("Adding column bot_snapshots.sub_user_id")
             conn.execute(text("ALTER TABLE bot_snapshots ADD COLUMN sub_user_id VARCHAR(255)"))
+        if "expires_at" not in existing:
+            _log.info("Adding column bot_snapshots.expires_at")
+            conn.execute(text(f"ALTER TABLE bot_snapshots ADD COLUMN expires_at {_dt_type}"))
 
     # accounts table — columns added in v3.x (plans, notifications, usage counters)
     if "accounts" in inspector.get_table_names():
@@ -106,12 +112,20 @@ def _migrate_schema(conn) -> None:
                 _log.info("Adding column accounts.%s", col_name)
                 conn.execute(text(f"ALTER TABLE accounts ADD COLUMN {col_name} {col_def}"))
 
-    # webhooks table — v4.x: add account_id for ownership scoping
+    # webhooks table — v4.x: delivery tracking columns + account_id for ownership scoping
     if "webhooks" in inspector.get_table_names():
         existing = {col["name"] for col in inspector.get_columns("webhooks")}
-        if "account_id" not in existing:
-            _log.info("Adding column webhooks.account_id")
-            conn.execute(text("ALTER TABLE webhooks ADD COLUMN account_id VARCHAR(36)"))
+        wh_migrations = [
+            ("account_id",           "VARCHAR(36)"),
+            ("delivery_attempts",    "INTEGER NOT NULL DEFAULT 0"),
+            ("last_delivery_at",     f"{_dt_type}"),
+            ("last_delivery_status", "INTEGER"),
+            ("consecutive_failures", "INTEGER NOT NULL DEFAULT 0"),
+        ]
+        for col_name, col_def in wh_migrations:
+            if col_name not in existing:
+                _log.info("Adding column webhooks.%s", col_name)
+                conn.execute(text(f"ALTER TABLE webhooks ADD COLUMN {col_name} {col_def}"))
 
     # bot_snapshots — v5.x: add consent_opted_out, keyword_alerts_fired fields
     if "bot_snapshots" in inspector.get_table_names():

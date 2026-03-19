@@ -217,6 +217,16 @@ async def register(request: Request, payload: RegisterRequest, db: AsyncSession 
     await db.commit()
 
     logger.info("New account registered: %s (%s)", account.email, account.id)
+
+    import asyncio as _asyncio
+    from app.services.audit_log_service import log_event as _audit
+    _asyncio.create_task(_audit(
+        account_id=account.id,
+        action="auth.register",
+        ip_address=request.client.host if request.client else None,
+        actor_email=account.email,
+    ))
+
     msg = "Account created. Use the api_key as your Bearer token: Authorization: Bearer <api_key>"
     if acct_type == "business":
         msg += (
@@ -257,6 +267,16 @@ async def login(
         raise HTTPException(status_code=403, detail="Account is disabled")
 
     token = _create_jwt(account.id)
+
+    import asyncio as _asyncio
+    from app.services.audit_log_service import log_event as _audit
+    _asyncio.create_task(_audit(
+        account_id=account.id,
+        action="auth.login",
+        ip_address=request.client.host if request.client else None,
+        actor_email=account.email,
+    ))
+
     return LoginResponse(access_token=token, account_id=account.id)
 
 
@@ -302,6 +322,16 @@ async def create_api_key(
     )
     db.add(api_key)
     await db.commit()
+
+    import asyncio as _asyncio
+    from app.services.audit_log_service import log_event as _audit
+    _asyncio.create_task(_audit(
+        account_id=account_id,
+        action="api_key.created",
+        resource_type="api_key",
+        resource_id=api_key.id,
+        details={"name": api_key.name},
+    ))
 
     return ApiKeyResponse(
         id=api_key.id,
@@ -361,6 +391,15 @@ async def revoke_api_key(
         raise HTTPException(status_code=404, detail="API key not found")
     key.is_active = False
     await db.commit()
+
+    import asyncio as _asyncio
+    from app.services.audit_log_service import log_event as _audit
+    _asyncio.create_task(_audit(
+        account_id=account_id,
+        action="api_key.revoked",
+        resource_type="api_key",
+        resource_id=key_id,
+    ))
 
 
 # ── Sandbox / test keys (sk_test_...) ────────────────────────────────────────

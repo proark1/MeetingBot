@@ -147,6 +147,10 @@
 
       <div class="admin-sidebar-label">Infrastructure</div>
 
+      <button class="admin-nav-item" data-section="audit">
+        <span>🛡️</span> Audit Log
+      </button>
+
       <button class="admin-nav-item" data-section="system">
         <span>⚙️</span> System Status
         {% if not crypto_rpc_configured %}
@@ -528,6 +532,77 @@
     </div>
 
     <!-- ────────────────────────────────────────────
+         AUDIT LOG
+    ──────────────────────────────────────────── -->
+    <div class="admin-section" id="admin-section-audit">
+      <div class="admin-section-hdr">
+        <div>
+          <h2>Audit Log</h2>
+          <p class="text-muted mb-0" style="font-size:13px">Tamper-evident, append-only record of platform actions (SOC 2).</p>
+        </div>
+      </div>
+
+      <!-- Filter bar -->
+      <div class="card mb-3" style="background:#1e293b;border:1px solid rgba(255,255,255,0.08);">
+        <div class="card-body py-2">
+          <div class="row g-2 align-items-end">
+            <div class="col-md-3">
+              <label class="form-label text-muted" style="font-size:11px;font-weight:600;text-transform:uppercase">Action filter</label>
+              <select id="auditActionFilter" class="form-select form-select-sm" style="background:#0f172a;border-color:rgba(255,255,255,0.12);color:#e2e8f0;">
+                <option value="">All actions</option>
+                <option value="bot.created">bot.created</option>
+                <option value="bot.deleted">bot.deleted</option>
+                <option value="auth.login">auth.login</option>
+                <option value="auth.register">auth.register</option>
+                <option value="api_key.created">api_key.created</option>
+                <option value="api_key.revoked">api_key.revoked</option>
+                <option value="webhook.created">webhook.created</option>
+                <option value="webhook.deleted">webhook.deleted</option>
+                <option value="admin.">admin.*</option>
+              </select>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label text-muted" style="font-size:11px;font-weight:600;text-transform:uppercase">Account ID</label>
+              <input type="text" id="auditAccountFilter" class="form-control form-control-sm" placeholder="(any)" style="background:#0f172a;border-color:rgba(255,255,255,0.12);color:#e2e8f0;">
+            </div>
+            <div class="col-md-2">
+              <button class="btn btn-sm btn-primary w-100" onclick="loadAuditLog()">Search</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Audit table -->
+      <div class="card" style="background:#1e293b;border:1px solid rgba(255,255,255,0.08);">
+        <div class="card-body p-0">
+          <div id="auditTableWrap" style="overflow-x:auto;">
+            <table class="table table-sm mb-0" style="font-size:12.5px;color:#cbd5e1;">
+              <thead>
+                <tr style="border-bottom:1px solid rgba(255,255,255,0.08);">
+                  <th class="px-3 py-2" style="color:#64748b;font-weight:600;">Time (UTC)</th>
+                  <th class="px-3 py-2" style="color:#64748b;font-weight:600;">Action</th>
+                  <th class="px-3 py-2" style="color:#64748b;font-weight:600;">Resource</th>
+                  <th class="px-3 py-2" style="color:#64748b;font-weight:600;">Actor / Details</th>
+                  <th class="px-3 py-2" style="color:#64748b;font-weight:600;">IP</th>
+                </tr>
+              </thead>
+              <tbody id="auditTableBody">
+                <tr><td colspan="5" class="text-center text-muted py-4">Click Search to load entries.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="d-flex justify-content-between align-items-center px-3 py-2" style="border-top:1px solid rgba(255,255,255,0.06);">
+            <span id="auditCount" class="text-muted" style="font-size:12px;"></span>
+            <div class="d-flex gap-2">
+              <button id="auditPrevBtn" class="btn btn-sm btn-outline-secondary" onclick="auditPage(-1)" disabled>← Prev</button>
+              <button id="auditNextBtn" class="btn btn-sm btn-outline-secondary" onclick="auditPage(1)">Next →</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ────────────────────────────────────────────
          SYSTEM STATUS
     ──────────────────────────────────────────── -->
     <div class="admin-section" id="admin-section-system">
@@ -743,8 +818,86 @@ document.querySelectorAll('.admin-nav-item[data-section]').forEach(btn => {
 
 document.addEventListener('DOMContentLoaded', () => {
   const hash = window.location.hash.replace('#', '');
-  const valid = ['overview','users','billing','system','crypto'];
+  const valid = ['overview','users','billing','audit','system','crypto'];
   if (hash && valid.includes(hash)) adminSwitch(hash);
 });
+
+// ── Audit Log ─────────────────────────────────────────────────────────────────
+let _auditOffset = 0;
+const _auditLimit = 50;
+
+const _ACTION_COLORS = {
+  'bot.created':    '#22c55e',
+  'auth.register':  '#22c55e',
+  'api_key.created':'#22c55e',
+  'webhook.created':'#22c55e',
+  'bot.deleted':    '#ef4444',
+  'api_key.revoked':'#ef4444',
+  'webhook.deleted':'#ef4444',
+  'auth.login':     '#94a3b8',
+};
+function _auditColor(action) {
+  if (_ACTION_COLORS[action]) return _ACTION_COLORS[action];
+  if (action.startsWith('admin.')) return '#f59e0b';
+  return '#94a3b8';
+}
+
+async function loadAuditLog() {
+  const action = document.getElementById('auditActionFilter').value;
+  const acct   = document.getElementById('auditAccountFilter').value.trim();
+  let url = `/api/v1/audit-log?limit=${_auditLimit}&offset=${_auditOffset}`;
+  if (action) url += `&action=${encodeURIComponent(action)}`;
+  if (acct)   url += `&account_id=${encodeURIComponent(acct)}`;
+
+  const tbody = document.getElementById('auditTableBody');
+  tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3">Loading...</td></tr>';
+
+  try {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(await r.text());
+    const rows = await r.json();
+
+    document.getElementById('auditCount').textContent =
+      `Showing ${_auditOffset + 1}–${_auditOffset + rows.length}`;
+    document.getElementById('auditPrevBtn').disabled = _auditOffset === 0;
+    document.getElementById('auditNextBtn').disabled = rows.length < _auditLimit;
+
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">No entries found.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = rows.map(r => {
+      const ts = new Date(r.created_at).toISOString().replace('T',' ').slice(0,19);
+      const color = _auditColor(r.action);
+      const resource = r.resource_type
+        ? `<span style="color:#94a3b8">${r.resource_type}</span> <code style="font-size:11px;color:#7dd3fc">${(r.resource_id||'').slice(0,8)}…</code>`
+        : '<span class="text-muted">—</span>';
+      let details = '';
+      if (r.details) {
+        try {
+          const d = JSON.parse(r.details);
+          details = d.actor_email
+            ? `<span style="color:#a5b4fc">${d.actor_email}</span>`
+            : Object.entries(d).map(([k,v])=>`<span class="text-muted">${k}:</span> ${v}`).join(' · ');
+        } catch { details = r.details; }
+      }
+      return `<tr style="border-bottom:1px solid rgba(255,255,255,0.04);">
+        <td class="px-3 py-2" style="white-space:nowrap;color:#64748b">${ts}</td>
+        <td class="px-3 py-2"><span style="color:${color};font-weight:600">${r.action}</span></td>
+        <td class="px-3 py-2">${resource}</td>
+        <td class="px-3 py-2" style="max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${details}</td>
+        <td class="px-3 py-2" style="font-family:monospace;color:#64748b">${r.ip_address||'—'}</td>
+      </tr>`;
+    }).join('');
+  } catch(e) {
+    tbody.innerHTML = `<tr><td colspan="5" class="text-center text-danger py-3">${e.message}</td></tr>`;
+  }
+}
+
+function auditPage(dir) {
+  _auditOffset = Math.max(0, _auditOffset + dir * _auditLimit);
+  loadAuditLog();
+}
 </script>
 {% endblock %}
