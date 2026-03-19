@@ -1223,6 +1223,46 @@
       </div>
       {% endif %}
 
+      <!-- Support Access Keys -->
+      <div class="card card-pad mb-3" id="support-key-card">
+        <div class="section-title mb-1">Support Access</div>
+        <div class="section-subtitle mb-3">
+          Generate a temporary key to share with our support team. Only the hash is stored — support cannot read the plaintext key from the database, only verify it. Revoke the key immediately after the support session.
+        </div>
+
+        <div class="d-flex gap-2 flex-wrap align-items-end mb-3">
+          <div>
+            <label class="form-label">Key label</label>
+            <input type="text" id="support-key-label" class="form-control form-control-sm" placeholder="e.g. May support session" maxlength="100" style="width:220px">
+          </div>
+          <div>
+            <label class="form-label">Expires in</label>
+            <select id="support-key-expires" class="form-select form-select-sm" style="width:130px">
+              <option value="24">24 hours</option>
+              <option value="72" selected>3 days</option>
+              <option value="168">7 days</option>
+              <option value="">Never</option>
+            </select>
+          </div>
+          <button type="button" class="btn btn-primary btn-sm" id="generate-support-key-btn">Generate Key</button>
+        </div>
+
+        <!-- Plaintext key reveal (hidden until generated) -->
+        <div id="support-key-reveal" class="d-none mb-3 p-3" style="background:#fefce8;border:1px solid #fde68a;border-radius:10px">
+          <div style="font-size:12px;font-weight:700;color:#92400e;margin-bottom:0.5rem">⚠ Copy this key now — it will not be shown again.</div>
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <code id="support-key-value" style="font-size:13px;word-break:break-all;flex:1;background:#fef9c3;padding:0.4rem 0.65rem;border-radius:6px;border:1px solid #fde68a"></code>
+            <button type="button" class="btn btn-sm btn-warning flex-shrink-0" id="copy-support-key-btn">Copy</button>
+          </div>
+          <div style="font-size:12px;color:#78716c">Share with support only. Revoke it as soon as the session ends.</div>
+        </div>
+
+        <!-- Active keys list -->
+        <div id="support-keys-list">
+          <div class="text-muted small text-center py-2" style="font-size:12.5px">Loading keys…</div>
+        </div>
+      </div>
+
       <!-- Danger zone -->
       <div class="card card-pad" style="border-color:#fecaca">
         <div class="section-title mb-1" style="color:#dc2626">Danger Zone</div>
@@ -1265,7 +1305,10 @@ window.addEventListener('popstate', (e) => {
 // Handle hash on load
 document.addEventListener('DOMContentLoaded', () => {
   const hash = window.location.hash.replace('#', '');
-  if (hash && _VALID_SECTIONS.includes(hash)) switchSection(hash);
+  if (hash && _VALID_SECTIONS.includes(hash)) {
+    switchSection(hash);
+    if (hash === 'settings') _loadSupportKeys();
+  }
 });
 
 // ── Copy API keys ─────────────────────────────────────────────────────────
@@ -1635,5 +1678,87 @@ function toggleIntegFields(type) {
     notionDb?.classList.remove('d-none');
   }
 }
+
+// ── Support Access Keys ───────────────────────────────────────────────────────
+async function _loadSupportKeys() {
+  const container = document.getElementById('support-keys-list');
+  if (!container) return;
+  try {
+    const keys = await apiFetch('/dashboard/support-keys');
+    if (!keys.length) {
+      container.innerHTML = '<div class="text-muted small py-1" style="font-size:12.5px">No active support keys.</div>';
+      return;
+    }
+    const header = '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8;margin-bottom:0.5rem">Active Keys</div>';
+    container.innerHTML = header + keys.map(k => `
+      <div class="d-flex align-items-center justify-content-between py-2 border-bottom" id="sk-row-${k.id}">
+        <div>
+          <div style="font-size:13px;font-weight:600">${k.label}</div>
+          <div style="font-size:11.5px;color:#94a3b8">
+            Created ${new Date(k.created_at).toLocaleDateString()}
+            ${k.expires_at ? ' · Expires ' + new Date(k.expires_at).toLocaleDateString() : ' · No expiry'}
+            ${k.last_used_at ? ' · Last used ' + new Date(k.last_used_at).toLocaleDateString() : ''}
+          </div>
+        </div>
+        <button type="button" class="btn btn-xs btn-outline-danger" onclick="_revokeSupportKey('${k.id}')">Revoke</button>
+      </div>`).join('');
+  } catch(e) {
+    const container = document.getElementById('support-keys-list');
+    if (container) container.innerHTML = `<div class="text-danger small">${e.message}</div>`;
+  }
+}
+
+async function _revokeSupportKey(id) {
+  if (!confirm('Revoke this support key?')) return;
+  try {
+    await apiFetch(`/dashboard/support-key/${id}/revoke`, { method: 'POST' });
+    document.getElementById(`sk-row-${id}`)?.remove();
+    showToast('Support key revoked', 'success');
+    // Refresh list if it's now empty
+    const container = document.getElementById('support-keys-list');
+    if (container && !container.querySelector('[id^="sk-row-"]')) {
+      container.innerHTML = '<div class="text-muted small py-1" style="font-size:12.5px">No active support keys.</div>';
+    }
+  } catch(e) { showToast(e.message, 'danger'); }
+}
+
+(function() {
+  // Load keys when settings section is activated
+  document.querySelector('.sidebar-nav-item[data-section="settings"]')?.addEventListener('click', _loadSupportKeys);
+  // Load now if already on settings
+  if (document.getElementById('section-settings')?.classList.contains('active')) _loadSupportKeys();
+
+  const generateBtn = document.getElementById('generate-support-key-btn');
+  if (!generateBtn) return;
+
+  generateBtn.addEventListener('click', async () => {
+    generateBtn.disabled = true;
+    const label = (document.getElementById('support-key-label')?.value || '').trim() || 'Support Key';
+    const expiresVal = document.getElementById('support-key-expires')?.value;
+    const expiresInHours = expiresVal ? parseInt(expiresVal) : null;
+    try {
+      const data = await apiFetch('/dashboard/support-key', {
+        method: 'POST',
+        body: JSON.stringify({ label, expires_in_hours: expiresInHours }),
+      });
+      // Show one-time plaintext reveal
+      const reveal = document.getElementById('support-key-reveal');
+      const keyEl = document.getElementById('support-key-value');
+      if (reveal && keyEl) {
+        keyEl.textContent = data.plaintext_key;
+        reveal.classList.remove('d-none');
+        document.getElementById('copy-support-key-btn').onclick = () => {
+          navigator.clipboard.writeText(data.plaintext_key)
+            .then(() => showToast('Support key copied!', 'success'))
+            .catch(() => showToast('Copy failed', 'danger'));
+        };
+      }
+      showToast('Support key generated — copy it now!', 'warning', 8000);
+      document.getElementById('support-key-label').value = '';
+      await _loadSupportKeys();
+    } catch(e) { showToast(e.message, 'danger'); }
+    finally { generateBtn.disabled = false; }
+  });
+})();
 </script>
 {% endblock %}

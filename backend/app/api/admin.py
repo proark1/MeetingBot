@@ -1,7 +1,11 @@
 """Admin API — platform configuration management (wallet address, etc.)."""
 
+import hashlib
+import json
 import logging
 import re
+import time as _time
+from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 from typing import Optional
 
@@ -455,6 +459,365 @@ async def set_account_type(
         account_type=account.account_type,
         message=f"Account type updated to '{payload.account_type}'.",
     )
+
+
+# ── Platform analytics ────────────────────────────────────────────────────────
+
+_analytics_cache: dict = {}
+_ANALYTICS_TTL = 300  # 5-minute cache
+
+
+def _detect_platform(url: str) -> str:
+    u = (url or "").lower()
+    if "zoom.us" in u or "zoom.com" in u:
+        return "Zoom"
+    if "meet.google.com" in u:
+        return "Google Meet"
+    if "teams.microsoft.com" in u or "teams.live.com" in u:
+        return "Microsoft Teams"
+    if "webex.com" in u:
+        return "Webex"
+    if "whereby.com" in u:
+        return "Whereby"
+    return "Other"
+
+
+@router.get("/platform-analytics", tags=["Admin"])
+async def platform_analytics(
+    db: AsyncSession = Depends(get_db),
+    _admin: str = Depends(require_admin),
+):
+    """Aggregated platform analytics — no private user data.
+
+    Returns counts, trends, feature-adoption rates, and AI token/cost breakdowns.
+    Transcript content, meeting URLs, and analysis text are never included.
+    Results are cached for 5 minutes.
+    """
+    cached = _analytics_cache.get("platform")
+    if cached and (_time.monotonic() - cached[0]) < _ANALYTICS_TTL:
+        return cached[1]
+
+    from sqlalchemy import func
+    from app.models.account import BotSnapshot
+    from app.store import store as _store
+
+    now = datetime.now(timezone.utc)
+    d30 = now - timedelta(days=30)
+    d7 = now - timedelta(days=7)
+
+    # ── Account stats ──────────────────────────────────────────────────────────
+    total_accounts = (await db.execute(select(func.count(Account.id)))).scalar_one()
+    new_30d_accts = (await db.execute(
+        select(func.count(Account.id)).where(Account.created_at >= d30)
+    )).scalar_one()
+    plan_counts_q = await db.execute(
+        select(Account.plan, func.count(Account.id)).group_by(Account.plan)
+    )
+    plan_counts = {(r[0] or "free"): r[1] for r in plan_counts_q.all()}
+
+    # ── Load bot snapshots (terminal bots) ─────────────────────────────────────
+    snaps_q = await db.execute(
+        select(
+            BotSnapshot.status, BotSnapshot.meeting_url,
+            BotSnapshot.created_at, BotSnapshot.account_id, BotSnapshot.data
+        )
+    )
+    snaps = snaps_q.all()
+
+    # Active / live bots from in-memory store
+    active_bots, _ = await _store.list_bots(limit=10000)
+
+    # ── Aggregate ──────────────────────────────────────────────────────────────
+    status_counts: dict[str, int] = {}
+    platform_counts: dict[str, int] = {}
+    daily_bots: dict[str, int] = {}
+    daily_errors: dict[str, int] = {}
+    features: dict[str, int] = {
+        "analysis_full": 0, "analysis_transcript_only": 0,
+        "consent_enabled": 0, "live_transcription": 0,
+        "record_video": 0, "pii_redaction": 0, "translation": 0,
+        "keyword_alerts": 0, "workspace": 0, "scheduled": 0,
+        "custom_template": 0, "custom_prompt": 0, "auto_followup": 0,
+    }
+    template_counts: dict[str, int] = {}
+    transcription_counts: dict[str, int] = {}
+    duration_samples: list[float] = []
+    ai_by_model: dict[str, dict] = {}
+    ai_by_operation: dict[str, dict] = {}
+    ai_daily: dict[str, dict] = {}
+    total_ai_tokens = 0
+    total_ai_cost = 0.0
+    user_stats: dict[str, dict] = {}
+
+    def _inc_ai(bucket: dict, key: str, tokens: int, cost: float) -> None:
+        if key not in bucket:
+            bucket[key] = {"tokens": 0, "cost": 0.0, "calls": 0}
+        bucket[key]["tokens"] += tokens
+        bucket[key]["cost"] += cost
+        bucket[key]["calls"] += 1
+
+    for s in snaps:
+        # Status
+        sc = s.status or "unknown"
+        status_counts[sc] = status_counts.get(sc, 0) + 1
+
+        # Platform — derived from URL only, never expose full URL
+        p = _detect_platform(s.meeting_url or "")
+        platform_counts[p] = platform_counts.get(p, 0) + 1
+
+        # Daily trend
+        if s.created_at and s.created_at >= d30:
+            day = s.created_at.strftime("%Y-%m-%d")
+            daily_bots[day] = daily_bots.get(day, 0) + 1
+            if sc == "error":
+                daily_errors[day] = daily_errors.get(day, 0) + 1
+
+        # Parse JSON blob for feature flags & AI usage
+        try:
+            data = json.loads(s.data) if s.data else {}
+        except Exception:
+            data = {}
+
+        am = data.get("analysis_mode", "full")
+        features["analysis_full" if am == "full" else "analysis_transcript_only"] += 1
+        if data.get("consent_enabled"):       features["consent_enabled"] += 1
+        if data.get("live_transcription"):    features["live_transcription"] += 1
+        if data.get("record_video"):          features["record_video"] += 1
+        if data.get("pii_redaction"):         features["pii_redaction"] += 1
+        if data.get("translation_language"):  features["translation"] += 1
+        if data.get("keyword_alerts"):        features["keyword_alerts"] += 1
+        if data.get("workspace_id"):          features["workspace"] += 1
+        if data.get("join_at"):               features["scheduled"] += 1
+        if data.get("auto_followup_email"):   features["auto_followup"] += 1
+        if data.get("template"):
+            features["custom_template"] += 1
+            t = data["template"]
+            template_counts[t] = template_counts.get(t, 0) + 1
+        if data.get("prompt_override"):       features["custom_prompt"] += 1
+
+        tp = data.get("transcription_provider", "gemini")
+        transcription_counts[tp] = transcription_counts.get(tp, 0) + 1
+
+        dur = data.get("duration_seconds")
+        if dur:
+            duration_samples.append(float(dur))
+
+        # AI usage — tokens and cost, never transcript text
+        day_key = s.created_at.strftime("%Y-%m-%d") if s.created_at else None
+        for u in data.get("ai_usage", []):
+            model = u.get("model", "unknown")
+            op    = u.get("operation", "unknown")
+            toks  = u.get("total_tokens", 0)
+            cost  = u.get("cost_usd", 0.0)
+            total_ai_tokens += toks
+            total_ai_cost   += cost
+            _inc_ai(ai_by_model, model, toks, cost)
+            _inc_ai(ai_by_operation, op, toks, cost)
+            if day_key and s.created_at and s.created_at >= d30:
+                if day_key not in ai_daily:
+                    ai_daily[day_key] = {"tokens": 0, "cost": 0.0}
+                ai_daily[day_key]["tokens"] += toks
+                ai_daily[day_key]["cost"]   += cost
+
+        # Per-user aggregate (email-keyed after join, no private content)
+        acct_id = s.account_id
+        if acct_id:
+            if acct_id not in user_stats:
+                user_stats[acct_id] = {
+                    "total_bots": 0, "bots_30d": 0, "bots_7d": 0,
+                    "last_active": None, "platform_pref": {},
+                    "ai_tokens": 0, "ai_cost": 0.0, "features_used": set(),
+                }
+            us = user_stats[acct_id]
+            us["total_bots"] += 1
+            if s.created_at and s.created_at >= d30:
+                us["bots_30d"] += 1
+            if s.created_at and s.created_at >= d7:
+                us["bots_7d"] += 1
+            if not us["last_active"] or (s.created_at and s.created_at > us["last_active"]):
+                us["last_active"] = s.created_at
+            us["platform_pref"][p] = us["platform_pref"].get(p, 0) + 1
+            for u in data.get("ai_usage", []):
+                us["ai_tokens"] += u.get("total_tokens", 0)
+                us["ai_cost"]   += u.get("cost_usd", 0.0)
+            for flag, key in [
+                ("consent_enabled", "consent"), ("live_transcription", "live_transcript"),
+                ("record_video", "video"), ("pii_redaction", "pii"),
+                ("translation_language", "translation"), ("workspace_id", "workspace"),
+            ]:
+                if data.get(flag):
+                    us["features_used"].add(key)
+
+    # Include live bots in status/platform counts
+    active_statuses = {"ready", "scheduled", "queued", "joining", "in_call", "call_ended"}
+    active_now = 0
+    for b in active_bots:
+        sc = b.status
+        status_counts[sc] = status_counts.get(sc, 0) + 1
+        p = _detect_platform(b.meeting_url or "")
+        platform_counts[p] = platform_counts.get(p, 0) + 1
+        if sc in active_statuses:
+            active_now += 1
+
+    total_bots = len(snaps) + len(active_bots)
+    bots_30d = sum(1 for s in snaps if s.created_at and s.created_at >= d30) + \
+               sum(1 for b in active_bots if b.created_at >= d30)
+    bots_7d  = sum(1 for s in snaps if s.created_at and s.created_at >= d7) + \
+               sum(1 for b in active_bots if b.created_at >= d7)
+
+    # Success rate
+    done  = status_counts.get("done", 0)
+    error = status_counts.get("error", 0)
+    total_terminal = done + error + status_counts.get("cancelled", 0)
+    success_rate = round(100 * done / total_terminal, 1) if total_terminal > 0 else 0.0
+    avg_duration = round(sum(duration_samples) / len(duration_samples), 0) if duration_samples else None
+
+    # 30-day daily trend arrays (fill zeros)
+    trend_days = []
+    ai_trend   = []
+    for i in range(30):
+        day = (now - timedelta(days=29 - i)).strftime("%Y-%m-%d")
+        trend_days.append({"date": day, "bots": daily_bots.get(day, 0), "errors": daily_errors.get(day, 0)})
+        ai_day = ai_daily.get(day, {"tokens": 0, "cost": 0.0})
+        ai_trend.append({"date": day, "tokens": ai_day["tokens"], "cost": round(ai_day["cost"], 4)})
+
+    # Per-user table — fetch emails, sort by total bots
+    per_user = []
+    if user_stats:
+        acct_rows = await db.execute(
+            select(Account.id, Account.email, Account.plan)
+            .where(Account.id.in_(list(user_stats.keys())))
+        )
+        acct_map = {r.id: {"email": r.email, "plan": r.plan or "free"} for r in acct_rows.all()}
+        for acct_id, us in sorted(user_stats.items(), key=lambda x: x[1]["total_bots"], reverse=True)[:100]:
+            info = acct_map.get(acct_id, {"email": f"[deleted:{acct_id[:8]}]", "plan": "unknown"})
+            pref = max(us["platform_pref"], key=us["platform_pref"].get) if us["platform_pref"] else "—"
+            per_user.append({
+                "email": info["email"],
+                "plan": info["plan"],
+                "total_bots": us["total_bots"],
+                "bots_30d": us["bots_30d"],
+                "bots_7d": us["bots_7d"],
+                "last_active": us["last_active"].strftime("%Y-%m-%d") if us["last_active"] else None,
+                "platform_pref": pref,
+                "ai_tokens": us["ai_tokens"],
+                "ai_cost_usd": round(us["ai_cost"], 4),
+                "features_used": sorted(us["features_used"]),
+            })
+
+    result = {
+        "overview": {
+            "total_bots": total_bots,
+            "bots_30d": bots_30d,
+            "bots_7d": bots_7d,
+            "active_now": active_now,
+            "success_rate_pct": success_rate,
+            "avg_duration_seconds": avg_duration,
+            "total_accounts": total_accounts,
+            "new_accounts_30d": new_30d_accts,
+            "total_ai_tokens": total_ai_tokens,
+            "total_ai_cost_usd": round(total_ai_cost, 4),
+        },
+        "trends": trend_days,
+        "platforms": platform_counts,
+        "status_breakdown": status_counts,
+        "plan_counts": plan_counts,
+        "features": features,
+        "templates": template_counts,
+        "transcription_providers": transcription_counts,
+        "ai_usage": {
+            "total_tokens": total_ai_tokens,
+            "total_cost_usd": round(total_ai_cost, 4),
+            "by_model": {
+                k: {"tokens": v["tokens"], "cost": round(v["cost"], 4), "calls": v["calls"]}
+                for k, v in sorted(ai_by_model.items(), key=lambda x: x[1]["tokens"], reverse=True)
+            },
+            "by_operation": {
+                k: {"tokens": v["tokens"], "cost": round(v["cost"], 4), "calls": v["calls"]}
+                for k, v in sorted(ai_by_operation.items(), key=lambda x: x[1]["tokens"], reverse=True)
+            },
+            "daily": ai_trend,
+        },
+        "per_user": per_user,
+        "generated_at": now.isoformat(),
+    }
+
+    _analytics_cache["platform"] = (_time.monotonic(), result)
+    return result
+
+
+# ── Support key lookup ─────────────────────────────────────────────────────────
+
+@router.get("/support-lookup", tags=["Admin"])
+async def support_lookup(
+    key: str,
+    db: AsyncSession = Depends(get_db),
+    _admin: str = Depends(require_admin),
+):
+    """Look up a user via their support key.
+
+    The user generates the key in their dashboard Settings → Support Access.
+    Admin enters the plaintext key here; the system verifies against the stored
+    hash and returns limited account + bot activity data for that user.
+    No transcript content is returned — only metadata.
+    """
+    from app.models.account import SupportKey
+
+    key_hash = hashlib.sha256(key.strip().encode()).hexdigest()
+    sk_result = await db.execute(
+        select(SupportKey).where(
+            SupportKey.key_hash == key_hash,
+            SupportKey.is_active == True,  # noqa: E712
+        )
+    )
+    sk = sk_result.scalar_one_or_none()
+    if sk is None:
+        raise HTTPException(status_code=404, detail="Support key not found, expired, or already revoked")
+
+    # Check expiry
+    if sk.expires_at and sk.expires_at < datetime.now(timezone.utc):
+        raise HTTPException(status_code=410, detail="Support key has expired")
+
+    # Record usage timestamp
+    sk.last_used_at = datetime.now(timezone.utc)
+    await db.commit()
+
+    account = await db.get(Account, sk.account_id)
+    if account is None:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    # Recent bots — metadata only, no transcript/analysis text
+    from app.store import store as _store
+    bots, _ = await _store.list_bots(limit=30, account_id=sk.account_id)
+
+    return {
+        "account_id": account.id,
+        "email": account.email,
+        "plan": account.plan or "free",
+        "account_type": account.account_type,
+        "created_at": account.created_at.isoformat(),
+        "monthly_bots_used": account.monthly_bots_used or 0,
+        "key_label": sk.label,
+        "key_created_at": sk.created_at.isoformat(),
+        "key_expires_at": sk.expires_at.isoformat() if sk.expires_at else None,
+        "recent_bots": [
+            {
+                "id": b.id,
+                "status": b.status,
+                "meeting_platform": b.meeting_platform,
+                "meeting_url": b.meeting_url,   # user consented by sharing key
+                "bot_name": b.bot_name,
+                "created_at": b.created_at.isoformat(),
+                "duration_seconds": b.duration_seconds,
+                "transcript_entries": len(b.transcript) if b.transcript else 0,
+                "has_analysis": bool(b.analysis),
+                "error_message": b.error_message,
+                "ai_tokens": b.ai_total_tokens,
+                "ai_cost_usd": b.ai_total_cost_usd,
+            }
+            for b in bots
+        ],
+    }
 
 
 # Admin API docs are registered directly on the app in main.py (outside the

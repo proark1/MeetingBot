@@ -49,6 +49,7 @@ class Account(Base):
     calendar_feeds: Mapped[list["CalendarFeed"]] = relationship(back_populates="account", cascade="all, delete-orphan")
     oauth_accounts: Mapped[list["OAuthAccount"]] = relationship(back_populates="account", cascade="all, delete-orphan")
     keyword_alerts: Mapped[list["KeywordAlert"]] = relationship(back_populates="account", cascade="all, delete-orphan")
+    support_keys: Mapped[list["SupportKey"]] = relationship(back_populates="account", cascade="all, delete-orphan")
 
 
 class ApiKey(Base):
@@ -335,6 +336,28 @@ class KeywordAlert(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     account: Mapped["Account"] = relationship(back_populates="keyword_alerts")
+
+
+class SupportKey(Base):
+    """User-generated support token shared with admin during support sessions.
+
+    The plaintext key is NEVER stored — only its SHA-256 hex digest.
+    Admin cannot derive the original key from the hash, preserving user privacy.
+    The user must explicitly share the key to authorise a support session.
+    """
+
+    __tablename__ = "support_keys"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    account_id: Mapped[str] = mapped_column(String(36), ForeignKey("accounts.id"), nullable=False, index=True)
+    key_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    label: Mapped[str] = mapped_column(String(100), default="Support Key")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    account: Mapped["Account"] = relationship(back_populates="support_keys")
 
 
 class Workspace(Base):

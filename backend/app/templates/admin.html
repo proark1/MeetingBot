@@ -159,6 +159,12 @@
 
       <div class="admin-sidebar-label">Infrastructure</div>
 
+      <button class="admin-nav-item" data-section="analytics">
+        <span>📈</span> Analytics
+      </button>
+      <button class="admin-nav-item" data-section="support">
+        <span>🔑</span> Support Lookup
+      </button>
       <button class="admin-nav-item" data-section="audit">
         <span>🛡️</span> Audit Log
       </button>
@@ -803,6 +809,125 @@
       {% endif %}
     </div>
 
+    <!-- ────────────────────────────────────────────
+         ANALYTICS
+    ──────────────────────────────────────────── -->
+    <div class="admin-section" id="admin-section-analytics">
+      <div class="admin-section-hdr">
+        <div>
+          <h2>Platform Analytics</h2>
+          <p>Aggregated usage metrics — no private user data. Cached 5 minutes.</p>
+        </div>
+        <button class="btn btn-outline-secondary btn-sm" id="analytics-refresh-btn" onclick="_loadAnalytics(true)">↺ Refresh</button>
+      </div>
+
+      <div id="analytics-loading" class="text-center py-5 text-muted" style="font-size:13.5px">Loading analytics…</div>
+
+      <div id="analytics-content" style="display:none">
+
+        <!-- KPI row -->
+        <div class="admin-kpi-grid" id="analytics-kpi-grid" style="grid-template-columns:repeat(4,1fr)"></div>
+
+        <!-- Activity chart + Platform doughnut -->
+        <div class="row g-3 mb-3">
+          <div class="col-md-8">
+            <div class="card card-pad h-100">
+              <div class="section-title mb-2">Bot Activity — last 30 days</div>
+              <canvas id="chart-activity" height="130"></canvas>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <div class="card card-pad h-100 d-flex flex-column">
+              <div class="section-title mb-2">Platform Breakdown</div>
+              <div style="flex:1;display:flex;align-items:center;justify-content:center">
+                <canvas id="chart-platforms" style="max-height:200px"></canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- AI usage row -->
+        <div class="row g-3 mb-3">
+          <div class="col-md-6">
+            <div class="card card-pad h-100">
+              <div class="section-title mb-2">AI Usage by Model</div>
+              <div id="ai-model-table"></div>
+            </div>
+          </div>
+          <div class="col-md-6">
+            <div class="card card-pad h-100">
+              <div class="section-title mb-2">AI Usage by Operation</div>
+              <div id="ai-op-table"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- AI token trend -->
+        <div class="card card-pad mb-3">
+          <div class="section-title mb-2">AI Token Usage — last 30 days</div>
+          <canvas id="chart-ai-trend" height="100"></canvas>
+        </div>
+
+        <!-- Feature adoption -->
+        <div class="card card-pad mb-3">
+          <div class="section-title mb-2">Feature Adoption (% of all bots)</div>
+          <div id="feature-bars"></div>
+        </div>
+
+        <!-- Per-user table -->
+        <div class="card">
+          <div class="px-4 pt-3 pb-2 d-flex justify-content-between align-items-center">
+            <div class="section-title mb-0">Per-User Activity <span style="font-size:11px;font-weight:400;color:#94a3b8">(no private data — top 100 by bots)</span></div>
+            <input type="text" id="analytics-user-search" class="form-control form-control-sm" placeholder="Search email…"
+              oninput="_filterAnalyticsUsers(this.value)" style="width:180px">
+          </div>
+          <div class="table-responsive" style="max-height:420px;overflow-y:auto">
+            <table class="table table-sm table-hover mb-0" id="analytics-user-table">
+              <thead class="table-light sticky-top">
+                <tr>
+                  <th>Email</th><th>Plan</th><th>Total</th><th>30d</th><th>7d</th>
+                  <th>Last Active</th><th>Platform</th><th>AI Tokens</th><th>AI Cost</th><th>Features</th>
+                </tr>
+              </thead>
+              <tbody id="analytics-user-tbody">
+                <tr><td colspan="10" class="text-center text-muted py-3">—</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ────────────────────────────────────────────
+         SUPPORT LOOKUP
+    ──────────────────────────────────────────── -->
+    <div class="admin-section" id="admin-section-support">
+      <div class="admin-section-hdr">
+        <div>
+          <h2>Support Lookup</h2>
+          <p>Users generate a temporary support key in Dashboard → Settings → Support Access.
+             Enter the plaintext key to view their account and bot metadata. No transcript content is returned.</p>
+        </div>
+      </div>
+
+      <div class="card card-pad mb-3">
+        <div class="section-title mb-1">Enter Support Key</div>
+        <div class="section-subtitle mb-3">
+          The key cannot be recovered from the database (only the SHA-256 hash is stored).
+          The user must share the plaintext key with you directly.
+        </div>
+        <div class="d-flex gap-2" style="max-width:480px">
+          <input type="text" id="support-key-input" class="form-control form-control-sm font-mono"
+            placeholder="Paste the support key here…" autocomplete="off" spellcheck="false">
+          <button class="btn btn-sm btn-primary flex-shrink-0" id="support-lookup-btn" onclick="_doSupportLookup()">Look Up</button>
+        </div>
+      </div>
+
+      <div id="support-lookup-result" class="d-none">
+        <!-- filled by JS -->
+      </div>
+    </div>
+
   </main>
 </div>
 
@@ -825,13 +950,17 @@ function adminSwitch(name) {
 }
 
 document.querySelectorAll('.admin-nav-item[data-section]').forEach(btn => {
-  btn.addEventListener('click', () => adminSwitch(btn.dataset.section));
+  btn.addEventListener('click', () => {
+    adminSwitch(btn.dataset.section);
+    if (btn.dataset.section === 'analytics') _loadAnalytics();
+  });
 });
 
 document.addEventListener('DOMContentLoaded', () => {
   const hash = window.location.hash.replace('#', '');
-  const valid = ['overview','users','billing','audit','system','crypto'];
+  const valid = ['overview','users','billing','analytics','support','audit','system','crypto'];
   if (hash && valid.includes(hash)) adminSwitch(hash);
+  if (hash === 'analytics') _loadAnalytics();
 });
 
 // ── Audit Log ─────────────────────────────────────────────────────────────────
@@ -911,5 +1040,241 @@ function auditPage(dir) {
   _auditOffset = Math.max(0, _auditOffset + dir * _auditLimit);
   loadAuditLog();
 }
+
+// ── Platform Analytics ────────────────────────────────────────────────────────
+let _analyticsData = null;
+let _analyticsCharts = {};
+
+async function _loadAnalytics(force = false) {
+  if (_analyticsData && !force) return; // already loaded
+  document.getElementById('analytics-loading').style.display = '';
+  document.getElementById('analytics-content').style.display = 'none';
+  try {
+    const r = await fetch('/admin/analytics-data');
+    if (!r.ok) throw new Error(await r.text());
+    _analyticsData = await r.json();
+    _renderAnalytics(_analyticsData);
+  } catch(e) {
+    document.getElementById('analytics-loading').textContent = 'Failed to load: ' + e.message;
+  }
+}
+
+function _fmt(n) { return (n||0).toLocaleString(); }
+function _fmtCost(n) { return '$' + (+(n||0)).toFixed(4); }
+
+function _renderAnalytics(d) {
+  const ov = d.overview || {};
+
+  // KPI grid
+  const kpis = [
+    ['Total Bots', _fmt(ov.total_bots), ''],
+    ['Bots (30d)', _fmt(ov.bots_30d), ''],
+    ['Active Now', _fmt(ov.active_now), ov.active_now > 0 ? 'color:#4f46e5' : ''],
+    ['Success Rate', (ov.success_rate_pct || 0) + '%', 'color:#16a34a'],
+    ['Total Accounts', _fmt(ov.total_accounts), ''],
+    ['New Accounts (30d)', _fmt(ov.new_accounts_30d), ''],
+    ['AI Tokens (all time)', _fmt(ov.total_ai_tokens), ''],
+    ['AI Cost (all time)', _fmtCost(ov.total_ai_cost_usd), ''],
+  ];
+  document.getElementById('analytics-kpi-grid').style.gridTemplateColumns = 'repeat(4,1fr)';
+  document.getElementById('analytics-kpi-grid').innerHTML = kpis.map(([label, val, style]) => `
+    <div class="stat-card">
+      <div class="stat-label">${label}</div>
+      <div class="stat-value mt-1" style="${style}">${val}</div>
+    </div>`).join('');
+
+  // Destroy old charts
+  Object.values(_analyticsCharts).forEach(c => c.destroy());
+  _analyticsCharts = {};
+
+  // Activity line chart
+  const trends = d.trends || [];
+  const actCtx = document.getElementById('chart-activity').getContext('2d');
+  _analyticsCharts.activity = new Chart(actCtx, {
+    type: 'line',
+    data: {
+      labels: trends.map(t => t.date.slice(5)),
+      datasets: [
+        { label: 'Bots', data: trends.map(t => t.bots), borderColor: '#6366f1', backgroundColor: 'rgba(99,102,241,0.1)', fill: true, tension: 0.3, pointRadius: 2 },
+        { label: 'Errors', data: trends.map(t => t.errors), borderColor: '#ef4444', backgroundColor: 'rgba(239,68,68,0.08)', fill: true, tension: 0.3, pointRadius: 2 },
+      ],
+    },
+    options: { plugins: { legend: { position: 'top' } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } }, x: { ticks: { maxTicksLimit: 10 } } } },
+  });
+
+  // Platform doughnut
+  const platforms = d.platforms || {};
+  const platLabels = Object.keys(platforms);
+  const platColors = ['#6366f1','#22c55e','#3b82f6','#f59e0b','#ef4444','#94a3b8'];
+  const platCtx = document.getElementById('chart-platforms').getContext('2d');
+  _analyticsCharts.platforms = new Chart(platCtx, {
+    type: 'doughnut',
+    data: {
+      labels: platLabels,
+      datasets: [{ data: platLabels.map(k => platforms[k]), backgroundColor: platColors }],
+    },
+    options: { plugins: { legend: { position: 'bottom', labels: { font: { size: 11 } } } }, cutout: '60%' },
+  });
+
+  // AI daily trend
+  const aiTrend = (d.ai_usage || {}).daily || [];
+  const aiCtx = document.getElementById('chart-ai-trend').getContext('2d');
+  _analyticsCharts.aiTrend = new Chart(aiCtx, {
+    type: 'bar',
+    data: {
+      labels: aiTrend.map(t => t.date.slice(5)),
+      datasets: [{ label: 'Tokens', data: aiTrend.map(t => t.tokens), backgroundColor: 'rgba(99,102,241,0.7)' }],
+    },
+    options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } }, x: { ticks: { maxTicksLimit: 10 } } } },
+  });
+
+  // AI model table
+  const byModel = (d.ai_usage || {}).by_model || {};
+  document.getElementById('ai-model-table').innerHTML = Object.keys(byModel).length
+    ? `<table class="table table-sm mb-0"><thead><tr><th>Model</th><th class="text-end">Calls</th><th class="text-end">Tokens</th><th class="text-end">Cost</th></tr></thead><tbody>` +
+      Object.entries(byModel).map(([m,v]) =>
+        `<tr><td style="font-size:12px">${m}</td><td class="text-end small">${_fmt(v.calls)}</td><td class="text-end small">${_fmt(v.tokens)}</td><td class="text-end small">${_fmtCost(v.cost)}</td></tr>`
+      ).join('') + '</tbody></table>'
+    : '<div class="text-muted small py-2">No AI usage recorded.</div>';
+
+  // AI operation table
+  const byOp = (d.ai_usage || {}).by_operation || {};
+  document.getElementById('ai-op-table').innerHTML = Object.keys(byOp).length
+    ? `<table class="table table-sm mb-0"><thead><tr><th>Operation</th><th class="text-end">Calls</th><th class="text-end">Tokens</th><th class="text-end">Cost</th></tr></thead><tbody>` +
+      Object.entries(byOp).map(([op,v]) =>
+        `<tr><td style="font-size:12px">${op}</td><td class="text-end small">${_fmt(v.calls)}</td><td class="text-end small">${_fmt(v.tokens)}</td><td class="text-end small">${_fmtCost(v.cost)}</td></tr>`
+      ).join('') + '</tbody></table>'
+    : '<div class="text-muted small py-2">No AI usage recorded.</div>';
+
+  // Feature adoption bars
+  const features = d.features || {};
+  const total = ov.total_bots || 1;
+  const featureLabels = {
+    analysis_full: 'Full Analysis', analysis_transcript_only: 'Transcript Only',
+    consent_enabled: 'Consent Gate', live_transcription: 'Live Transcription',
+    record_video: 'Video Recording', pii_redaction: 'PII Redaction',
+    translation: 'Translation', keyword_alerts: 'Keyword Alerts',
+    workspace: 'Workspaces', scheduled: 'Scheduled Bots',
+    custom_template: 'Custom Template', custom_prompt: 'Custom Prompt', auto_followup: 'Auto Follow-up',
+  };
+  document.getElementById('feature-bars').innerHTML = Object.entries(featureLabels).map(([k, label]) => {
+    const count = features[k] || 0;
+    const pct = Math.round(100 * count / total);
+    return `<div class="mb-2">
+      <div class="d-flex justify-content-between" style="font-size:12.5px">
+        <span>${label}</span><span class="text-muted">${_fmt(count)} bots (${pct}%)</span>
+      </div>
+      <div style="background:#e2e8f0;border-radius:4px;height:6px">
+        <div style="background:#6366f1;border-radius:4px;height:6px;width:${pct}%;transition:width 0.4s"></div>
+      </div>
+    </div>`;
+  }).join('');
+
+  // Per-user table
+  _renderAnalyticsUsers(d.per_user || []);
+
+  document.getElementById('analytics-loading').style.display = 'none';
+  document.getElementById('analytics-content').style.display = '';
+}
+
+let _allUsers = [];
+function _renderAnalyticsUsers(users) {
+  _allUsers = users;
+  _filterAnalyticsUsers('');
+}
+
+function _filterAnalyticsUsers(q) {
+  q = q.toLowerCase();
+  const filtered = q ? _allUsers.filter(u => u.email.toLowerCase().includes(q)) : _allUsers;
+  const tbody = document.getElementById('analytics-user-tbody');
+  if (!filtered.length) {
+    tbody.innerHTML = '<tr><td colspan="10" class="text-center text-muted py-3">No users found.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = filtered.map(u => `<tr>
+    <td style="font-size:12.5px">${u.email}</td>
+    <td><span class="chip chip-gray" style="font-size:10px;padding:1px 5px">${u.plan}</span></td>
+    <td class="fw-semibold">${u.total_bots}</td>
+    <td>${u.bots_30d}</td>
+    <td>${u.bots_7d}</td>
+    <td style="font-size:12px;color:#94a3b8">${u.last_active || '—'}</td>
+    <td style="font-size:12px">${u.platform_pref || '—'}</td>
+    <td style="font-size:12px">${_fmt(u.ai_tokens)}</td>
+    <td style="font-size:12px">${_fmtCost(u.ai_cost_usd)}</td>
+    <td style="font-size:11px;color:#64748b">${(u.features_used||[]).join(', ') || '—'}</td>
+  </tr>`).join('');
+}
+
+// ── Support Lookup ────────────────────────────────────────────────────────────
+
+async function _doSupportLookup() {
+  const key = (document.getElementById('support-key-input').value || '').trim();
+  if (!key) { alert('Please enter a support key.'); return; }
+
+  const btn = document.getElementById('support-lookup-btn');
+  const resultEl = document.getElementById('support-lookup-result');
+  btn.disabled = true;
+  resultEl.className = 'd-none';
+
+  try {
+    const r = await fetch(`/admin/support-lookup-data?key=${encodeURIComponent(key)}`);
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({ detail: r.statusText }));
+      resultEl.className = '';
+      resultEl.innerHTML = `<div class="alert alert-danger">${err.detail || 'Lookup failed.'}</div>`;
+      return;
+    }
+    const d = await r.json();
+    const bots = (d.recent_bots || []).map(b => `<tr>
+      <td style="font-size:12px">${b.id.slice(0,8)}…</td>
+      <td><span class="chip chip-gray" style="font-size:10px">${b.status}</span></td>
+      <td style="font-size:12px">${b.meeting_platform || '—'}</td>
+      <td style="font-size:11.5px;word-break:break-all;max-width:200px">${b.meeting_url || '—'}</td>
+      <td style="font-size:12px">${b.created_at ? b.created_at.slice(0,10) : '—'}</td>
+      <td style="font-size:12px">${b.duration_seconds ? (b.duration_seconds/60).toFixed(1)+'m' : '—'}</td>
+      <td style="font-size:12px">${b.transcript_entries || 0}</td>
+      <td style="font-size:12px;color:${b.has_analysis ? '#16a34a' : '#94a3b8'}">${b.has_analysis ? '✓' : '—'}</td>
+      <td style="font-size:12px">${b.error_message ? '<span class="text-danger">'+b.error_message.slice(0,40)+'</span>' : '—'}</td>
+    </tr>`).join('');
+
+    resultEl.className = '';
+    resultEl.innerHTML = `
+      <div class="card card-pad mb-3">
+        <div class="section-title mb-3">Account: ${d.email}</div>
+        <div class="row g-3">
+          <div class="col-md-3"><div class="stat-card"><div class="stat-label">Plan</div><div class="fw-semibold mt-1">${d.plan}</div></div></div>
+          <div class="col-md-3"><div class="stat-card"><div class="stat-label">Type</div><div class="fw-semibold mt-1">${d.account_type}</div></div></div>
+          <div class="col-md-3"><div class="stat-card"><div class="stat-label">Monthly Bots</div><div class="fw-semibold mt-1">${d.monthly_bots_used}</div></div></div>
+          <div class="col-md-3"><div class="stat-card"><div class="stat-label">Joined</div><div class="fw-semibold mt-1 small">${(d.created_at||'').slice(0,10)}</div></div></div>
+        </div>
+        <div class="mt-2 small text-muted">Key: <strong>${d.key_label}</strong> · Issued ${(d.key_created_at||'').slice(0,10)}${d.key_expires_at ? ' · Expires '+d.key_expires_at.slice(0,10) : ''}</div>
+      </div>
+      <div class="card">
+        <div class="px-4 pt-3 pb-2"><div class="section-title">Recent Bots (last 30)</div></div>
+        <div class="table-responsive">
+          <table class="table table-sm table-hover mb-0">
+            <thead class="table-light">
+              <tr><th>ID</th><th>Status</th><th>Platform</th><th>Meeting URL</th><th>Date</th><th>Duration</th><th>Transcript Entries</th><th>Analysis</th><th>Error</th></tr>
+            </thead>
+            <tbody>${bots || '<tr><td colspan="9" class="text-center text-muted py-3">No bots yet.</td></tr>'}</tbody>
+          </table>
+        </div>
+      </div>`;
+  } catch(e) {
+    resultEl.className = '';
+    resultEl.innerHTML = `<div class="alert alert-danger">${e.message}</div>`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// Allow Enter key in support key input
+document.getElementById('support-key-input')?.addEventListener('keydown', e => {
+  if (e.key === 'Enter') _doSupportLookup();
+});
 </script>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 {% endblock %}

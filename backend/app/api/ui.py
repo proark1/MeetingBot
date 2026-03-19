@@ -1474,3 +1474,120 @@ async def create_webhook_ui(request: Request, db: AsyncSession = Depends(get_db)
         "is_active": wh.is_active,
         "created_at": wh.created_at.isoformat() if wh.created_at else None,
     })
+
+
+# ── Support key proxy routes (cookie-auth wrappers) ───────────────────────────
+
+@router.get("/dashboard/support-keys", include_in_schema=False)
+async def list_support_keys_ui(request: Request, db: AsyncSession = Depends(get_db)):
+    """Return the current user's active support keys as JSON (no plaintext)."""
+    account = await _get_account_from_request(request, db)
+    if not account:
+        return JSONResponse({"detail": "Unauthenticated"}, status_code=401)
+
+    from app.models.account import SupportKey
+    result = await db.execute(
+        select(SupportKey)
+        .where(SupportKey.account_id == account.id, SupportKey.is_active == True)  # noqa: E712
+        .order_by(SupportKey.created_at.desc())
+    )
+    keys = result.scalars().all()
+    return JSONResponse([
+        {
+            "id": k.id,
+            "label": k.label,
+            "created_at": k.created_at.isoformat(),
+            "expires_at": k.expires_at.isoformat() if k.expires_at else None,
+            "last_used_at": k.last_used_at.isoformat() if k.last_used_at else None,
+        }
+        for k in keys
+    ])
+
+
+@router.post("/dashboard/support-key", include_in_schema=False)
+async def create_support_key_ui(request: Request, db: AsyncSession = Depends(get_db)):
+    """Generate a support key and return the plaintext once."""
+    account = await _get_account_from_request(request, db)
+    if not account:
+        return JSONResponse({"detail": "Unauthenticated"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"detail": "Invalid JSON body"}, status_code=400)
+
+    import hashlib as _hl
+    import secrets as _sec
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+    from app.models.account import SupportKey
+
+    label = (body.get("label") or "Support Key")[:100]
+    expires_in_h = body.get("expires_in_hours")
+    plaintext = _sec.token_urlsafe(24)
+    key_hash = _hl.sha256(plaintext.encode()).hexdigest()
+    expires_at = (_dt.now(_tz.utc) + _td(hours=int(expires_in_h))) if expires_in_h else None
+
+    import uuid as _uuid
+    sk = SupportKey(
+        id=str(_uuid.uuid4()),
+        account_id=account.id,
+        key_hash=key_hash,
+        label=label,
+        expires_at=expires_at,
+    )
+    db.add(sk)
+    await db.commit()
+
+    return JSONResponse({
+        "id": sk.id,
+        "plaintext_key": plaintext,
+        "label": sk.label,
+        "created_at": sk.created_at.isoformat(),
+        "expires_at": sk.expires_at.isoformat() if sk.expires_at else None,
+    })
+
+
+@router.post("/dashboard/support-key/{key_id}/revoke", include_in_schema=False)
+async def revoke_support_key_ui(
+    key_id: str, request: Request, db: AsyncSession = Depends(get_db)
+):
+    """Revoke a support key via cookie auth."""
+    account = await _get_account_from_request(request, db)
+    if not account:
+        return JSONResponse({"detail": "Unauthenticated"}, status_code=401)
+
+    from app.models.account import SupportKey
+    result = await db.execute(
+        select(SupportKey).where(SupportKey.id == key_id, SupportKey.account_id == account.id)
+    )
+    sk = result.scalar_one_or_none()
+    if not sk:
+        return JSONResponse({"detail": "Support key not found"}, status_code=404)
+    sk.is_active = False
+    await db.commit()
+    return JSONResponse({"revoked": True})
+
+
+# ── Admin UI API proxies (cookie-auth wrappers for admin JS fetches) ───────────
+
+@router.get("/admin/analytics-data", include_in_schema=False)
+async def admin_analytics_data_ui(request: Request, db: AsyncSession = Depends(get_db)):
+    """Cookie-auth proxy for platform analytics used by admin.html JS."""
+    account = await _get_account_from_request(request, db)
+    if not _is_admin(account):
+        return JSONResponse({"detail": "Forbidden"}, status_code=403)
+    from app.api.admin import platform_analytics
+    return await platform_analytics(db=db, _admin=account.id)
+
+
+@router.get("/admin/support-lookup-data", include_in_schema=False)
+async def admin_support_lookup_ui(
+    request: Request, key: str = "", db: AsyncSession = Depends(get_db)
+):
+    """Cookie-auth proxy for support-key lookup used by admin.html JS."""
+    account = await _get_account_from_request(request, db)
+    if not _is_admin(account):
+        return JSONResponse({"detail": "Forbidden"}, status_code=403)
+    if not key:
+        return JSONResponse({"detail": "key is required"}, status_code=400)
+    from app.api.admin import support_lookup
+    return await support_lookup(key=key, db=db, _admin=account.id)

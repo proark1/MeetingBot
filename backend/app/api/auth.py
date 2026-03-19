@@ -1,5 +1,6 @@
 """Account registration, login, and API key management."""
 
+import hashlib as _hashlib
 import logging
 import secrets
 import uuid
@@ -779,3 +780,119 @@ async def delete_account(
         "message": "Account permanently deleted. All associated data has been erased.",
         "account_id": account_id,
     }
+
+
+# ── Support keys ──────────────────────────────────────────────────────────────
+
+class SupportKeyCreateRequest(BaseModel):
+    label: str = Field(default="Support Key", max_length=100, description="Label to identify this key.")
+    expires_in_hours: Optional[int] = Field(
+        default=72,
+        description="Hours until the key expires. Set to null for no expiry. Defaults to 72 hours.",
+    )
+
+
+class SupportKeyResponse(BaseModel):
+    id: str
+    label: str
+    created_at: datetime
+    expires_at: Optional[datetime]
+    last_used_at: Optional[datetime]
+    is_active: bool
+
+
+@router.post("/support-key", status_code=201, tags=["Auth"])
+async def create_support_key(
+    payload: SupportKeyCreateRequest,
+    account_id: Optional[str] = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Generate a support access key.
+
+    The plaintext key is returned **once** and never stored — only its SHA-256
+    hash is persisted. Share the plaintext key with support during a session,
+    then revoke it immediately after. The admin cannot recover the key from the
+    database.
+    """
+    if not account_id or account_id == SUPERADMIN_ACCOUNT_ID:
+        raise HTTPException(status_code=403, detail="Use per-user authentication")
+
+    from app.models.account import SupportKey
+
+    plaintext = secrets.token_urlsafe(24)
+    key_hash = _hashlib.sha256(plaintext.encode()).hexdigest()
+    expires_at = (
+        datetime.now(timezone.utc) + timedelta(hours=payload.expires_in_hours)
+        if payload.expires_in_hours
+        else None
+    )
+    sk = SupportKey(
+        id=str(uuid.uuid4()),
+        account_id=account_id,
+        key_hash=key_hash,
+        label=payload.label or "Support Key",
+        expires_at=expires_at,
+    )
+    db.add(sk)
+    await db.commit()
+
+    return {
+        "id": sk.id,
+        "plaintext_key": plaintext,
+        "label": sk.label,
+        "created_at": sk.created_at.isoformat(),
+        "expires_at": sk.expires_at.isoformat() if sk.expires_at else None,
+        "warning": "This key will not be shown again. Store it securely and share only with support.",
+    }
+
+
+@router.get("/support-keys", response_model=list[SupportKeyResponse], tags=["Auth"])
+async def list_support_keys(
+    account_id: Optional[str] = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """List active support access keys for this account. Plaintext keys are never returned."""
+    if not account_id or account_id == SUPERADMIN_ACCOUNT_ID:
+        raise HTTPException(status_code=403, detail="Use per-user authentication")
+
+    from app.models.account import SupportKey
+
+    result = await db.execute(
+        select(SupportKey)
+        .where(SupportKey.account_id == account_id, SupportKey.is_active == True)  # noqa: E712
+        .order_by(SupportKey.created_at.desc())
+    )
+    keys = result.scalars().all()
+    return [
+        SupportKeyResponse(
+            id=k.id,
+            label=k.label,
+            created_at=k.created_at,
+            expires_at=k.expires_at,
+            last_used_at=k.last_used_at,
+            is_active=k.is_active,
+        )
+        for k in keys
+    ]
+
+
+@router.delete("/support-key/{key_id}", status_code=204, tags=["Auth"])
+async def revoke_support_key(
+    key_id: str,
+    account_id: Optional[str] = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Revoke a support access key immediately."""
+    if not account_id or account_id == SUPERADMIN_ACCOUNT_ID:
+        raise HTTPException(status_code=403, detail="Use per-user authentication")
+
+    from app.models.account import SupportKey
+
+    result = await db.execute(
+        select(SupportKey).where(SupportKey.id == key_id, SupportKey.account_id == account_id)
+    )
+    sk = result.scalar_one_or_none()
+    if not sk:
+        raise HTTPException(status_code=404, detail="Support key not found")
+    sk.is_active = False
+    await db.commit()
