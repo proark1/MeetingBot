@@ -99,6 +99,54 @@ def _video_available(bot: BotSession) -> bool:
     return bool(bot.video_path and os.path.exists(bot.video_path))
 
 
+async def _check_workspace_role(bot: BotSession, account_id: Optional[str], min_role: str) -> None:
+    """If the bot belongs to a workspace, verify the requester has at least min_role.
+
+    Roles in ascending order: viewer < member < admin.
+    Skips the check for superadmin and unauthenticated accounts, and for bots
+    that don't belong to any workspace.
+    """
+    if not bot.workspace_id:
+        return
+    if not account_id or account_id == SUPERADMIN_ACCOUNT_ID:
+        return
+    # Workspace owner always has full access
+    if bot.account_id and bot.account_id == account_id:
+        return
+
+    try:
+        from app.db import AsyncSessionLocal
+        from app.models.account import WorkspaceMember
+        from sqlalchemy import select
+
+        _ROLE_ORDER = {"viewer": 0, "member": 1, "admin": 2}
+        min_level = _ROLE_ORDER.get(min_role, 0)
+
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                select(WorkspaceMember).where(
+                    WorkspaceMember.workspace_id == bot.workspace_id,
+                    WorkspaceMember.account_id == account_id,
+                )
+            )
+            member = result.scalar_one_or_none()
+
+        if member is None:
+            raise HTTPException(status_code=403, detail="You are not a member of this workspace")
+
+        member_level = _ROLE_ORDER.get(member.role, 0)
+        if member_level < min_level:
+            raise HTTPException(
+                status_code=403,
+                detail=f"This action requires workspace role '{min_role}' or higher",
+            )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning("Workspace RBAC check failed: %s", exc)
+        # Fail open — don't block on DB errors
+
+
 def _to_response(bot: BotSession) -> BotResponse:
     return BotResponse(
         id=bot.id,
@@ -124,6 +172,9 @@ def _to_response(bot: BotSession) -> BotResponse:
         is_demo_transcript=bot.is_demo_transcript,
         sub_user_id=bot.sub_user_id,
         metadata=bot.metadata,
+        health_score=getattr(bot, "health_score", None),
+        meeting_cost_usd=getattr(bot, "meeting_cost_usd", None),
+        pii_detected=getattr(bot, "pii_detected", False),
         ai_usage=AIUsageSummary(
             total_tokens=bot.ai_total_tokens,
             total_cost_usd=bot.ai_total_cost_usd,
@@ -215,8 +266,9 @@ async def create_bot(payload: BotCreate, request: Request):
         except Exception:
             logger.exception("Idempotency key lookup failed")
 
-    # Check credits for per-user accounts (not superadmin / unauthenticated)
-    if account_id and account_id != SUPERADMIN_ACCOUNT_ID:
+    # Check credits for per-user accounts (not superadmin / unauthenticated / sandbox)
+    is_sandbox = getattr(request.state, "sandbox", False)
+    if account_id and account_id != SUPERADMIN_ACCOUNT_ID and not is_sandbox:
         from app.db import AsyncSessionLocal
         from app.services.credit_service import check_credits
         async with AsyncSessionLocal() as db:
@@ -268,8 +320,29 @@ async def create_bot(payload: BotCreate, request: Request):
         auto_followup_email=payload.auto_followup_email,
         workspace_id=payload.workspace_id,
         transcription_provider=payload.transcription_provider,
+        translation_language=payload.translation_language,
+        pii_redaction=payload.pii_redaction,
+        avg_hourly_rate_usd=payload.avg_hourly_rate_usd,
     )
     await store.create_bot(bot)
+
+    # ── Sandbox fast-path: return demo bot instantly, no credits deducted ─────
+    if is_sandbox:
+        demo_transcript = await intelligence_service.generate_demo_transcript(bot.meeting_url)
+        now = _now()
+        await store.update_bot(
+            bot.id,
+            status="done",
+            transcript=demo_transcript,
+            is_demo_transcript=True,
+            started_at=now,
+            ended_at=now,
+            duration_seconds=0,
+            participants=[e.get("speaker") for e in demo_transcript if e.get("speaker")],
+        )
+        bot = await store.get_bot(bot.id)
+        logger.info("Sandbox bot %s completed instantly with demo transcript", bot.id)
+        return _to_response(bot)
 
     # ── Store idempotency key ─────────────────────────────────────────────────
     if idempotency_key_raw:
@@ -383,10 +456,13 @@ async def delete_bot(bot_id: str, request: Request):
 
     If the bot already finished (`done` / `error`), it is removed from memory
     immediately. If still running, it is cancelled (transcript salvaged if possible).
+
+    **Workspace RBAC:** Requires `admin` role when the bot belongs to a workspace.
     """
     account_id: Optional[str] = getattr(request.state, "account_id", None)
     sub_user_id = _get_sub_user_from_request(request)
     bot = await _get_or_404(bot_id, account_id, sub_user_id)
+    await _check_workspace_role(bot, account_id, "admin")
 
     task = _running_tasks.get(bot_id)
     if task and not task.done():
@@ -444,11 +520,15 @@ async def get_transcript(bot_id: str, request: Request):
 
 @router.get("/{bot_id}/recording")
 async def download_recording(bot_id: str, request: Request):
-    """Download the meeting audio recording (WAV)."""
+    """Download the meeting audio recording (WAV).
+
+    **Workspace RBAC:** Requires `member` role or higher when the bot belongs to a workspace.
+    """
     import os
     account_id: Optional[str] = getattr(request.state, "account_id", None)
     sub_user_id = _get_sub_user_from_request(request)
     bot = await _get_or_404(bot_id, account_id, sub_user_id)
+    await _check_workspace_role(bot, account_id, "member")
     if not bot.recording_path or not os.path.exists(bot.recording_path):
         raise HTTPException(status_code=404, detail="Recording not available")
     return FileResponse(
@@ -466,11 +546,14 @@ async def download_video(bot_id: str, request: Request):
 
     Available only when `record_video=true` was set at bot creation and
     `video_available` is `true` in the bot response.
+
+    **Workspace RBAC:** Requires `member` role or higher when the bot belongs to a workspace.
     """
     import os
     account_id: Optional[str] = getattr(request.state, "account_id", None)
     sub_user_id = _get_sub_user_from_request(request)
     bot = await _get_or_404(bot_id, account_id, sub_user_id)
+    await _check_workspace_role(bot, account_id, "member")
     if not bot.video_path or not os.path.exists(bot.video_path):
         raise HTTPException(status_code=404, detail="Video recording not available")
     return FileResponse(
@@ -568,6 +651,44 @@ async def ask_bot(bot_id: str, request: Request, payload: AskRequest):
         raise HTTPException(status_code=425, detail="No transcript available yet")
     answer = await intelligence_service.ask_about_transcript(bot.transcript, question)
     return {"bot_id": bot_id, "question": question, "answer": answer}
+
+
+# ── POST /api/v1/bot/{id}/ask-live ───────────────────────────────────────────
+
+@router.post("/{bot_id}/ask-live")
+async def ask_live_bot(bot_id: str, request: Request, payload: AskRequest):
+    """Ask a free-form question about a bot that is currently in a call.
+
+    Works during `in_call` status using whatever transcript has been captured
+    so far (from the live buffer). Also works on completed bots.
+
+    This is distinct from ``POST /ask`` in that it does NOT require the bot to
+    be in a terminal state — you can query the meeting while it is still going.
+    """
+    question = payload.question.strip()
+    if not question:
+        raise HTTPException(status_code=422, detail="question is required")
+    account_id: Optional[str] = getattr(request.state, "account_id", None)
+    sub_user_id = _get_sub_user_from_request(request)
+    bot = await _get_or_404(bot_id, account_id, sub_user_id)
+
+    # Accept any status that has at least some transcript data
+    transcript = bot.transcript or []
+    if not transcript:
+        raise HTTPException(
+            status_code=425,
+            detail="No transcript available yet — the bot may not have joined the call yet",
+            headers={"Retry-After": "5"},
+        )
+
+    answer = await intelligence_service.ask_about_transcript(transcript, question)
+    return {
+        "bot_id": bot_id,
+        "question": question,
+        "answer": answer,
+        "transcript_entries": len(transcript),
+        "bot_status": bot.status,
+    }
 
 
 # ── POST /api/v1/bot/{id}/followup-email ─────────────────────────────────────

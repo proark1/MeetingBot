@@ -2,6 +2,7 @@
 
 import json
 import logging
+from datetime import datetime, timezone, timedelta
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
@@ -14,6 +15,10 @@ router = APIRouter()
 _ACTIVE_STATUSES = ("ready", "scheduled", "queued", "joining", "in_call", "call_ended")
 
 
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
 @router.get("/analytics", tags=["Analytics"])
 async def get_analytics(request: Request):
     """Aggregate analytics across all bots currently in memory (24-hour window)."""
@@ -23,10 +28,16 @@ async def get_analytics(request: Request):
 
     by_status: dict[str, int] = {}
     by_platform: dict[str, int] = {}
+    by_workspace: dict[str, int] = {}
     durations: list[float] = []
+    health_scores: list[int] = []
     total_transcript_entries = 0
     total_tokens = 0
     total_cost = 0.0
+    total_meeting_cost = 0.0
+    meetings_with_quiet_participants = 0
+    seven_days_ago = _now() - timedelta(days=7)
+    meetings_last_7d = 0
 
     for bot in all_bots:
         by_status[bot.status] = by_status.get(bot.status, 0) + 1
@@ -37,12 +48,32 @@ async def get_analytics(request: Request):
         total_tokens += bot.ai_total_tokens
         total_cost += bot.ai_total_cost_usd
 
+        # New aggregations
+        hs = getattr(bot, "health_score", None)
+        if hs is not None:
+            health_scores.append(hs)
+        mc = getattr(bot, "meeting_cost_usd", None)
+        if mc:
+            total_meeting_cost += mc
+        if bot.workspace_id:
+            by_workspace[bot.workspace_id] = by_workspace.get(bot.workspace_id, 0) + 1
+        if bot.speaker_stats:
+            if any(s.get("is_quiet") for s in bot.speaker_stats):
+                meetings_with_quiet_participants += 1
+        if bot.created_at and bot.created_at >= seven_days_ago:
+            meetings_last_7d += 1
+
     done = by_status.get("done", 0)
     error = by_status.get("error", 0)
     finished = done + error
     success_rate = round(done / finished, 3) if finished > 0 else None
     avg_duration = round(sum(durations) / len(durations), 1) if durations else None
+    avg_health_score = round(sum(health_scores) / len(health_scores), 1) if health_scores else None
     active = sum(by_status.get(s, 0) for s in _ACTIVE_STATUSES)
+    quiet_participant_rate = round(meetings_with_quiet_participants / finished, 3) if finished > 0 else None
+
+    # Top 5 workspaces by bot count
+    top_workspaces = sorted(by_workspace.items(), key=lambda x: x[1], reverse=True)[:5]
 
     return {
         "total_bots": total,
@@ -54,6 +85,12 @@ async def get_analytics(request: Request):
         "total_transcript_entries": total_transcript_entries,
         "total_ai_tokens": total_tokens,
         "total_ai_cost_usd": round(total_cost, 6),
+        # New metrics
+        "avg_health_score": avg_health_score,
+        "total_meeting_cost_usd": round(total_meeting_cost, 2) if total_meeting_cost else None,
+        "meetings_per_week": round(meetings_last_7d / 7, 1),
+        "quiet_participant_rate": quiet_participant_rate,
+        "top_workspaces": [{"workspace_id": wid, "count": cnt} for wid, cnt in top_workspaces],
     }
 
 
@@ -80,6 +117,131 @@ async def get_action_items_stats(request: Request):
         "total": len(items),
         "by_assignee": by_assignee,
         "recent": items[:20],
+    }
+
+
+@router.get("/analytics/recurring", tags=["Analytics"])
+async def get_recurring_insights(
+    attendees: str = Query(None, description="Comma-separated attendee names (e.g. 'Alice,Bob'). Used to group recurring meetings by participant set."),
+    limit: int = Query(10, ge=1, le=50, description="Maximum number of past meetings to include in the trend."),
+    request: Request = None,
+):
+    """Recurring meeting trend analysis for a fixed group of attendees.
+
+    Finds meetings in the 24-hour in-memory window (and DB archive) that share
+    the same set of participants and returns a time-series of quality metrics.
+
+    Optionally pass ``attendees=Alice,Bob`` to filter by participant name; omit
+    to return insights across ALL recurring meeting groups.
+    """
+    account_id = getattr(request.state, "account_id", None)
+    filter_account = account_id if (account_id and account_id != SUPERADMIN_ACCOUNT_ID) else None
+
+    target_names: set[str] | None = None
+    if attendees:
+        target_names = {n.strip().lower() for n in attendees.split(",") if n.strip()}
+
+    all_bots, _ = await store.list_bots(limit=10000, account_id=filter_account)
+    done_bots = [b for b in all_bots if b.status in ("done", "cancelled") and b.transcript]
+
+    # Filter by attendees if provided
+    if target_names:
+        filtered = []
+        for bot in done_bots:
+            bot_speakers = {e.get("speaker", "").strip().lower() for e in bot.transcript}
+            if target_names.issubset(bot_speakers):
+                filtered.append(bot)
+        done_bots = filtered
+
+    # Sort by creation time descending, take the most recent `limit` bots
+    done_bots = sorted(done_bots, key=lambda b: b.created_at, reverse=True)[:limit]
+
+    series = []
+    for bot in done_bots:
+        action_items = []
+        if bot.analysis:
+            action_items = bot.analysis.get("action_items", [])
+        series.append({
+            "bot_id": bot.id,
+            "date": bot.created_at.isoformat(),
+            "duration_s": bot.duration_seconds,
+            "health_score": getattr(bot, "health_score", None),
+            "action_item_count": len(action_items),
+            "sentiment": bot.analysis.get("sentiment") if bot.analysis else None,
+            "participants": bot.participants,
+            "meeting_cost_usd": getattr(bot, "meeting_cost_usd", None),
+        })
+
+    # Simple trend computation on the time series (oldest → newest)
+    rev = list(reversed(series))
+    health_trend = "stable"
+    if len(rev) >= 3:
+        recent_hs = [r["health_score"] for r in rev[-3:] if r["health_score"] is not None]
+        older_hs  = [r["health_score"] for r in rev[:max(1, len(rev)-3)] if r["health_score"] is not None]
+        if recent_hs and older_hs:
+            if sum(recent_hs) / len(recent_hs) > sum(older_hs) / len(older_hs) + 5:
+                health_trend = "improving"
+            elif sum(recent_hs) / len(recent_hs) < sum(older_hs) / len(older_hs) - 5:
+                health_trend = "declining"
+
+    return {
+        "attendees_filter": list(target_names) if target_names else None,
+        "meeting_count": len(series),
+        "health_trend": health_trend,
+        "series": series,
+    }
+
+
+@router.get("/analytics/api-usage", tags=["Analytics"])
+async def get_api_usage(request: Request):
+    """Account-level API usage summary for the current 24-hour window.
+
+    Returns bot counts, token consumption, cost breakdown, error rate,
+    and top platforms — useful for building a usage dashboard.
+    """
+    account_id = getattr(request.state, "account_id", None)
+    filter_account = account_id if (account_id and account_id != SUPERADMIN_ACCOUNT_ID) else None
+    all_bots, _ = await store.list_bots(limit=10000, account_id=filter_account)
+
+    now = _now()
+    seven_days_ago = now - timedelta(days=7)
+    thirty_days_ago = now - timedelta(days=30)
+
+    bots_7d = [b for b in all_bots if b.created_at and b.created_at >= seven_days_ago]
+    bots_30d = [b for b in all_bots if b.created_at and b.created_at >= thirty_days_ago]
+
+    tokens_7d = sum(b.ai_total_tokens for b in bots_7d)
+    cost_7d = sum(b.ai_total_cost_usd for b in bots_7d)
+
+    done_7d = sum(1 for b in bots_7d if b.status == "done")
+    error_7d = sum(1 for b in bots_7d if b.status == "error")
+    finished_7d = done_7d + error_7d
+    error_rate_7d = round(error_7d / finished_7d, 3) if finished_7d > 0 else None
+
+    platform_counts: dict[str, int] = {}
+    for bot in bots_7d:
+        platform_counts[bot.meeting_platform] = platform_counts.get(bot.meeting_platform, 0) + 1
+    top_platforms = sorted(platform_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+
+    # AI operation breakdown for last 7 days
+    op_tokens: dict[str, int] = {}
+    op_cost: dict[str, float] = {}
+    for bot in bots_7d:
+        for usage in bot.ai_usage:
+            op = usage.get("operation", "unknown")
+            op_tokens[op] = op_tokens.get(op, 0) + usage.get("total_tokens", 0)
+            op_cost[op] = op_cost.get(op, 0.0) + usage.get("cost_usd", 0.0)
+
+    return {
+        "window": "24h_in_memory",
+        "bots_created_7d": len(bots_7d),
+        "bots_created_30d": len(bots_30d),
+        "total_tokens_7d": tokens_7d,
+        "total_cost_usd_7d": round(cost_7d, 6),
+        "error_rate_7d": error_rate_7d,
+        "top_platforms_7d": [{"platform": p, "count": c} for p, c in top_platforms],
+        "tokens_by_operation_7d": op_tokens,
+        "cost_by_operation_7d": {k: round(v, 6) for k, v in op_cost.items()},
     }
 
 

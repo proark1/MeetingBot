@@ -44,8 +44,9 @@ def _create_jwt(account_id: str) -> str:
     )
 
 
-def generate_api_key() -> str:
-    return "sk_live_" + secrets.token_urlsafe(40)
+def generate_api_key(mode: str = "live") -> str:
+    prefix = "sk_test_" if mode == "test" else "sk_live_"
+    return prefix + secrets.token_urlsafe(40)
 
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
@@ -130,6 +131,7 @@ class ApiKeyResponse(BaseModel):
     id: str = Field(description="Unique key UUID (used to revoke the key).")
     name: str = Field(description="Human-readable label.")
     key_preview: str = Field(description="First 16 characters of the key followed by `...` — the full key is only shown once at creation.")
+    mode: str = Field(default="live", description="`live` for production keys, `test` for sandbox keys that return demo data without deducting credits.")
     is_active: bool = Field(description="False if the key has been revoked.")
     created_at: datetime = Field(description="When the key was created (UTC).")
     last_used_at: Optional[datetime] = Field(default=None, description="Last time this key was used for an authenticated request (UTC), or null if never used.")
@@ -305,6 +307,7 @@ async def create_api_key(
         id=api_key.id,
         name=api_key.name,
         key_preview=key_value[:16] + "...",
+        mode="live",
         is_active=True,
         created_at=api_key.created_at,
         last_used_at=None,
@@ -331,6 +334,7 @@ async def list_api_keys(
             id=k.id,
             name=k.name,
             key_preview=k.key[:16] + "...",
+            mode=getattr(k, "mode", "live"),
             is_active=k.is_active,
             created_at=k.created_at,
             last_used_at=k.last_used_at,
@@ -357,6 +361,86 @@ async def revoke_api_key(
         raise HTTPException(status_code=404, detail="API key not found")
     key.is_active = False
     await db.commit()
+
+
+# ── Sandbox / test keys (sk_test_...) ────────────────────────────────────────
+
+class TestKeyResponse(BaseModel):
+    id: str
+    name: str
+    key: str = Field(description="Full test key — shown once. Use as Bearer token for sandbox mode.")
+    mode: str = "test"
+    created_at: datetime
+
+
+@router.post("/test-keys", response_model=TestKeyResponse, status_code=201, tags=["Auth"])
+async def create_test_key(
+    payload: CreateKeyRequest,
+    account_id: Optional[str] = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Generate a sandbox API key (`sk_test_...`).
+
+    Test keys behave like live keys except:
+    - Bot creation returns a mock bot with a demo transcript immediately.
+    - Credits are **not** deducted.
+    - Useful for local development and CI/CD pipelines.
+
+    The full key is returned once — store it securely.
+    """
+    if not account_id or account_id == SUPERADMIN_ACCOUNT_ID:
+        raise HTTPException(status_code=403, detail="Use per-user authentication to manage API keys")
+
+    key_value = generate_api_key(mode="test")
+    api_key = ApiKey(
+        id=str(uuid.uuid4()),
+        account_id=account_id,
+        key=key_value,
+        name=payload.name or "Test Key",
+        mode="test",
+    )
+    db.add(api_key)
+    await db.commit()
+
+    return TestKeyResponse(
+        id=api_key.id,
+        name=api_key.name,
+        key=key_value,
+        created_at=api_key.created_at,
+    )
+
+
+@router.get("/test-keys", response_model=list[ApiKeyResponse], tags=["Auth"])
+async def list_test_keys(
+    account_id: Optional[str] = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """List all active sandbox (`sk_test_...`) API keys for the current account."""
+    if not account_id or account_id == SUPERADMIN_ACCOUNT_ID:
+        raise HTTPException(status_code=403, detail="Use per-user authentication to manage API keys")
+
+    result = await db.execute(
+        select(ApiKey)
+        .where(
+            ApiKey.account_id == account_id,
+            ApiKey.is_active == True,  # noqa: E712
+            ApiKey.mode == "test",
+        )
+        .order_by(ApiKey.created_at.desc())
+    )
+    keys = result.scalars().all()
+    return [
+        ApiKeyResponse(
+            id=k.id,
+            name=k.name,
+            key_preview=k.key[:16] + "...",
+            mode="test",
+            is_active=k.is_active,
+            created_at=k.created_at,
+            last_used_at=k.last_used_at,
+        )
+        for k in keys
+    ]
 
 
 # ── Wallet ───────────────────────────────────────────────────────────────────

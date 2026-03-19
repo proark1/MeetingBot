@@ -81,6 +81,101 @@ async def _update_trigger_count(alert_id: str) -> None:
         logger.warning("Failed to update trigger count for alert %s: %s", alert_id, exc)
 
 
+async def scan_live_entry(
+    bot,
+    entry: dict,
+    fired_keys: set,
+) -> None:
+    """Check a single live transcript entry against keyword alert rules and fire immediately.
+
+    Unlike ``scan_and_fire_alerts`` (post-call), this runs during the meeting in real-time.
+    Fires ``bot.live_keyword_alert`` events (distinct from post-call ``bot.keyword_alert``).
+
+    ``fired_keys`` is a mutable set owned by the caller (the live entry closure) used to
+    deduplicate: a (keyword, minute-bucket) pair fires at most once per minute.
+    """
+    from app.services import webhook_service
+    from app.services.intelligence_service import get_sentiment
+
+    text = entry.get("text", "") or ""
+    if not text:
+        return
+
+    speaker = entry.get("speaker", "Unknown")
+    timestamp = entry.get("timestamp", 0)
+    bot_id = bot.id
+    account_id = bot.account_id
+
+    # Collect rules
+    rules: list[dict] = []
+    for item in (getattr(bot, "keyword_alerts", None) or []):
+        keyword = item.get("keyword", "").strip()
+        if keyword:
+            rules.append({"id": None, "name": f"bot-rule:{keyword}", "keywords": [keyword], "webhook_url": item.get("webhook_url")})
+
+    if account_id:
+        try:
+            account_rules = await _load_account_keyword_alerts(account_id)
+            rules.extend(account_rules)
+        except Exception:
+            pass
+
+    if not rules:
+        return
+
+    for rule in rules:
+        for keyword in rule.get("keywords", []):
+            if not keyword:
+                continue
+            if not _matches_keyword(text, keyword):
+                continue
+
+            # Deduplicate: fire at most once per (keyword, 60-second bucket)
+            dedup_key = f"{keyword.lower()}_{int(timestamp // 60)}"
+            if dedup_key in fired_keys:
+                continue
+            fired_keys.add(dedup_key)
+
+            # Enrich with sentiment
+            try:
+                sentiment = await get_sentiment(text)
+            except Exception:
+                sentiment = "neutral"
+
+            payload = {
+                "bot_id": bot_id,
+                "account_id": account_id,
+                "keyword": keyword,
+                "alert_name": rule.get("name", ""),
+                "speaker": speaker,
+                "text": text,
+                "timestamp": timestamp,
+                "sentiment": sentiment,
+                "live": True,
+            }
+            try:
+                await webhook_service.dispatch_event(
+                    "bot.live_keyword_alert",
+                    payload,
+                    extra_webhook_url=rule.get("webhook_url"),
+                    account_id=account_id,
+                )
+                logger.info(
+                    "Bot %s: live keyword alert — '%s' by %s @ %.1fs (sentiment: %s)",
+                    bot_id, keyword, speaker, timestamp, sentiment,
+                )
+            except Exception as exc:
+                logger.warning("Bot %s: failed to dispatch live keyword alert: %s", bot_id, exc)
+
+            if rule.get("id"):
+                try:
+                    await _update_trigger_count(rule["id"])
+                except Exception:
+                    pass
+
+            break  # only fire once per (entry, rule)
+
+
 async def scan_and_fire_alerts(
     bot_id: str,
     account_id: Optional[str],

@@ -171,6 +171,17 @@ class Settings(BaseSettings):
     # ── MCP server ─────────────────────────────────────────────────────────────
     MCP_ENABLED: bool = True
 
+    # ── PostgreSQL connection pool ─────────────────────────────────────────────
+    # Tune these for your deployment's expected concurrency.
+    # pool_size: number of persistent connections kept open.
+    # max_overflow: extra connections allowed above pool_size under burst load.
+    # pool_recycle: recycle connections older than N seconds (prevents stale-connection errors).
+    # pool_timeout: seconds to wait for a free connection before raising OperationalError.
+    DB_POOL_SIZE: int = 10
+    DB_POOL_MAX_OVERFLOW: int = 10
+    DB_POOL_RECYCLE_SECONDS: int = 1800   # 30 minutes
+    DB_POOL_TIMEOUT: int = 30
+
     model_config = {"env_file": ".env", "extra": "ignore"}
 
 

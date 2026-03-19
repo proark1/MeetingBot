@@ -149,8 +149,25 @@ async def lifespan(app: FastAPI):
 
     signal.signal(signal.SIGTERM, _handle_sigterm)
 
+    async def _supervised(name: str, coro_fn, *args, **kwargs) -> None:
+        """Run a background coroutine and restart it if it crashes.
+
+        Without this, a single unhandled exception in a background task silently
+        kills the task — webhooks stop retrying, cleanup stops running, etc.
+        This wrapper logs the crash and restarts after a short delay.
+        """
+        while True:
+            try:
+                await coro_fn(*args, **kwargs)
+            except asyncio.CancelledError:
+                logger.info("Background task %r cancelled", name)
+                return
+            except Exception:
+                logger.exception("Background task %r crashed — restarting in 10 s", name)
+                await asyncio.sleep(10)
+
     # Start bot queue processor
-    queue_task = asyncio.create_task(_queue_processor())
+    queue_task = asyncio.create_task(_supervised("queue_processor", _queue_processor))
     logger.info("Bot queue processor started")
 
     # Start periodic cleanup of expired bots
@@ -160,17 +177,17 @@ async def lifespan(app: FastAPI):
             await asyncio.sleep(3600)  # every hour
             await store.cleanup_expired()
 
-    cleanup_task = asyncio.create_task(_cleanup_loop())
+    cleanup_task = asyncio.create_task(_supervised("cleanup_loop", _cleanup_loop))
 
     # Start webhook retry loop
     from app.services.webhook_service import webhook_retry_loop
-    webhook_retry_task = asyncio.create_task(webhook_retry_loop())
+    webhook_retry_task = asyncio.create_task(_supervised("webhook_retry", webhook_retry_loop))
     logger.info("Webhook retry loop started")
 
     # Start calendar auto-join poll loop
     from app.services.calendar_service import calendar_poll_loop
     calendar_task = asyncio.create_task(
-        calendar_poll_loop(interval_s=settings.CALENDAR_POLL_INTERVAL_S)
+        _supervised("calendar_poll", calendar_poll_loop, interval_s=settings.CALENDAR_POLL_INTERVAL_S)
     )
 
     # Start retention enforcement loop (daily)
@@ -242,7 +259,7 @@ async def lifespan(app: FastAPI):
                 await db.commit()
                 logger.info("Retention enforcement complete")
 
-    retention_task = asyncio.create_task(_retention_loop())
+    retention_task = asyncio.create_task(_supervised("retention_loop", _retention_loop))
 
     logger.info("MeetingBot ready — API docs at /api/docs")
     yield
@@ -786,6 +803,59 @@ app.add_middleware(
 app.add_middleware(PrometheusMiddleware)
 
 
+# ── Security headers ───────────────────────────────────────────────────────────
+
+@app.middleware("http")
+async def add_security_headers(request, call_next):
+    """Add defensive HTTP security headers to every response.
+
+    These headers protect against XSS, clickjacking, MIME-sniffing, and
+    information leakage without requiring application-level changes.
+    """
+    response = await call_next(request)
+    # Prevent browsers from MIME-sniffing the content-type
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    # Deny embedding in iframes (clickjacking protection)
+    response.headers["X-Frame-Options"] = "DENY"
+    # Limit Referer header to same-origin
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    # Disable potentially dangerous browser features
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    # Content-Security-Policy: allow scripts/styles only from self + CDNs used by the UI
+    # API responses (application/json) are unaffected — browsers don't execute them.
+    if "text/html" in response.headers.get("content-type", ""):
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' cdn.jsdelivr.net; "
+            "style-src 'self' 'unsafe-inline' cdn.jsdelivr.net fonts.googleapis.com; "
+            "font-src 'self' fonts.gstatic.com; "
+            "img-src 'self' data: https:; "
+            "connect-src 'self' wss: ws:; "
+            "frame-ancestors 'none';"
+        )
+    # HSTS: tell browsers to always use HTTPS for this domain (1 year)
+    # Only set if we're serving over HTTPS (detected via X-Forwarded-Proto or direct TLS)
+    forwarded_proto = request.headers.get("x-forwarded-proto", "")
+    if forwarded_proto == "https" or request.url.scheme == "https":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
+
+
+# ── Rate limit response headers ────────────────────────────────────────────────
+
+@app.middleware("http")
+async def add_rate_limit_headers(request, call_next):
+    """Attach X-RateLimit-Remaining and X-RateLimit-Reset to every response."""
+    response = await call_next(request)
+    remaining = getattr(request.state, "rate_limit_remaining", None)
+    reset = getattr(request.state, "rate_limit_reset", None)
+    if remaining is not None:
+        response.headers["X-RateLimit-Remaining"] = str(remaining)
+    if reset is not None:
+        response.headers["X-RateLimit-Reset"] = str(reset)
+    return response
+
+
 # ── Public OpenAPI override ────────────────────────────────────────────────────
 # The default /api/docs and /api/openapi.json show only public endpoints.
 # Admin endpoints, platform analytics, and ai_usage cost fields are excluded.
@@ -873,6 +943,31 @@ async def _unhandled_exception_handler(request, exc):
 
 
 _auth = [Depends(require_auth)]
+
+
+# ── Developer tool web routes ──────────────────────────────────────────────────
+
+_TEMPLATES_DIR = Path(__file__).parent / "templates"
+
+
+@app.get("/webhook-playground", include_in_schema=False, response_class=HTMLResponse)
+async def webhook_playground():
+    """Webhook testing playground — view delivery history and send test events."""
+    tmpl = _TEMPLATES_DIR / "webhook_playground.html"
+    if tmpl.exists():
+        return HTMLResponse(tmpl.read_text(encoding="utf-8"))
+    return HTMLResponse("<h1>Webhook Playground</h1><p>Template not found.</p>", status_code=500)
+
+
+@app.get("/api-dashboard", include_in_schema=False, response_class=HTMLResponse)
+async def api_dashboard():
+    """API usage dashboard — view bot counts, token usage, and cost breakdowns."""
+    tmpl = _TEMPLATES_DIR / "api_dashboard.html"
+    if tmpl.exists():
+        return HTMLResponse(tmpl.read_text(encoding="utf-8"))
+    return HTMLResponse("<h1>API Dashboard</h1><p>Template not found.</p>", status_code=500)
+
+
 app.include_router(metrics_router)                                       # unauthenticated /metrics
 app.include_router(auth_router,           prefix="/api/v1")              # no auth on register/login
 app.include_router(oauth_router,          prefix="/api/v1")              # SSO OAuth (no prefix auth)
@@ -894,12 +989,57 @@ app.include_router(ws_router,             prefix="/api/v1")              # WS au
 app.include_router(ui_router)                                             # web UI (no prefix)
 
 
-# ── Health ────────────────────────────────────────────────────────────────────
+# ── Health & readiness probes ──────────────────────────────────────────────────
 
 @app.get("/health", tags=["Health"])
 @app.get("/api/health", tags=["Health"])
 async def health():
+    """Liveness probe — returns 200 when the process is running.
+
+    Does NOT check external dependencies (use /ready for that).
+    Kubernetes: use this as the `livenessProbe`.
+    """
     return {"status": "ok", "service": "MeetingBot", "version": "2.2.0"}
+
+
+@app.get("/ready", tags=["Health"])
+@app.get("/api/ready", tags=["Health"])
+async def ready():
+    """Readiness probe — returns 200 only when all critical dependencies are healthy.
+
+    Checks:
+    - Database connectivity (SELECT 1)
+    - At least one AI provider key is configured
+
+    Kubernetes: use this as the `readinessProbe` to stop routing traffic to
+    instances that can't serve requests.
+    """
+    checks: dict = {}
+    ok = True
+
+    # ── Database ──────────────────────────────────────────────────────────────
+    try:
+        from app.db import AsyncSessionLocal
+        from sqlalchemy import text as _text
+        async with AsyncSessionLocal() as _db:
+            await _db.execute(_text("SELECT 1"))
+        checks["database"] = "ok"
+    except Exception as exc:
+        checks["database"] = f"error: {exc}"
+        ok = False
+
+    # ── AI provider ───────────────────────────────────────────────────────────
+    if settings.ANTHROPIC_API_KEY or settings.GEMINI_API_KEY:
+        checks["ai_provider"] = "ok"
+    else:
+        checks["ai_provider"] = "no key configured (demo mode only)"
+        # Not fatal — service can still return demo transcripts
+
+    from fastapi.responses import JSONResponse as _JR
+    return _JR(
+        content={"status": "ok" if ok else "degraded", "checks": checks},
+        status_code=200 if ok else 503,
+    )
 
 
 # ── Serve frontend ────────────────────────────────────────────────────────────

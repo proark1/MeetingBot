@@ -423,7 +423,39 @@
   {% block content %}{% endblock %}
 </div>
 
+<!-- Toast container (used for inline interactions like "Copied" feedback) -->
+<div id="toast-container" class="position-fixed bottom-0 end-0 p-3" style="z-index: 1100;">
+  <!-- Toasts are injected here via JS -->
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+  function showToast(message, variant = 'success', duration = 2500) {
+    const container = document.getElementById('toast-container');
+    if (!container) return;
+
+    const toastEl = document.createElement('div');
+    toastEl.className = `toast align-items-center text-bg-${variant} border-0`;
+    toastEl.role = 'alert';
+    toastEl.ariaLive = 'assertive';
+    toastEl.ariaAtomic = 'true';
+
+    toastEl.innerHTML = `
+      <div class="d-flex">
+        <div class="toast-body" style="font-size:0.9rem;">
+          ${message}
+        </div>
+        <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+      </div>
+    `;
+
+    container.appendChild(toastEl);
+    const toast = new bootstrap.Toast(toastEl, { delay: duration });
+    toast.show();
+    toastEl.addEventListener('hidden.bs.toast', () => toastEl.remove());
+    return toast;
+  }
+</script>
 {% block scripts %}{% endblock %}
 </body>
 </html>

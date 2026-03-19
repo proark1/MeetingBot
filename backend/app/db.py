@@ -9,15 +9,24 @@ def _engine_kwargs() -> dict:
     """Return extra kwargs for create_async_engine based on the configured DB."""
     url = settings.async_database_url
     if "postgresql" in url:
-        # asyncpg requires ssl=True when connecting over a public/TLS endpoint.
-        # Railway's private-network URL works with ssl=False; the public URL needs ssl=True.
-        # We default to ssl=False (private network) but allow override via DATABASE_URL
-        # query string — e.g. append ?ssl=require to DATABASE_URL for external clients.
-        # timeout=10: fail fast if the DB is unreachable instead of hanging forever.
         connect_args: dict = {"timeout": 10}
         if "ssl=require" in url or "sslmode=require" in url:
             connect_args["ssl"] = True
-        return {"connect_args": connect_args}
+        return {
+            "connect_args": connect_args,
+            # Connection pool tuning for production PostgreSQL.
+            # pool_pre_ping: execute a lightweight "SELECT 1" before reusing a connection to
+            #   detect stale/dropped connections (crucial when DB restarts or idles out).
+            # pool_recycle: recycle connections older than 30 min to prevent silent drops
+            #   from cloud-proxy or network idle timeouts (common on Railway/Fly/RDS).
+            # pool_size / max_overflow: allow bursting to 20 concurrent DB connections under load.
+            "pool_pre_ping": True,
+            "pool_recycle": settings.DB_POOL_RECYCLE_SECONDS,
+            "pool_size": settings.DB_POOL_SIZE,
+            "max_overflow": settings.DB_POOL_MAX_OVERFLOW,
+            "pool_timeout": settings.DB_POOL_TIMEOUT,
+        }
+    # SQLite (dev) — no pooling config needed
     return {}
 
 
@@ -114,3 +123,25 @@ def _migrate_schema(conn) -> None:
             if col_name not in existing:
                 _log.info("Adding column bot_snapshots.%s", col_name)
                 conn.execute(text(f"ALTER TABLE bot_snapshots ADD COLUMN {col_name} {col_def}"))
+
+    # v6.x: add composite performance indexes (idempotent — CREATE INDEX IF NOT EXISTS)
+    _indexes = [
+        ("ix_bot_snapshots_account_created",
+         "CREATE INDEX IF NOT EXISTS ix_bot_snapshots_account_created ON bot_snapshots (account_id, created_at)"),
+        ("ix_bot_snapshots_account_sub_user",
+         "CREATE INDEX IF NOT EXISTS ix_bot_snapshots_account_sub_user ON bot_snapshots (account_id, sub_user_id)"),
+        ("ix_webhook_deliveries_retry",
+         "CREATE INDEX IF NOT EXISTS ix_webhook_deliveries_retry ON webhook_deliveries (status, next_retry_at)"),
+        ("ix_idempotency_account_key",
+         "CREATE UNIQUE INDEX IF NOT EXISTS ix_idempotency_account_key ON idempotency_keys (account_id, key)"),
+    ]
+    existing_tables = set(inspector.get_table_names())
+    for _idx_name, _idx_sql in _indexes:
+        # SQLite supports IF NOT EXISTS on CREATE INDEX; PostgreSQL also supports it
+        # Only run if the table the index references actually exists
+        _tbl = _idx_sql.split(" ON ")[1].split(" ")[0]
+        if _tbl in existing_tables:
+            try:
+                conn.execute(text(_idx_sql))
+            except Exception:
+                pass  # index already exists or table schema mismatch — safe to ignore

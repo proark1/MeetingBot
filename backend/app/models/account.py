@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -58,6 +58,8 @@ class ApiKey(Base):
     account_id: Mapped[str] = mapped_column(String(36), ForeignKey("accounts.id"), nullable=False, index=True)
     key: Mapped[str] = mapped_column(String(80), unique=True, nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(100), default="Default")
+    # "live" (default) or "test" — test keys return demo data without deducting credits
+    mode: Mapped[str] = mapped_column(String(10), default="live", nullable=False)
     last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
@@ -109,6 +111,12 @@ class BotSnapshot(Base):
     """Persists completed/error/cancelled bot sessions across server restarts."""
 
     __tablename__ = "bot_snapshots"
+    __table_args__ = (
+        # Composite index for the most common query: filter by account + sort by date
+        Index("ix_bot_snapshots_account_created", "account_id", "created_at"),
+        # Composite index used by sub-user isolation queries
+        Index("ix_bot_snapshots_account_sub_user", "account_id", "sub_user_id"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     account_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
@@ -251,6 +259,10 @@ class WebhookDelivery(Base):
     """Persistent delivery log + retry queue for global webhook deliveries."""
 
     __tablename__ = "webhook_deliveries"
+    __table_args__ = (
+        # Used by the retry loop: SELECT WHERE status IN ('pending','retrying') AND next_retry_at <= now()
+        Index("ix_webhook_deliveries_retry", "status", "next_retry_at"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     webhook_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
@@ -271,6 +283,10 @@ class IdempotencyKey(Base):
     """Maps an (account_id, idempotency_key) pair to the bot_id created by that request."""
 
     __tablename__ = "idempotency_keys"
+    __table_args__ = (
+        # The primary lookup: account_id + key must be unique; also speeds up the dedup check
+        Index("ix_idempotency_account_key", "account_id", "key", unique=True),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     account_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)

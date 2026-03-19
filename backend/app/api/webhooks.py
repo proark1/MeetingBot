@@ -9,48 +9,82 @@ import ipaddress
 import socket
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request as _Request
+from slowapi import Limiter as _Limiter
+from slowapi.util import get_remote_address as _get_remote_address
 
 from app.schemas.webhook import WebhookCreate, WebhookResponse
 from app.store import store
 
 router = APIRouter(prefix="/webhook", tags=["Webhooks"])
+_limiter = _Limiter(key_func=_get_remote_address)
 
-_PRIVATE_NETS = [ipaddress.ip_network(n) for n in [
-    "127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12",
-    "192.168.0.0/16", "169.254.0.0/16", "::1/128", "fc00::/7",
+# Private/reserved IP ranges — all traffic to these must be blocked (SSRF prevention).
+# Includes cloud-provider metadata endpoints (169.254.169.254 is AWS/GCP/Azure IMDS).
+_BLOCKED_NETS = [ipaddress.ip_network(n) for n in [
+    "127.0.0.0/8",       # loopback
+    "10.0.0.0/8",        # RFC 1918 private
+    "172.16.0.0/12",     # RFC 1918 private
+    "192.168.0.0/16",    # RFC 1918 private
+    "169.254.0.0/16",    # link-local / cloud metadata (AWS IMDS, GCP, Azure)
+    "100.64.0.0/10",     # carrier-grade NAT (RFC 6598)
+    "192.0.0.0/24",      # IETF protocol assignments
+    "198.18.0.0/15",     # benchmark testing
+    "198.51.100.0/24",   # TEST-NET-2 (documentation)
+    "203.0.113.0/24",    # TEST-NET-3 (documentation)
+    "::1/128",           # IPv6 loopback
+    "fc00::/7",          # IPv6 unique local
+    "fe80::/10",         # IPv6 link-local
 ]]
+_ALLOWED_SCHEMES = {"http", "https"}
 
 
-def _is_private_ip(addr) -> bool:
-    return addr.is_private or addr.is_loopback or addr.is_link_local or any(addr in net for net in _PRIVATE_NETS)
+def _is_blocked_ip(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    return addr.is_private or addr.is_loopback or addr.is_link_local or any(
+        addr in net for net in _BLOCKED_NETS
+    )
 
 
 async def _block_ssrf(url: str) -> None:
-    host = urlparse(url).hostname or ""
-    if not host or host.lower() == "localhost":
+    """Reject webhook URLs that target internal/private infrastructure.
+
+    Defends against SSRF by:
+    1. Enforcing http/https scheme only
+    2. Blocking localhost and private IP literals directly
+    3. Resolving hostnames and blocking if any resolved IP is private
+    """
+    parsed = urlparse(url)
+    if parsed.scheme not in _ALLOWED_SCHEMES:
+        raise HTTPException(status_code=400, detail=f"Webhook URL scheme must be http or https (got {parsed.scheme!r})")
+    host = parsed.hostname or ""
+    if not host or host.lower() in ("localhost", "0.0.0.0"):
         raise HTTPException(status_code=400, detail="Webhook URL must not target localhost")
     try:
         addr = ipaddress.ip_address(host)
-        if _is_private_ip(addr):
-            raise HTTPException(status_code=400, detail="Webhook URL must not target a private address")
+        if _is_blocked_ip(addr):
+            raise HTTPException(status_code=400, detail="Webhook URL must not target a private/reserved address")
         return
     except ValueError:
-        pass
+        pass  # not an IP literal — resolve below
     try:
-        infos = await asyncio.to_thread(socket.getaddrinfo, host, None)
+        infos = await asyncio.wait_for(
+            asyncio.to_thread(socket.getaddrinfo, host, None),
+            timeout=5.0,
+        )
         for *_, sockaddr in infos:
             try:
                 addr = ipaddress.ip_address(sockaddr[0])
-                if _is_private_ip(addr):
+                if _is_blocked_ip(addr):
                     raise HTTPException(
                         status_code=400,
-                        detail=f"Webhook URL resolves to a private address ({sockaddr[0]})",
+                        detail=f"Webhook URL resolves to a private/reserved address ({sockaddr[0]})",
                     )
             except ValueError:
                 pass
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=400, detail="Webhook URL DNS resolution timed out")
     except socket.gaierror:
-        pass
+        pass  # hostname unresolvable — let the delivery attempt fail naturally
 
 
 def _to_response(wh) -> WebhookResponse:
@@ -68,7 +102,8 @@ def _to_response(wh) -> WebhookResponse:
 
 
 @router.post("", response_model=WebhookResponse, status_code=201)
-async def create_webhook(payload: WebhookCreate):
+@_limiter.limit("10/minute")
+async def create_webhook(payload: WebhookCreate, request: _Request):
     """Register a global webhook.
 
     The webhook will receive events for all bots:
@@ -107,7 +142,8 @@ async def delete_webhook(webhook_id: str):
 
 
 @router.post("/{webhook_id}/test")
-async def test_webhook(webhook_id: str):
+@_limiter.limit("5/minute")
+async def test_webhook(webhook_id: str, request: _Request):
     """Send a test event to this webhook endpoint."""
     wh = store.get_webhook(webhook_id)
     if wh is None:
@@ -128,6 +164,7 @@ async def test_webhook(webhook_id: str):
 
 # ── Delivery log ───────────────────────────────────────────────────────────────
 
+from fastapi import Request as _Request
 from pydantic import BaseModel as _BM
 from typing import Optional as _Opt
 from datetime import datetime as _dt
@@ -146,6 +183,50 @@ class DeliveryResponse(_BM):
     next_retry_at: _Opt[_dt] = None
     delivered_at: _Opt[_dt] = None
     created_at: _dt
+
+
+@router.get("/deliveries", response_model=list[DeliveryResponse], tags=["Webhooks"])
+async def list_all_deliveries(
+    limit: int = 50,
+    offset: int = 0,
+):
+    """List the most recent webhook delivery attempts across ALL registered webhooks.
+
+    Useful for the webhook testing playground. Returns up to `limit` entries sorted
+    newest-first, combining deliveries from every webhook in the account.
+    """
+    try:
+        from app.db import AsyncSessionLocal
+        from app.models.account import WebhookDelivery
+        from sqlalchemy import select
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(WebhookDelivery)
+                .order_by(WebhookDelivery.created_at.desc())
+                .limit(limit)
+                .offset(offset)
+            )
+            rows = result.scalars().all()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return [
+        DeliveryResponse(
+            id=r.id,
+            webhook_id=r.webhook_id,
+            bot_id=r.bot_id,
+            event=r.event,
+            status=r.status,
+            attempt_number=r.attempt_number,
+            response_status_code=r.response_status_code,
+            response_body=r.response_body,
+            error_message=r.error_message,
+            next_retry_at=r.next_retry_at,
+            delivered_at=r.delivered_at,
+            created_at=r.created_at,
+        )
+        for r in rows
+    ]
 
 
 @router.get("/{webhook_id}/deliveries", response_model=list[DeliveryResponse])

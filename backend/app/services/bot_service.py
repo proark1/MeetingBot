@@ -21,6 +21,46 @@ from app.services.intelligence_service import set_usage_sink
 
 logger = logging.getLogger(__name__)
 
+# ── Live-entry helper coroutines (fire-and-forget via create_task) ─────────────
+
+async def _extract_and_broadcast_action_items(
+    bot_id: str, account_id: Optional[str], transcript_slice: list
+) -> None:
+    """Extract action items from a live slice and broadcast via WebSocket."""
+    try:
+        action_items = await intelligence_service.extract_live_action_items(transcript_slice)
+        if action_items:
+            await ws_manager.broadcast(
+                "bot.live_action_items",
+                {"bot_id": bot_id, "account_id": account_id, "action_items": action_items},
+                account_id=account_id,
+            )
+    except Exception as exc:
+        logger.debug("Bot %s: live action items failed: %s", bot_id, exc)
+
+
+async def _translate_and_broadcast(
+    bot_id: str, account_id: Optional[str], entry: dict, target_lang: str
+) -> None:
+    """Translate a live transcript entry and broadcast the translation."""
+    try:
+        translated = await intelligence_service.translate_text(entry.get("text", ""), target_lang)
+        await ws_manager.broadcast(
+            "bot.live_transcript_translated",
+            {
+                "bot_id": bot_id,
+                "account_id": account_id,
+                "original": entry.get("text", ""),
+                "translated": translated,
+                "language": target_lang,
+                "speaker": entry.get("speaker"),
+                "timestamp": entry.get("timestamp"),
+            },
+            account_id=account_id,
+        )
+    except Exception as exc:
+        logger.debug("Bot %s: live translation failed: %s", bot_id, exc)
+
 # Persistent recordings directory
 _RECORDINGS_DIR = Path(os.environ.get("RECORDINGS_DIR", "/app/data/recordings"))
 try:
@@ -101,18 +141,57 @@ def _compute_speaker_stats(transcript: list[dict]) -> list[dict]:
     total = sum(speaker_time.values())
     if total == 0:
         return []
-    return [
-        {
+
+    stats = []
+    for name, t in sorted(speaker_time.items(), key=lambda x: x[1], reverse=True):
+        talk_pct = round(t / total * 100, 1)
+        turns = speaker_turns.get(name, 0)
+        # "Quiet" = present (has turns) but speaks less than 5% of total time
+        is_quiet = talk_pct < 5.0 and turns > 0
+        stats.append({
             "name": name,
             "talk_time_s": round(t, 1),
-            "talk_pct": round(t / total * 100, 1),
-            "turns": speaker_turns.get(name, 0),
+            "talk_pct": talk_pct,
+            "turns": turns,
             "questions": speaker_questions.get(name, 0),
             "filler_words": speaker_fillers.get(name, 0),
             "longest_monologue_s": round(speaker_monologue.get(name, 0.0), 1),
-        }
-        for name, t in sorted(speaker_time.items(), key=lambda x: x[1], reverse=True)
-    ]
+            "is_quiet": is_quiet,
+        })
+    return stats
+
+
+def _compute_health_score(
+    analysis: dict,
+    speaker_stats: list[dict],
+    duration_seconds: Optional[float],
+) -> int:
+    """Compute a 0–100 meeting quality score based on participation, decisions, action items, and length."""
+    n = len(speaker_stats)
+    if n == 0:
+        participation_score = 0.5
+    else:
+        max_pct = max((s.get("talk_pct", 0) for s in speaker_stats), default=0) / 100.0
+        ideal = 1.0 / n
+        # Penalise if the dominant speaker exceeds 2× their fair share
+        dominance_excess = max(0.0, max_pct - min(ideal * 2, 0.7))
+        participation_score = max(0.0, 1.0 - dominance_excess / 0.5)
+
+    decisions = analysis.get("decisions") or []
+    action_items = analysis.get("action_items") or []
+    decision_score = min(len(decisions) / 3.0, 1.0)
+    action_item_score = min(len(action_items) / 5.0, 1.0)
+
+    duration_min = (duration_seconds or 0) / 60.0
+    length_score = min(60.0 / max(duration_min, 60.0), 1.0) if duration_min > 0 else 0.5
+
+    raw = (
+        participation_score * 0.30
+        + decision_score * 0.25
+        + action_item_score * 0.25
+        + length_score * 0.20
+    )
+    return max(0, min(100, int(raw * 100)))
 
 
 
@@ -196,6 +275,19 @@ async def _do_analysis(bot: BotSession, audio_path: str, use_real_bot: bool, vid
                 except Exception as exc:
                     logger.warning("Bot %s: consent processing failed: %s", bot.id, exc)
 
+            # ── PII detection & redaction ─────────────────────────────────
+            if getattr(bot, "pii_redaction", False):
+                try:
+                    from app.services.pii_service import redact_transcript, transcript_has_pii
+                    pii_found = transcript_has_pii(transcript)
+                    transcript = redact_transcript(transcript)
+                    await store.update_bot(bot.id, pii_detected=pii_found)
+                    bot.pii_detected = pii_found
+                    if pii_found:
+                        logger.info("Bot %s: PII detected and redacted from transcript", bot.id)
+                except Exception as exc:
+                    logger.warning("Bot %s: PII redaction failed: %s", bot.id, exc)
+
             await store.update_bot(bot.id, transcript=transcript)
             bot.transcript = transcript
 
@@ -235,6 +327,13 @@ async def _do_analysis(bot: BotSession, audio_path: str, use_real_bot: bool, vid
         chapters = [] if isinstance(chapters_result, Exception) else (chapters_result or [])
         speaker_stats = _compute_speaker_stats(bot.transcript)
 
+        # ── Meeting health score ──────────────────────────────────────────
+        try:
+            health_score = _compute_health_score(analysis_result, speaker_stats, bot.duration_seconds)
+        except Exception as exc:
+            logger.warning("Bot %s: health score computation failed: %s", bot.id, exc)
+            health_score = None
+
         if use_real_bot and os.path.exists(audio_path) and os.path.getsize(audio_path) > 0:
             await store.update_bot(bot.id, recording_path=audio_path)
             bot.recording_path = audio_path
@@ -257,8 +356,27 @@ async def _do_analysis(bot: BotSession, audio_path: str, use_real_bot: bool, vid
             analysis=analysis_result,
             chapters=chapters,
             speaker_stats=speaker_stats,
+            health_score=health_score,
         )
         bot.analysis = analysis_result
+        bot.health_score = health_score
+
+        # ── Quiet participant coaching summary ────────────────────────────
+        quiet_participants = [s["name"] for s in speaker_stats if s.get("is_quiet")]
+        if quiet_participants:
+            try:
+                await webhook_service.dispatch_event(
+                    "bot.coaching_summary",
+                    {
+                        "bot_id": bot.id,
+                        "account_id": bot.account_id,
+                        "quiet_participants": quiet_participants,
+                        "health_score": health_score,
+                    },
+                    account_id=bot.account_id,
+                )
+            except Exception as exc:
+                logger.debug("Bot %s: coaching_summary dispatch failed: %s", bot.id, exc)
 
         await webhook_service.dispatch_event("bot.analysis_ready", {"bot_id": bot.id, "account_id": bot.account_id}, account_id=bot.account_id)
 
@@ -304,6 +422,9 @@ def _build_done_payload(bot: BotSession) -> dict:
         "duration_seconds": bot.duration_seconds,
         "recording_available": bot.recording_available(),
         "is_demo_transcript": bot.is_demo_transcript,
+        "health_score":     bot.health_score,
+        "meeting_cost_usd": bot.meeting_cost_usd,
+        "pii_detected":     bot.pii_detected,
         "metadata":         bot.metadata,
         "ai_usage": {
             "total_tokens":   bot.ai_total_tokens,
@@ -420,21 +541,97 @@ async def run_bot_lifecycle(bot_id: str) -> None:
             _live_buffer: list = []
             _last_flush: float = time.monotonic()
             _live_lock = asyncio.Lock()
+            # Live intelligence state (mutable containers — no nonlocal needed)
+            _live_state = {"prev_ts": 0.0, "processed_index": 0}
+            _live_speaker_seconds: dict[str, float] = {}
+            _live_window_start = [time.monotonic()]  # list so closure can mutate
+            _live_coaching_last_fired: dict[str, float] = {}
+            _live_fired_alert_keys: set[str] = set()
 
             async def on_live_entry(entry: dict) -> None:
                 nonlocal _last_flush
                 async with _live_lock:
                     _live_buffer.append(entry)
-                    should_flush = (
-                        len(_live_buffer) >= 10
-                        or time.monotonic() - _last_flush >= 30
-                    )
-                await ws_manager.broadcast("bot.live_transcript", {"bot_id": bot_id, "account_id": bot.account_id, "entry": entry}, account_id=bot.account_id)
+                    buf_len = len(_live_buffer)
+                    should_flush = buf_len >= 10 or time.monotonic() - _last_flush >= 30
+
+                # Broadcast raw live transcript
+                await ws_manager.broadcast(
+                    "bot.live_transcript",
+                    {"bot_id": bot_id, "account_id": bot.account_id, "entry": entry},
+                    account_id=bot.account_id,
+                )
+
                 if should_flush:
                     async with _live_lock:
                         snapshot = list(_live_buffer)
                     await store.update_bot(bot_id, transcript=snapshot)
                     _last_flush = time.monotonic()
+
+                # ── Real-time translation ─────────────────────────────────────
+                if getattr(bot, "translation_language", None):
+                    asyncio.create_task(
+                        _translate_and_broadcast(bot_id, bot.account_id, entry, bot.translation_language)
+                    )
+
+                # ── Dominant-speaker coaching alert ───────────────────────────
+                speaker = entry.get("speaker", "Unknown")
+                ts = entry.get("timestamp", 0.0)
+                prev_ts = _live_state["prev_ts"]
+                duration = min(max(ts - prev_ts, 0.0), 60.0) if prev_ts > 0 else 5.0
+                _live_state["prev_ts"] = ts
+
+                now_mono = time.monotonic()
+                # Reset 5-minute rolling window
+                if now_mono - _live_window_start[0] > 300:
+                    _live_speaker_seconds.clear()
+                    _live_window_start[0] = now_mono
+                _live_speaker_seconds[speaker] = _live_speaker_seconds.get(speaker, 0.0) + duration
+
+                total_window = sum(_live_speaker_seconds.values())
+                if total_window >= 60:
+                    for spkr, secs in _live_speaker_seconds.items():
+                        pct = secs / total_window
+                        if pct > 0.70:
+                            last_fired = _live_coaching_last_fired.get(spkr, 0.0)
+                            if now_mono - last_fired > 120:
+                                _live_coaching_last_fired[spkr] = now_mono
+                                try:
+                                    await webhook_service.dispatch_event(
+                                        "bot.coaching_alert",
+                                        {
+                                            "bot_id": bot_id,
+                                            "account_id": bot.account_id,
+                                            "type": "dominant_speaker",
+                                            "speaker": spkr,
+                                            "pct": round(pct * 100, 1),
+                                        },
+                                        account_id=bot.account_id,
+                                    )
+                                    logger.info(
+                                        "Bot %s: coaching alert — %s dominated %.0f%% of last 5 min",
+                                        bot_id, spkr, pct * 100,
+                                    )
+                                except Exception as exc:
+                                    logger.debug("Bot %s: coaching alert dispatch failed: %s", bot_id, exc)
+                            break
+
+                # ── Live action item extraction (every 10 entries) ─────────────
+                if buf_len > 0 and buf_len % 10 == 0 and buf_len > _live_state["processed_index"]:
+                    _live_state["processed_index"] = buf_len
+                    async with _live_lock:
+                        slice_start = max(0, buf_len - 10)
+                        transcript_slice = list(_live_buffer[slice_start:buf_len])
+                    asyncio.create_task(
+                        _extract_and_broadcast_action_items(bot_id, bot.account_id, transcript_slice)
+                    )
+
+                # ── Live keyword / competitor-mention alerts ───────────────────
+                try:
+                    from app.services.keyword_alert_service import scan_live_entry as _scan_live_entry
+                    await _scan_live_entry(bot, entry, _live_fired_alert_keys)
+                except Exception as exc:
+                    logger.debug("Bot %s: live keyword scan failed: %s", bot_id, exc)
 
             max_retries = settings.BOT_JOIN_MAX_RETRIES
             retry_delay = settings.BOT_JOIN_RETRY_DELAY_S
@@ -595,8 +792,17 @@ async def run_bot_lifecycle(bot_id: str) -> None:
         if bot_refreshed:
             bot = bot_refreshed
 
-        # ── 5. Compute meeting duration ───────────────────────────────────
-        # (duration_seconds is a computed property on BotSession)
+        # ── 5. Compute meeting cost ───────────────────────────────────────
+        avg_rate = getattr(bot, "avg_hourly_rate_usd", None)
+        if avg_rate and bot.duration_seconds and bot.participants:
+            headcount = len(bot.participants)
+            cost = round(headcount * avg_rate * (bot.duration_seconds / 3600), 2)
+            await store.update_bot(bot_id, meeting_cost_usd=cost)
+        elif avg_rate and bot.duration_seconds and bot.transcript:
+            headcount = len({e.get("speaker", "") for e in bot.transcript if e.get("speaker")})
+            if headcount:
+                cost = round(headcount * avg_rate * (bot.duration_seconds / 3600), 2)
+                await store.update_bot(bot_id, meeting_cost_usd=cost)
 
         # ── 6. Done ───────────────────────────────────────────────────────
         await store.mark_terminal(bot_id, "done", ended_at=bot.ended_at or _now())

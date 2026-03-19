@@ -7,6 +7,7 @@ Supports two AI providers, selected by environment variable:
 If neither key is configured the service returns stub/empty results.
 """
 
+import asyncio
 import contextvars
 import json
 import logging
@@ -52,6 +53,40 @@ def _record_usage(entry: dict[str, Any]) -> None:
 
 # Public alias used by transcription_service and other modules
 record_usage = _record_usage
+
+
+# ── Retry helper ──────────────────────────────────────────────────────────────
+
+async def _with_retry(coro_fn, *args, max_attempts: int = 3, base_delay: float = 1.0, **kwargs):
+    """Call an async coroutine with exponential-backoff retry on transient errors.
+
+    Retries on: connection errors, rate-limit (429), server errors (5xx).
+    Gives up immediately on: auth errors (401/403), bad request (400), not found (404).
+
+    Args:
+        coro_fn: async callable to invoke.
+        max_attempts: total tries before raising (default 3).
+        base_delay: initial delay in seconds; doubles each retry (1s → 2s → 4s).
+    """
+    _no_retry_phrases = ("authentication", "invalid_api_key", "permission", "not found", "bad request")
+    last_exc: Exception | None = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return await coro_fn(*args, **kwargs)
+        except Exception as exc:
+            msg = str(exc).lower()
+            # Don't retry auth or request-validation errors — they won't succeed on retry
+            if any(p in msg for p in _no_retry_phrases):
+                raise
+            last_exc = exc
+            if attempt < max_attempts:
+                delay = base_delay * (2 ** (attempt - 1))
+                logger.warning(
+                    "AI call failed (attempt %d/%d): %s — retrying in %.1fs",
+                    attempt, max_attempts, exc, delay,
+                )
+                await asyncio.sleep(delay)
+    raise last_exc
 
 _ANALYSIS_PROMPT = """You are an expert meeting analyst. Given a meeting transcript produce a
 structured JSON analysis. Be concise but thorough. Return ONLY valid JSON — no markdown fences,
@@ -614,22 +649,22 @@ async def analyze_transcript(
 
     if _use_claude():
         try:
-            return await _claude_analyze_transcript(transcript, prompt_override, vocabulary)
+            return await _with_retry(_claude_analyze_transcript, transcript, prompt_override, vocabulary)
         except json.JSONDecodeError as exc:
             logger.error("Claude returned invalid JSON for analysis: %s", exc)
         except Exception as exc:
-            logger.error("Claude analysis error: %s", exc)
+            logger.error("Claude analysis error (all retries exhausted): %s", exc)
         return _stub_analysis(transcript)
 
     if _use_gemini():
         try:
-            return await _gemini_analyze_transcript(transcript, prompt_override, vocabulary)
+            return await _with_retry(_gemini_analyze_transcript, transcript, prompt_override, vocabulary)
         except json.JSONDecodeError as exc:
             logger.error("Gemini returned invalid JSON for analysis: %s", exc)
         except ValueError as exc:
             logger.warning("Gemini analysis blocked by safety filter: %s", exc)
         except Exception as exc:
-            logger.error("Gemini analysis error: %s", exc)
+            logger.error("Gemini analysis error (all retries exhausted): %s", exc)
         return _stub_analysis(transcript)
 
     logger.warning("No AI API key configured — returning stub analysis")
@@ -643,22 +678,22 @@ async def generate_chapters(transcript: list[dict[str, Any]]) -> list[dict[str, 
 
     if _use_claude():
         try:
-            return await _claude_generate_chapters(transcript)
+            return await _with_retry(_claude_generate_chapters, transcript)
         except json.JSONDecodeError as exc:
             logger.error("Claude chapters: invalid JSON — %s", exc)
         except Exception as exc:
-            logger.warning("Claude chapter generation failed: %s", exc)
+            logger.warning("Claude chapter generation failed (all retries exhausted): %s", exc)
         return []
 
     if _use_gemini():
         try:
-            return await _gemini_generate_chapters(transcript)
+            return await _with_retry(_gemini_generate_chapters, transcript)
         except json.JSONDecodeError as exc:
             logger.error("Gemini chapters: invalid JSON — %s", exc)
         except ValueError as exc:
             logger.warning("Gemini chapters blocked by safety filter: %s", exc)
         except Exception as exc:
-            logger.warning("Chapter generation failed: %s", exc)
+            logger.warning("Chapter generation failed (all retries exhausted): %s", exc)
         return []
 
     return []
@@ -1023,6 +1058,156 @@ _BUILTIN_TEMPLATE_PROMPTS: dict[str, str] = {
 def get_template_prompt(template: str) -> str | None:
     """Return the prompt for a built-in template name, or None for the default."""
     return _BUILTIN_TEMPLATE_PROMPTS.get(template)
+
+
+async def extract_live_action_items(transcript_slice: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Extract action items from a short live transcript slice (lightweight, fast).
+
+    Uses Claude Haiku or Gemini Flash for low-cost live extraction.
+    Returns a list of {task, assignee} dicts (due_date optional).
+    """
+    if not transcript_slice:
+        return []
+
+    lines = "\n".join(
+        f"{e.get('speaker', '?')}: {e.get('text', '')}" for e in transcript_slice
+    )
+    prompt = (
+        "Extract any concrete action items from these meeting transcript lines. "
+        "Return ONLY a JSON array — no markdown, no prose. "
+        'Each item: {"task": "...", "assignee": "..." (or "Unassigned")}. '
+        "Return [] if there are no clear action items.\n\n"
+        f"Transcript:\n{lines}"
+    )
+
+    # Prefer Gemini Flash (cheaper + fast for this micro-task)
+    if _use_gemini():
+        try:
+            model = _get_gemini_model()
+            t0 = time.monotonic()
+            response = await model.generate_content_async(
+                prompt,
+                generation_config={"temperature": 0.1, "max_output_tokens": 512},
+            )
+            _record_gemini_usage(response, "live_action_items", duration_s=round(time.monotonic() - t0, 2))
+            result = json.loads(_strip_fences(response.text))
+            return result if isinstance(result, list) else []
+        except Exception as exc:
+            logger.debug("Live action item extraction failed (Gemini): %s", exc)
+            return []
+
+    if _use_claude():
+        try:
+            client = _get_anthropic_client()
+            import anthropic as _anthropic
+            model_id = "claude-haiku-4-5-20251001"
+            t0 = time.monotonic()
+            message = await client.messages.create(
+                model=model_id,
+                max_tokens=512,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            duration_s = round(time.monotonic() - t0, 2)
+            text = message.content[0].text if message.content else ""
+            input_tokens = getattr(message.usage, "input_tokens", 0)
+            output_tokens = getattr(message.usage, "output_tokens", 0)
+            _record_usage({
+                "operation": "live_action_items",
+                "provider": "anthropic",
+                "model": model_id,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "total_tokens": input_tokens + output_tokens,
+                "cost_usd": round(_estimate_cost(model_id, input_tokens, output_tokens), 6),
+                "duration_s": duration_s,
+            })
+            result = json.loads(_strip_fences(text))
+            return result if isinstance(result, list) else []
+        except Exception as exc:
+            logger.debug("Live action item extraction failed (Claude): %s", exc)
+            return []
+
+    return []
+
+
+async def translate_text(text: str, target_language: str) -> str:
+    """Translate a short text snippet to the target BCP-47 language.
+
+    Uses Gemini Flash (fast, cheap for short text). Returns original on failure.
+    """
+    if not text or not target_language:
+        return text
+
+    prompt = (
+        f"Translate the following text to language code '{target_language}'. "
+        "Return ONLY the translated text — no explanation, no quotes, no prefix.\n\n"
+        f"Text: {text}"
+    )
+
+    if _use_gemini():
+        try:
+            model = _get_gemini_model()
+            t0 = time.monotonic()
+            response = await model.generate_content_async(
+                prompt,
+                generation_config={"temperature": 0.1, "max_output_tokens": 512},
+            )
+            _record_gemini_usage(response, "live_translation", duration_s=round(time.monotonic() - t0, 2))
+            return response.text.strip()
+        except Exception as exc:
+            logger.debug("Translation failed (Gemini): %s", exc)
+            return text
+
+    if _use_claude():
+        try:
+            text_result = await _claude_complete(prompt, max_tokens=256, operation="live_translation")
+            return text_result.strip()
+        except Exception as exc:
+            logger.debug("Translation failed (Claude): %s", exc)
+            return text
+
+    return text
+
+
+async def get_sentiment(text: str) -> str:
+    """Classify the sentiment of a short text snippet.
+
+    Returns "positive", "neutral", or "negative".
+    """
+    if not text:
+        return "neutral"
+
+    prompt = (
+        "Classify the sentiment of this text as exactly one of: positive, neutral, negative. "
+        "Return ONLY the single word — nothing else.\n\n"
+        f"Text: {text}"
+    )
+
+    if _use_gemini():
+        try:
+            model = _get_gemini_model()
+            t0 = time.monotonic()
+            response = await model.generate_content_async(
+                prompt,
+                generation_config={"temperature": 0.0, "max_output_tokens": 10},
+            )
+            _record_gemini_usage(response, "sentiment", duration_s=round(time.monotonic() - t0, 2))
+            word = response.text.strip().lower().split()[0] if response.text.strip() else "neutral"
+            return word if word in ("positive", "neutral", "negative") else "neutral"
+        except Exception as exc:
+            logger.debug("Sentiment classification failed (Gemini): %s", exc)
+            return "neutral"
+
+    if _use_claude():
+        try:
+            result = await _claude_complete(prompt, max_tokens=10, operation="sentiment")
+            word = result.strip().lower().split()[0] if result.strip() else "neutral"
+            return word if word in ("positive", "neutral", "negative") else "neutral"
+        except Exception as exc:
+            logger.debug("Sentiment classification failed (Claude): %s", exc)
+            return "neutral"
+
+    return "neutral"
 
 
 def _hardcoded_demo_transcript() -> list[dict[str, Any]]:

@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>API Usage Dashboard — MeetingBot</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --primary: #6366f1; --primary-dark: #4f46e5;
+      --dark: #0f172a; --dark-2: #1e293b; --gray: #64748b;
+      --success: #10b981; --warning: #f59e0b; --danger: #ef4444;
+      --border: #e2e8f0;
+    }
+    * { box-sizing: border-box; }
+    body { font-family: 'Inter', sans-serif; background: #f1f5f9; color: #0f172a; font-size: 14px; margin: 0; }
+
+    .app-nav {
+      background: var(--dark); padding: 0 1.75rem; height: 58px;
+      display: flex; align-items: center; justify-content: space-between;
+      border-bottom: 1px solid rgba(255,255,255,.05); position: sticky; top: 0; z-index: 1000;
+    }
+    .app-nav-brand { font-weight: 700; font-size: 1.05rem; color: white; text-decoration: none; }
+    .app-nav a { color: rgba(255,255,255,.65); font-size: .85rem; text-decoration: none; }
+    .app-nav a:hover { color: white; }
+
+    .page-header { background: white; border-bottom: 1px solid var(--border); padding: 1.25rem 1.75rem; }
+    .page-header h1 { font-size: 1.3rem; font-weight: 700; margin: 0; }
+    .page-header p { color: var(--gray); margin: .25rem 0 0; font-size: .875rem; }
+
+    .main { max-width: 1100px; margin: 0 auto; padding: 1.5rem 1.25rem; }
+
+    .stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: .875rem; margin-bottom: 1.25rem; }
+    .stat-card { background: white; border: 1px solid var(--border); border-radius: 10px; padding: 1.1rem 1.25rem; }
+    .stat-label { font-size: .72rem; font-weight: 600; color: var(--gray); text-transform: uppercase; letter-spacing: .05em; margin-bottom: .3rem; }
+    .stat-value { font-size: 1.6rem; font-weight: 700; line-height: 1.1; }
+    .stat-sub { font-size: .75rem; color: var(--gray); margin-top: .2rem; }
+    .stat-up   { color: var(--success); }
+    .stat-down { color: var(--danger); }
+
+    .card { background: white; border: 1px solid var(--border); border-radius: 10px; margin-bottom: 1.25rem; }
+    .card-header { padding: .875rem 1.25rem; border-bottom: 1px solid var(--border); font-weight: 600; font-size: .9rem; display: flex; align-items: center; justify-content: space-between; }
+    .card-body { padding: 1.25rem; }
+
+    table { width: 100%; border-collapse: collapse; font-size: .83rem; }
+    th { background: #f8fafc; font-weight: 600; color: var(--gray); text-transform: uppercase; font-size: .7rem; letter-spacing: .05em; padding: .6rem 1rem; border-bottom: 1px solid var(--border); text-align: left; }
+    td { padding: .65rem 1rem; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
+    tr:last-child td { border-bottom: none; }
+
+    .bar-wrap { display: flex; align-items: center; gap: .5rem; }
+    .bar-track { flex: 1; background: #f1f5f9; border-radius: 999px; height: 7px; overflow: hidden; }
+    .bar-fill  { height: 100%; border-radius: 999px; background: var(--primary); transition: width .4s; }
+
+    .badge { display: inline-flex; align-items: center; padding: .2rem .55rem; border-radius: 999px; font-size: .72rem; font-weight: 600; }
+    .badge-primary { background: #ede9fe; color: #5b21b6; }
+    .badge-success { background: #d1fae5; color: #065f46; }
+    .badge-warning { background: #fef3c7; color: #92400e; }
+    .badge-danger  { background: #fee2e2; color: #991b1b; }
+
+    .btn { display: inline-flex; align-items: center; gap: .35rem; padding: .45rem .9rem; border-radius: 6px; font-size: .82rem; font-weight: 500; cursor: pointer; border: none; text-decoration: none; transition: opacity .15s; }
+    .btn:hover { opacity: .85; }
+    .btn-outline { background: transparent; border: 1px solid var(--border); color: #374151; }
+    .btn-sm { padding: .3rem .65rem; font-size: .78rem; }
+
+    .empty-state { text-align: center; padding: 2rem 1rem; color: var(--gray); font-size: .85rem; }
+
+    /* Simple sparkline via canvas */
+    canvas.sparkline { height: 50px; width: 100%; }
+
+    #toastContainer { position: fixed; bottom: 1.5rem; right: 1.5rem; z-index: 9999; display: flex; flex-direction: column; gap: .5rem; }
+    .toast { background: var(--dark-2); color: white; padding: .65rem 1rem; border-radius: 8px; font-size: .83rem; max-width: 320px; box-shadow: 0 4px 12px rgba(0,0,0,.2); }
+    .toast.success { border-left: 3px solid var(--success); }
+    .toast.error   { border-left: 3px solid var(--danger); }
+  </style>
+</head>
+<body>
+
+<nav class="app-nav">
+  <a href="/" class="app-nav-brand">⚡ MeetingBot</a>
+  <div style="display:flex;gap:1.25rem;align-items:center;">
+    <a href="/dashboard">Dashboard</a>
+    <a href="/api/docs">API Docs</a>
+    <a href="/webhook-playground">Webhooks</a>
+  </div>
+</nav>
+
+<div class="page-header">
+  <h1>API Usage Dashboard</h1>
+  <p>Bot activity, token consumption, and cost breakdown for your account.</p>
+</div>
+
+<div class="main">
+
+  <!-- KPI row -->
+  <div class="stat-grid" id="kpiGrid">
+    <div class="stat-card"><div class="stat-label">Loading…</div><div class="stat-value">—</div></div>
+  </div>
+
+  <div class="row g-3">
+
+    <!-- Platform breakdown -->
+    <div class="col-12 col-md-6">
+      <div class="card">
+        <div class="card-header">Top Platforms (last 7 days)</div>
+        <div class="card-body" style="padding:.5rem 0;">
+          <table>
+            <thead><tr><th>Platform</th><th>Bots</th><th>Share</th></tr></thead>
+            <tbody id="platformBody"><tr><td colspan="3" class="text-center text-muted">Loading…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Token / cost by operation -->
+    <div class="col-12 col-md-6">
+      <div class="card">
+        <div class="card-header">Tokens by Operation (7d)</div>
+        <div class="card-body" style="padding:.5rem 0;">
+          <table>
+            <thead><tr><th>Operation</th><th>Tokens</th><th>Cost (USD)</th></tr></thead>
+            <tbody id="opBody"><tr><td colspan="3" class="text-center text-muted">Loading…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Analytics overview -->
+    <div class="col-12">
+      <div class="card">
+        <div class="card-header">
+          Platform Overview
+          <button class="btn btn-outline btn-sm" onclick="loadAll()">↻ Refresh</button>
+        </div>
+        <div class="card-body">
+          <div class="row g-3" id="analyticsGrid">
+            <div class="col-12 text-muted" style="font-size:.83rem;">Loading…</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div id="toastContainer"></div>
+
+<script>
+const API = '/api/v1';
+
+function authHeaders() {
+  const t = localStorage.getItem('access_token') || '';
+  return t ? { 'Authorization': 'Bearer ' + t } : {};
+}
+
+function toast(msg, type='success') {
+  const el = document.createElement('div');
+  el.className = 'toast ' + type;
+  el.textContent = msg;
+  document.getElementById('toastContainer').appendChild(el);
+  setTimeout(() => el.remove(), 4000);
+}
+
+function fmtNum(n) {
+  if (n === null || n === undefined) return '—';
+  return n.toLocaleString();
+}
+
+function fmtUsd(v) {
+  if (v === null || v === undefined) return '—';
+  return '$' + Number(v).toFixed(4);
+}
+
+// ── Load API usage ─────────────────────────────────────────────────────────────
+async function loadApiUsage() {
+  try {
+    const res = await fetch(API + '/analytics/api-usage', { headers: authHeaders() });
+    if (!res.ok) { console.warn('api-usage:', res.status); return; }
+    const d = await res.json();
+
+    // KPI cards
+    const kpis = [
+      { label: 'Bots (7 days)',  value: fmtNum(d.bots_created_7d) },
+      { label: 'Bots (30 days)', value: fmtNum(d.bots_created_30d) },
+      { label: 'Tokens (7d)',    value: fmtNum(d.total_tokens_7d) },
+      { label: 'AI Cost (7d)',   value: fmtUsd(d.total_cost_usd_7d) },
+      { label: 'Error Rate (7d)',value: d.error_rate_7d !== null ? (d.error_rate_7d * 100).toFixed(1) + '%' : '—',
+        sub: d.error_rate_7d !== null && d.error_rate_7d > 0.05 ? '⚠ High' : '' },
+    ];
+    document.getElementById('kpiGrid').innerHTML = kpis.map(k => `
+      <div class="stat-card">
+        <div class="stat-label">${k.label}</div>
+        <div class="stat-value">${k.value}</div>
+        ${k.sub ? `<div class="stat-sub stat-down">${k.sub}</div>` : ''}
+      </div>`).join('');
+
+    // Platform table
+    const platforms = d.top_platforms_7d || [];
+    const maxP = platforms.reduce((m, p) => Math.max(m, p.count), 1);
+    document.getElementById('platformBody').innerHTML = platforms.length
+      ? platforms.map(p => `
+          <tr>
+            <td><span class="badge badge-primary">${p.platform}</span></td>
+            <td>${p.count}</td>
+            <td>
+              <div class="bar-wrap">
+                <div class="bar-track"><div class="bar-fill" style="width:${Math.round(p.count/maxP*100)}%"></div></div>
+                <span style="font-size:.75rem;color:var(--gray);width:38px;text-align:right">${Math.round(p.count/maxP*100)}%</span>
+              </div>
+            </td>
+          </tr>`).join('')
+      : '<tr><td colspan="3"><div class="empty-state">No data yet.</div></td></tr>';
+
+    // Operation token table
+    const ops = Object.entries(d.tokens_by_operation_7d || {})
+      .sort((a,b) => b[1]-a[1]);
+    const costByOp = d.cost_by_operation_7d || {};
+    document.getElementById('opBody').innerHTML = ops.length
+      ? ops.map(([op, tok]) => `
+          <tr>
+            <td><code style="font-size:.75rem;">${op}</code></td>
+            <td>${fmtNum(tok)}</td>
+            <td>${fmtUsd(costByOp[op])}</td>
+          </tr>`).join('')
+      : '<tr><td colspan="3"><div class="empty-state">No data yet.</div></td></tr>';
+
+  } catch (e) {
+    console.error('loadApiUsage:', e);
+    toast('Failed to load API usage', 'error');
+  }
+}
+
+// ── Load analytics overview ────────────────────────────────────────────────────
+async function loadAnalytics() {
+  try {
+    const res = await fetch(API + '/analytics', { headers: authHeaders() });
+    if (!res.ok) return;
+    const d = await res.json();
+
+    const items = [
+      ['Total Bots', fmtNum(d.total_bots)],
+      ['Active Bots', fmtNum(d.active_bots)],
+      ['Success Rate', d.success_rate !== null ? (d.success_rate * 100).toFixed(1) + '%' : '—'],
+      ['Avg Duration', d.avg_duration_seconds !== null ? Math.round(d.avg_duration_seconds) + 's' : '—'],
+      ['Avg Health Score', d.avg_health_score !== null ? d.avg_health_score + '/100' : '—'],
+      ['Meetings/Week', d.meetings_per_week],
+      ['Quiet Participant Rate', d.quiet_participant_rate !== null ? (d.quiet_participant_rate*100).toFixed(1)+'%' : '—'],
+      ['Total Meeting Cost', d.total_meeting_cost_usd ? '$' + d.total_meeting_cost_usd : '—'],
+      ['Total AI Cost', fmtUsd(d.total_ai_cost_usd)],
+      ['Total Tokens', fmtNum(d.total_ai_tokens)],
+    ];
+
+    document.getElementById('analyticsGrid').innerHTML = items.map(([label, val]) => `
+      <div class="col-6 col-md-4 col-lg-2">
+        <div style="background:#f8fafc;border-radius:8px;padding:.75rem;text-align:center;">
+          <div style="font-size:.7rem;font-weight:600;color:var(--gray);text-transform:uppercase;letter-spacing:.04em;margin-bottom:.2rem;">${label}</div>
+          <div style="font-size:1.1rem;font-weight:700;">${val}</div>
+        </div>
+      </div>`).join('');
+
+    // Top workspaces
+    if (d.top_workspaces && d.top_workspaces.length) {
+      const wsHtml = '<div class="col-12" style="margin-top:.5rem;"><div style="font-size:.78rem;font-weight:600;color:var(--gray);margin-bottom:.4rem;">Top Workspaces</div><div style="display:flex;flex-wrap:wrap;gap:.4rem;">'
+        + d.top_workspaces.map(w => `<span class="badge badge-primary">${w.workspace_id.slice(0,12)}… — ${w.count} bots</span>`).join('')
+        + '</div></div>';
+      document.getElementById('analyticsGrid').innerHTML += wsHtml;
+    }
+  } catch (e) {
+    console.error('loadAnalytics:', e);
+  }
+}
+
+function loadAll() {
+  loadApiUsage();
+  loadAnalytics();
+}
+
+loadAll();
+</script>
+</body>
+</html>

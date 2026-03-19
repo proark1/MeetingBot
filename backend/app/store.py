@@ -89,6 +89,18 @@ class BotSession:
     # ── Transcription provider ─────────────────────────────────────────────────
     transcription_provider: str = "gemini"  # "gemini" | "whisper"
 
+    # ── Real-time intelligence ─────────────────────────────────────────────────
+    translation_language: Optional[str] = None  # BCP-47 (e.g. "es", "fr") for live translation
+
+    # ── PII detection & redaction ──────────────────────────────────────────────
+    pii_redaction: bool = False   # redact PII from transcript before analysis
+    pii_detected: bool = False    # True if PII was found (set after transcription)
+
+    # ── Meeting intelligence (set at completion) ───────────────────────────────
+    health_score: Optional[int] = None         # 0-100 meeting quality score
+    meeting_cost_usd: Optional[float] = None   # estimated attendee cost in USD
+    avg_hourly_rate_usd: Optional[float] = None  # used to compute meeting cost
+
     # AI usage tracking
     ai_usage: list = field(default_factory=list)  # list of usage entry dicts
 
@@ -258,6 +270,12 @@ class Store:
                 "followup_email": bot.followup_email,
                 "workspace_id": bot.workspace_id,
                 "transcription_provider": bot.transcription_provider,
+                "translation_language": bot.translation_language,
+                "pii_redaction": bot.pii_redaction,
+                "pii_detected": bot.pii_detected,
+                "health_score": bot.health_score,
+                "meeting_cost_usd": bot.meeting_cost_usd,
+                "avg_hourly_rate_usd": bot.avg_hourly_rate_usd,
                 "ai_usage": bot.ai_usage,
                 "created_at": _dt(bot.created_at),
                 "updated_at": _dt(bot.updated_at),
@@ -487,6 +505,12 @@ async def load_persisted_bots() -> int:
                     followup_email=d.get("followup_email"),
                     workspace_id=d.get("workspace_id"),
                     transcription_provider=d.get("transcription_provider", "gemini"),
+                    translation_language=d.get("translation_language"),
+                    pii_redaction=d.get("pii_redaction", False),
+                    pii_detected=d.get("pii_detected", False),
+                    health_score=d.get("health_score"),
+                    meeting_cost_usd=d.get("meeting_cost_usd"),
+                    avg_hourly_rate_usd=d.get("avg_hourly_rate_usd"),
                     ai_usage=d.get("ai_usage", []),
                     created_at=_parse_dt(d.get("created_at")) or now,
                     updated_at=_parse_dt(d.get("updated_at")) or now,

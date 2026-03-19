@@ -52,6 +52,7 @@ async def get_current_account_id(
     # Legacy superadmin bypass
     if settings.API_KEY and token == settings.API_KEY:
         request.state.account_id = SUPERADMIN_ACCOUNT_ID
+        request.state.sandbox = False
         return SUPERADMIN_ACCOUNT_ID
 
     # JWT (web UI sessions)
@@ -62,6 +63,7 @@ async def get_current_account_id(
             if not account_id:
                 raise ValueError("No sub claim in JWT")
             request.state.account_id = account_id
+            request.state.sandbox = False
             return account_id
         except (JWTError, ValueError):
             raise HTTPException(
@@ -93,6 +95,7 @@ async def get_current_account_id(
         pass
 
     request.state.account_id = api_key.account_id
+    request.state.sandbox = token.startswith("sk_test_")
     return api_key.account_id
 
 

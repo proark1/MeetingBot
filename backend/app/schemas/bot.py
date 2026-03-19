@@ -181,6 +181,36 @@ class BotCreate(BaseModel):
         ),
     )
 
+    # ── Real-time translation ───────────────────────────────────────────────────
+    translation_language: Optional[str] = Field(
+        default=None,
+        max_length=10,
+        description=(
+            "BCP-47 language code for real-time translation of live transcript entries "
+            "(e.g. `es` for Spanish, `fr` for French). When set, each live entry is also "
+            "broadcast as a `bot.live_transcript_translated` WebSocket event."
+        ),
+    )
+
+    # ── PII detection & redaction ───────────────────────────────────────────────
+    pii_redaction: bool = Field(
+        default=False,
+        description=(
+            "When true, detect and redact PII (emails, phone numbers, SSNs, credit card numbers) "
+            "from the transcript before analysis. Redacted text is replaced with `[REDACTED]`."
+        ),
+    )
+
+    # ── Meeting cost estimator ──────────────────────────────────────────────────
+    avg_hourly_rate_usd: Optional[float] = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Average attendee hourly rate in USD. When provided, `meeting_cost_usd` is calculated "
+            "as `attendee_count × rate × duration_hours` and included in the bot response."
+        ),
+    )
+
     # Pass-through metadata — returned as-is in bot responses and webhook payloads
     metadata: dict[str, Any] = Field(
         default={},
@@ -283,6 +313,26 @@ class BotResponse(BaseModel):
     is_demo_transcript: bool = False
     sub_user_id: Optional[str] = Field(default=None, description="Business account sub-user identifier (if set).")
     metadata: dict[str, Any] = {}
+
+    # ── Meeting intelligence ────────────────────────────────────────────────────
+    health_score: Optional[int] = Field(
+        default=None,
+        description=(
+            "Meeting quality score from 0–100, computed from participation balance, "
+            "decision count, action item count, and meeting length. Available once status is `done`."
+        ),
+    )
+    meeting_cost_usd: Optional[float] = Field(
+        default=None,
+        description=(
+            "Estimated meeting cost in USD (attendee_count × avg_hourly_rate_usd × duration_hours). "
+            "Only populated when `avg_hourly_rate_usd` was provided at bot creation."
+        ),
+    )
+    pii_detected: bool = Field(
+        default=False,
+        description="True if PII was detected in the transcript (only relevant when `pii_redaction=true`).",
+    )
 
     ai_usage: Optional[AIUsageSummary] = None
 
