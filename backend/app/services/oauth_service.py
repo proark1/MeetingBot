@@ -23,6 +23,7 @@ import httpx
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+_http_client = httpx.AsyncClient(timeout=15, follow_redirects=True)
 
 # ── Provider configurations ────────────────────────────────────────────────────
 
@@ -106,28 +107,26 @@ def get_authorization_url(provider: str, extra_state: Optional[str] = None) -> s
 async def exchange_code(provider: str, code: str) -> dict:
     """Exchange an authorization code for access/refresh tokens."""
     cfg = _PROVIDERS[provider]
-    async with httpx.AsyncClient(timeout=15) as client:
-        resp = await client.post(cfg["token_url"], data={
-            "grant_type":    "authorization_code",
-            "code":          code,
-            "redirect_uri":  _redirect_uri(provider),
-            "client_id":     cfg["client_id"](),
-            "client_secret": cfg["client_secret"](),
-        })
-        resp.raise_for_status()
-        return resp.json()
+    resp = await _http_client.post(cfg["token_url"], data={
+        "grant_type":    "authorization_code",
+        "code":          code,
+        "redirect_uri":  _redirect_uri(provider),
+        "client_id":     cfg["client_id"](),
+        "client_secret": cfg["client_secret"](),
+    })
+    resp.raise_for_status()
+    return resp.json()
 
 
 async def get_userinfo(provider: str, access_token: str) -> dict:
     """Fetch user profile from the provider's userinfo endpoint."""
     cfg = _PROVIDERS[provider]
-    async with httpx.AsyncClient(timeout=15) as client:
-        resp = await client.get(
-            cfg["userinfo_url"],
-            headers={"Authorization": f"Bearer {access_token}"},
-        )
-        resp.raise_for_status()
-        return resp.json()
+    resp = await _http_client.get(
+        cfg["userinfo_url"],
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+    resp.raise_for_status()
+    return resp.json()
 
 
 # ── Account upsert ─────────────────────────────────────────────────────────────

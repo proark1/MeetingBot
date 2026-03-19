@@ -65,6 +65,9 @@ async def _queue_processor() -> None:
         if active >= settings.MAX_CONCURRENT_BOTS:
             continue
         bot_id = _bot_queue.pop(0)
+        if await store.get_bot(bot_id) is None:
+            logger.warning("Queue: bot %s was deleted — skipping", bot_id)
+            continue
         await store.update_bot(bot_id, status="joining")
         task = asyncio.create_task(bot_service.run_bot_lifecycle(bot_id))
         _running_tasks[bot_id] = task
@@ -296,6 +299,11 @@ async def create_bot(payload: BotCreate, request: Request):
         for ka in (payload.keyword_alerts or [])
     ]
 
+    # SSRF protection: validate per-bot webhook_url before storing
+    if payload.webhook_url:
+        from app.api.webhooks import _block_ssrf
+        await _block_ssrf(payload.webhook_url)
+
     bot = BotSession(
         id=str(uuid.uuid4()),
         meeting_url=str(payload.meeting_url),
@@ -364,8 +372,10 @@ async def create_bot(payload: BotCreate, request: Request):
                 )
                 db.add(ik)
                 await db.commit()
-        except Exception:
-            logger.exception("Failed to store idempotency key")
+        except Exception as _ik_exc:
+            logger.exception("Failed to store idempotency key — rolling back bot %s", bot.id)
+            await store.delete_bot(bot.id)
+            raise HTTPException(status_code=500, detail="Failed to register idempotency key") from _ik_exc
 
     active = sum(1 for t in _running_tasks.values() if not t.done())
     if active >= settings.MAX_CONCURRENT_BOTS:

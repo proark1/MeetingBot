@@ -15,7 +15,10 @@ import json
 import logging
 from typing import Any, Optional
 
+import httpx as _httpx
+
 logger = logging.getLogger(__name__)
+_http_client = _httpx.AsyncClient(timeout=15, follow_redirects=True)
 
 
 def _truncate(text: str, max_len: int = 4000) -> str:
@@ -98,20 +101,19 @@ async def _post_to_hubspot(access_token: str, config: dict, bot_data: dict) -> b
     }
 
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(
-                "https://api.hubapi.com/engagements/v1/engagements",
-                headers=headers,
-                json=payload,
-            )
-            resp.raise_for_status()
-            engagement_id = resp.json().get("engagement", {}).get("id")
-            logger.info(
-                "HubSpot note created (engagement %s) for bot %s",
-                engagement_id,
-                bot_data.get("bot_id"),
-            )
-            return True
+        resp = await _http_client.post(
+            "https://api.hubapi.com/engagements/v1/engagements",
+            headers=headers,
+            json=payload,
+        )
+        resp.raise_for_status()
+        engagement_id = resp.json().get("engagement", {}).get("id")
+        logger.info(
+            "HubSpot note created (engagement %s) for bot %s",
+            engagement_id,
+            bot_data.get("bot_id"),
+        )
+        return True
     except Exception as exc:
         logger.error("HubSpot integration failed for bot %s: %s", bot_data.get("bot_id"), exc)
         return False
@@ -177,12 +179,11 @@ async def _post_to_salesforce(instance_url: str, access_token: str, config: dict
     url = f"{instance_url.rstrip('/')}/services/data/v59.0/sobjects/Task/"
 
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(url, headers=headers, json=task)
-            resp.raise_for_status()
-            task_id = resp.json().get("id")
-            logger.info("Salesforce Task %s created for bot %s", task_id, bot_data.get("bot_id"))
-            return True
+        resp = await _http_client.post(url, headers=headers, json=task)
+        resp.raise_for_status()
+        task_id = resp.json().get("id")
+        logger.info("Salesforce Task %s created for bot %s", task_id, bot_data.get("bot_id"))
+        return True
     except Exception as exc:
         logger.error("Salesforce integration failed for bot %s: %s", bot_data.get("bot_id"), exc)
         return False
@@ -193,7 +194,6 @@ async def _get_salesforce_token(config: dict) -> tuple[str, str]:
 
     Returns (instance_url, access_token).
     """
-    import httpx
     from app.config import settings
 
     # Prefer config-level credentials, fall back to global settings
@@ -212,10 +212,9 @@ async def _get_salesforce_token(config: dict) -> tuple[str, str]:
         "password": password + security_token,
     }
 
-    async with httpx.AsyncClient(timeout=15) as client:
-        resp = await client.post(f"{login_url}/services/oauth2/token", data=data)
-        resp.raise_for_status()
-        result = resp.json()
+    resp = await _http_client.post(f"{login_url}/services/oauth2/token", data=data)
+    resp.raise_for_status()
+    result = resp.json()
     return result["instance_url"], result["access_token"]
 
 

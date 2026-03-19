@@ -6,6 +6,7 @@ bots (superadmin / unauthenticated dev-mode connections receive all events).
 """
 
 import asyncio
+import hmac
 import json
 import logging
 from typing import Optional
@@ -28,7 +29,7 @@ async def _resolve_ws_account(token: Optional[str]) -> Optional[str]:
     from app.config import settings
 
     # Legacy superadmin API_KEY bypass
-    if settings.API_KEY and token == settings.API_KEY:
+    if settings.API_KEY and hmac.compare_digest(token, settings.API_KEY):
         return "__superadmin__"
 
     # JWT (web UI sessions)

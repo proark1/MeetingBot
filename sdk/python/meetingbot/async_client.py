@@ -156,7 +156,7 @@ class AsyncMeetingBotClient:
     async def create_bot(
         self,
         meeting_url: str,
-        bot_name: str = "MeetingBot",
+        bot_name: str = "JustHereToListen.io",
         bot_avatar_url: Optional[str] = None,
         webhook_url: Optional[str] = None,
         join_at: Optional[str] = None,
@@ -178,7 +178,7 @@ class AsyncMeetingBotClient:
         Create a new meeting bot.
 
         :param meeting_url: The URL of the meeting to join.
-        :param bot_name: Display name for the bot (default: "MeetingBot").
+        :param bot_name: Display name for the bot (default: "JustHereToListen.io").
         :param bot_avatar_url: Optional URL for the bot's avatar image.
         :param webhook_url: URL to receive webhook events for this bot.
         :param join_at: ISO 8601 datetime string for scheduled join time.

@@ -1,6 +1,6 @@
 """Model Context Protocol (MCP) server API.
 
-Exposes MeetingBot as an MCP server so AI assistants (Claude Desktop, etc.)
+Exposes JustHereToListen.io as an MCP server so AI assistants (Claude Desktop, etc.)
 can discover and call meeting tools.
 
 Endpoints:
@@ -29,7 +29,7 @@ async def get_mcp_schema():
     """Return the MCP server manifest with tool definitions.
 
     This endpoint conforms to the Model Context Protocol specification.
-    Use it to register MeetingBot as an MCP server in Claude Desktop or
+    Use it to register JustHereToListen.io as an MCP server in Claude Desktop or
     other MCP-compatible AI assistants.
     """
     if not settings.MCP_ENABLED:

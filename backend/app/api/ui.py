@@ -132,7 +132,7 @@ async def register_submit(
     from app.api.auth import _create_jwt
     token = _create_jwt(account.id)
     response = RedirectResponse("/dashboard", status_code=303)
-    response.set_cookie(_COOKIE, token, httponly=True, samesite="lax", max_age=settings.JWT_EXPIRE_HOURS * 3600)
+    response.set_cookie(_COOKIE, token, httponly=True, samesite="lax", secure=True, max_age=settings.JWT_EXPIRE_HOURS * 3600)
     return response
 
 
@@ -170,7 +170,7 @@ async def login_submit(
 
     token = _create_jwt(account.id)
     response = RedirectResponse("/dashboard", status_code=303)
-    response.set_cookie(_COOKIE, token, httponly=True, samesite="lax", max_age=settings.JWT_EXPIRE_HOURS * 3600)
+    response.set_cookie(_COOKIE, token, httponly=True, samesite="lax", secure=True, max_age=settings.JWT_EXPIRE_HOURS * 3600)
     return response
 
 

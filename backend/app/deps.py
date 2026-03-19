@@ -1,5 +1,6 @@
 """Shared FastAPI dependencies — authentication and account resolution."""
 
+import hmac
 import logging
 from datetime import datetime, timezone
 from typing import Optional
@@ -50,7 +51,7 @@ async def get_current_account_id(
     token = credentials.credentials
 
     # Legacy superadmin bypass
-    if settings.API_KEY and token == settings.API_KEY:
+    if settings.API_KEY and hmac.compare_digest(token, settings.API_KEY):
         request.state.account_id = SUPERADMIN_ACCOUNT_ID
         request.state.sandbox = False
         return SUPERADMIN_ACCOUNT_ID

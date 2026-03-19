@@ -23,6 +23,10 @@ _api_usage_cache: dict[str, tuple[float, dict]] = {}
 _ANALYTICS_TTL = 30.0
 _API_USAGE_TTL = 60.0
 
+# Shared bot list cache — all analytics endpoints draw from this single fetch per 30s
+_bots_list_cache: dict[str, tuple[float, list]] = {}
+_BOTS_LIST_TTL = 30.0
+
 
 def _cache_get(cache: dict, key: str, ttl: float):
     ts, val = cache.get(key, (0.0, None))
@@ -36,6 +40,20 @@ def _cache_set(cache: dict, key: str, value: dict) -> None:
     if len(cache) > 200:
         oldest = min(cache, key=lambda k: cache[k][0])
         del cache[oldest]
+
+
+async def _get_bots(filter_account: Optional[str]) -> list:
+    """Fetch (or return cached) bot list for analytics — shared across all endpoints."""
+    key = filter_account or "__all__"
+    ts, bots = _bots_list_cache.get(key, (0.0, None))
+    if bots is not None and (_time.monotonic() - ts) < _BOTS_LIST_TTL:
+        return bots
+    all_bots, _ = await store.list_bots(limit=10000, account_id=filter_account)
+    _bots_list_cache[key] = (_time.monotonic(), all_bots)
+    if len(_bots_list_cache) > 200:
+        oldest = min(_bots_list_cache, key=lambda k: _bots_list_cache[k][0])
+        del _bots_list_cache[oldest]
+    return all_bots
 
 
 def _now() -> datetime:
@@ -53,7 +71,8 @@ async def get_analytics(request: Request):
     if cached is not None:
         return cached
 
-    all_bots, total = await store.list_bots(limit=10000, account_id=filter_account)
+    all_bots = await _get_bots(filter_account)
+    total = len(all_bots)
 
     by_status: dict[str, int] = {}
     by_platform: dict[str, int] = {}
@@ -130,7 +149,7 @@ async def get_action_items_stats(request: Request):
     """Aggregate action-item statistics across all bots in memory."""
     account_id = getattr(request.state, "account_id", None)
     filter_account = account_id if (account_id and account_id != SUPERADMIN_ACCOUNT_ID) else None
-    all_bots, _ = await store.list_bots(limit=10000, account_id=filter_account)
+    all_bots = await _get_bots(filter_account)
 
     items: list[dict] = []
     for bot in all_bots:
@@ -172,7 +191,7 @@ async def get_recurring_insights(
     if attendees:
         target_names = {n.strip().lower() for n in attendees.split(",") if n.strip()}
 
-    all_bots, _ = await store.list_bots(limit=10000, account_id=filter_account)
+    all_bots = await _get_bots(filter_account)
     done_bots = [b for b in all_bots if b.status in ("done", "cancelled") and b.transcript]
 
     # Filter by attendees if provided
@@ -238,7 +257,7 @@ async def get_api_usage(request: Request):
     if cached is not None:
         return cached
 
-    all_bots, _ = await store.list_bots(limit=10000, account_id=filter_account)
+    all_bots = await _get_bots(filter_account)
 
     now = _now()
     seven_days_ago = now - timedelta(days=7)

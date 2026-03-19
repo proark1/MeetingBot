@@ -19,7 +19,7 @@ class BotResponse(BaseModel):
 
     id: str
     meeting_url: str
-    bot_name: str = "MeetingBot"
+    bot_name: str = "JustHereToListen.io"
     bot_avatar_url: Optional[str] = None
     webhook_url: Optional[str] = None
     join_at: Optional[datetime] = None
@@ -47,7 +47,7 @@ class BotSummary(BaseModel):
 
     id: str
     meeting_url: str
-    bot_name: str = "MeetingBot"
+    bot_name: str = "JustHereToListen.io"
     status: Optional[str] = None
     created_at: Optional[datetime] = None
     sub_user_id: Optional[str] = None

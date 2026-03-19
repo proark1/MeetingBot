@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Dashboard — MeetingBot{% endblock %}
+{% block title %}Dashboard — JustHereToListen.io{% endblock %}
 
 {% block content %}
 <style>
@@ -938,7 +938,7 @@
               </div>
               <div class="col-md-3">
                 <label class="form-label">Bot display name</label>
-                <input type="text" id="cal-bot-name" class="form-control form-control-sm" placeholder="MeetingBot">
+                <input type="text" id="cal-bot-name" class="form-control form-control-sm" placeholder="JustHereToListen.io">
               </div>
               <div class="col-12">
                 <div class="form-check">
@@ -968,7 +968,7 @@
                 <td style="font-weight:500">{{ feed.name }}</td>
                 <td>{% if feed.is_active %}<span class="chip chip-success">Active</span>{% else %}<span class="chip chip-gray">Paused</span>{% endif %}</td>
                 <td>{% if feed.auto_record %}<span class="chip chip-info">On</span>{% else %}<span class="chip chip-gray">Off</span>{% endif %}</td>
-                <td style="color:#64748b;font-size:13px">{{ feed.bot_name or "MeetingBot" }}</td>
+                <td style="color:#64748b;font-size:13px">{{ feed.bot_name or "JustHereToListen.io" }}</td>
                 <td style="color:#94a3b8;font-size:12.5px">{{ feed.last_synced_at or "Never" }}</td>
                 <td>
                   <div class="d-flex gap-1">
@@ -1526,7 +1526,7 @@ document.getElementById('cal-add-btn')?.addEventListener('click', async () => {
       tr.innerHTML = `<td style="font-weight:500">${data.name}</td>
         <td><span class="chip chip-success">Active</span></td>
         <td><span class="chip chip-info">On</span></td>
-        <td style="color:#64748b;font-size:13px">${botName || 'MeetingBot'}</td>
+        <td style="color:#64748b;font-size:13px">${botName || 'JustHereToListen.io'}</td>
         <td style="color:#94a3b8;font-size:12.5px">Never</td>
         <td>
           <div class="d-flex gap-1">

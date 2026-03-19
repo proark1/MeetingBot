@@ -51,28 +51,80 @@ async def create_all_tables() -> None:
 
 
 def _migrate_schema(conn) -> None:
-    """Apply additive schema migrations for columns added after initial deployment."""
+    """Apply additive schema migrations for columns added after initial deployment.
+
+    PostgreSQL path: uses ALTER TABLE ... ADD COLUMN IF NOT EXISTS — no inspector queries needed.
+    SQLite path: falls back to inspector-based checks (SQLite lacks IF NOT EXISTS support).
+    """
     import logging
     from sqlalchemy import inspect, text
 
     _log = logging.getLogger(__name__)
-    inspector = inspect(conn)
 
     # Detect backend to use the correct datetime type
     _is_pg = "postgresql" in str(conn.engine.url)
-    _dt_type = "TIMESTAMP" if _is_pg else "DATETIME"
+    _dt_type = "TIMESTAMP WITH TIME ZONE" if _is_pg else "DATETIME"
     _bool_false = "FALSE" if _is_pg else "0"
     _bool_true = "TRUE" if _is_pg else "1"
+
+    if _is_pg:
+        # PostgreSQL: use ADD COLUMN IF NOT EXISTS — zero inspector overhead, idempotent
+        _pg_migrations = [
+            f"ALTER TABLE accounts ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE",
+            f"ALTER TABLE accounts ADD COLUMN IF NOT EXISTS account_type VARCHAR(20) NOT NULL DEFAULT 'personal'",
+            f"ALTER TABLE accounts ADD COLUMN IF NOT EXISTS wallet_address VARCHAR(42)",
+            f"ALTER TABLE accounts ADD COLUMN IF NOT EXISTS plan VARCHAR(20) NOT NULL DEFAULT 'free'",
+            f"ALTER TABLE accounts ADD COLUMN IF NOT EXISTS monthly_bots_used INTEGER NOT NULL DEFAULT 0",
+            f"ALTER TABLE accounts ADD COLUMN IF NOT EXISTS monthly_reset_at TIMESTAMP WITH TIME ZONE",
+            f"ALTER TABLE accounts ADD COLUMN IF NOT EXISTS notify_on_done BOOLEAN NOT NULL DEFAULT TRUE",
+            f"ALTER TABLE accounts ADD COLUMN IF NOT EXISTS notify_email VARCHAR(255)",
+            f"ALTER TABLE accounts ADD COLUMN IF NOT EXISTS failed_login_attempts INTEGER NOT NULL DEFAULT 0",
+            f"ALTER TABLE accounts ADD COLUMN IF NOT EXISTS last_failed_login_at TIMESTAMP WITH TIME ZONE",
+            f"ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS last_used_at TIMESTAMP WITH TIME ZONE",
+            f"ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS mode VARCHAR(10) NOT NULL DEFAULT 'live'",
+            f"ALTER TABLE bot_snapshots ADD COLUMN IF NOT EXISTS sub_user_id VARCHAR(255)",
+            f"ALTER TABLE bot_snapshots ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP WITH TIME ZONE",
+            f"ALTER TABLE bot_snapshots ADD COLUMN IF NOT EXISTS consent_given BOOLEAN NOT NULL DEFAULT FALSE",
+            f"ALTER TABLE bot_snapshots ADD COLUMN IF NOT EXISTS opted_out_participants TEXT",
+            f"ALTER TABLE webhooks ADD COLUMN IF NOT EXISTS account_id VARCHAR(36)",
+            f"ALTER TABLE webhooks ADD COLUMN IF NOT EXISTS delivery_attempts INTEGER NOT NULL DEFAULT 0",
+            f"ALTER TABLE webhooks ADD COLUMN IF NOT EXISTS last_delivery_at TIMESTAMP WITH TIME ZONE",
+            f"ALTER TABLE webhooks ADD COLUMN IF NOT EXISTS last_delivery_status INTEGER",
+            f"ALTER TABLE webhooks ADD COLUMN IF NOT EXISTS consecutive_failures INTEGER NOT NULL DEFAULT 0",
+        ]
+        for sql in _pg_migrations:
+            try:
+                conn.execute(text(sql))
+            except Exception as e:
+                _log.debug("PG migration skipped (%s): %s", sql.split("ADD COLUMN")[1][:40].strip(), e)
+        # Indexes (IF NOT EXISTS works on both PG and SQLite)
+        _pg_indexes = [
+            "CREATE INDEX IF NOT EXISTS ix_bot_snapshots_account_created ON bot_snapshots (account_id, created_at)",
+            "CREATE INDEX IF NOT EXISTS ix_bot_snapshots_account_sub_user ON bot_snapshots (account_id, sub_user_id)",
+            "CREATE INDEX IF NOT EXISTS ix_webhook_deliveries_retry ON webhook_deliveries (status, next_retry_at)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS ix_idempotency_account_key ON idempotency_keys (account_id, key)",
+        ]
+        existing_tables = set(inspect(conn).get_table_names())
+        for idx_sql in _pg_indexes:
+            _tbl = idx_sql.split(" ON ")[1].split(" ")[0]
+            if _tbl in existing_tables:
+                try:
+                    conn.execute(text(idx_sql))
+                except Exception:
+                    pass
+        return
+
+    # ── SQLite fallback (dev/test only) — inspector-based checks ──────────────
+    inspector = inspect(conn)
 
     # accounts table — columns added in v2.x
     if "accounts" in inspector.get_table_names():
         existing = {col["name"] for col in inspector.get_columns("accounts")}
-        migrations = [
-            ("is_admin", f"BOOLEAN NOT NULL DEFAULT {_bool_false}"),
-            ("account_type", "VARCHAR(20) NOT NULL DEFAULT 'personal'"),
+        for col_name, col_def in [
+            ("is_admin",      f"BOOLEAN NOT NULL DEFAULT {_bool_false}"),
+            ("account_type",  "VARCHAR(20) NOT NULL DEFAULT 'personal'"),
             ("wallet_address", "VARCHAR(42)"),
-        ]
-        for col_name, col_def in migrations:
+        ]:
             if col_name not in existing:
                 _log.info("Adding column accounts.%s", col_name)
                 conn.execute(text(f"ALTER TABLE accounts ADD COLUMN {col_name} {col_def}"))
@@ -101,11 +153,14 @@ def _migrate_schema(conn) -> None:
     if "accounts" in inspector.get_table_names():
         existing = {col["name"] for col in inspector.get_columns("accounts")}
         v3_migrations = [
-            ("plan",                 "VARCHAR(20) NOT NULL DEFAULT 'free'"),
-            ("monthly_bots_used",   "INTEGER NOT NULL DEFAULT 0"),
-            ("monthly_reset_at",    f"{_dt_type}"),
-            ("notify_on_done",      f"BOOLEAN NOT NULL DEFAULT {_bool_true}"),
-            ("notify_email",        "VARCHAR(255)"),
+            ("plan",                     "VARCHAR(20) NOT NULL DEFAULT 'free'"),
+            ("monthly_bots_used",        "INTEGER NOT NULL DEFAULT 0"),
+            ("monthly_reset_at",         f"{_dt_type}"),
+            ("notify_on_done",           f"BOOLEAN NOT NULL DEFAULT {_bool_true}"),
+            ("notify_email",             "VARCHAR(255)"),
+            # v7.x: brute-force lockout tracking
+            ("failed_login_attempts",    "INTEGER NOT NULL DEFAULT 0"),
+            ("last_failed_login_at",     f"{_dt_type}"),
         ]
         for col_name, col_def in v3_migrations:
             if col_name not in existing:

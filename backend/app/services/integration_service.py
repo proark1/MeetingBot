@@ -13,7 +13,10 @@ import json
 import logging
 from typing import Any, Optional
 
+import httpx as _httpx
+
 logger = logging.getLogger(__name__)
+_http_client = _httpx.AsyncClient(timeout=15, follow_redirects=True)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -103,8 +106,6 @@ async def _post_to_slack(webhook_url: str, bot_data: dict) -> bool:
 
     Returns True on success, False on failure (never raises).
     """
-    import httpx
-
     blocks = _build_slack_blocks(bot_data)
     payload = {
         "text": "Meeting recording complete",  # fallback text
@@ -112,11 +113,10 @@ async def _post_to_slack(webhook_url: str, bot_data: dict) -> bool:
     }
 
     try:
-        async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
-            resp = await client.post(webhook_url, json=payload)
-            resp.raise_for_status()
-            logger.info("Slack notification sent for bot %s", bot_data.get("bot_id"))
-            return True
+        resp = await _http_client.post(webhook_url, json=payload)
+        resp.raise_for_status()
+        logger.info("Slack notification sent for bot %s", bot_data.get("bot_id"))
+        return True
     except Exception as exc:
         logger.error("Slack notification failed for bot %s: %s", bot_data.get("bot_id"), exc)
         return False
@@ -224,8 +224,6 @@ async def _post_to_notion(api_token: str, database_id: str, bot_data: dict) -> b
 
     Returns True on success, False on failure (never raises).
     """
-    import httpx
-
     page_body = _build_notion_page(bot_data, database_id)
 
     headers = {
@@ -235,15 +233,14 @@ async def _post_to_notion(api_token: str, database_id: str, bot_data: dict) -> b
     }
 
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(
-                "https://api.notion.com/v1/pages",
-                headers=headers,
-                json=page_body,
-            )
-            resp.raise_for_status()
-            logger.info("Notion page created for bot %s", bot_data.get("bot_id"))
-            return True
+        resp = await _http_client.post(
+            "https://api.notion.com/v1/pages",
+            headers=headers,
+            json=page_body,
+        )
+        resp.raise_for_status()
+        logger.info("Notion page created for bot %s", bot_data.get("bot_id"))
+        return True
     except Exception as exc:
         logger.error("Notion integration failed for bot %s: %s", bot_data.get("bot_id"), exc)
         return False

@@ -172,8 +172,8 @@ async def test_webhook(webhook_id: str, request: _Request):
     await _block_ssrf(wh.url)
 
     from app.services.webhook_service import _attempt_delivery, _build_body, _sign
-    body = _build_body("bot.test", {"message": "Test delivery from MeetingBot"})
-    headers = {"Content-Type": "application/json", "User-Agent": "MeetingBot/1.0"}
+    body = _build_body("bot.test", {"message": "Test delivery from JustHereToListen.io"})
+    headers = {"Content-Type": "application/json", "User-Agent": "JustHereToListen.io/1.0"}
     if wh.secret:
         headers["X-MeetingBot-Signature"] = _sign(body, wh.secret)
 

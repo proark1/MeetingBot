@@ -175,7 +175,8 @@ class Store:
             self._bots[session.id] = session
 
     async def get_bot(self, bot_id: str) -> Optional[BotSession]:
-        return self._bots.get(bot_id)
+        async with self._lock:
+            return self._bots.get(bot_id)
 
     async def update_bot(self, bot_id: str, **kwargs) -> Optional[BotSession]:
         async with self._lock:
@@ -195,13 +196,17 @@ class Store:
         account_id: Optional[str] = None,
         sub_user_id: Optional[str] = None,
     ) -> tuple[list[BotSession], int]:
-        bots = sorted(self._bots.values(), key=lambda b: b.created_at, reverse=True)
+        async with self._lock:
+            snapshot = list(self._bots.values())
+        # Filter first (O(n)), then sort only the smaller result set
+        filtered = snapshot
         if status:
-            bots = [b for b in bots if b.status == status]
+            filtered = [b for b in filtered if b.status == status]
         if account_id:
-            bots = [b for b in bots if b.account_id == account_id]
+            filtered = [b for b in filtered if b.account_id == account_id]
         if sub_user_id is not None:
-            bots = [b for b in bots if b.sub_user_id == sub_user_id]
+            filtered = [b for b in filtered if b.sub_user_id == sub_user_id]
+        bots = sorted(filtered, key=lambda b: b.created_at, reverse=True)
         total = len(bots)
         return bots[offset : offset + limit], total
 
@@ -231,79 +236,89 @@ class Store:
                     return v.isoformat()
                 return str(v)
 
-            data = json.dumps({
-                "id": bot.id,
-                "meeting_url": bot.meeting_url,
-                "meeting_platform": bot.meeting_platform,
-                "bot_name": bot.bot_name,
-                "status": bot.status,
-                "webhook_url": bot.webhook_url,
-                "transcript": bot.transcript,
-                "analysis": bot.analysis,
-                "chapters": bot.chapters,
-                "speaker_stats": bot.speaker_stats,
-                "participants": bot.participants,
-                "recording_path": bot.recording_path,
-                "video_path": bot.video_path,
-                "error_message": bot.error_message,
-                "analysis_mode": bot.analysis_mode,
-                "template": bot.template,
-                "prompt_override": bot.prompt_override,
-                "vocabulary": bot.vocabulary,
-                "respond_on_mention": bot.respond_on_mention,
-                "mention_response_mode": bot.mention_response_mode,
-                "tts_provider": bot.tts_provider,
-                "start_muted": bot.start_muted,
-                "live_transcription": bot.live_transcription,
-                "join_at": _dt(bot.join_at),
-                "metadata": bot.metadata,
-                "is_demo_transcript": bot.is_demo_transcript,
-                "bot_avatar_url": bot.bot_avatar_url,
-                "record_video": bot.record_video,
-                "account_id": bot.account_id,
-                "sub_user_id": bot.sub_user_id,
-                "consent_enabled": bot.consent_enabled,
-                "consent_message": bot.consent_message,
-                "opted_out_participants": bot.opted_out_participants,
-                "keyword_alerts": bot.keyword_alerts,
-                "auto_followup_email": bot.auto_followup_email,
-                "followup_email": bot.followup_email,
-                "workspace_id": bot.workspace_id,
-                "transcription_provider": bot.transcription_provider,
-                "translation_language": bot.translation_language,
-                "pii_redaction": bot.pii_redaction,
-                "pii_detected": bot.pii_detected,
-                "health_score": bot.health_score,
-                "meeting_cost_usd": bot.meeting_cost_usd,
-                "avg_hourly_rate_usd": bot.avg_hourly_rate_usd,
-                "ai_usage": bot.ai_usage,
-                "created_at": _dt(bot.created_at),
-                "updated_at": _dt(bot.updated_at),
-                "started_at": _dt(bot.started_at),
-                "ended_at": _dt(bot.ended_at),
-                "expires_at": _dt(bot.expires_at),
-            })
+            # Snapshot all fields while holding the lock to prevent concurrent mutation
+            async with self._lock:
+                bot_id = bot.id
+                bot_account_id = bot.account_id
+                bot_sub_user_id = bot.sub_user_id
+                bot_status = bot.status
+                bot_meeting_url = bot.meeting_url
+                bot_created_at = bot.created_at
+                bot_expires_at = bot.expires_at
+                data = json.dumps({
+                    "id": bot.id,
+                    "meeting_url": bot.meeting_url,
+                    "meeting_platform": bot.meeting_platform,
+                    "bot_name": bot.bot_name,
+                    "status": bot.status,
+                    "webhook_url": bot.webhook_url,
+                    "transcript": bot.transcript,
+                    "analysis": bot.analysis,
+                    "chapters": bot.chapters,
+                    "speaker_stats": bot.speaker_stats,
+                    "participants": bot.participants,
+                    "recording_path": bot.recording_path,
+                    "video_path": bot.video_path,
+                    "error_message": bot.error_message,
+                    "analysis_mode": bot.analysis_mode,
+                    "template": bot.template,
+                    "prompt_override": bot.prompt_override,
+                    "vocabulary": bot.vocabulary,
+                    "respond_on_mention": bot.respond_on_mention,
+                    "mention_response_mode": bot.mention_response_mode,
+                    "tts_provider": bot.tts_provider,
+                    "start_muted": bot.start_muted,
+                    "live_transcription": bot.live_transcription,
+                    "join_at": _dt(bot.join_at),
+                    "metadata": bot.metadata,
+                    "is_demo_transcript": bot.is_demo_transcript,
+                    "bot_avatar_url": bot.bot_avatar_url,
+                    "record_video": bot.record_video,
+                    "account_id": bot.account_id,
+                    "sub_user_id": bot.sub_user_id,
+                    "consent_enabled": bot.consent_enabled,
+                    "consent_message": bot.consent_message,
+                    "opted_out_participants": bot.opted_out_participants,
+                    "keyword_alerts": bot.keyword_alerts,
+                    "auto_followup_email": bot.auto_followup_email,
+                    "followup_email": bot.followup_email,
+                    "workspace_id": bot.workspace_id,
+                    "transcription_provider": bot.transcription_provider,
+                    "translation_language": bot.translation_language,
+                    "pii_redaction": bot.pii_redaction,
+                    "pii_detected": bot.pii_detected,
+                    "health_score": bot.health_score,
+                    "meeting_cost_usd": bot.meeting_cost_usd,
+                    "avg_hourly_rate_usd": bot.avg_hourly_rate_usd,
+                    "ai_usage": bot.ai_usage,
+                    "created_at": _dt(bot.created_at),
+                    "updated_at": _dt(bot.updated_at),
+                    "started_at": _dt(bot.started_at),
+                    "ended_at": _dt(bot.ended_at),
+                    "expires_at": _dt(bot.expires_at),
+                })
 
+            # DB I/O happens outside the lock
             async with AsyncSessionLocal() as db:
                 result = await db.execute(
-                    _select(BotSnapshot).where(BotSnapshot.id == bot.id)
+                    _select(BotSnapshot).where(BotSnapshot.id == bot_id)
                 )
                 snap = result.scalar_one_or_none()
                 if snap is None:
                     snap = BotSnapshot(
-                        id=bot.id,
-                        account_id=bot.account_id,
-                        sub_user_id=bot.sub_user_id,
-                        status=bot.status,
-                        meeting_url=bot.meeting_url,
-                        created_at=bot.created_at,
-                        expires_at=bot.expires_at,
+                        id=bot_id,
+                        account_id=bot_account_id,
+                        sub_user_id=bot_sub_user_id,
+                        status=bot_status,
+                        meeting_url=bot_meeting_url,
+                        created_at=bot_created_at,
+                        expires_at=bot_expires_at,
                         data=data,
                     )
                     db.add(snap)
                 else:
-                    snap.status = bot.status
-                    snap.expires_at = bot.expires_at
+                    snap.status = bot_status
+                    snap.expires_at = bot_expires_at
                     snap.data = data
                 await db.commit()
         except Exception:
@@ -470,7 +485,7 @@ async def load_persisted_bots() -> int:
                     id=d["id"],
                     meeting_url=d["meeting_url"],
                     meeting_platform=d.get("meeting_platform", "unknown"),
-                    bot_name=d.get("bot_name", "MeetingBot"),
+                    bot_name=d.get("bot_name", "JustHereToListen.io"),
                     status=d.get("status", "done"),
                     webhook_url=d.get("webhook_url"),
                     transcript=d.get("transcript", []),

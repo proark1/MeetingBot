@@ -1,4 +1,4 @@
-"""MeetingBot API — stateless meeting bot service.
+"""JustHereToListen.io API — stateless meeting bot service.
 
 Run with:
     uvicorn app.main:app --reload
@@ -149,22 +149,33 @@ async def lifespan(app: FastAPI):
 
     signal.signal(signal.SIGTERM, _handle_sigterm)
 
-    async def _supervised(name: str, coro_fn, *args, **kwargs) -> None:
+    async def _supervised(name: str, coro_fn, *args, max_restarts: int = 20, **kwargs) -> None:
         """Run a background coroutine and restart it if it crashes.
 
         Without this, a single unhandled exception in a background task silently
         kills the task — webhooks stop retrying, cleanup stops running, etc.
-        This wrapper logs the crash and restarts after a short delay.
+        This wrapper logs the crash and restarts with exponential backoff.
         """
-        while True:
+        restarts = 0
+        backoff = 5.0
+        while restarts < max_restarts:
             try:
                 await coro_fn(*args, **kwargs)
+                # Coroutine returned normally (shouldn't happen for loops) — restart cleanly
+                restarts = 0
+                backoff = 5.0
             except asyncio.CancelledError:
                 logger.info("Background task %r cancelled", name)
                 return
             except Exception:
-                logger.exception("Background task %r crashed — restarting in 10 s", name)
-                await asyncio.sleep(10)
+                restarts += 1
+                logger.exception(
+                    "Background task %r crashed (restart %d/%d) — retrying in %.0f s",
+                    name, restarts, max_restarts, backoff,
+                )
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, 300.0)
+        logger.critical("Background task %r exceeded max restarts (%d) — giving up", name, max_restarts)
 
     # Start bot queue processor
     queue_task = asyncio.create_task(_supervised("queue_processor", _queue_processor))
@@ -261,7 +272,7 @@ async def lifespan(app: FastAPI):
 
     retention_task = asyncio.create_task(_supervised("retention_loop", _retention_loop))
 
-    logger.info("MeetingBot ready — API docs at /api/docs")
+    logger.info("JustHereToListen.io ready — API docs at /api/docs")
     yield
 
     # Shutdown
@@ -279,7 +290,7 @@ async def lifespan(app: FastAPI):
 
     from app.services import webhook_service
     await webhook_service.close_http_client()
-    logger.info("MeetingBot shut down")
+    logger.info("JustHereToListen.io shut down")
 
 
 # ── App ───────────────────────────────────────────────────────────────────────
@@ -334,7 +345,7 @@ _PUBLIC_DESCRIPTION = (
     "return an empty `api_key` — use your existing key.\n\n"
 
     "## Business accounts (multi-user data isolation)\n"
-    "Business accounts are for **platforms integrating MeetingBot on behalf of multiple "
+    "Business accounts are for **platforms integrating JustHereToListen.io on behalf of multiple "
     "end-users**. A single business account uses one API key and one shared credit balance, "
     "but isolates all bot data between end-users.\n\n"
     "**How to use:** Pass the `X-Sub-User: <user-id>` header on every request to scope "
@@ -389,7 +400,7 @@ _PUBLIC_DESCRIPTION = (
     "integrations for that account.\n\n"
 
     "## Calendar auto-join\n"
-    "Connect an iCal feed so MeetingBot automatically dispatches bots to upcoming meetings.\n\n"
+    "Connect an iCal feed so JustHereToListen.io automatically dispatches bots to upcoming meetings.\n\n"
     "- `POST /api/v1/calendar` — add an iCal feed (`ical_url`, `name`, `bot_name?`, `auto_record`)\n"
     "- `GET /api/v1/calendar` — list all calendar feeds\n"
     "- `PATCH /api/v1/calendar/{id}` — update a feed\n"
@@ -516,7 +527,7 @@ _PUBLIC_DESCRIPTION = (
 )
 
 app = FastAPI(
-    title="MeetingBot API",
+    title="JustHereToListen.io API",
     description=(
         "A **multi-tenant meeting bot API** service. Send bots into **Zoom**, **Google Meet**, "
         "and **Microsoft Teams** meetings to record, transcribe, and analyse them with "
@@ -565,7 +576,7 @@ app = FastAPI(
         "return an empty `api_key` — use your existing key.\n\n"
 
         "## Business accounts (multi-user data isolation)\n"
-        "Business accounts are for **platforms integrating MeetingBot on behalf of multiple "
+        "Business accounts are for **platforms integrating JustHereToListen.io on behalf of multiple "
         "end-users**. A single business account uses one API key and one shared credit balance, "
         "but isolates all bot data between end-users.\n\n"
         "**How to use:** Pass the `X-Sub-User: <user-id>` header on every request to scope "
@@ -620,7 +631,7 @@ app = FastAPI(
         "integrations for that account.\n\n"
 
         "## Calendar auto-join\n"
-        "Connect an iCal feed so MeetingBot automatically dispatches bots to upcoming meetings.\n\n"
+        "Connect an iCal feed so JustHereToListen.io automatically dispatches bots to upcoming meetings.\n\n"
         "- `POST /api/v1/calendar` — add an iCal feed (`ical_url`, `name`, `bot_name?`, `auto_record`)\n"
         "- `GET /api/v1/calendar` — list all calendar feeds\n"
         "- `PATCH /api/v1/calendar/{id}` — update a feed\n"
@@ -907,7 +918,7 @@ async def admin_api_docs():
     """Swagger UI for the full admin API (includes all endpoints and ai_usage data)."""
     return _get_swagger_ui_html(
         openapi_url="/api/v1/admin/openapi.json",
-        title="MeetingBot Admin API",
+        title="JustHereToListen.io Admin API",
         swagger_favicon_url="",
     )
 
@@ -916,7 +927,7 @@ async def admin_api_docs():
 async def admin_openapi_schema():
     """Full OpenAPI schema — includes admin-only endpoints, platform analytics, and ai_usage fields."""
     return _get_openapi_util(
-        title="MeetingBot Admin API",
+        title="JustHereToListen.io Admin API",
         version=app.version,
         description=app.description,
         routes=app.routes,
@@ -997,7 +1008,7 @@ async def health():
     Does NOT check external dependencies (use /ready for that).
     Kubernetes: use this as the `livenessProbe`.
     """
-    return {"status": "ok", "service": "MeetingBot", "version": "2.2.0"}
+    return {"status": "ok", "service": "JustHereToListen.io", "version": "2.2.0"}
 
 
 @app.get("/ready", tags=["Health"])

@@ -1,6 +1,6 @@
 """Model Context Protocol (MCP) server implementation.
 
-Exposes MeetingBot data as MCP tools so AI assistants (Claude, etc.) can
+Exposes JustHereToListen.io data as MCP tools so AI assistants (Claude, etc.) can
 query meetings, transcripts, and action items in real-time.
 
 MCP endpoint: GET /api/v1/mcp/schema — returns the MCP server manifest
@@ -28,7 +28,7 @@ MCP_SERVER_MANIFEST = {
     "name": "meetingbot",
     "description": (
         "Access meeting transcripts, analysis, action items, and search across "
-        "all meetings recorded by MeetingBot."
+        "all meetings recorded by JustHereToListen.io."
     ),
     "tools": [
         {

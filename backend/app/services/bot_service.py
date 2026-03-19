@@ -21,6 +21,9 @@ from app.services.intelligence_service import set_usage_sink
 
 logger = logging.getLogger(__name__)
 
+# Tracks bot IDs currently undergoing analysis — prevents duplicate concurrent AI calls
+_analysis_in_flight: set[str] = set()
+
 # ── Live-entry helper coroutines (fire-and-forget via create_task) ─────────────
 
 async def _extract_and_broadcast_action_items(
@@ -250,6 +253,18 @@ async def _transcribe_audio_for_bot(bot: BotSession, audio_path: str) -> list:
 
 async def _do_analysis(bot: BotSession, audio_path: str, use_real_bot: bool, video_path: Optional[str] = None) -> None:
     """Transcribe (if needed), analyse, and update the bot in-memory."""
+    if bot.id in _analysis_in_flight:
+        logger.warning("Bot %s: analysis already in flight — skipping duplicate call", bot.id)
+        return
+    _analysis_in_flight.add(bot.id)
+    try:
+        await _do_analysis_inner(bot, audio_path, use_real_bot, video_path=video_path)
+    finally:
+        _analysis_in_flight.discard(bot.id)
+
+
+async def _do_analysis_inner(bot: BotSession, audio_path: str, use_real_bot: bool, video_path: Optional[str] = None) -> None:
+    """Inner implementation of _do_analysis (called after in-flight guard check)."""
     # ── transcript ─────────────────────────────────────────────────────────
     if not bot.transcript:
         transcript: list = []
@@ -861,7 +876,8 @@ async def run_bot_lifecycle(bot_id: str) -> None:
                 await _do_analysis(bot, audio_path, use_real_bot, video_path=video_path)
                 bot = await store.get_bot(bot_id)
             except Exception:
-                logger.exception("Bot %s: error during error cleanup", bot_id)
+                logger.exception("Bot %s: error during error cleanup analysis", bot_id)
+            # Always attempt to set terminal state — if this fails, log loudly so we know
             try:
                 await store.mark_terminal(
                     bot_id, "error",
@@ -880,7 +896,11 @@ async def run_bot_lifecycle(bot_id: str) -> None:
                         account_id=bot.account_id,
                     )
             except Exception:
-                pass
+                logger.exception(
+                    "Bot %s: CRITICAL — failed to set terminal error state, bot status may be stuck", bot_id
+                )
+        else:
+            logger.error("Bot %s: not found during error cleanup — cannot set terminal state", bot_id)
 
     finally:
         # Delete audio only if it was NOT stored as a persistent recording

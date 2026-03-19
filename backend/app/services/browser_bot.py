@@ -489,6 +489,7 @@ def _stop_ffmpeg(proc: subprocess.Popen) -> None:
     except Exception:
         try:
             proc.kill()
+            proc.wait()  # reap zombie after SIGKILL
         except Exception:
             pass
 
@@ -3592,7 +3593,11 @@ async def run_browser_bot(
                     xvfb_proc.terminate()
                     xvfb_proc.wait(timeout=5)
                 except Exception:
-                    pass
+                    try:
+                        xvfb_proc.kill()
+                        xvfb_proc.wait()
+                    except Exception:
+                        pass
             try:
                 _prune_screenshots()
             except Exception:

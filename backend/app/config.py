@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     ADMIN_EMAILS: str = ""
 
     # Bot defaults
-    BOT_NAME_DEFAULT: str = "MeetingBot"
+    BOT_NAME_DEFAULT: str = "JustHereToListen.io"
     BOT_SIMULATION_DURATION: int = 15   # seconds for unsupported-platform demo mode
     BOT_ADMISSION_TIMEOUT: int = 300    # seconds to wait for host to admit the bot
     BOT_MAX_DURATION: int = 7200        # max meeting length in seconds (2 hours)
@@ -177,8 +177,8 @@ class Settings(BaseSettings):
     # max_overflow: extra connections allowed above pool_size under burst load.
     # pool_recycle: recycle connections older than N seconds (prevents stale-connection errors).
     # pool_timeout: seconds to wait for a free connection before raising OperationalError.
-    DB_POOL_SIZE: int = 10
-    DB_POOL_MAX_OVERFLOW: int = 10
+    DB_POOL_SIZE: int = 30
+    DB_POOL_MAX_OVERFLOW: int = 20
     DB_POOL_RECYCLE_SECONDS: int = 1800   # 30 minutes
     DB_POOL_TIMEOUT: int = 30
 

@@ -39,8 +39,8 @@ def create_checkout_session(
                     "currency": "usd",
                     "unit_amount": amount_usd * 100,  # Stripe uses cents
                     "product_data": {
-                        "name": f"MeetingBot Credits — ${amount_usd}",
-                        "description": f"Add ${amount_usd} to your MeetingBot credit balance",
+                        "name": f"JustHereToListen.io Credits — ${amount_usd}",
+                        "description": f"Add ${amount_usd} to your JustHereToListen.io credit balance",
                     },
                 },
                 "quantity": 1,

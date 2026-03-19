@@ -41,7 +41,7 @@ class BotCreate(BaseModel):
     """Request body for creating a new meeting bot."""
 
     meeting_url: AnyHttpUrl = Field(description="Full URL of the Zoom, Google Meet, or Teams meeting.")
-    bot_name: str = Field(default="MeetingBot", max_length=100, description="Display name shown in the meeting.")
+    bot_name: str = Field(default="JustHereToListen.io", max_length=100, description="Display name shown in the meeting.")
 
     # Where to deliver results when the bot finishes
     webhook_url: Optional[str] = Field(

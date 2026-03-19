@@ -145,7 +145,7 @@ async def dispatch_event(
     from app.store import store
 
     body = _build_body(event, payload)
-    headers_base = {"Content-Type": "application/json", "User-Agent": "MeetingBot/1.0"}
+    headers_base = {"Content-Type": "application/json", "User-Agent": "JustHereToListen.io/1.0"}
     bot_id: "str | None" = payload.get("id") or payload.get("bot_id")
 
     for wh in store.active_webhooks():
@@ -260,7 +260,7 @@ async def _process_retries() -> None:
             )
             continue
 
-        hdrs: dict = {"Content-Type": "application/json", "User-Agent": "MeetingBot/1.0"}
+        hdrs: dict = {"Content-Type": "application/json", "User-Agent": "JustHereToListen.io/1.0"}
         if wh.secret:
             sig, ts = _sign(delivery.request_body, wh.secret)
             hdrs["X-MeetingBot-Signature"] = sig

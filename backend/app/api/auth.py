@@ -64,7 +64,7 @@ class RegisterRequest(BaseModel):
         default="personal",
         description=(
             "Account type: `personal` (default) for individual users, or `business` for "
-            "platforms integrating MeetingBot on behalf of multiple end-users. Business "
+            "platforms integrating JustHereToListen.io on behalf of multiple end-users. Business "
             "accounts can use the `X-Sub-User` header to isolate data per end-user."
         ),
     )
@@ -262,10 +262,35 @@ async def login(
     """
     result = await db.execute(select(Account).where(Account.email == form.username))
     account = result.scalar_one_or_none()
+
+    # Check account lockout before verifying password (prevents timing oracle)
+    _LOCKOUT_ATTEMPTS = 10
+    _LOCKOUT_MINUTES = 30
+    if account and (account.failed_login_attempts or 0) >= _LOCKOUT_ATTEMPTS:
+        lockout_until = account.last_failed_login_at + timedelta(minutes=_LOCKOUT_MINUTES) if account.last_failed_login_at else None
+        if lockout_until and datetime.now(timezone.utc) < lockout_until:
+            raise HTTPException(
+                status_code=429,
+                detail=f"Account temporarily locked due to too many failed attempts. Try again after {lockout_until.strftime('%H:%M UTC')}",
+            )
+        # Lockout expired — reset counter
+        account.failed_login_attempts = 0
+
     if not account or not _verify_password(form.password, account.hashed_password):
+        # Increment failed attempt counter (only if account exists, to avoid timing differences)
+        if account:
+            account.failed_login_attempts = (account.failed_login_attempts or 0) + 1
+            account.last_failed_login_at = datetime.now(timezone.utc)
+            await db.commit()
         raise HTTPException(status_code=401, detail="Invalid email or password")
     if not account.is_active:
         raise HTTPException(status_code=403, detail="Account is disabled")
+
+    # Successful login — reset lockout counter
+    if account.failed_login_attempts:
+        account.failed_login_attempts = 0
+        account.last_failed_login_at = None
+        await db.commit()
 
     token = _create_jwt(account.id)
 
@@ -655,7 +680,7 @@ class AccountTypeRequest(BaseModel):
     account_type: str = Field(
         description=(
             "Account type: `personal` for individual users, or `business` for platforms "
-            "integrating MeetingBot on behalf of multiple end-users. Business accounts can "
+            "integrating JustHereToListen.io on behalf of multiple end-users. Business accounts can "
             "pass `X-Sub-User` to isolate data per end-user."
         ),
     )

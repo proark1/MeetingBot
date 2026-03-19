@@ -128,13 +128,15 @@ def _extract_video_url(text: str) -> Optional[str]:
     return None
 
 
+import httpx as _httpx
+_http_client = _httpx.AsyncClient(timeout=15, follow_redirects=True)
+
+
 async def _fetch_ical(url: str) -> bytes:
     """Fetch an iCal feed with a short timeout."""
-    import httpx
-    async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
-        resp = await client.get(url, headers={"User-Agent": "MeetingBot/1.0 (iCal)"})
-        resp.raise_for_status()
-        return resp.content
+    resp = await _http_client.get(url, headers={"User-Agent": "JustHereToListen.io/1.0 (iCal)"})
+    resp.raise_for_status()
+    return resp.content
 
 
 async def _process_feed(feed, account_id: str) -> int:
@@ -170,17 +172,25 @@ async def _process_feed(feed, account_id: str) -> int:
             join_at = now  # already past — join immediately
 
         try:
+            import uuid as _uuid
             from app.store import store, BotSession
-            from app.api.bots import _schedule_bot
+            from app.services import bot_service as _bot_service
+            from app.api.bots import _bot_queue, _queue_event
 
+            meeting_url = event["meeting_url"]
             bot = BotSession(
-                meeting_url=event["meeting_url"],
-                bot_name=feed.bot_name or "MeetingBot",
+                id=str(_uuid.uuid4()),
+                meeting_url=meeting_url,
+                meeting_platform=_bot_service.detect_platform(meeting_url),
+                bot_name=feed.bot_name or "JustHereToListen.io",
+                status="scheduled",
                 join_at=join_at,
                 account_id=account_id,
                 metadata={"calendar_event": event["summary"], "calendar_feed_id": feed.id},
             )
-            await _schedule_bot(bot)
+            await store.create_bot(bot)
+            _bot_queue.append(bot.id)
+            _queue_event.set()
             _dispatched[cache_key] = _time.monotonic()
             dispatched += 1
             logger.info(

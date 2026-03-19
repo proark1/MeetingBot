@@ -39,6 +39,9 @@ class Account(Base):
     # Email notification preferences
     notify_on_done: Mapped[bool] = mapped_column(Boolean, default=True)
     notify_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    # Brute-force lockout tracking
+    failed_login_attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    last_failed_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     api_keys: Mapped[list["ApiKey"]] = relationship(back_populates="account", cascade="all, delete-orphan")
