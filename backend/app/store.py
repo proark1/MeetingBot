@@ -96,6 +96,15 @@ class BotSession:
     pii_redaction: bool = False   # redact PII from transcript before analysis
     pii_detected: bool = False    # True if PII was found (set after transcription)
 
+    # ── Shareable link ─────────────────────────────────────────────────────────
+    share_token_hash: Optional[str] = None  # SHA-256 of the plaintext share token
+
+    # ── Recurring intelligence ─────────────────────────────────────────────────
+    recurring_intel: Optional[dict] = None  # set when recurring meeting pattern detected
+
+    # ── Semantic search ────────────────────────────────────────────────────────
+    summary_embedding: Optional[list] = None  # float vector from text-embedding-004
+
     # ── Meeting intelligence (set at completion) ───────────────────────────────
     health_score: Optional[int] = None         # 0-100 meeting quality score
     meeting_cost_usd: Optional[float] = None   # estimated attendee cost in USD
@@ -287,6 +296,9 @@ class Store:
                     "translation_language": bot.translation_language,
                     "pii_redaction": bot.pii_redaction,
                     "pii_detected": bot.pii_detected,
+                    "share_token_hash": bot.share_token_hash,
+                    "recurring_intel": bot.recurring_intel,
+                    "summary_embedding": bot.summary_embedding,
                     "health_score": bot.health_score,
                     "meeting_cost_usd": bot.meeting_cost_usd,
                     "avg_hourly_rate_usd": bot.avg_hourly_rate_usd,
@@ -523,6 +535,9 @@ async def load_persisted_bots() -> int:
                     translation_language=d.get("translation_language"),
                     pii_redaction=d.get("pii_redaction", False),
                     pii_detected=d.get("pii_detected", False),
+                    share_token_hash=d.get("share_token_hash"),
+                    recurring_intel=d.get("recurring_intel"),
+                    summary_embedding=d.get("summary_embedding"),
                     health_score=d.get("health_score"),
                     meeting_cost_usd=d.get("meeting_cost_usd"),
                     avg_hourly_rate_usd=d.get("avg_hourly_rate_usd"),

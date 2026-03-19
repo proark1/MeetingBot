@@ -420,3 +420,21 @@ class SamlConfig(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
+class ActionItem(Base):
+    """First-class action item extracted from a meeting, with lifecycle tracking."""
+    __tablename__ = "action_items"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=_uuid)
+    account_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
+    bot_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    # Stable content hash so upsert is idempotent: sha256(bot_id + task.lower().strip())
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    task: Mapped[str] = mapped_column(Text, nullable=False)
+    assignee: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    due_date: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    confidence: Mapped[Optional[float]] = mapped_column(Numeric(3, 2), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="open")  # open | done
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)

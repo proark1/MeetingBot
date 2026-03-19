@@ -94,14 +94,23 @@ no prose outside the JSON object.
 
 Required JSON shape:
 {
-  "summary":      "<2–4 sentence overview>",
-  "key_points":   ["<point 1>", ...],
-  "action_items": [{"task": "...", "assignee": "...", "due_date": "..."}],
-  "decisions":    ["<decision 1>", ...],
-  "next_steps":   ["<step 1>", ...],
-  "sentiment":    "positive|neutral|negative",
-  "topics":       ["<topic 1>", ...]
-}"""
+  "summary":        "<2–4 sentence overview>",
+  "key_points":     ["<point 1>", ...],
+  "action_items":   [{"task": "...", "assignee": "...", "due_date": "...", "confidence": 0.0}],
+  "decisions":      ["<decision 1>", ...],
+  "next_steps":     ["<step 1>", ...],
+  "sentiment":      "positive|neutral|negative",
+  "topics":         [{"name": "<topic>", "start_time": <seconds_float>, "end_time": <seconds_float>}],
+  "risks_blockers": ["<risk or blocker explicitly mentioned>"],
+  "next_meeting":   "<ISO date or natural-language date if a next meeting was scheduled, else null>",
+  "unresolved_items": ["<question or agenda item that was raised but not resolved>"]
+}
+
+For action_items.confidence: use 1.0 when a task was explicitly assigned ("Alice will do X by Friday"),
+0.7 for strong implicit commitment ("we need to do X"), 0.4 for vague mention ("someone should look at X").
+For topics: use the transcript timestamps to anchor each topic's start_time and end_time (seconds from start).
+For risks_blockers: include only items explicitly called out as blockers, risks, or concerns — not general topics.
+For next_meeting: extract from phrases like "let's meet Thursday", "same time next week", "I'll set up a call for the 15th"."""
 
 _CHAPTERS_PROMPT = """You are a meeting analyst. Segment the following transcript into 3–8 named chapters.
 Return ONLY a JSON array — no markdown, no prose outside the array.
@@ -885,6 +894,7 @@ def _empty_analysis() -> dict[str, Any]:
         "summary": "No transcript available.",
         "key_points": [], "action_items": [], "decisions": [],
         "next_steps": [], "sentiment": "neutral", "topics": [],
+        "risks_blockers": [], "next_meeting": None, "unresolved_items": [],
     }
 
 
@@ -899,7 +909,8 @@ def _stub_analysis(transcript: list[dict]) -> dict[str, Any]:
         "action_items": [], "decisions": [],
         "next_steps": ["Review the full transcript above"],
         "sentiment": "neutral",
-        "topics": ["general discussion"],
+        "topics": [{"name": "general discussion", "start_time": 0.0, "end_time": 0.0}],
+        "risks_blockers": [], "next_meeting": None, "unresolved_items": [],
     }
 
 
@@ -914,7 +925,7 @@ _BUILTIN_TEMPLATE_PROMPTS: dict[str, str] = {
         '  "decisions": ["<decision>"],\n'
         '  "next_steps": ["<step>"],\n'
         '  "sentiment": "positive|neutral|negative",\n'
-        '  "topics": ["<topic>"],\n'
+        '  "topics": [{"name": "<topic>", "start_time": <seconds_float>, "end_time": <seconds_float>}],\n'
         '  "buying_signals": ["<signal>"],\n'
         '  "objections": ["<objection>"],\n'
         '  "deal_stage": "discovery|evaluation|negotiation|closed|unknown"\n'
@@ -930,7 +941,7 @@ _BUILTIN_TEMPLATE_PROMPTS: dict[str, str] = {
         '  "decisions": ["<decision>"],\n'
         '  "next_steps": ["<step>"],\n'
         '  "sentiment": "positive|neutral|negative",\n'
-        '  "topics": ["<topic>"],\n'
+        '  "topics": [{"name": "<topic>", "start_time": <seconds_float>, "end_time": <seconds_float>}],\n'
         '  "blockers": ["<blocker>"],\n'
         '  "completed_yesterday": ["<item>"],\n'
         '  "planned_today": ["<item>"]\n'
@@ -946,7 +957,7 @@ _BUILTIN_TEMPLATE_PROMPTS: dict[str, str] = {
         '  "decisions": ["<decision>"],\n'
         '  "next_steps": ["<step>"],\n'
         '  "sentiment": "positive|neutral|negative",\n'
-        '  "topics": ["<topic>"],\n'
+        '  "topics": [{"name": "<topic>", "start_time": <seconds_float>, "end_time": <seconds_float>}],\n'
         '  "feedback_given": ["<feedback>"],\n'
         '  "growth_areas": ["<area>"]\n'
         '}'
@@ -961,7 +972,7 @@ _BUILTIN_TEMPLATE_PROMPTS: dict[str, str] = {
         '  "decisions": ["<decision>"],\n'
         '  "next_steps": ["<step>"],\n'
         '  "sentiment": "positive|neutral|negative",\n'
-        '  "topics": ["<topic>"],\n'
+        '  "topics": [{"name": "<topic>", "start_time": <seconds_float>, "end_time": <seconds_float>}],\n'
         '  "went_well": ["<item>"],\n'
         '  "went_poorly": ["<item>"],\n'
         '  "process_improvements": ["<improvement>"]\n'
@@ -977,7 +988,7 @@ _BUILTIN_TEMPLATE_PROMPTS: dict[str, str] = {
         '  "decisions": ["<decision>"],\n'
         '  "next_steps": ["<step>"],\n'
         '  "sentiment": "positive|neutral|negative",\n'
-        '  "topics": ["<topic>"],\n'
+        '  "topics": [{"name": "<topic>", "start_time": <seconds_float>, "end_time": <seconds_float>}],\n'
         '  "scope_items": ["<scope>"],\n'
         '  "deliverables": ["<deliverable>"],\n'
         '  "risks": ["<risk>"],\n'
@@ -994,7 +1005,7 @@ _BUILTIN_TEMPLATE_PROMPTS: dict[str, str] = {
         '  "decisions": ["<decision>"],\n'
         '  "next_steps": ["<step>"],\n'
         '  "sentiment": "positive|neutral|negative",\n'
-        '  "topics": ["<topic>"],\n'
+        '  "topics": [{"name": "<topic>", "start_time": <seconds_float>, "end_time": <seconds_float>}],\n'
         '  "announcements": ["<announcement>"],\n'
         '  "metrics_shared": ["<metric>"],\n'
         '  "employee_questions": ["<question>"],\n'
@@ -1011,7 +1022,7 @@ _BUILTIN_TEMPLATE_PROMPTS: dict[str, str] = {
         '  "decisions": ["<decision>"],\n'
         '  "next_steps": ["<step>"],\n'
         '  "sentiment": "positive|neutral|negative",\n'
-        '  "topics": ["<topic>"],\n'
+        '  "topics": [{"name": "<topic>", "start_time": <seconds_float>, "end_time": <seconds_float>}],\n'
         '  "timeline": ["<event>"],\n'
         '  "root_causes": ["<cause>"],\n'
         '  "customer_impact": "<description>",\n'
@@ -1028,7 +1039,7 @@ _BUILTIN_TEMPLATE_PROMPTS: dict[str, str] = {
         '  "decisions": ["<decision>"],\n'
         '  "next_steps": ["<step>"],\n'
         '  "sentiment": "positive|neutral|negative",\n'
-        '  "topics": ["<topic>"],\n'
+        '  "topics": [{"name": "<topic>", "start_time": <seconds_float>, "end_time": <seconds_float>}],\n'
         '  "strengths": ["<strength>"],\n'
         '  "concerns": ["<concern>"],\n'
         '  "competency_ratings": [{"competency": "...", "rating": "strong|acceptable|weak", "evidence": "..."}],\n'
@@ -1045,7 +1056,7 @@ _BUILTIN_TEMPLATE_PROMPTS: dict[str, str] = {
         '  "decisions": ["<decision>"],\n'
         '  "next_steps": ["<step>"],\n'
         '  "sentiment": "positive|neutral|negative",\n'
-        '  "topics": ["<topic>"],\n'
+        '  "topics": [{"name": "<topic>", "start_time": <seconds_float>, "end_time": <seconds_float>}],\n'
         '  "design_decisions": ["<decision>"],\n'
         '  "alternatives_rejected": [{"option": "...", "reason": "..."}],\n'
         '  "open_questions": ["<question>"],\n'
@@ -1229,3 +1240,30 @@ def _hardcoded_demo_transcript() -> list[dict[str, Any]]:
         {"speaker": "Carol (Design)", "text": "No blockers on my end.", "timestamp": 114.0},
         {"speaker": "Alice (PM)",     "text": "Great. Next sync is Thursday 10am. Thanks everyone!", "timestamp": 118.5},
     ]
+
+
+# ── Semantic embeddings ────────────────────────────────────────────────────────
+
+async def embed_text(text: str) -> list[float]:
+    """Generate a text embedding vector using Gemini text-embedding-004.
+
+    Returns an empty list on failure (caller should fall back to substring search).
+    """
+    if not text or not text.strip():
+        return []
+    from app.config import settings
+    if not settings.GEMINI_API_KEY:
+        return []
+    try:
+        import google.generativeai as genai
+        genai.configure(api_key=settings.GEMINI_API_KEY)
+        result = await asyncio.to_thread(
+            genai.embed_content,
+            model="models/text-embedding-004",
+            content=text,
+            task_type="RETRIEVAL_DOCUMENT",
+        )
+        return result["embedding"]
+    except Exception as exc:
+        logger.warning("embed_text failed: %s", exc)
+        return []

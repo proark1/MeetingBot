@@ -254,7 +254,11 @@ class MeetingAnalysis(BaseModel):
     decisions: list[str] = []
     next_steps: list[str] = []
     sentiment: str = "neutral"
-    topics: list[str] = []
+    topics: list[dict[str, Any]] = []
+    # Enriched fields (Round 3)
+    risks_blockers: list[str] = []
+    next_meeting: Optional[str] = None
+    unresolved_items: list[str] = []
 
     model_config = {"extra": "allow"}
 
@@ -312,6 +316,7 @@ class BotResponse(BaseModel):
     analysis_mode: str = "full"
     is_demo_transcript: bool = False
     sub_user_id: Optional[str] = Field(default=None, description="Business account sub-user identifier (if set).")
+    translation_language: Optional[str] = Field(default=None, description="BCP-47 language the stored transcript was translated to (if post-meeting translation was applied).")
     metadata: dict[str, Any] = {}
 
     # ── Meeting intelligence ────────────────────────────────────────────────────

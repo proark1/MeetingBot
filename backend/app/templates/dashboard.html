@@ -176,6 +176,10 @@
         <span class="nav-icon">📈</span> Analytics
       </button>
 
+      <button class="sidebar-nav-item" data-section="action-items">
+        <span class="nav-icon">✅</span> Action Items
+      </button>
+
       <div class="sidebar-section-label">Developer</div>
 
       <button class="sidebar-nav-item" data-section="api-keys">
@@ -286,6 +290,40 @@
           <div style="font-size:11.5px;color:#94a3b8;margin-top:4px">
             {{ all_integrations|length }} integration{% if all_integrations|length != 1 %}s{% endif %},
             {{ all_calendar_feeds|length }} calendar{% if all_calendar_feeds|length != 1 %}s{% endif %}
+          </div>
+        </div>
+      </div>
+
+      <!-- My Stats -->
+      <div class="card card-pad mb-3" id="my-stats-card">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <div class="section-title" style="margin-bottom:0">My Stats — This Month</div>
+          <span id="my-stats-loading" style="font-size:12px;color:#94a3b8">Loading…</span>
+        </div>
+        <div id="my-stats-content" class="row g-3" style="display:none">
+          <div class="col-6 col-md-3">
+            <div class="kpi-card" style="background:#f8fafc">
+              <div class="stat-label">Meetings</div>
+              <div class="stat-value mt-1" id="ms-meetings">—</div>
+            </div>
+          </div>
+          <div class="col-6 col-md-3">
+            <div class="kpi-card" style="background:#f8fafc">
+              <div class="stat-label">AI Cost</div>
+              <div class="stat-value mt-1" id="ms-cost">—</div>
+            </div>
+          </div>
+          <div class="col-6 col-md-3">
+            <div class="kpi-card" style="background:#f8fafc">
+              <div class="stat-label">Open Tasks</div>
+              <div class="stat-value mt-1" id="ms-tasks">—</div>
+            </div>
+          </div>
+          <div class="col-6 col-md-3">
+            <div class="kpi-card" style="background:#f8fafc">
+              <div class="stat-label">Avg Duration</div>
+              <div class="stat-value mt-1" id="ms-duration">—</div>
+            </div>
           </div>
         </div>
       </div>
@@ -624,6 +662,30 @@
     </div>
 
     <!-- ────────────────────────────────────────────
+         ACTION ITEMS
+    ──────────────────────────────────────────── -->
+    <div class="dash-section" id="section-action-items">
+      <div class="section-hdr">
+        <div>
+          <h2>Action Items</h2>
+          <p>Track open tasks and commitments extracted from your meetings</p>
+        </div>
+        <div class="d-flex gap-2">
+          <select id="ai-filter-status" class="form-select form-select-sm" style="width:120px">
+            <option value="">All</option>
+            <option value="open">Open</option>
+            <option value="done">Done</option>
+          </select>
+          <input type="text" id="ai-filter-assignee" class="form-control form-control-sm" placeholder="Filter assignee…" style="width:160px">
+          <button class="btn btn-sm btn-outline-secondary" onclick="loadActionItems()">Refresh</button>
+        </div>
+      </div>
+      <div class="card card-pad" id="action-items-container">
+        <div style="color:#94a3b8;text-align:center;padding:2rem">Loading action items…</div>
+      </div>
+    </div>
+
+    <!-- ────────────────────────────────────────────
          API KEYS
     ──────────────────────────────────────────── -->
     <div class="dash-section" id="section-api-keys">
@@ -765,14 +827,16 @@
               <label class="form-label">Signing Secret <span style="color:#94a3b8;font-weight:400">(optional)</span></label>
               <input type="password" name="secret" class="form-control form-control-sm" placeholder="For HMAC-SHA256 signature">
             </div>
-            <div class="col-md-3">
-              <label class="form-label">Events</label>
-              <select name="events" class="form-select form-select-sm">
-                <option value="*">All events</option>
-                <option value="bot.transcript_ready">transcript_ready only</option>
-                <option value="bot.analysis_ready">analysis_ready only</option>
-                <option value="bot.done">bot.done only</option>
-              </select>
+          </div>
+          <div class="mt-3">
+            <label class="form-label">Events <span style="color:#94a3b8;font-weight:400">(leave all unchecked to receive every event)</span></label>
+            <div id="wh-events-group" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:0.25rem 1.5rem;padding:0.5rem;border:1px solid #e2e8f0;border-radius:6px;background:#f8fafc">
+              {% for ev in ["bot.joining","bot.in_call","bot.call_ended","bot.transcript_ready","bot.analysis_ready","bot.done","bot.error","bot.cancelled","bot.keyword_alert","bot.live_transcript","bot.live_transcript_translated","bot.recurring_intel_ready"] %}
+              <label class="form-check-label" style="display:flex;align-items:center;gap:0.4rem;font-size:12px;cursor:pointer">
+                <input type="checkbox" class="form-check-input wh-event-cb" value="{{ ev }}" style="margin-top:0">
+                <code style="font-size:11px">{{ ev }}</code>
+              </label>
+              {% endfor %}
             </div>
           </div>
           <div class="mt-3">
@@ -1404,11 +1468,12 @@ document.querySelectorAll('[data-revoke-key]').forEach(btn => {
     btn.disabled = true;
     try {
       const url = form.querySelector('[name=url]')?.value.trim() || '';
-      const events = form.querySelector('[name=events]')?.value.trim() || '*';
       const secret = form.querySelector('[name=secret]')?.value.trim() || '';
+      const checkedEvents = Array.from(form.querySelectorAll('.wh-event-cb:checked')).map(cb => cb.value);
+      const events = checkedEvents.length > 0 ? checkedEvents : ['*'];
       const data = await apiFetch('/dashboard/webhook', {
         method: 'POST',
-        body: JSON.stringify({ url, events: events.split(',').map(s => s.trim()).filter(Boolean), secret: secret || null }),
+        body: JSON.stringify({ url, events, secret: secret || null }),
       });
       showToast(`Webhook registered: ${data.url}`, 'success');
       form.reset();
@@ -1760,5 +1825,79 @@ async function _revokeSupportKey(id) {
     finally { generateBtn.disabled = false; }
   });
 })();
+
+// ── My Stats ─────────────────────────────────────────────────────────────────
+(async function() {
+  try {
+    const data = await apiFetch('/api/v1/analytics/me');
+    document.getElementById('ms-meetings').textContent = data.meetings_this_month ?? '—';
+    document.getElementById('ms-cost').textContent = data.ai_cost_this_month != null ? `$${data.ai_cost_this_month.toFixed(4)}` : '—';
+    document.getElementById('ms-tasks').textContent = data.total_action_items_open ?? '—';
+    document.getElementById('ms-duration').textContent = data.avg_meeting_duration_min != null ? `${data.avg_meeting_duration_min}m` : '—';
+    document.getElementById('my-stats-content').style.display = 'flex';
+    document.getElementById('my-stats-loading').style.display = 'none';
+  } catch(e) {
+    document.getElementById('my-stats-loading').textContent = 'Stats unavailable';
+  }
+})();
+
+// ── Action Items ──────────────────────────────────────────────────────────────
+async function loadActionItems() {
+  const container = document.getElementById('action-items-container');
+  if (!container) return;
+  const status = document.getElementById('ai-filter-status')?.value || '';
+  const assignee = document.getElementById('ai-filter-assignee')?.value.trim() || '';
+  try {
+    let url = '/api/v1/action-items?limit=100';
+    if (status) url += `&status=${encodeURIComponent(status)}`;
+    if (assignee) url += `&assignee=${encodeURIComponent(assignee)}`;
+    const items = await apiFetch(url);
+    if (!items || items.length === 0) {
+      container.innerHTML = '<div style="color:#94a3b8;text-align:center;padding:2rem">No action items found. Action items are extracted from your meetings automatically.</div>';
+      return;
+    }
+    const rows = items.map(item => {
+      const isDone = item.status === 'done';
+      const conf = item.confidence != null ? `<span style="font-size:11px;color:#94a3b8">${Math.round(item.confidence * 100)}% confidence</span>` : '';
+      const due = item.due_date ? `<span style="font-size:11px;color:#64748b">Due: ${item.due_date}</span>` : '';
+      const assigneeHtml = item.assignee ? `<span style="font-size:11px;color:#475569">${item.assignee}</span>` : '';
+      return `<div style="display:flex;align-items:flex-start;gap:.75rem;padding:.6rem .5rem;border-bottom:1px solid #f1f5f9;${isDone ? 'opacity:0.5' : ''}">
+        <input type="checkbox" class="form-check-input ai-status-cb" data-id="${item.id}" ${isDone ? 'checked' : ''} style="margin-top:3px;cursor:pointer">
+        <div style="flex:1">
+          <div style="font-size:13.5px;${isDone ? 'text-decoration:line-through' : ''}">${item.task}</div>
+          <div style="display:flex;gap:.75rem;margin-top:.2rem;flex-wrap:wrap">${assigneeHtml}${due}${conf}</div>
+        </div>
+      </div>`;
+    }).join('');
+    container.innerHTML = `<div>${rows}</div>`;
+    container.querySelectorAll('.ai-status-cb').forEach(cb => {
+      cb.addEventListener('change', async function() {
+        const id = this.getAttribute('data-id');
+        const newStatus = this.checked ? 'done' : 'open';
+        try {
+          await apiFetch(`/api/v1/action-items/${id}`, {method:'PATCH', body: JSON.stringify({status: newStatus})});
+          loadActionItems();
+        } catch(e) { showToast(e.message, 'danger'); this.checked = !this.checked; }
+      });
+    });
+  } catch(e) { container.innerHTML = `<div style="color:#dc2626;padding:1rem">${e.message}</div>`; }
+}
+
+// Load when action-items section becomes active
+document.addEventListener('DOMContentLoaded', function() {
+  document.querySelectorAll('[data-section]').forEach(btn => {
+    btn.addEventListener('click', function() {
+      if (this.getAttribute('data-section') === 'action-items') {
+        loadActionItems();
+      }
+    });
+  });
+  // Also wire filter controls
+  document.getElementById('ai-filter-status')?.addEventListener('change', loadActionItems);
+  document.getElementById('ai-filter-assignee')?.addEventListener('input', function() {
+    clearTimeout(this._debounce);
+    this._debounce = setTimeout(loadActionItems, 400);
+  });
+});
 </script>
 {% endblock %}

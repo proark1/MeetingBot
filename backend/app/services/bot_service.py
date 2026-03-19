@@ -115,7 +115,7 @@ def _unwrap_safelinks(url: str) -> str:
     return url
 
 
-def _compute_speaker_stats(transcript: list[dict]) -> list[dict]:
+async def _compute_speaker_stats(transcript: list[dict]) -> list[dict]:
     if not transcript:
         return []
     entries = sorted(transcript, key=lambda e: e.get("timestamp", 0))
@@ -125,6 +125,7 @@ def _compute_speaker_stats(transcript: list[dict]) -> list[dict]:
     speaker_fillers: dict[str, int] = {}
     speaker_monologue: dict[str, float] = {}
     speaker_turns: dict[str, int] = {}
+    speaker_texts: dict[str, list[str]] = {}
 
     for i, e in enumerate(entries):
         speaker = e.get("speaker", "Unknown")
@@ -140,10 +141,23 @@ def _compute_speaker_stats(transcript: list[dict]) -> list[dict]:
         speaker_questions[speaker] = speaker_questions.get(speaker, 0) + text.count("?")
         speaker_fillers[speaker] = speaker_fillers.get(speaker, 0) + len(_FILLER_WORDS.findall(text))
         speaker_monologue[speaker] = max(speaker_monologue.get(speaker, 0.0), duration)
+        speaker_texts.setdefault(speaker, []).append(text)
 
     total = sum(speaker_time.values())
     if total == 0:
         return []
+
+    # Compute per-speaker sentiment in parallel
+    speaker_names = list(speaker_time.keys())
+    combined_texts = [" ".join(speaker_texts.get(n, [])) for n in speaker_names]
+    sentiment_results = await asyncio.gather(
+        *[intelligence_service.get_sentiment(t) for t in combined_texts],
+        return_exceptions=True,
+    )
+    speaker_sentiment = {
+        name: (result if isinstance(result, str) else "neutral")
+        for name, result in zip(speaker_names, sentiment_results)
+    }
 
     stats = []
     for name, t in sorted(speaker_time.items(), key=lambda x: x[1], reverse=True):
@@ -160,6 +174,7 @@ def _compute_speaker_stats(transcript: list[dict]) -> list[dict]:
             "filler_words": speaker_fillers.get(name, 0),
             "longest_monologue_s": round(speaker_monologue.get(name, 0.0), 1),
             "is_quiet": is_quiet,
+            "sentiment": speaker_sentiment.get(name, "neutral"),
         })
     return stats
 
@@ -303,6 +318,21 @@ async def _do_analysis_inner(bot: BotSession, audio_path: str, use_real_bot: boo
                 except Exception as exc:
                     logger.warning("Bot %s: PII redaction failed: %s", bot.id, exc)
 
+            # ── Post-meeting transcript translation ───────────────────────
+            if getattr(bot, "translation_language", None):
+                try:
+                    lang = bot.translation_language
+                    logger.info("Bot %s: translating transcript to %s", bot.id, lang)
+                    translated_texts = await asyncio.gather(
+                        *[intelligence_service.translate_text(e.get("text", ""), lang) for e in transcript],
+                        return_exceptions=True,
+                    )
+                    for entry, result in zip(transcript, translated_texts):
+                        if isinstance(result, str):
+                            entry["text"] = result
+                except Exception as exc:
+                    logger.warning("Bot %s: post-meeting translation failed: %s", bot.id, exc)
+
             await store.update_bot(bot.id, transcript=transcript)
             bot.transcript = transcript
 
@@ -340,7 +370,7 @@ async def _do_analysis_inner(bot: BotSession, audio_path: str, use_real_bot: boo
             )
 
         chapters = [] if isinstance(chapters_result, Exception) else (chapters_result or [])
-        speaker_stats = _compute_speaker_stats(bot.transcript)
+        speaker_stats = await _compute_speaker_stats(bot.transcript)
 
         # ── Meeting health score ──────────────────────────────────────────
         try:
@@ -376,6 +406,34 @@ async def _do_analysis_inner(bot: BotSession, audio_path: str, use_real_bot: boo
         bot.analysis = analysis_result
         bot.health_score = health_score
 
+        # ── Persist action items to DB ────────────────────────────────────
+        try:
+            from app.api.action_items import upsert_action_items
+            await upsert_action_items(
+                account_id=bot.account_id,
+                bot_id=bot.id,
+                items=analysis_result.get("action_items", []),
+            )
+        except Exception as exc:
+            logger.warning("Bot %s: action item upsert failed: %s", bot.id, exc)
+
+        # ── Generate semantic embedding ───────────────────────────────────
+        try:
+            summary = analysis_result.get("summary", "")
+            key_points = " ".join(analysis_result.get("key_points", []))
+            topics = " ".join(
+                t.get("name", "") if isinstance(t, dict) else str(t)
+                for t in analysis_result.get("topics", [])
+            )
+            embed_text = f"{summary} {key_points} {topics}".strip()
+            if embed_text:
+                embedding = await intelligence_service.embed_text(embed_text)
+                if embedding:
+                    await store.update_bot(bot.id, summary_embedding=embedding)
+                    bot.summary_embedding = embedding
+        except Exception as exc:
+            logger.warning("Bot %s: embedding generation failed: %s", bot.id, exc)
+
         # ── Quiet participant coaching summary ────────────────────────────
         quiet_participants = [s["name"] for s in speaker_stats if s.get("is_quiet")]
         if quiet_participants:
@@ -410,7 +468,7 @@ async def _do_analysis_inner(bot: BotSession, audio_path: str, use_real_bot: boo
 
     elif analysis_mode == "transcript_only":
         logger.info("Bot %s: analysis_mode=transcript_only — skipping AI analysis", bot.id)
-        speaker_stats = _compute_speaker_stats(bot.transcript)
+        speaker_stats = await _compute_speaker_stats(bot.transcript)
         if use_real_bot and os.path.exists(audio_path) and os.path.getsize(audio_path) > 0:
             await store.update_bot(bot.id, recording_path=audio_path, speaker_stats=speaker_stats)
             bot.recording_path = audio_path
@@ -505,6 +563,42 @@ async def _post_completion_notifications(account_id: str, bot_data: dict, bot=No
     except Exception as exc:
         logger.warning("CRM integration dispatch failed for account %s: %s", account_id, exc)
 
+    # ── Recurring meeting intelligence ────────────────────────────────────
+    if bot:
+        try:
+            from urllib.parse import urlparse
+            base_url = urlparse(bot.meeting_url).scheme + "://" + (urlparse(bot.meeting_url).netloc or "")
+            path = urlparse(bot.meeting_url).path.split("?")[0]
+            canonical_url = base_url + path
+
+            recent_bots, _ = await store.list_bots(limit=500, account_id=account_id)
+            matching = [
+                b for b in recent_bots
+                if b.id != bot.id
+                and b.status == "done"
+                and b.analysis
+                and urlparse(b.meeting_url).path.split("?")[0] == path
+            ]
+            if len(matching) >= 2:  # 3+ total including current
+                past_summaries = [
+                    b.analysis.get("summary", "")
+                    for b in matching[:4]  # last 4
+                    if b.analysis and b.analysis.get("summary")
+                ]
+                if past_summaries:
+                    from app.services.intelligence_service import generate_recurring_intelligence
+                    intel = await generate_recurring_intelligence(past_summaries, bot.participants or [])
+                    await store.update_bot(bot.id, recurring_intel=intel)
+                    # Fire webhook event
+                    await webhook_service.dispatch_event(
+                        "bot.recurring_intel_ready",
+                        {"bot_id": bot.id, "account_id": account_id, "recurring_intel": intel},
+                        account_id=account_id,
+                    )
+                    logger.info("Bot %s: recurring intelligence generated", bot.id)
+        except Exception as exc:
+            logger.warning("Recurring intelligence failed for bot %s: %s", bot.id if bot else "?", exc)
+
 
 async def run_bot_lifecycle(bot_id: str) -> None:
     """
@@ -576,6 +670,13 @@ async def run_bot_lifecycle(bot_id: str) -> None:
                     {"bot_id": bot_id, "account_id": bot.account_id, "entry": entry},
                     account_id=bot.account_id,
                 )
+
+                # Push to SSE subscribers
+                try:
+                    from app.services.sse_manager import push_entry as _sse_push
+                    asyncio.create_task(_sse_push(bot_id, entry))
+                except Exception:
+                    pass
 
                 if should_flush:
                     async with _live_lock:
@@ -839,6 +940,13 @@ async def run_bot_lifecycle(bot_id: str) -> None:
         # Fire integrations (Slack / Notion / CRM) and email notification in parallel
         if bot.account_id:
             asyncio.create_task(_post_completion_notifications(bot.account_id, done_payload, bot=bot))
+
+        # Notify SSE subscribers that the stream is complete
+        try:
+            from app.services.sse_manager import push_terminal as _sse_terminal
+            asyncio.create_task(_sse_terminal(bot_id, "done"))
+        except Exception:
+            pass
 
         logger.info("Bot %s done", bot_id)
 

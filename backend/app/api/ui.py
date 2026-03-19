@@ -1591,3 +1591,39 @@ async def admin_support_lookup_ui(
         return JSONResponse({"detail": "key is required"}, status_code=400)
     from app.api.admin import support_lookup
     return await support_lookup(key=key, db=db, _admin=account.id)
+
+
+# ── GET /share/{token} — public shareable meeting view ────────────────────────
+
+@router.get("/share/{token}", response_class=HTMLResponse, include_in_schema=False)
+async def share_meeting(token: str, request: Request):
+    """Public, no-auth view of a shared meeting. Token must match the stored hash."""
+    import hashlib
+    from app.store import store
+
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    # Search for a bot with this share token hash
+    all_bots, _ = await store.list_bots(limit=10000)
+    bot = next((b for b in all_bots if getattr(b, "share_token_hash", None) == token_hash), None)
+
+    if bot is None:
+        return HTMLResponse("<h1>Not Found</h1><p>This share link is invalid or has expired.</p>", status_code=404)
+
+    # Build a sanitised view — strip sensitive fields
+    analysis = bot.analysis or {}
+    return templates.TemplateResponse("share.html", {
+        "request": request,
+        "bot_id": bot.id[:12] + "…",
+        "platform": bot.meeting_platform,
+        "status": bot.status,
+        "participants": bot.participants,
+        "duration_seconds": bot.duration_seconds,
+        "summary": analysis.get("summary", ""),
+        "key_points": analysis.get("key_points", []),
+        "action_items": analysis.get("action_items", []),
+        "decisions": analysis.get("decisions", []),
+        "topics": analysis.get("topics", []),
+        "sentiment": analysis.get("sentiment", "neutral"),
+        "transcript": bot.transcript,
+        "created_at": bot.created_at,
+    })

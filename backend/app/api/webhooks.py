@@ -19,6 +19,23 @@ from app.store import store
 router = APIRouter(prefix="/webhook", tags=["Webhooks"])
 _limiter = _Limiter(key_func=_get_remote_address)
 
+# All supported webhook event names (wildcard "*" also accepted)
+WEBHOOK_EVENTS: list[str] = [
+    "bot.joining",
+    "bot.in_call",
+    "bot.call_ended",
+    "bot.transcript_ready",
+    "bot.analysis_ready",
+    "bot.done",
+    "bot.error",
+    "bot.cancelled",
+    "bot.keyword_alert",
+    "bot.live_transcript",
+    "bot.live_transcript_translated",
+    "bot.recurring_intel_ready",
+    "bot.test",
+]
+
 # Private/reserved IP ranges — all traffic to these must be blocked (SSRF prevention).
 # Includes cloud-provider metadata endpoints (169.254.169.254 is AWS/GCP/Azure IMDS).
 _BLOCKED_NETS = [ipaddress.ip_network(n) for n in [
@@ -137,6 +154,16 @@ async def create_webhook(payload: WebhookCreate, request: _Request):
 async def list_webhooks():
     """List all registered global webhooks."""
     return [_to_response(wh) for wh in store.list_webhooks()]
+
+
+@router.get("/events")
+async def list_webhook_events():
+    """Return the list of all supported webhook event names.
+
+    Use these values in the `events` array when registering a webhook.
+    Pass `["*"]` to subscribe to all events.
+    """
+    return {"events": WEBHOOK_EVENTS}
 
 
 @router.get("/{webhook_id}", response_model=WebhookResponse)

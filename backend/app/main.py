@@ -43,6 +43,7 @@ from app.api.keyword_alerts import router as keyword_alerts_router
 from app.api.workspaces import router as workspaces_router
 from app.api.saml import router as saml_router
 from app.api.mcp import router as mcp_router
+from app.api.action_items import router as action_items_router
 from app.deps import require_auth
 from typing import Any
 
@@ -993,6 +994,7 @@ app.include_router(retention_router,      prefix="/api/v1", dependencies=_auth)
 app.include_router(keyword_alerts_router, prefix="/api/v1", dependencies=_auth)
 app.include_router(workspaces_router,     prefix="/api/v1", dependencies=_auth)
 app.include_router(mcp_router,            prefix="/api/v1", dependencies=_auth)
+app.include_router(action_items_router,   prefix="/api/v1", dependencies=_auth)
 app.include_router(admin_router,          prefix="/api/v1")              # admin has its own auth (require_admin)
 app.include_router(ws_router,             prefix="/api/v1")              # WS auth handled separately
 app.include_router(ui_router)                                             # web UI (no prefix)

@@ -246,6 +246,180 @@ async def _post_to_notion(api_token: str, database_id: str, bot_data: dict) -> b
         return False
 
 
+async def _post_to_google_drive(access_token: str, folder_id: Optional[str], bot_data: dict) -> bool:
+    """Upload a Markdown meeting report to Google Drive.
+
+    Uses Drive Files API v3 multipart upload. Returns True on success.
+    """
+    import httpx
+
+    bot_id = bot_data.get("id", "unknown")
+    # Build markdown content
+    try:
+        from app.api.exports import _build_markdown
+        # Build a minimal BotSession-like object from bot_data
+        from app.store import BotSession, _now as _store_now
+        from dataclasses import fields as _dc_fields
+        # Use only fields that exist in both bot_data and BotSession
+        session_kwargs: dict = {}
+        for f in _dc_fields(BotSession):
+            if f.name in bot_data:
+                session_kwargs[f.name] = bot_data[f.name]
+        # Required fields
+        session_kwargs.setdefault("id", bot_id)
+        session_kwargs.setdefault("meeting_url", bot_data.get("meeting_url", ""))
+        session_kwargs.setdefault("meeting_platform", bot_data.get("platform", "unknown"))
+        session_kwargs.setdefault("bot_name", "JustHereToListen.io")
+        from datetime import datetime, timezone
+        session_kwargs.setdefault("created_at", datetime.now(timezone.utc))
+        session_kwargs.setdefault("updated_at", datetime.now(timezone.utc))
+        fake_bot = BotSession(**session_kwargs)
+        md_content = _build_markdown(fake_bot)
+    except Exception as exc:
+        logger.warning("Google Drive: markdown build failed: %s", exc)
+        # Fallback minimal content
+        analysis = bot_data.get("analysis") or {}
+        md_content = f"# Meeting {bot_id}\n\n## Summary\n{analysis.get('summary', 'N/A')}\n"
+
+    filename = f"Meeting-{bot_id[:8]}.md"
+    metadata: dict = {"name": filename, "mimeType": "text/markdown"}
+    if folder_id:
+        metadata["parents"] = [folder_id]
+
+    import json as _json
+    boundary = "meeting_bot_boundary"
+    body = (
+        f"--{boundary}\r\n"
+        f"Content-Type: application/json; charset=UTF-8\r\n\r\n"
+        f"{_json.dumps(metadata)}\r\n"
+        f"--{boundary}\r\n"
+        f"Content-Type: text/markdown\r\n\r\n"
+        f"{md_content}\r\n"
+        f"--{boundary}--"
+    ).encode()
+
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": f"multipart/related; boundary={boundary}",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
+                headers=headers,
+                content=body,
+            )
+            if resp.status_code in (200, 201):
+                logger.info("Google Drive: uploaded %s", filename)
+                return True
+            else:
+                logger.warning("Google Drive upload failed: %s %s", resp.status_code, resp.text[:200])
+                return False
+    except Exception as exc:
+        logger.warning("Google Drive upload error: %s", exc)
+        return False
+
+
+async def _post_to_linear(api_key: str, team_id: str, bot_data: dict) -> bool:
+    """Create Linear issues for each action item extracted from the meeting.
+
+    Uses Linear's GraphQL API. Returns True on success, False on failure.
+    """
+    import httpx
+
+    action_items = (bot_data.get("analysis") or {}).get("action_items", [])
+    if not action_items:
+        return True  # nothing to create
+
+    summary = (bot_data.get("analysis") or {}).get("summary", "")
+    bot_id = bot_data.get("id", "")
+    headers = {"Authorization": api_key, "Content-Type": "application/json"}
+    url = "https://api.linear.app/graphql"
+    successes = 0
+
+    for item in action_items:
+        task = item.get("task") or item if isinstance(item, str) else ""
+        if not task:
+            continue
+        assignee_name = item.get("assignee", "") if isinstance(item, dict) else ""
+        due = item.get("due_date", "") if isinstance(item, dict) else ""
+        description = f"**From meeting:** {bot_id}\n\n{summary[:300]}"
+        if assignee_name:
+            description += f"\n\n**Assignee:** {assignee_name}"
+        if due:
+            description += f"\n**Due:** {due}"
+
+        mutation = """
+mutation CreateIssue($teamId: String!, $title: String!, $description: String) {
+  issueCreate(input: {teamId: $teamId, title: $title, description: $description}) {
+    success
+    issue { id identifier title }
+  }
+}"""
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(url, headers=headers, json={
+                    "query": mutation,
+                    "variables": {"teamId": team_id, "title": task[:255], "description": description},
+                })
+                if resp.status_code == 200:
+                    successes += 1
+        except Exception as exc:
+            logger.warning("Linear issue creation failed: %s", exc)
+
+    return successes > 0
+
+
+async def _post_to_jira(base_url: str, token: str, email: str, project_key: str, bot_data: dict) -> bool:
+    """Create Jira issues for each action item extracted from the meeting.
+
+    Uses Jira REST API v3 with Basic Auth. Returns True on success, False on failure.
+    """
+    import httpx
+    import base64
+
+    action_items = (bot_data.get("analysis") or {}).get("action_items", [])
+    if not action_items:
+        return True
+
+    summary = (bot_data.get("analysis") or {}).get("summary", "")
+    bot_id = bot_data.get("id", "")
+    auth = base64.b64encode(f"{email}:{token}".encode()).decode()
+    headers = {
+        "Authorization": f"Basic {auth}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+    api_url = base_url.rstrip("/") + "/rest/api/3/issue"
+    successes = 0
+
+    for item in action_items:
+        task = item.get("task") or item if isinstance(item, str) else ""
+        if not task:
+            continue
+        description_text = f"From meeting {bot_id}. {summary[:300]}"
+        payload = {
+            "fields": {
+                "project": {"key": project_key},
+                "summary": str(task)[:255],
+                "description": {
+                    "type": "doc", "version": 1,
+                    "content": [{"type": "paragraph", "content": [{"type": "text", "text": description_text}]}],
+                },
+                "issuetype": {"name": "Task"},
+            }
+        }
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(api_url, headers=headers, json=payload)
+                if resp.status_code in (200, 201):
+                    successes += 1
+        except Exception as exc:
+            logger.warning("Jira issue creation failed: %s", exc)
+
+    return successes > 0
+
+
 # ── Public API ────────────────────────────────────────────────────────────────
 
 async def dispatch_integrations(account_id: str, bot_data: dict) -> None:
@@ -288,6 +462,26 @@ async def dispatch_integrations(account_id: str, bot_data: dict) -> None:
                 database_id = config.get("database_id", "")
                 if api_token and database_id:
                     tasks.append(_post_to_notion(api_token, database_id, bot_data))
+
+            elif integration.type == "linear":
+                api_key = config.get("api_key", "")
+                team_id = config.get("team_id", "")
+                if api_key and team_id:
+                    tasks.append(_post_to_linear(api_key, team_id, bot_data))
+
+            elif integration.type == "jira":
+                jira_url = config.get("base_url", "")
+                jira_token = config.get("token", "")
+                jira_email = config.get("email", "")
+                project_key = config.get("project_key", "")
+                if jira_url and jira_token and jira_email and project_key:
+                    tasks.append(_post_to_jira(jira_url, jira_token, jira_email, project_key, bot_data))
+
+            elif integration.type == "google_drive":
+                access_token = config.get("access_token", "")
+                folder_id = config.get("folder_id")
+                if access_token:
+                    tasks.append(_post_to_google_drive(access_token, folder_id, bot_data))
 
             # CRM types are handled by crm_service.dispatch_crm_integrations
             # (called separately from bot_service._post_completion_notifications)

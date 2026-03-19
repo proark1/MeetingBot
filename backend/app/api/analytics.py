@@ -481,3 +481,170 @@ async def get_audit_log(
         )
         for r in rows
     ]
+
+
+# ── GET /api/v1/analytics/me — personal usage dashboard ─────────────────────
+
+@router.get("/analytics/me", tags=["Analytics"])
+async def get_my_analytics(request: Request):
+    """Personal usage statistics scoped strictly to the authenticated account.
+
+    Returns meetings this month, AI cost, open action items count,
+    average meeting duration, 4-week sentiment trend, and cost by platform.
+    """
+    account_id = getattr(request.state, "account_id", None)
+    if not account_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    now = datetime.now(timezone.utc)
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    week_starts = [now - timedelta(weeks=i+1) for i in range(4)]
+
+    # Use account-scoped store (never superadmin expanded)
+    all_bots, _ = await store.list_bots(limit=10000, account_id=account_id)
+
+    meetings_this_month = 0
+    ai_cost_this_month = 0.0
+    durations = []
+    cost_by_platform: dict[str, float] = {}
+    sentiment_by_week: list[dict] = []
+
+    for bot in all_bots:
+        created = bot.created_at
+        if created and created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        if created and created >= month_start:
+            meetings_this_month += 1
+            ai_cost_this_month += bot.ai_total_cost_usd
+        if bot.duration_seconds:
+            durations.append(bot.duration_seconds)
+        plat = bot.meeting_platform or "unknown"
+        cost_by_platform[plat] = round(cost_by_platform.get(plat, 0.0) + bot.ai_total_cost_usd, 4)
+
+    # 4-week sentiment trend — average sentiment score per week (positive=1, neutral=0, negative=-1)
+    for i, week_start in enumerate(week_starts):
+        week_end = week_start + timedelta(weeks=1)
+        if week_start.tzinfo is None:
+            week_start = week_start.replace(tzinfo=timezone.utc)
+        if week_end.tzinfo is None:
+            week_end = week_end.replace(tzinfo=timezone.utc)
+        week_bots = [
+            b for b in all_bots
+            if b.created_at and (b.created_at.replace(tzinfo=timezone.utc) if b.created_at.tzinfo is None else b.created_at) >= week_start
+            and (b.created_at.replace(tzinfo=timezone.utc) if b.created_at.tzinfo is None else b.created_at) < week_end
+            and b.analysis
+        ]
+        sentiments = [b.analysis.get("sentiment", "neutral") for b in week_bots if b.analysis]
+        score_map = {"positive": 1, "neutral": 0, "negative": -1}
+        avg_score = sum(score_map.get(s, 0) for s in sentiments) / len(sentiments) if sentiments else 0
+        sentiment_by_week.append({
+            "week": week_start.strftime("%Y-%m-%d"),
+            "score": round(avg_score, 2),
+            "meetings": len(week_bots),
+        })
+
+    # Open action items count from DB
+    open_action_items = 0
+    try:
+        from app.db import AsyncSessionLocal
+        from app.models.account import ActionItem
+        from sqlalchemy import select, func
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(func.count()).where(
+                    ActionItem.account_id == account_id,
+                    ActionItem.status == "open",
+                )
+            )
+            open_action_items = result.scalar_one() or 0
+    except Exception:
+        pass
+
+    avg_duration_min = round(sum(durations) / len(durations) / 60, 1) if durations else 0
+
+    return {
+        "meetings_this_month": meetings_this_month,
+        "ai_cost_this_month": round(ai_cost_this_month, 4),
+        "total_action_items_open": open_action_items,
+        "avg_meeting_duration_min": avg_duration_min,
+        "sentiment_trend": list(reversed(sentiment_by_week)),  # oldest first
+        "cost_by_platform": cost_by_platform,
+    }
+
+
+# ── GET /api/v1/search — unified text + semantic search ─────────────────────
+
+@router.get("/search", tags=["Analytics"])
+async def search_meetings(
+    request: Request,
+    q: str = Query(..., description="Search query text"),
+    semantic: bool = Query(default=False, description="Use semantic (embedding) search instead of substring match"),
+    limit: int = Query(default=20, ge=1, le=50),
+):
+    """Search meeting transcripts and analysis.
+
+    With `semantic=false` (default): fast substring search across all transcripts.
+    With `semantic=true`: embed the query and rank meetings by cosine similarity
+    against stored `summary_embedding` vectors (falls back to substring if no embeddings).
+    """
+    account_id = getattr(request.state, "account_id", None)
+    filter_account = account_id if (account_id and account_id != SUPERADMIN_ACCOUNT_ID) else None
+
+    all_bots, _ = await store.list_bots(limit=10000, account_id=filter_account)
+
+    if semantic:
+        from app.services.intelligence_service import embed_text
+        query_embedding = await embed_text(q)
+        if query_embedding:
+            # Cosine similarity search
+            import math
+            def _cosine(a: list, b: list) -> float:
+                dot = sum(x * y for x, y in zip(a, b))
+                mag_a = math.sqrt(sum(x * x for x in a))
+                mag_b = math.sqrt(sum(x * x for x in b))
+                return dot / (mag_a * mag_b) if mag_a and mag_b else 0.0
+
+            scored = []
+            for bot in all_bots:
+                if bot.summary_embedding:
+                    score = _cosine(query_embedding, bot.summary_embedding)
+                    if score >= 0.6:
+                        scored.append((score, bot))
+
+            scored.sort(key=lambda x: x[0], reverse=True)
+            results = [
+                {
+                    "bot_id": bot.id,
+                    "meeting_url": bot.meeting_url,
+                    "platform": bot.meeting_platform,
+                    "score": round(score, 3),
+                    "summary": (bot.analysis or {}).get("summary", ""),
+                    "created_at": bot.created_at.isoformat() if bot.created_at else None,
+                }
+                for score, bot in scored[:limit]
+            ]
+            return {"query": q, "semantic": True, "total": len(results), "results": results}
+        # Fall back to substring if no embeddings available
+
+    # Substring search across transcripts
+    q_lower = q.lower()
+    matches = []
+    for bot in all_bots:
+        for entry in bot.transcript:
+            text = entry.get("text", "") or ""
+            if q_lower in text.lower():
+                matches.append({
+                    "bot_id": bot.id,
+                    "meeting_url": bot.meeting_url,
+                    "platform": bot.meeting_platform,
+                    "speaker": entry.get("speaker"),
+                    "text": text,
+                    "timestamp": entry.get("timestamp"),
+                    "created_at": bot.created_at.isoformat() if bot.created_at else None,
+                })
+                if len(matches) >= limit:
+                    break
+        if len(matches) >= limit:
+            break
+
+    return {"query": q, "semantic": False, "total": len(matches), "results": matches}

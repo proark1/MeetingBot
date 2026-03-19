@@ -78,6 +78,11 @@ MCP_SERVER_MANIFEST = {
                         "description": "Max results (1-50, default 20).",
                         "default": 20,
                     },
+                    "semantic": {
+                        "type": "boolean",
+                        "description": "Use semantic (embedding-based) search instead of substring match.",
+                        "default": False,
+                    },
                 },
                 "required": ["query"],
             },
@@ -117,6 +122,52 @@ MCP_SERVER_MANIFEST = {
                     },
                 },
                 "required": ["agenda"],
+            },
+        },
+        {
+            "name": "create_bot",
+            "description": "Create and dispatch a meeting bot to join a meeting URL.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "meeting_url": {"type": "string", "description": "Full Zoom/Meet/Teams URL."},
+                    "bot_name": {"type": "string", "description": "Display name for the bot.", "default": "JustHereToListen.io"},
+                    "template": {"type": "string", "description": "Analysis template (default, sales, standup, 1on1, retro, etc.)."},
+                    "respond_on_mention": {"type": "boolean", "description": "Whether the bot replies when its name is mentioned.", "default": True},
+                },
+                "required": ["meeting_url"],
+            },
+        },
+        {
+            "name": "cancel_bot",
+            "description": "Cancel a running or scheduled meeting bot.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "bot_id": {"type": "string", "description": "The bot ID to cancel."},
+                },
+                "required": ["bot_id"],
+            },
+        },
+        {
+            "name": "get_speaker_analytics",
+            "description": "Get detailed speaker analytics for a meeting, including talk time, sentiment, and filler words.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "bot_id": {"type": "string", "description": "The bot/meeting ID."},
+                },
+                "required": ["bot_id"],
+            },
+        },
+        {
+            "name": "get_meeting_cost_summary",
+            "description": "Aggregate meeting cost and AI usage costs across recent meetings, broken down by platform.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "days": {"type": "integer", "description": "Number of past days to include (1-90, default 30).", "default": 30},
+                },
             },
         },
     ],
@@ -201,12 +252,44 @@ async def _tool_search_meetings(args: dict, account_id: Optional[str]) -> dict:
         return {"error": "query is required"}
 
     limit = min(max(int(args.get("limit", 20)), 1), 50)
+    semantic = bool(args.get("semantic", False))
     filter_account = account_id if (account_id and account_id != SUPERADMIN_ACCOUNT_ID) else None
 
     all_bots, _ = await store.list_bots(limit=10000, account_id=filter_account)
+
+    if semantic:
+        from app.services.intelligence_service import embed_text
+        import math
+        query_embedding = await embed_text(query)
+        if query_embedding:
+            def _cosine(a: list, b: list) -> float:
+                dot = sum(x * y for x, y in zip(a, b))
+                mag_a = math.sqrt(sum(x * x for x in a))
+                mag_b = math.sqrt(sum(x * x for x in b))
+                return dot / (mag_a * mag_b) if mag_a and mag_b else 0.0
+
+            scored = []
+            for bot in all_bots:
+                if bot.summary_embedding:
+                    score = _cosine(query_embedding, bot.summary_embedding)
+                    if score >= 0.6:
+                        scored.append((score, bot))
+            scored.sort(key=lambda x: x[0], reverse=True)
+            results = [
+                {
+                    "bot_id": bot.id,
+                    "meeting_url": bot.meeting_url,
+                    "platform": bot.meeting_platform,
+                    "score": round(score, 3),
+                    "summary": (bot.analysis or {}).get("summary", ""),
+                }
+                for score, bot in scored[:limit]
+            ]
+            return {"query": query, "semantic": True, "total": len(results), "results": results}
+
+    # Substring fallback
     q_lower = query.lower()
     matches = []
-
     for bot in all_bots:
         for entry in bot.transcript:
             text = entry.get("text", "") or ""
@@ -224,7 +307,7 @@ async def _tool_search_meetings(args: dict, account_id: Optional[str]) -> dict:
         if len(matches) >= limit:
             break
 
-    return {"query": query, "total": len(matches), "results": matches}
+    return {"query": query, "semantic": False, "total": len(matches), "results": matches}
 
 
 async def _tool_get_action_items(args: dict, account_id: Optional[str]) -> dict:
@@ -288,6 +371,139 @@ async def _tool_get_meeting_brief(args: dict, account_id: Optional[str]) -> dict
     return result
 
 
+async def _tool_create_bot(args: dict, account_id: Optional[str]) -> dict:
+    from app.schemas.bot import BotCreate
+    from app.services import bot_service
+    from app.store import store
+
+    meeting_url = args.get("meeting_url", "").strip()
+    if not meeting_url:
+        return {"error": "meeting_url is required"}
+
+    try:
+        payload = BotCreate(
+            meeting_url=meeting_url,  # type: ignore[arg-type]
+            bot_name=args.get("bot_name", "JustHereToListen.io"),
+            template=args.get("template"),
+            respond_on_mention=args.get("respond_on_mention", True),
+        )
+    except Exception as exc:
+        return {"error": f"Invalid arguments: {exc}"}
+
+    import uuid
+    from datetime import datetime, timezone
+    from app.store import BotSession, _now
+    from app.config import settings
+
+    bot_id = str(uuid.uuid4())
+    platform = bot_service._detect_platform(str(payload.meeting_url))
+    bot = BotSession(
+        id=bot_id,
+        meeting_url=str(payload.meeting_url),
+        meeting_platform=platform,
+        bot_name=payload.bot_name,
+        account_id=account_id,
+        template=payload.template,
+        respond_on_mention=payload.respond_on_mention,
+    )
+    await store.new_bot(bot)
+    use_real_bot = bool(settings.USE_REAL_BOT)
+    import asyncio as _asyncio
+    task = _asyncio.create_task(bot_service.run_bot_lifecycle(bot_id, use_real_bot))
+    from app.api.bots import _running_tasks
+    _running_tasks[bot_id] = task
+    return {"bot_id": bot_id, "status": bot.status, "platform": platform}
+
+
+async def _tool_cancel_bot(args: dict, account_id: Optional[str]) -> dict:
+    from app.store import store
+    from app.deps import SUPERADMIN_ACCOUNT_ID
+    from app.api.bots import _running_tasks
+
+    bot_id = args.get("bot_id", "").strip()
+    if not bot_id:
+        return {"error": "bot_id is required"}
+
+    bot = await store.get_bot(bot_id)
+    if bot is None:
+        return {"error": f"Bot {bot_id!r} not found"}
+    if (
+        account_id
+        and account_id != SUPERADMIN_ACCOUNT_ID
+        and bot.account_id is not None
+        and bot.account_id != account_id
+    ):
+        return {"error": f"Bot {bot_id!r} not found"}
+
+    task = _running_tasks.pop(bot_id, None)
+    if task and not task.done():
+        task.cancel()
+    await store.update_bot(bot_id, status="cancelled")
+    return {"bot_id": bot_id, "status": "cancelled"}
+
+
+async def _tool_get_speaker_analytics(args: dict, account_id: Optional[str]) -> dict:
+    from app.store import store
+    from app.deps import SUPERADMIN_ACCOUNT_ID
+
+    bot_id = args.get("bot_id", "").strip()
+    if not bot_id:
+        return {"error": "bot_id is required"}
+
+    bot = await store.get_bot(bot_id)
+    if bot is None:
+        return {"error": f"Bot {bot_id!r} not found"}
+    if (
+        account_id
+        and account_id != SUPERADMIN_ACCOUNT_ID
+        and bot.account_id is not None
+        and bot.account_id != account_id
+    ):
+        return {"error": f"Bot {bot_id!r} not found"}
+
+    return {
+        "bot_id": bot_id,
+        "speaker_stats": bot.speaker_stats,
+        "participant_count": len(bot.participants),
+        "participants": bot.participants,
+    }
+
+
+async def _tool_get_meeting_cost_summary(args: dict, account_id: Optional[str]) -> dict:
+    from app.store import store
+    from app.deps import SUPERADMIN_ACCOUNT_ID
+    from datetime import datetime, timezone, timedelta
+
+    days = min(max(int(args.get("days", 30)), 1), 90)
+    filter_account = account_id if (account_id and account_id != SUPERADMIN_ACCOUNT_ID) else None
+
+    all_bots, _ = await store.list_bots(limit=10000, account_id=filter_account)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+
+    total_meeting_cost = 0.0
+    total_ai_cost = 0.0
+    by_platform: dict[str, dict] = {}
+
+    for bot in all_bots:
+        if bot.created_at and bot.created_at.replace(tzinfo=timezone.utc if bot.created_at.tzinfo is None else bot.created_at.tzinfo) < cutoff:
+            continue
+        plat = bot.meeting_platform or "unknown"
+        entry = by_platform.setdefault(plat, {"meeting_cost_usd": 0.0, "ai_cost_usd": 0.0, "count": 0})
+        entry["count"] += 1
+        if bot.meeting_cost_usd:
+            entry["meeting_cost_usd"] += bot.meeting_cost_usd
+            total_meeting_cost += bot.meeting_cost_usd
+        entry["ai_cost_usd"] += bot.ai_total_cost_usd
+        total_ai_cost += bot.ai_total_cost_usd
+
+    return {
+        "days": days,
+        "total_meeting_cost_usd": round(total_meeting_cost, 4),
+        "total_ai_cost_usd": round(total_ai_cost, 4),
+        "by_platform": {k: {**v, "meeting_cost_usd": round(v["meeting_cost_usd"], 4), "ai_cost_usd": round(v["ai_cost_usd"], 4)} for k, v in by_platform.items()},
+    }
+
+
 # ── Dispatch ──────────────────────────────────────────────────────────────────
 
 _TOOL_HANDLERS = {
@@ -296,6 +512,10 @@ _TOOL_HANDLERS = {
     "search_meetings": _tool_search_meetings,
     "get_action_items": _tool_get_action_items,
     "get_meeting_brief": _tool_get_meeting_brief,
+    "create_bot": _tool_create_bot,
+    "cancel_bot": _tool_cancel_bot,
+    "get_speaker_analytics": _tool_get_speaker_analytics,
+    "get_meeting_cost_summary": _tool_get_meeting_cost_summary,
 }
 
 

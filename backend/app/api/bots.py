@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -179,6 +179,7 @@ def _to_response(bot: BotSession) -> BotResponse:
         analysis_mode=bot.analysis_mode,
         is_demo_transcript=bot.is_demo_transcript,
         sub_user_id=bot.sub_user_id,
+        translation_language=getattr(bot, "translation_language", None),
         metadata=bot.metadata,
         health_score=getattr(bot, "health_score", None),
         meeting_cost_usd=getattr(bot, "meeting_cost_usd", None),
@@ -745,3 +746,124 @@ async def generate_followup_email(bot_id: str, request: Request):
         participants=bot.participants or [],
     )
     return {"bot_id": bot_id, **result}
+
+
+# ── PATCH /api/v1/bot/{id}/speakers ──────────────────────────────────────────
+
+class SpeakerRenameRequest(BaseModel):
+    renames: dict[str, str] = Field(
+        description="Map of original speaker label → new display name. E.g. {'Speaker 1': 'Alice'}."
+    )
+
+
+@router.patch("/{bot_id}/speakers", response_model=BotResponse)
+async def rename_speakers(bot_id: str, request: Request, payload: SpeakerRenameRequest):
+    """Rename speaker labels in the transcript.
+
+    Iterates every transcript entry and replaces matching `speaker` fields.
+    Updates `participants` list accordingly. Does not re-run AI analysis —
+    call `POST /{id}/analyze` afterwards if you want refreshed analysis.
+    """
+    account_id: Optional[str] = getattr(request.state, "account_id", None)
+    sub_user_id = _get_sub_user_from_request(request)
+    bot = await _get_or_404(bot_id, account_id, sub_user_id)
+
+    if not bot.transcript:
+        raise HTTPException(status_code=425, detail="No transcript available yet")
+
+    renames = payload.renames
+    if not renames:
+        raise HTTPException(status_code=400, detail="renames map must not be empty")
+
+    # Apply renames to transcript entries
+    for entry in bot.transcript:
+        old_name = entry.get("speaker")
+        if old_name and old_name in renames:
+            entry["speaker"] = renames[old_name]
+
+    # Rebuild participants list
+    seen: dict[str, str] = {}
+    for p in bot.participants:
+        seen[p] = renames.get(p, p)
+    new_participants = sorted(set(seen.values()))
+
+    await store.update_bot(bot.id, transcript=bot.transcript, participants=new_participants)
+    bot.participants = new_participants
+
+    return _to_response(bot)
+
+
+# ── GET /api/v1/bot/{id}/stream — SSE live transcript ────────────────────────
+
+@router.get("/{bot_id}/stream")
+async def stream_transcript(bot_id: str, request: Request):
+    """Stream live transcript entries as Server-Sent Events.
+
+    Each event is a JSON object with `speaker`, `text`, `timestamp` fields.
+    A final `{__terminal__: true, status: "done"}` event is sent when the bot
+    reaches a terminal state, after which the stream closes.
+
+    Usage with curl: `curl -N /api/v1/bot/{id}/stream`
+    """
+    account_id: Optional[str] = getattr(request.state, "account_id", None)
+    sub_user_id = _get_sub_user_from_request(request)
+    bot = await _get_or_404(bot_id, account_id, sub_user_id)
+
+    from app.services.sse_manager import subscribe, unsubscribe, TERMINAL_STATUSES
+    import json
+
+    # If bot is already in terminal state, return its transcript immediately and close
+    if bot.status in TERMINAL_STATUSES:
+        async def _terminal_gen():
+            for entry in bot.transcript:
+                yield f"data: {json.dumps(entry)}\n\n"
+            yield f"data: {json.dumps({'__terminal__': True, 'status': bot.status})}\n\n"
+        return StreamingResponse(_terminal_gen(), media_type="text/event-stream")
+
+    q = await subscribe(bot_id)
+
+    async def _event_gen():
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    entry = await asyncio.wait_for(q.get(), timeout=30.0)
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+                    continue
+                yield f"data: {json.dumps(entry)}\n\n"
+                if entry.get("__terminal__"):
+                    break
+        finally:
+            await unsubscribe(bot_id, q)
+
+    return StreamingResponse(_event_gen(), media_type="text/event-stream")
+
+
+# ── POST /api/v1/bot/{id}/share ───────────────────────────────────────────────
+
+import hashlib as _hashlib
+import secrets as _secrets
+
+
+@router.post("/{bot_id}/share")
+async def create_share_link(bot_id: str, request: Request):
+    """Generate a shareable link for this meeting's results.
+
+    Returns a one-time-revealed `share_url`. The token is stored hashed.
+    Anyone with the URL can view a read-only version of the meeting (no auth required).
+    Only works for bots in `done` status.
+    """
+    account_id: Optional[str] = getattr(request.state, "account_id", None)
+    sub_user_id = _get_sub_user_from_request(request)
+    bot = await _get_or_404(bot_id, account_id, sub_user_id)
+    if bot.status != "done":
+        raise HTTPException(status_code=425, detail="Meeting must be complete before sharing")
+
+    token = _secrets.token_urlsafe(32)
+    token_hash = _hashlib.sha256(token.encode()).hexdigest()
+    await store.update_bot(bot.id, share_token_hash=token_hash)
+
+    base_url = str(request.base_url).rstrip("/")
+    return {"share_url": f"{base_url}/share/{token}", "bot_id": bot_id}
