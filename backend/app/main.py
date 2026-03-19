@@ -321,7 +321,7 @@ async def lifespan(app: FastAPI):
 # The full description (including those sections) is stored on app.description for admin docs.
 _PUBLIC_DESCRIPTION = (
     "A **multi-tenant meeting bot API** service. Send bots into **Zoom**, **Google Meet**, "
-    "and **Microsoft Teams** meetings to record, transcribe, and analyse them with "
+    "**Microsoft Teams**, and **onepizza.io** meetings to record, transcribe, and analyse them with "
     "**Claude** (Anthropic) or **Gemini** (Google) AI.\n\n"
 
     "## How it works\n"

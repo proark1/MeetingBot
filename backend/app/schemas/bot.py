@@ -40,7 +40,7 @@ def _reject_private_url(v: Any) -> str:
 class BotCreate(BaseModel):
     """Request body for creating a new meeting bot."""
 
-    meeting_url: AnyHttpUrl = Field(description="Full URL of the Zoom, Google Meet, or Teams meeting.")
+    meeting_url: AnyHttpUrl = Field(description="Full URL of the Zoom, Google Meet, Teams, or onepizza.io meeting.")
     bot_name: str = Field(default="JustHereToListen.io", max_length=100, description="Display name shown in the meeting.")
 
     # Where to deliver results when the bot finishes

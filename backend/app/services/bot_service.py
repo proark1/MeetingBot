@@ -85,9 +85,10 @@ _PLATFORM_NETLOC: dict[str, set[str]] = {
     "whereby":         {"whereby.com"},
     "bluejeans":       {"bluejeans.com"},
     "gotomeeting":     {"gotomeeting.com"},
+    "onepizza":        {"onepizza.io"},
 }
 
-_REAL_PLATFORMS = {"google_meet", "zoom", "microsoft_teams"}
+_REAL_PLATFORMS = {"google_meet", "zoom", "microsoft_teams", "onepizza"}
 
 
 def detect_platform(url: str) -> str:

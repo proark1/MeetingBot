@@ -1036,22 +1036,76 @@ async def _join_teams(page: Page, url: str, bot_name: str, start_muted: bool = T
     logger.info("Teams join button clicked")
 
 
+async def _join_onepizza(page: Page, url: str, bot_name: str, start_muted: bool = True) -> None:
+    """Join an onepizza.io meeting room."""
+    # Append ?name=... so the lobby pre-fills the name field
+    sep = "&" if "?" in url else "?"
+    join_url = f"{url}{sep}name={bot_name.replace(' ', '+')}"
+    await page.goto(join_url, wait_until="domcontentloaded", timeout=30_000)
+
+    # Wait for the lobby overlay to appear
+    try:
+        await page.wait_for_selector(".lobby-overlay, #lobbyName", timeout=15_000)
+    except Exception:
+        await _screenshot(page, "onepizza_no_lobby")
+
+    # Fill name if the ?name= param didn't auto-populate
+    try:
+        name_val = await page.input_value("#lobbyName")
+        if not name_val.strip():
+            await page.fill("#lobbyName", bot_name)
+    except Exception:
+        try:
+            await page.fill("#lobbyName", bot_name)
+        except Exception:
+            pass
+
+    # Disable camera (hide the bot's blank video feed from participants)
+    try:
+        cam_state = await page.get_attribute("#lobbyCamBtn", "aria-pressed")
+        if cam_state != "false":
+            await page.click("#lobbyCamBtn", timeout=3000)
+            logger.info("onepizza: camera disabled in lobby")
+    except Exception:
+        pass
+
+    # Mute mic in lobby (start_muted=True by default for bot)
+    if start_muted:
+        try:
+            mic_state = await page.get_attribute("#lobbyMicBtn", "aria-pressed")
+            if mic_state != "false":
+                await page.click("#lobbyMicBtn", timeout=3000)
+                logger.info("onepizza: mic muted in lobby")
+        except Exception:
+            pass
+
+    # Click Join
+    ok = await _click(page, ["#lobbyJoinBtn", "button:has-text('Join')"])
+    if not ok:
+        await _screenshot(page, "onepizza_no_join_button")
+        raise MeetingBotError("Could not find join button on onepizza.io")
+    logger.info("onepizza join button clicked")
+
+
 # ── Admission & end detection ─────────────────────────────────────────────────
 
 _IN_CALL_TEXTS = {
     "google_meet": ["leave call", "you're in the call", "turn on camera", "everyone in this call"],
     "zoom": ["stop video", "audio connected", "end meeting"],
     "microsoft_teams": ["you're in the meeting", "leave", "raise your hand"],
+    "onepizza": [],  # rely on DOM checks only (no reliable in-call text)
 }
 _WAITING_TEXTS = {
     "google_meet": ["waiting to be admitted", "waiting room", "someone will let you in"],
     "zoom": ["waiting for the host", "waiting room"],
     "microsoft_teams": ["waiting for others", "someone in the meeting should let you in", "lobby"],
+    "onepizza": [],  # waiting room detected via #waitingRoomOverlay DOM check
 }
 _END_TEXTS = {
     "google_meet": ["you left the meeting", "call has ended", "meeting ended", "you've been removed"],
     "zoom": ["meeting has been ended", "meeting is ended", "this meeting has ended"],
     "microsoft_teams": ["the meeting has ended", "call ended", "you left"],
+    "onepizza": ["meeting ended", "meeting has ended", "you left"],
 }
 
 # Text signals that the bot is the only one in the meeting
@@ -1072,6 +1126,7 @@ _ALONE_TEXTS = {
         "you are the only one here",
         "no one else is here",
     ],
+    "onepizza": [],  # detected via tile count below
 }
 
 
@@ -1099,6 +1154,11 @@ async def _is_bot_alone(page: Page, platform: str) -> bool:
         elif platform == "microsoft_teams":
             count = await page.locator("[data-tid='roster-participant']").count()
             if count == 1:
+                return True
+        elif platform == "onepizza":
+            # Only the bot's own tile (.is-local) exists — count non-local tiles
+            non_local = await page.locator(".video-tile:not(.is-local)").count()
+            if non_local == 0:
                 return True
     except Exception:
         pass
@@ -1140,6 +1200,16 @@ async def _wait_for_admission(
                     return True
             elif platform == "microsoft_teams":
                 if await page.locator("button[data-tid='hangup-button']").count() > 0:
+                    if on_admitted:
+                        await on_admitted()
+                    return True
+            elif platform == "onepizza":
+                # Waiting room overlay being visible means we're NOT yet admitted
+                waiting_visible = await page.locator("#waitingRoomOverlay").is_visible()
+                # Leave button only exists once inside the call
+                leave_visible = await page.locator("#leaveBtn").is_visible()
+                if leave_visible and not waiting_visible:
+                    logger.info("Bot admitted to onepizza meeting")
                     if on_admitted:
                         await on_admitted()
                     return True
@@ -1227,6 +1297,26 @@ async def _collect_participants(page: Page, platform: str) -> set[str]:
                     except Exception:
                         pass
 
+        elif platform == "onepizza":
+            # .tile-label contains participant name + mute icon — extract text from
+            # non-local tiles only (skip the bot's own tile)
+            try:
+                found = await page.evaluate("""
+                    () => {
+                        const names = [];
+                        document.querySelectorAll('.video-tile:not(.is-local) .tile-label').forEach(el => {
+                            const txt = (el.innerText || el.textContent || '').split('\\n')[0].trim();
+                            if (txt) names.push(txt);
+                        });
+                        return names;
+                    }
+                """)
+                for name in (found or []):
+                    if name and len(name) < 60:
+                        names.add(name)
+            except Exception:
+                pass
+
     except Exception as exc:
         logger.debug("_collect_participants error: %s", exc)
 
@@ -1265,6 +1355,8 @@ async def _leave_meeting(page: Page, platform: str) -> None:
                 "button[data-tid*='leave' i]",
                 "button:has-text('Leave')",
             ], timeout=2000)
+        elif platform == "onepizza":
+            await _click(page, ["#leaveBtn", "button:has-text('Leave')"], timeout=2000)
     except Exception as exc:
         logger.debug("_leave_meeting: %s", exc)
 
@@ -3224,6 +3316,8 @@ async def run_browser_bot(
                 await _join_zoom(page, meeting_url, bot_name, start_muted=start_muted)
             elif platform == "microsoft_teams":
                 await _join_teams(page, meeting_url, bot_name, start_muted=start_muted)
+            elif platform == "onepizza":
+                await _join_onepizza(page, meeting_url, bot_name, start_muted=start_muted)
             else:
                 raise MeetingBotError(f"Unsupported platform: {platform}")
 
