@@ -50,8 +50,15 @@ def _build_body(event: str, payload: dict) -> str:
     return json.dumps({"event": event, "data": payload, "ts": datetime.now(timezone.utc).isoformat()})
 
 
-def _sign(body: str, secret: str) -> str:
-    return "sha256=" + hmac.new(secret.encode(), body.encode(), hashlib.sha256).hexdigest()
+def _sign(body: str, secret: str) -> tuple[str, str]:
+    """Return (signature, timestamp_str). Timestamp is included in the signed payload.
+
+    BREAKING CHANGE: Signed payload is f"{timestamp}.{body}".
+    Reject deliveries where abs(time.time() - int(X-MeetingBot-Timestamp)) > 300 seconds.
+    """
+    ts = str(int(datetime.now(timezone.utc).timestamp()))
+    sig = "sha256=" + hmac.new(secret.encode(), f"{ts}.{body}".encode(), hashlib.sha256).hexdigest()
+    return sig, ts
 
 
 # ── Delivery logging ───────────────────────────────────────────────────────────
@@ -148,7 +155,9 @@ async def dispatch_event(
 
         hdrs = dict(headers_base)
         if wh.secret:
-            hdrs["X-MeetingBot-Signature"] = _sign(body, wh.secret)
+            sig, ts = _sign(body, wh.secret)
+            hdrs["X-MeetingBot-Signature"] = sig
+            hdrs["X-MeetingBot-Timestamp"] = ts
 
         delivery_id = await _log_delivery(
             webhook_id=wh.id, bot_id=bot_id, event=event,
@@ -253,7 +262,9 @@ async def _process_retries() -> None:
 
         hdrs: dict = {"Content-Type": "application/json", "User-Agent": "MeetingBot/1.0"}
         if wh.secret:
-            hdrs["X-MeetingBot-Signature"] = _sign(delivery.request_body, wh.secret)
+            sig, ts = _sign(delivery.request_body, wh.secret)
+            hdrs["X-MeetingBot-Signature"] = sig
+            hdrs["X-MeetingBot-Timestamp"] = ts
 
         next_attempt = delivery.attempt_number + 1
         status_code, resp_text = await _attempt_delivery(wh.url, delivery.request_body, hdrs)

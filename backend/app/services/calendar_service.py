@@ -9,6 +9,7 @@ Requires: icalendar, recurring_ical_events packages
 import asyncio
 import json
 import logging
+import time as _time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
@@ -20,9 +21,19 @@ _LOOKAHEAD_MINUTES = 15
 _JOIN_EARLY_S = 60
 # Avoid dispatching the same event twice within this window (seconds)
 _DISPATCH_COOLDOWN_S = 3600
+# Evict entries older than 48 hours to prevent unbounded growth
+_DISPATCH_TTL_S = 172800
 
-# In-memory set of (feed_id, event_uid) already dispatched this session
-_dispatched: set[tuple[str, str]] = set()
+# Maps (feed_id, event_uid) → monotonic insertion time
+_dispatched: dict[tuple[str, str], float] = {}
+_poll_cycle_count = 0
+
+
+def _prune_dispatched() -> None:
+    cutoff = _time.monotonic() - _DISPATCH_TTL_S
+    stale = [k for k, t in _dispatched.items() if t < cutoff]
+    for k in stale:
+        del _dispatched[k]
 
 
 def _parse_ical(ical_data: bytes, lookahead_minutes: int = _LOOKAHEAD_MINUTES) -> list[dict[str, Any]]:
@@ -152,6 +163,7 @@ async def _process_feed(feed, account_id: str) -> int:
         if cache_key in _dispatched:
             continue
 
+
         # Schedule the bot to join early
         join_at = event["start"] - timedelta(seconds=_JOIN_EARLY_S)
         if join_at < now:
@@ -169,7 +181,7 @@ async def _process_feed(feed, account_id: str) -> int:
                 metadata={"calendar_event": event["summary"], "calendar_feed_id": feed.id},
             )
             await _schedule_bot(bot)
-            _dispatched.add(cache_key)
+            _dispatched[cache_key] = _time.monotonic()
             dispatched += 1
             logger.info(
                 "Calendar auto-join: dispatched bot for '%s' at %s (feed %s)",
@@ -220,6 +232,7 @@ async def sync_all_feeds() -> int:
 
 async def calendar_poll_loop(interval_s: int = 300) -> None:
     """Background task: poll calendar feeds every interval_s seconds."""
+    global _poll_cycle_count
     logger.info("Calendar poll loop started (interval=%ds)", interval_s)
     while True:
         try:
@@ -228,4 +241,7 @@ async def calendar_poll_loop(interval_s: int = 300) -> None:
                 logger.info("Calendar sync: dispatched %d bot(s)", dispatched)
         except Exception as exc:
             logger.error("Calendar poll loop error: %s", exc)
+        _poll_cycle_count += 1
+        if _poll_cycle_count % 288 == 0:  # ~24h at 5-min intervals
+            _prune_dispatched()
         await asyncio.sleep(interval_s)

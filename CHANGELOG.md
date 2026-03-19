@@ -4,7 +4,29 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.2.0 — **Last updated:** 2026-03-17
+> **Latest version:** 2.3.0 — **Last updated:** 2026-03-19
+
+---
+
+## [2.3.0] - 2026-03-19
+
+### Added
+- **Async dashboard — zero page reloads** — All 10 dashboard actions (API key create/revoke, webhook register, integration add/toggle/delete, calendar feed add/toggle/delete) now use `fetch()` + in-place DOM updates with toast notifications. No full-page reload occurs for any dashboard action.
+- **`apiFetch()` helper** — Shared JS utility in `base.html` for all dashboard mutations. Automatically attaches `Content-Type: application/json` and `Accept: application/json` headers; throws on non-2xx responses with the server's `detail` message.
+- **Browser back button support** — `switchSection()` now uses `window.history.pushState()` (not `replaceState`). A `popstate` listener restores the correct section when the user presses Back — the browser history stack works fully within the dashboard.
+- **Schedule Bot in-place update** — After scheduling a bot, a `<tr>` is inserted into the bots table immediately without calling `window.location.reload()`.
+- **Admin endpoint rate limiting** — `PUT /api/v1/admin/wallet`, `PUT /api/v1/admin/rpc-url`, and `POST /api/v1/admin/credit` are now limited to **10 requests/minute per IP**. `POST /api/v1/admin/usdc/rescan` is limited to **5/minute**. Returns HTTP 429 when exceeded.
+- **Webhook replay protection** — Signed webhook deliveries now include an `X-MeetingBot-Timestamp` header alongside `X-MeetingBot-Signature`. The HMAC is computed over `{timestamp}.{body}` instead of just `{body}`. Recipients should reject deliveries where `abs(now - timestamp) > 300 seconds`.
+
+### Changed
+- **Webhook HMAC format (BREAKING)** — The signed payload is now `f"{timestamp}.{body}"`. Update your HMAC verification to extract `X-MeetingBot-Timestamp`, prepend it to the body, and verify the combined string. The 5-minute replay window is enforced server-side on delivery; recipients are responsible for enforcing it client-side.
+- **Bot queue latency: 10 s → near-zero** — The queue processor previously polled every 10 seconds with `asyncio.sleep(10)`. It now wakes immediately via `asyncio.Event` when a bot is enqueued. Slots are filled in under 100 ms.
+- **Analytics response caching** — `GET /api/v1/analytics` results are cached for **30 seconds** per account. `GET /api/v1/analytics/api-usage` results are cached for **60 seconds**. Reduces `list_bots()` calls under high-frequency polling.
+
+### Fixed
+- **WebSocket DB error now fails explicitly** — Previously, a database error during token lookup would return `None`, which was indistinguishable from an unknown/invalid token. Now returns close code **4503 (Service Temporarily Unavailable)** with reason `"Service temporarily unavailable"` so clients can distinguish a transient DB failure from a bad token.
+- **Calendar feed dedup memory leak** — The `_dispatched` set grew unbounded across long-running instances. Changed to a `dict[key, float]` with a 48-hour TTL. A prune sweep runs every 288 poll cycles (~24 h at default 5-minute intervals). Memory is now bounded.
+- **Dashboard JSON response branches** — All 10 `POST /dashboard/*` handlers now return `JSONResponse` when the request includes `Accept: application/json`, enabling the new async fetch flow. The redirect-based form flow is preserved for non-JS clients.
 
 ---
 

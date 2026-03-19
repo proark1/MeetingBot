@@ -54,6 +54,7 @@ async def _resolve_ws_account(token: Optional[str]) -> Optional[str]:
                 return api_key.account_id
     except Exception:
         logger.exception("WS token DB lookup failed")
+        return "__db_error__"
 
     return None  # unknown token → reject
 
@@ -116,6 +117,10 @@ async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = None) 
     from app.config import settings
 
     account_id = await _resolve_ws_account(token)
+
+    if account_id == "__db_error__":
+        await websocket.close(code=4503, reason="Service temporarily unavailable")
+        return
 
     # Reject unauthenticated connections when auth is required
     if account_id is None and token is not None:

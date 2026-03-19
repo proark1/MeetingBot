@@ -376,7 +376,59 @@
           <h2>Bots</h2>
           <p>All meeting bots from the last 24 hours</p>
         </div>
-        <a href="/api/docs#/Bots/create_bot_api_v1_bot_post" target="_blank" class="btn btn-primary btn-sm">Create Bot via API ↗</a>
+        <div class="d-flex gap-2">
+          <button class="btn btn-outline-secondary btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#scheduleBotPanel" aria-expanded="false">
+            📅 Schedule a Bot
+          </button>
+          <a href="/api/docs#/Bots/create_bot_api_v1_bot_post" target="_blank" class="btn btn-primary btn-sm">Create Bot via API ↗</a>
+        </div>
+      </div>
+
+      <!-- Schedule a Bot panel -->
+      <div class="collapse mb-3" id="scheduleBotPanel">
+        <div class="card card-pad">
+          <div class="section-title mb-3">📅 Schedule a Bot</div>
+          <form id="scheduleBotForm">
+            <div class="row g-3">
+              <div class="col-md-6">
+                <label class="form-label" style="font-size:12.5px;font-weight:600">Meeting URL <span class="text-danger">*</span></label>
+                <input type="url" class="form-control form-control-sm" id="sbMeetingUrl" placeholder="https://zoom.us/j/..." required>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label" style="font-size:12.5px;font-weight:600">Schedule Date &amp; Time <span class="text-danger">*</span></label>
+                <input type="datetime-local" class="form-control form-control-sm" id="sbJoinAt" required>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label" style="font-size:12.5px;font-weight:600">Meeting Template</label>
+                <select class="form-select form-select-sm" id="sbTemplate">
+                  <option value="default">Default</option>
+                  <option value="sales">Sales</option>
+                  <option value="standup">Standup</option>
+                  <option value="1on1">1-on-1</option>
+                  <option value="retro">Retro</option>
+                  <option value="kickoff">Kickoff</option>
+                  <option value="allhands">All Hands</option>
+                  <option value="postmortem">Post-Mortem</option>
+                  <option value="interview">Interview</option>
+                  <option value="design-review">Design Review</option>
+                </select>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label" style="font-size:12.5px;font-weight:600">Bot Display Name</label>
+                <input type="text" class="form-control form-control-sm" id="sbBotName" placeholder="Meeting Notetaker">
+              </div>
+              <div class="col-md-4">
+                <label class="form-label" style="font-size:12.5px;font-weight:600">Webhook URL (optional)</label>
+                <input type="url" class="form-control form-control-sm" id="sbWebhookUrl" placeholder="https://yourapp.com/webhook">
+              </div>
+            </div>
+            <div class="d-flex gap-2 mt-3 align-items-center">
+              <button type="submit" class="btn btn-primary btn-sm" id="sbSubmitBtn">Schedule Bot</button>
+              <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="collapse" data-bs-target="#scheduleBotPanel">Cancel</button>
+              <span id="sbStatus" class="ms-2" style="font-size:13px"></span>
+            </div>
+          </form>
+        </div>
       </div>
 
       <!-- Quickstart snippet if no bots -->
@@ -454,7 +506,13 @@
                 <td style="font-size:12.5px;color:#64748b">
                   {% if bot.duration_seconds %}{{ (bot.duration_seconds / 60)|int }}m{% else %}—{% endif %}
                 </td>
-                <td style="color:#94a3b8;font-size:12px;white-space:nowrap">{{ bot.created_at }}</td>
+                <td style="color:#94a3b8;font-size:12px;white-space:nowrap">
+                  {% if bot.status == "scheduled" and bot.join_at %}
+                    <span style="color:#f59e0b">📅 {{ bot.join_at }}</span>
+                  {% else %}
+                    {{ bot.created_at }}
+                  {% endif %}
+                </td>
                 <td><a href="/bot/{{ bot.id }}" class="btn btn-outline-secondary btn-sm" style="font-size:11px;padding:2px 8px">View</a></td>
               </tr>
               {% endfor %}
@@ -601,16 +659,15 @@
             <div class="section-title">Live Keys <span style="color:#94a3b8;font-weight:400;font-size:12px">(sk_live_...)</span></div>
             <div class="section-subtitle">Used in production — credits are deducted on each bot</div>
           </div>
-          <form method="post" action="/dashboard/keys" class="d-flex gap-2">
-            <input type="hidden" name="mode" value="live">
-            <input type="text" name="name" class="form-control form-control-sm" placeholder="Key name" style="width:120px">
-            <button type="submit" class="btn btn-primary btn-sm">+ New Key</button>
-          </form>
+          <div class="d-flex gap-2">
+            <input type="text" id="live-key-name" class="form-control form-control-sm" placeholder="Key name" style="width:120px">
+            <button type="button" class="btn btn-primary btn-sm" data-create-key="live">+ New Key</button>
+          </div>
         </div>
         {% set live_keys = api_keys | selectattr("key_preview", "string") | list %}
         {% if api_keys %}
         <div style="overflow-x:auto">
-          <table class="table table-hover">
+          <table class="table table-hover" id="live-keys-table">
             <thead>
               <tr><th>Name</th><th>Key</th><th>Last used</th><th></th></tr>
             </thead>
@@ -626,9 +683,7 @@
                 </td>
                 <td style="color:#94a3b8;font-size:12.5px">{{ key.last_used_at or "Never" }}</td>
                 <td>
-                  <form method="post" action="/dashboard/keys/{{ key.id }}/revoke" style="display:inline">
-                    <button type="submit" class="btn btn-xs btn-outline-danger" onclick="return confirm('Revoke this key?')">Revoke</button>
-                  </form>
+                  <button type="button" class="btn btn-xs btn-outline-danger" data-revoke-key="{{ key.id }}">Revoke</button>
                 </td>
               </tr>
               {% endfor %}
@@ -636,7 +691,7 @@
           </table>
         </div>
         {% else %}
-        <div class="empty-state" style="padding:1.25rem">
+        <div class="empty-state" style="padding:1.25rem" id="live-keys-empty">
           <div class="empty-state-desc">No API keys yet. Create one to start using the API.</div>
         </div>
         {% endif %}
@@ -649,16 +704,15 @@
             <div class="section-title">Test Keys <span style="color:#94a3b8;font-weight:400;font-size:12px">(sk_test_...)</span></div>
             <div class="section-subtitle">Bots complete instantly with demo transcripts — zero credits deducted. Use in CI/CD.</div>
           </div>
-          <form method="post" action="/dashboard/keys" class="d-flex gap-2">
-            <input type="hidden" name="mode" value="test">
-            <input type="text" name="name" class="form-control form-control-sm" placeholder="Test key name" style="width:140px">
-            <button type="submit" class="btn btn-outline-secondary btn-sm">+ New Test Key</button>
-          </form>
+          <div class="d-flex gap-2">
+            <input type="text" id="test-key-name" class="form-control form-control-sm" placeholder="Test key name" style="width:140px">
+            <button type="button" class="btn btn-outline-secondary btn-sm" data-create-key="test">+ New Test Key</button>
+          </div>
         </div>
         {% set test_keys = api_keys | selectattr("key_preview", "defined") | list %}
         {% if api_keys %}
         <div style="overflow-x:auto">
-          <table class="table table-hover">
+          <table class="table table-hover" id="test-keys-table">
             <thead>
               <tr><th>Name</th><th>Key</th><th>Last used</th><th></th></tr>
             </thead>
@@ -674,9 +728,7 @@
                 </td>
                 <td style="color:#94a3b8;font-size:12.5px">{{ key.last_used_at or "Never" }}</td>
                 <td>
-                  <form method="post" action="/dashboard/keys/{{ key.id }}/revoke" style="display:inline">
-                    <button type="submit" class="btn btn-xs btn-outline-danger" onclick="return confirm('Revoke this key?')">Revoke</button>
-                  </form>
+                  <button type="button" class="btn btn-xs btn-outline-danger" data-revoke-key="{{ key.id }}">Revoke</button>
                 </td>
               </tr>
               {% else %}
@@ -703,7 +755,7 @@
 
       <div class="card card-pad mb-3">
         <div class="section-title mb-3">Register a Webhook</div>
-        <form method="post" action="/api/v1/webhook" id="webhook-register-form">
+        <form id="webhook-register-form">
           <div class="row g-3">
             <div class="col-md-5">
               <label class="form-label">Endpoint URL</label>
@@ -775,31 +827,31 @@
       <div class="collapse mb-3" id="add-integ-form">
         <div class="card card-pad">
           <div class="section-title mb-3">Add new integration</div>
-          <form method="post" action="/dashboard/integrations/add">
+          <form id="integration-add-form">
             <div class="row g-3">
               <div class="col-md-3">
                 <label class="form-label">Type</label>
-                <select name="integ_type" id="integ-type-select" class="form-select form-select-sm" onchange="toggleIntegFields(this.value)">
+                <select id="integ-type-select" class="form-select form-select-sm" onchange="toggleIntegFields(this.value)">
                   <option value="slack">Slack</option>
                   <option value="notion">Notion</option>
                 </select>
               </div>
               <div class="col-md-3">
                 <label class="form-label">Display name</label>
-                <input type="text" name="name" class="form-control form-control-sm" placeholder="e.g. Team Channel">
+                <input type="text" id="integ-name" class="form-control form-control-sm" placeholder="e.g. Team Channel">
               </div>
               <div class="col-md-6" id="slack-fields">
                 <label class="form-label">Slack Webhook URL</label>
-                <input type="url" name="slack_webhook_url" class="form-control form-control-sm" placeholder="https://hooks.slack.com/services/...">
+                <input type="url" id="integ-slack-url" class="form-control form-control-sm" placeholder="https://hooks.slack.com/services/...">
                 <div class="form-text"><a href="https://api.slack.com/messaging/webhooks" target="_blank" style="color:#6366f1">How to get a Slack webhook ↗</a></div>
               </div>
               <div class="col-md-3 d-none" id="notion-token-field">
                 <label class="form-label">Notion API Token</label>
-                <input type="password" name="notion_api_token" class="form-control form-control-sm" placeholder="secret_...">
+                <input type="password" id="integ-notion-token" class="form-control form-control-sm" placeholder="secret_...">
               </div>
               <div class="col-md-3 d-none" id="notion-db-field">
                 <label class="form-label">Database ID</label>
-                <input type="text" name="notion_database_id" class="form-control form-control-sm" placeholder="32-char ID">
+                <input type="text" id="integ-notion-db" class="form-control form-control-sm" placeholder="32-char ID">
               </div>
             </div>
             <div class="mt-3 d-flex gap-2">
@@ -813,7 +865,7 @@
       {% if all_integrations %}
       <div class="card">
         <div class="table-responsive">
-          <table class="table table-hover">
+          <table class="table table-hover" id="integrations-table">
             <thead>
               <tr><th>Type</th><th>Name</th><th>Status</th><th>Added</th><th></th></tr>
             </thead>
@@ -833,12 +885,8 @@
                 <td style="color:#94a3b8;font-size:12.5px">{{ integ.created_at }}</td>
                 <td>
                   <div class="d-flex gap-1">
-                    <form method="post" action="/dashboard/integrations/{{ integ.id }}/toggle" style="display:inline">
-                      <button type="submit" class="btn btn-xs btn-outline-secondary">{% if integ.is_active %}Pause{% else %}Enable{% endif %}</button>
-                    </form>
-                    <form method="post" action="/dashboard/integrations/{{ integ.id }}/delete" style="display:inline">
-                      <button type="submit" class="btn btn-xs btn-outline-danger" onclick="return confirm('Delete this integration?')">Delete</button>
-                    </form>
+                    <button type="button" class="btn btn-xs btn-outline-secondary" data-toggle-integ="{{ integ.id }}">{% if integ.is_active %}Pause{% else %}Enable{% endif %}</button>
+                    <button type="button" class="btn btn-xs btn-outline-danger" data-delete-integ="{{ integ.id }}">Delete</button>
                   </div>
                 </td>
               </tr>
@@ -877,30 +925,30 @@
       <div class="collapse mb-3" id="add-cal-form">
         <div class="card card-pad">
           <div class="section-title mb-3">Add iCal feed</div>
-          <form method="post" action="/dashboard/calendar/add">
+          <form id="cal-add-form">
             <div class="row g-3">
               <div class="col-md-4">
                 <label class="form-label">Calendar name</label>
-                <input type="text" name="name" class="form-control form-control-sm" placeholder="My Work Calendar" value="My Calendar">
+                <input type="text" id="cal-name" class="form-control form-control-sm" placeholder="My Work Calendar" value="My Calendar">
               </div>
               <div class="col-md-5">
                 <label class="form-label">iCal URL</label>
-                <input type="url" name="ical_url" class="form-control form-control-sm" placeholder="https://calendar.google.com/calendar/ical/..." required>
+                <input type="url" id="cal-ical-url" class="form-control form-control-sm" placeholder="https://calendar.google.com/calendar/ical/..." required>
                 <div class="form-text">Google Calendar → Settings → Integrate → Secret iCal address</div>
               </div>
               <div class="col-md-3">
                 <label class="form-label">Bot display name</label>
-                <input type="text" name="bot_name" class="form-control form-control-sm" placeholder="MeetingBot">
+                <input type="text" id="cal-bot-name" class="form-control form-control-sm" placeholder="MeetingBot">
               </div>
               <div class="col-12">
                 <div class="form-check">
-                  <input class="form-check-input" type="checkbox" name="auto_record" id="auto-record-check" checked>
+                  <input class="form-check-input" type="checkbox" id="auto-record-check" checked>
                   <label class="form-check-label" for="auto-record-check" style="font-size:13.5px">Auto-join meetings when they start</label>
                 </div>
               </div>
             </div>
             <div class="mt-3 d-flex gap-2">
-              <button type="submit" class="btn btn-primary btn-sm">Add Calendar</button>
+              <button type="button" id="cal-add-btn" class="btn btn-primary btn-sm">Add Calendar</button>
               <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="collapse" data-bs-target="#add-cal-form">Cancel</button>
             </div>
           </form>
@@ -910,7 +958,7 @@
       {% if all_calendar_feeds %}
       <div class="card">
         <div class="table-responsive">
-          <table class="table table-hover">
+          <table class="table table-hover" id="cal-feeds-table">
             <thead>
               <tr><th>Name</th><th>Status</th><th>Auto-join</th><th>Bot name</th><th>Last synced</th><th></th></tr>
             </thead>
@@ -924,12 +972,8 @@
                 <td style="color:#94a3b8;font-size:12.5px">{{ feed.last_synced_at or "Never" }}</td>
                 <td>
                   <div class="d-flex gap-1">
-                    <form method="post" action="/dashboard/calendar/{{ feed.id }}/toggle" style="display:inline">
-                      <button type="submit" class="btn btn-xs btn-outline-secondary">{% if feed.is_active %}Pause{% else %}Enable{% endif %}</button>
-                    </form>
-                    <form method="post" action="/dashboard/calendar/{{ feed.id }}/delete" style="display:inline">
-                      <button type="submit" class="btn btn-xs btn-outline-danger" onclick="return confirm('Remove this calendar feed?')">Remove</button>
-                    </form>
+                    <button type="button" class="btn btn-xs btn-outline-secondary" data-toggle-cal="{{ feed.id }}">{% if feed.is_active %}Pause{% else %}Enable{% endif %}</button>
+                    <button type="button" class="btn btn-xs btn-outline-danger" data-delete-cal="{{ feed.id }}">Remove</button>
                   </div>
                 </td>
               </tr>
@@ -1195,34 +1239,39 @@
 {% block scripts %}
 <script>
 // ── Section navigation ─────────────────────────────────────────────────────
-function switchSection(name) {
+const _VALID_SECTIONS = ['overview','bots','analytics','api-keys','webhooks','integrations','calendar','workspaces','billing','settings'];
+
+function _activateSection(name) {
   document.querySelectorAll('.dash-section').forEach(el => el.classList.remove('active'));
   document.querySelectorAll('.sidebar-nav-item[data-section]').forEach(el => el.classList.remove('active'));
-  const section = document.getElementById('section-' + name);
-  if (section) section.classList.add('active');
-  const btn = document.querySelector('.sidebar-nav-item[data-section="' + name + '"]');
-  if (btn) btn.classList.add('active');
-  window.history.replaceState(null, '', '#' + name);
+  document.getElementById('section-' + name)?.classList.add('active');
+  document.querySelector(`.sidebar-nav-item[data-section="${name}"]`)?.classList.add('active');
+}
+
+function switchSection(name) {
+  _activateSection(name);
+  window.history.pushState({ section: name }, '', '#' + name);
 }
 
 document.querySelectorAll('.sidebar-nav-item[data-section]').forEach(btn => {
   btn.addEventListener('click', () => switchSection(btn.dataset.section));
 });
 
+window.addEventListener('popstate', (e) => {
+  const name = e.state?.section || window.location.hash.replace('#', '') || 'overview';
+  if (_VALID_SECTIONS.includes(name)) _activateSection(name);
+});
+
 // Handle hash on load
 document.addEventListener('DOMContentLoaded', () => {
   const hash = window.location.hash.replace('#', '');
-  const valid = ['overview','bots','analytics','api-keys','webhooks','integrations','calendar','workspaces','billing','settings'];
-  if (hash && valid.includes(hash)) {
-    switchSection(hash);
-  }
+  if (hash && _VALID_SECTIONS.includes(hash)) switchSection(hash);
 });
 
 // ── Copy API keys ─────────────────────────────────────────────────────────
 document.querySelectorAll('.copy-key-btn').forEach(btn => {
   btn.addEventListener('click', function() {
-    const key = this.getAttribute('data-key');
-    navigator.clipboard.writeText(key).then(() => {
+    navigator.clipboard.writeText(this.getAttribute('data-key')).then(() => {
       showToast('API key copied to clipboard', 'success');
       const orig = this.innerHTML;
       this.innerHTML = '✓';
@@ -1241,6 +1290,334 @@ if (qsSnippet && qsBtn) {
       .catch(() => showToast('Copy failed', 'danger'));
   });
 }
+
+// ── API Key helpers ────────────────────────────────────────────────────────
+function _prependKeyRow(data, mode) {
+  const tbody = document.querySelector(`#${mode}-keys-table tbody`);
+  if (!tbody) return;
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td><code style="font-size:11.5px">${data.key_preview}</code>
+      <button class="btn btn-xs btn-outline-secondary ms-1 copy-key-btn" data-key="${data.full_key}" title="Copy full key">Copy</button>
+    </td>
+    <td style="color:#64748b;font-size:13px">${data.name || '—'}</td>
+    <td style="color:#94a3b8;font-size:12px">${new Date(data.created_at).toLocaleDateString()}</td>
+    <td>
+      <button type="button" class="btn btn-xs btn-outline-danger" data-revoke-key="${data.id}">Revoke</button>
+    </td>`;
+  tbody.prepend(tr);
+  // wire up copy button on new row
+  tr.querySelector('.copy-key-btn')?.addEventListener('click', function() {
+    navigator.clipboard.writeText(this.getAttribute('data-key')).then(() => {
+      showToast('Key copied!', 'success');
+    }).catch(() => showToast('Copy failed', 'danger'));
+  });
+  // wire up revoke button on new row
+  tr.querySelector('[data-revoke-key]')?.addEventListener('click', _handleRevoke);
+}
+
+async function _handleRevoke() {
+  if (!confirm('Revoke this key?')) return;
+  const btn = this;
+  btn.disabled = true;
+  try {
+    await apiFetch(`/dashboard/keys/${btn.dataset.revokeKey}`, { method: 'POST' });
+    btn.closest('tr').remove();
+    showToast('Key revoked', 'success');
+  } catch(e) { showToast(e.message, 'danger'); btn.disabled = false; }
+}
+
+// Create key buttons (live + test)
+document.querySelectorAll('[data-create-key]').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    const mode = btn.dataset.createKey;
+    const nameInput = document.getElementById(`${mode}-key-name`);
+    btn.disabled = true;
+    try {
+      const data = await apiFetch('/dashboard/keys', {
+        method: 'POST',
+        body: JSON.stringify({ name: nameInput?.value.trim() || '', mode }),
+      });
+      showToast(`Key created: ${data.key_preview}`, 'success', 6000);
+      _prependKeyRow(data, mode);
+      if (nameInput) nameInput.value = '';
+    } catch(e) { showToast(e.message, 'danger'); }
+    finally { btn.disabled = false; }
+  });
+});
+
+// Revoke key buttons (server-rendered rows)
+document.querySelectorAll('[data-revoke-key]').forEach(btn => {
+  btn.addEventListener('click', _handleRevoke);
+});
+
+// ── Webhook form ──────────────────────────────────────────────────────────
+(function() {
+  const form = document.getElementById('webhook-register-form');
+  if (!form) return;
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = form.querySelector('button[type=submit]');
+    btn.disabled = true;
+    try {
+      const url = form.querySelector('[name=url]')?.value.trim() || '';
+      const events = form.querySelector('[name=events]')?.value.trim() || '*';
+      const secret = form.querySelector('[name=secret]')?.value.trim() || '';
+      const data = await apiFetch('/dashboard/webhook', {
+        method: 'POST',
+        body: JSON.stringify({ url, events: events.split(',').map(s => s.trim()).filter(Boolean), secret: secret || null }),
+      });
+      showToast(`Webhook registered: ${data.url}`, 'success');
+      form.reset();
+      // Append row to webhook table if it exists
+      const tbody = document.querySelector('#webhooks-table tbody');
+      if (tbody) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td style="font-size:12px;word-break:break-all">${data.url}</td>
+          <td><code style="font-size:11px">${(data.events||[]).join(', ')}</code></td>
+          <td><span class="chip chip-success">Active</span></td>
+          <td style="color:#94a3b8;font-size:12px">${new Date(data.created_at||Date.now()).toLocaleDateString()}</td>`;
+        tbody.prepend(tr);
+      }
+    } catch(e) { showToast(e.message, 'danger'); }
+    finally { btn.disabled = false; }
+  });
+})();
+
+// ── Integration form ──────────────────────────────────────────────────────
+(function() {
+  const form = document.getElementById('integration-add-form');
+  if (!form) return;
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = form.querySelector('button[type=submit]');
+    btn.disabled = true;
+    try {
+      const type = document.getElementById('integ-type-select')?.value || '';
+      const name = document.getElementById('integ-name')?.value.trim() || '';
+      const webhookUrl = document.getElementById('integ-slack-url')?.value.trim() || '';
+      const botToken = document.getElementById('integ-bot-token')?.value.trim() || '';
+      const notionToken = document.getElementById('integ-notion-token')?.value.trim() || '';
+      const notionDb = document.getElementById('integ-notion-db')?.value.trim() || '';
+      const data = await apiFetch('/dashboard/integrations/add', {
+        method: 'POST',
+        body: JSON.stringify({ type, name, webhook_url: webhookUrl, bot_token: botToken, notion_token: notionToken, notion_database_id: notionDb }),
+      });
+      showToast(`Integration "${data.name}" added`, 'success');
+      form.reset();
+      const tbody = document.querySelector('#integrations-table tbody');
+      if (tbody) {
+        const tr = document.createElement('tr');
+        tr.dataset.integId = data.id;
+        tr.innerHTML = `<td style="font-weight:500">${data.name}</td>
+          <td><span class="chip chip-gray">${data.type}</span></td>
+          <td><span class="chip chip-success">Active</span></td>
+          <td>
+            <div class="d-flex gap-1">
+              <button type="button" class="btn btn-xs btn-outline-secondary" data-toggle-integ="${data.id}">Pause</button>
+              <button type="button" class="btn btn-xs btn-outline-danger" data-delete-integ="${data.id}">Delete</button>
+            </div>
+          </td>`;
+        tbody.prepend(tr);
+        tr.querySelector('[data-toggle-integ]')?.addEventListener('click', _handleIntegToggle);
+        tr.querySelector('[data-delete-integ]')?.addEventListener('click', _handleIntegDelete);
+      }
+    } catch(e) { showToast(e.message, 'danger'); }
+    finally { btn.disabled = false; }
+  });
+})();
+
+async function _handleIntegToggle() {
+  const btn = this;
+  btn.disabled = true;
+  try {
+    const data = await apiFetch(`/dashboard/integrations/${btn.dataset.toggleInteg}`, { method: 'POST' });
+    btn.textContent = data.is_active ? 'Pause' : 'Enable';
+    const row = btn.closest('tr');
+    const chip = row?.querySelector('.chip');
+    if (chip) { chip.className = `chip ${data.is_active ? 'chip-success' : 'chip-gray'}`; chip.textContent = data.is_active ? 'Active' : 'Paused'; }
+  } catch(e) { showToast(e.message, 'danger'); }
+  finally { btn.disabled = false; }
+}
+
+async function _handleIntegDelete() {
+  if (!confirm('Delete this integration?')) return;
+  const btn = this;
+  btn.disabled = true;
+  try {
+    await apiFetch(`/dashboard/integrations/${btn.dataset.deleteInteg}/delete`, { method: 'POST' });
+    btn.closest('tr').remove();
+    showToast('Integration deleted', 'success');
+  } catch(e) { showToast(e.message, 'danger'); btn.disabled = false; }
+}
+
+document.querySelectorAll('[data-toggle-integ]').forEach(btn => btn.addEventListener('click', _handleIntegToggle));
+document.querySelectorAll('[data-delete-integ]').forEach(btn => btn.addEventListener('click', _handleIntegDelete));
+
+// ── Calendar form ─────────────────────────────────────────────────────────
+document.getElementById('cal-add-btn')?.addEventListener('click', async () => {
+  const btn = document.getElementById('cal-add-btn');
+  btn.disabled = true;
+  try {
+    const name = document.getElementById('cal-name')?.value.trim() || 'My Calendar';
+    const icalUrl = document.getElementById('cal-ical-url')?.value.trim() || '';
+    const botName = document.getElementById('cal-bot-name')?.value.trim() || '';
+    const autoRecord = document.getElementById('auto-record-check')?.checked ?? true;
+    if (!icalUrl) { showToast('iCal URL is required', 'danger'); return; }
+    const data = await apiFetch('/dashboard/calendar/add', {
+      method: 'POST',
+      body: JSON.stringify({ name, ical_url: icalUrl, bot_name: botName, auto_record: autoRecord }),
+    });
+    showToast(`Calendar "${data.name}" added`, 'success');
+    document.getElementById('cal-name').value = 'My Calendar';
+    document.getElementById('cal-ical-url').value = '';
+    document.getElementById('cal-bot-name').value = '';
+    // Collapse the add form
+    const panel = document.getElementById('add-cal-form');
+    if (panel?.classList.contains('show')) bootstrap.Collapse.getInstance(panel)?.hide();
+    // Append row to calendar table if it exists
+    const tbody = document.querySelector('#cal-feeds-table tbody');
+    if (tbody) {
+      const tr = document.createElement('tr');
+      tr.dataset.calId = data.id;
+      tr.innerHTML = `<td style="font-weight:500">${data.name}</td>
+        <td><span class="chip chip-success">Active</span></td>
+        <td><span class="chip chip-info">On</span></td>
+        <td style="color:#64748b;font-size:13px">${botName || 'MeetingBot'}</td>
+        <td style="color:#94a3b8;font-size:12.5px">Never</td>
+        <td>
+          <div class="d-flex gap-1">
+            <button type="button" class="btn btn-xs btn-outline-secondary" data-toggle-cal="${data.id}">Pause</button>
+            <button type="button" class="btn btn-xs btn-outline-danger" data-delete-cal="${data.id}">Remove</button>
+          </div>
+        </td>`;
+      tbody.prepend(tr);
+      tr.querySelector('[data-toggle-cal]')?.addEventListener('click', _handleCalToggle);
+      tr.querySelector('[data-delete-cal]')?.addEventListener('click', _handleCalDelete);
+    }
+  } catch(e) { showToast(e.message, 'danger'); }
+  finally { btn.disabled = false; }
+});
+
+async function _handleCalToggle() {
+  const btn = this;
+  btn.disabled = true;
+  try {
+    const data = await apiFetch(`/dashboard/calendar/${btn.dataset.toggleCal}`, { method: 'POST' });
+    btn.textContent = data.is_active ? 'Pause' : 'Enable';
+    const row = btn.closest('tr');
+    const chip = row?.querySelector('.chip');
+    if (chip) { chip.className = `chip ${data.is_active ? 'chip-success' : 'chip-gray'}`; chip.textContent = data.is_active ? 'Active' : 'Paused'; }
+  } catch(e) { showToast(e.message, 'danger'); }
+  finally { btn.disabled = false; }
+}
+
+async function _handleCalDelete() {
+  if (!confirm('Remove this calendar feed?')) return;
+  const btn = this;
+  btn.disabled = true;
+  try {
+    await apiFetch(`/dashboard/calendar/${btn.dataset.deleteCal}/delete`, { method: 'POST' });
+    btn.closest('tr').remove();
+    showToast('Calendar feed removed', 'success');
+  } catch(e) { showToast(e.message, 'danger'); btn.disabled = false; }
+}
+
+document.querySelectorAll('[data-toggle-cal]').forEach(btn => btn.addEventListener('click', _handleCalToggle));
+document.querySelectorAll('[data-delete-cal]').forEach(btn => btn.addEventListener('click', _handleCalDelete));
+
+// ── Schedule a Bot ────────────────────────────────────────────────────────
+(function() {
+  const form = document.getElementById('scheduleBotForm');
+  if (!form) return;
+
+  const pad = n => String(n).padStart(2, '0');
+  function _oneHourStr() {
+    const d = new Date(Date.now() + 60 * 60 * 1000);
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+  const joinAtInput = document.getElementById('sbJoinAt');
+  if (joinAtInput) joinAtInput.value = _oneHourStr();
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = document.getElementById('sbSubmitBtn');
+    const status = document.getElementById('sbStatus');
+    const meetingUrl = document.getElementById('sbMeetingUrl').value.trim();
+    const joinAt = joinAtInput?.value;
+    const template = document.getElementById('sbTemplate').value;
+    const botName = document.getElementById('sbBotName').value.trim();
+    const webhookUrl = document.getElementById('sbWebhookUrl').value.trim();
+
+    if (!meetingUrl || !joinAt) {
+      status.textContent = 'Meeting URL and schedule time are required.';
+      status.style.color = '#ef4444';
+      return;
+    }
+
+    const payload = { meeting_url: meetingUrl, join_at: new Date(joinAt).toISOString(), template };
+    if (botName) payload.bot_name = botName;
+    if (webhookUrl) payload.webhook_url = webhookUrl;
+
+    btn.disabled = true;
+    status.textContent = 'Scheduling…';
+    status.style.color = '#94a3b8';
+
+    try {
+      const resp = await fetch('/api/v1/bot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+        throw new Error(err.detail || resp.statusText);
+      }
+      const bot = await resp.json();
+      status.textContent = `✓ Bot scheduled (ID: ${bot.id.slice(0,8)}…)`;
+      status.style.color = '#22c55e';
+      form.reset();
+      if (joinAtInput) joinAtInput.value = _oneHourStr();
+      setTimeout(() => {
+        const panel = document.getElementById('scheduleBotPanel');
+        if (panel?.classList.contains('show')) bootstrap.Collapse.getInstance(panel)?.hide();
+        status.textContent = '';
+      }, 1500);
+      _prependBotRow(bot);
+    } catch(err) {
+      status.textContent = `Error: ${err.message}`;
+      status.style.color = '#ef4444';
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  function _prependBotRow(bot) {
+    const tbody = document.querySelector('#section-bots .table tbody, #section-overview .table tbody');
+    if (!tbody) return;
+    const tr = document.createElement('tr');
+    const shortId = (bot.id || '').slice(0, 12);
+    const meetUrl = bot.meeting_url || '';
+    const platform = (bot.meeting_platform || 'unknown').replace(/^\w/, c => c.toUpperCase());
+    const joinAt = bot.join_at ? new Date(bot.join_at).toLocaleString() : '';
+    const created = bot.created_at ? new Date(bot.created_at).toLocaleString() : new Date().toLocaleString();
+    tr.innerHTML = `
+      <td><code style="font-size:11.5px">${shortId}…</code></td>
+      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+        <span title="${meetUrl}" style="font-size:12px;color:#64748b">${meetUrl}</span>
+      </td>
+      <td><span class="chip chip-gray">${platform}</span></td>
+      <td><span class="chip chip-warning">Scheduled</span></td>
+      <td><span style="color:#94a3b8">—</span></td>
+      <td><span style="color:#94a3b8">—</span></td>
+      <td style="font-size:12.5px;color:#64748b">—</td>
+      <td style="color:#94a3b8;font-size:12px;white-space:nowrap">
+        ${joinAt ? `<span style="color:#f59e0b">📅 ${joinAt}</span>` : created}
+      </td>
+      <td><a href="/bot/${bot.id}" class="btn btn-outline-secondary btn-sm" style="font-size:11px;padding:2px 8px">View</a></td>`;
+    tbody.prepend(tr);
+  }
+})();
 
 // ── Integration type toggle ───────────────────────────────────────────────
 function toggleIntegFields(type) {

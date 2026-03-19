@@ -42,6 +42,7 @@ _running_tasks: dict[str, asyncio.Task] = {}
 _bot_queue: list[str] = []
 
 _ACTIVE_STATUSES = ("ready", "scheduled", "queued", "joining", "in_call", "call_ended")
+_queue_event = asyncio.Event()
 
 
 def _get_sub_user_from_request(request: Request) -> Optional[str]:
@@ -53,7 +54,11 @@ def _get_sub_user_from_request(request: Request) -> Optional[str]:
 async def _queue_processor() -> None:
     """Background loop: start queued bots when a slot is free."""
     while True:
-        await asyncio.sleep(10)
+        try:
+            await asyncio.wait_for(_queue_event.wait(), timeout=30.0)
+        except asyncio.TimeoutError:
+            pass
+        _queue_event.clear()
         if not _bot_queue:
             continue
         active = sum(1 for t in _running_tasks.values() if not t.done())
@@ -365,6 +370,7 @@ async def create_bot(payload: BotCreate, request: Request):
     active = sum(1 for t in _running_tasks.values() if not t.done())
     if active >= settings.MAX_CONCURRENT_BOTS:
         _bot_queue.append(bot.id)
+        _queue_event.set()
         await store.update_bot(bot.id, status="queued")
         bot.status = "queued"
         queue_pos = _bot_queue.index(bot.id) + 1
@@ -375,6 +381,18 @@ async def create_bot(payload: BotCreate, request: Request):
         task.add_done_callback(lambda _: _running_tasks.pop(bot.id, None))
 
     logger.info("Created bot %s for %s (status=%s)", bot.id, bot.meeting_url, bot.status)
+
+    # Audit log — fire-and-forget
+    from app.services.audit_log_service import log_event as _audit
+    asyncio.create_task(_audit(
+        account_id=account_id,
+        action="bot.created",
+        resource_type="bot",
+        resource_id=bot.id,
+        ip_address=request.client.host if request.client else None,
+        details={"meeting_url": bot.meeting_url, "status": bot.status},
+    ))
+
     return _to_response(bot)
 
 
@@ -477,6 +495,16 @@ async def delete_bot(bot_id: str, request: Request):
     else:
         # Already finished — remove from memory immediately
         await store.delete_bot(bot_id)
+
+    # Audit log — fire-and-forget
+    from app.services.audit_log_service import log_event as _audit
+    asyncio.create_task(_audit(
+        account_id=account_id,
+        action="bot.deleted",
+        resource_type="bot",
+        resource_id=bot_id,
+        ip_address=request.client.host if request.client else None,
+    ))
 
 
 # ── Helper: wait for transcription to finish ──────────────────────────────────

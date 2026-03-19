@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "MeetingBot API",
-    "version": "2.2.0",
-    "description": "Send bots into Zoom, Google Meet, and Microsoft Teams meetings to record, transcribe, and analyse them with Claude (Anthropic) or Gemini (Google) AI.\n\nMulti-tenant: each external service registers an account and gets its own API key. Pre-fund a credit balance via Stripe (card) or USDC (ERC-20) — credits are deducted automatically per bot run.\n\n**Authentication:** Pass your `sk_live_...` API key as a Bearer token on every request:\n```\nAuthorization: Bearer sk_live_<your-key>\n```\n\n**Business accounts:** Upgrade to a business account to isolate data per end-user. Pass `X-Sub-User: <user-id>` on every request — different sub-users cannot see each other's bots.\n\n**Interactive docs:** Public Swagger UI at `/api/docs` · Admin full schema at `/api/v1/admin/docs` (admin only)."
+    "version": "2.3.0",
+    "description": "Send bots into Zoom, Google Meet, and Microsoft Teams meetings to record, transcribe, and analyse them with Claude (Anthropic) or Gemini (Google) AI.\n\nMulti-tenant: each external service registers an account and gets its own API key. Pre-fund a credit balance via Stripe (card) or USDC (ERC-20) — credits are deducted automatically per bot run.\n\n**Authentication:** Pass your `sk_live_...` API key as a Bearer token on every request:\n```\nAuthorization: Bearer sk_live_<your-key>\n```\n\n**Business accounts:** Upgrade to a business account to isolate data per end-user. Pass `X-Sub-User: <user-id>` on every request — different sub-users cannot see each other's bots.\n\n**Interactive docs:** Public Swagger UI at `/api/docs` · Admin full schema at `/api/v1/admin/docs` (admin only).\n\n**v2.3.0 changes:** Zero-reload async dashboard, admin rate limits (10/min), webhook replay protection via `X-MeetingBot-Timestamp`, bot queue wake latency near-zero via asyncio.Event, analytics caching (30 s), calendar dedup memory fix."
   },
   "servers": [
     {

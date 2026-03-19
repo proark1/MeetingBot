@@ -14,9 +14,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
-from slowapi.util import get_remote_address
+from app._limiter import limiter as _limiter
 
 from fastapi.responses import JSONResponse as _JSONResponse
 
@@ -514,8 +514,6 @@ _PUBLIC_DESCRIPTION = (
     "decisions, next steps, sentiment, topics), speaker breakdown, chapters, meeting metadata, "
     "and download links for audio/video/markdown/PDF |\n"
 )
-
-_limiter = Limiter(key_func=get_remote_address)
 
 app = FastAPI(
     title="MeetingBot API",

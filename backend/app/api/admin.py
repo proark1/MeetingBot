@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.deps import require_admin
+from app._limiter import limiter as _limiter
 from app.models.account import Account, MonitorState, PlatformConfig, UnmatchedUsdcTransfer
 
 logger = logging.getLogger(__name__)
@@ -110,7 +111,9 @@ async def get_platform_wallet(
 
 
 @router.put("/wallet", response_model=WalletResponse)
+@_limiter.limit("10/minute")
 async def set_platform_wallet(
+    request: Request,
     payload: WalletUpdateRequest,
     db: AsyncSession = Depends(get_db),
     _admin: str = Depends(require_admin),
@@ -161,7 +164,9 @@ async def get_all_platform_config(
 
 
 @router.post("/credit", response_model=ManualCreditResponse)
+@_limiter.limit("10/minute")
 async def manual_credit(
+    request: Request,
     payload: ManualCreditRequest,
     db: AsyncSession = Depends(get_db),
     _admin: str = Depends(require_admin),
@@ -233,7 +238,9 @@ async def get_rpc_url_status(
 
 
 @router.put("/rpc-url", response_model=RpcUrlResponse)
+@_limiter.limit("10/minute")
 async def set_rpc_url(
+    request: Request,
     payload: RpcUrlRequest,
     db: AsyncSession = Depends(get_db),
     _admin: str = Depends(require_admin),
@@ -359,7 +366,9 @@ async def resolve_unmatched_transfer(
 
 
 @router.post("/usdc/rescan", response_model=RescanResponse)
+@_limiter.limit("5/minute")
 async def rescan_usdc_from_block(
+    request: Request,
     payload: RescanRequest,
     db: AsyncSession = Depends(get_db),
     _admin: str = Depends(require_admin),

@@ -2,9 +2,12 @@
 
 import json
 import logging
+import time as _time
 from datetime import datetime, timezone, timedelta
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
+from pydantic import BaseModel
 
 from app.deps import SUPERADMIN_ACCOUNT_ID
 from app.store import store
@@ -13,6 +16,26 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _ACTIVE_STATUSES = ("ready", "scheduled", "queued", "joining", "in_call", "call_ended")
+
+# Module-level result caches: cache_key → (monotonic_ts, result)
+_analytics_cache: dict[str, tuple[float, dict]] = {}
+_api_usage_cache: dict[str, tuple[float, dict]] = {}
+_ANALYTICS_TTL = 30.0
+_API_USAGE_TTL = 60.0
+
+
+def _cache_get(cache: dict, key: str, ttl: float):
+    ts, val = cache.get(key, (0.0, None))
+    if val is not None and (_time.monotonic() - ts) < ttl:
+        return val
+    return None
+
+
+def _cache_set(cache: dict, key: str, value: dict) -> None:
+    cache[key] = (_time.monotonic(), value)
+    if len(cache) > 200:
+        oldest = min(cache, key=lambda k: cache[k][0])
+        del cache[oldest]
 
 
 def _now() -> datetime:
@@ -24,6 +47,12 @@ async def get_analytics(request: Request):
     """Aggregate analytics across all bots currently in memory (24-hour window)."""
     account_id = getattr(request.state, "account_id", None)
     filter_account = account_id if (account_id and account_id != SUPERADMIN_ACCOUNT_ID) else None
+
+    cache_key = f"analytics:{filter_account}"
+    cached = _cache_get(_analytics_cache, cache_key, _ANALYTICS_TTL)
+    if cached is not None:
+        return cached
+
     all_bots, total = await store.list_bots(limit=10000, account_id=filter_account)
 
     by_status: dict[str, int] = {}
@@ -75,7 +104,7 @@ async def get_analytics(request: Request):
     # Top 5 workspaces by bot count
     top_workspaces = sorted(by_workspace.items(), key=lambda x: x[1], reverse=True)[:5]
 
-    return {
+    result = {
         "total_bots": total,
         "active_bots": active,
         "by_status": by_status,
@@ -92,6 +121,8 @@ async def get_analytics(request: Request):
         "quiet_participant_rate": quiet_participant_rate,
         "top_workspaces": [{"workspace_id": wid, "count": cnt} for wid, cnt in top_workspaces],
     }
+    _cache_set(_analytics_cache, cache_key, result)
+    return result
 
 
 @router.get("/action-items/stats", tags=["Analytics"])
@@ -201,6 +232,12 @@ async def get_api_usage(request: Request):
     """
     account_id = getattr(request.state, "account_id", None)
     filter_account = account_id if (account_id and account_id != SUPERADMIN_ACCOUNT_ID) else None
+
+    cache_key = f"api_usage:{filter_account}"
+    cached = _cache_get(_api_usage_cache, cache_key, _API_USAGE_TTL)
+    if cached is not None:
+        return cached
+
     all_bots, _ = await store.list_bots(limit=10000, account_id=filter_account)
 
     now = _now()
@@ -232,7 +269,7 @@ async def get_api_usage(request: Request):
             op_tokens[op] = op_tokens.get(op, 0) + usage.get("total_tokens", 0)
             op_cost[op] = op_cost.get(op, 0.0) + usage.get("cost_usd", 0.0)
 
-    return {
+    result = {
         "window": "24h_in_memory",
         "bots_created_7d": len(bots_7d),
         "bots_created_30d": len(bots_30d),
@@ -243,6 +280,8 @@ async def get_api_usage(request: Request):
         "tokens_by_operation_7d": op_tokens,
         "cost_by_operation_7d": {k: round(v, 6) for k, v in op_cost.items()},
     }
+    _cache_set(_api_usage_cache, cache_key, result)
+    return result
 
 
 @router.get("/search", tags=["Search"])
@@ -354,3 +393,72 @@ async def search_transcripts(
         "include_archived": include_archived,
         "results": matches,
     }
+
+
+# ── Audit Log ─────────────────────────────────────────────────────────────────
+
+class AuditLogEntryResponse(BaseModel):
+    id: str
+    account_id: Optional[str] = None
+    action: str
+    resource_type: Optional[str] = None
+    resource_id: Optional[str] = None
+    ip_address: Optional[str] = None
+    details: Optional[str] = None
+    created_at: datetime
+
+
+@router.get("/audit-log", response_model=list[AuditLogEntryResponse], tags=["Audit"])
+async def get_audit_log(
+    request: Request,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    action: Optional[str] = Query(None, description="Filter by action prefix, e.g. 'bot.created'"),
+    account_id_filter: Optional[str] = Query(None, alias="account_id", description="Admin only: filter by account ID"),
+):
+    """List audit log entries for the current account.
+
+    Non-admin users see only their own entries. Admins may pass `account_id`
+    to query any account's log.
+    """
+    requester_id: Optional[str] = getattr(request.state, "account_id", None)
+    is_admin = requester_id == SUPERADMIN_ACCOUNT_ID
+
+    # Determine which account to query
+    if is_admin and account_id_filter:
+        target_account_id = account_id_filter
+    elif requester_id and requester_id != SUPERADMIN_ACCOUNT_ID:
+        target_account_id = requester_id
+    else:
+        target_account_id = None  # superadmin without filter: return all
+
+    try:
+        from app.db import AsyncSessionLocal
+        from app.models.account import AuditLog
+        from sqlalchemy import select
+
+        async with AsyncSessionLocal() as db:
+            query = select(AuditLog)
+            if target_account_id:
+                query = query.where(AuditLog.account_id == target_account_id)
+            if action:
+                query = query.where(AuditLog.action.like(f"{action}%"))
+            query = query.order_by(AuditLog.created_at.desc()).limit(limit).offset(offset)
+            result = await db.execute(query)
+            rows = result.scalars().all()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return [
+        AuditLogEntryResponse(
+            id=r.id,
+            account_id=r.account_id,
+            action=r.action,
+            resource_type=r.resource_type,
+            resource_id=r.resource_id,
+            ip_address=r.ip_address,
+            details=r.details,
+            created_at=r.created_at,
+        )
+        for r in rows
+    ]

@@ -1,8 +1,8 @@
 # MeetingBot API
 
-**Version 2.2.0** — A stateless meeting bot API service with multi-tenant billing, business account support, Google/Microsoft SSO, Python & JS SDKs, webhook retry/delivery logs, bot persona customization, video recording, Prometheus metrics, idempotency keys, cloud storage, email notifications, calendar auto-join, Slack/Notion integrations, and GDPR compliance.
+**Version 2.3.0** — A stateless meeting bot API service with multi-tenant billing, business account support, Google/Microsoft SSO, Python & JS SDKs, webhook retry/delivery logs, bot persona customization, video recording, Prometheus metrics, idempotency keys, cloud storage, email notifications, calendar auto-join, Slack/Notion integrations, and GDPR compliance.
 
-> **Last updated:** 2026-03-18 · **API version in Swagger UI:** 2.2.0 · **Build fix:** resolved HTMLResponse NameError in admin docs endpoint <!-- auto-updated on each release -->
+> **Last updated:** 2026-03-19 · **API version in Swagger UI:** 2.3.0 · **Build:** async dashboard UX, security hardening, performance optimisations <!-- auto-updated on each release -->
 
 Send bots into **Zoom**, **Google Meet**, and **Microsoft Teams** meetings to record, transcribe, and analyse them with **Claude** (Anthropic) or **Gemini** (Google) AI.
 
@@ -10,9 +10,24 @@ Send bots into **Zoom**, **Google Meet**, and **Microsoft Teams** meetings to re
 
 ---
 
-## Recent changes (2026-03-18)
+## Recent changes (2026-03-19)
 
-### New features
+### UX — Async dashboard (zero page reloads)
+- **All 10 dashboard actions go async** — API key create/revoke, webhook register, integration add/toggle/delete, calendar feed add/toggle/delete all use `fetch()` + in-place DOM updates with toast notifications. No full-page reload.
+- **Browser back button** — `pushState` + `popstate` listener: pressing Back inside the dashboard restores the correct section in the browser history stack.
+- **Schedule Bot in-place update** — New bot row appended to the table without `window.location.reload()`.
+
+### Security
+- **Admin endpoint rate limits** — `PUT /admin/wallet`, `PUT /admin/rpc-url`, `POST /admin/credit`: 10/min per IP. `POST /admin/usdc/rescan`: 5/min per IP. Returns HTTP 429.
+- **Webhook replay protection** — All signed deliveries now include `X-MeetingBot-Timestamp`. HMAC is computed over `"{timestamp}.{body}"`. Reject deliveries where `abs(now - timestamp) > 300 s`.
+- **WebSocket DB error → explicit close** — Database failure during token lookup now closes the connection with code **4503** (`"Service temporarily unavailable"`) instead of silently passing `None` through.
+
+### Performance
+- **Bot queue latency: 10 s → near-zero** — Queue processor now wakes via `asyncio.Event` the moment a bot is enqueued (was `asyncio.sleep(10)`).
+- **Analytics caching** — `GET /api/v1/analytics` cached 30 s per account; `GET /api/v1/analytics/api-usage` cached 60 s. Reduces DB load under polling.
+- **Calendar dedup memory fix** — `_dispatched` set → bounded `dict` with 48-hour TTL; pruned every 288 poll cycles.
+
+### Previous changes (2026-03-18)
 - **Consent announcement + opt-out** — Set `consent_enabled: true` on a bot to announce recording at join. Transcripts are scanned for opt-out phrases; opted-out participants' content is redacted. Configure globally via `CONSENT_ANNOUNCEMENT_ENABLED` and `CONSENT_OPT_OUT_PHRASE` env vars.
 - **Auto-delete retention policies** — `GET/PUT /api/v1/retention` to configure per-account bot/recording/transcript retention days. A background task enforces policies nightly. Defaults controlled via `DEFAULT_BOT_RETENTION_DAYS` (90), `DEFAULT_RECORDING_RETENTION_DAYS` (30).
 - **Keyword alerts** — `POST /api/v1/keyword-alerts` to register keywords. A `bot.keyword_alert` webhook event fires whenever a keyword is detected in a transcript. Per-bot alerts can also be specified at creation via `keyword_alerts: [{"keyword": "...", "webhook_url": "..."}]`.
@@ -594,7 +609,7 @@ The background poll loop checks all active feeds every `CALENDAR_POLL_INTERVAL_S
 | `GET` | `/api/v1/bot/{id}/brief` | Pre-meeting brief: AI-generated agenda and background for an upcoming meeting. HTTP 425 if no transcript yet |
 | `GET` | `/api/v1/bot/{id}/recurring` | Recurring meeting intelligence: links to previous meetings at the same URL and surfaces recurring action items |
 | `GET` | `/api/v1/bot/{id}/video` | Download screen recording as MP4. HTTP 404 if not available. Enable per-bot with `record_video: true` |
-| `GET` | `/api/v1/health` or `/health` | Health check → `{"status": "ok", "service": "MeetingBot", "version": "2.2.0"}` |
+| `GET` | `/api/v1/health` or `/health` | Health check → `{"status": "ok", "service": "MeetingBot", "version": "2.3.0"}` |
 
 ### Admin (requires admin account)
 
@@ -731,7 +746,7 @@ Pass `template` in bot creation. Use `prompt_override` for a fully custom prompt
 | `409 Conflict` | Email already registered, or wallet already linked to another account |
 | `422 Unprocessable Entity` | Validation error (invalid meeting URL, bad wallet address format, etc.) |
 | `425 Too Early` | Transcript or analysis not yet available — retry after the `Retry-After` header value (seconds) |
-| `429 Too Many Requests` | Rate limit exceeded. Limits: register 3/min, login 5/min, create bot 20/min |
+| `429 Too Many Requests` | Rate limit exceeded. Limits: register 3/min, login 5/min, create bot 20/min, admin write endpoints 10/min (5/min for rescan) |
 | `503 Service Unavailable` | Database unreachable or service misconfigured |
 
 **Error response body:**
@@ -1105,7 +1120,11 @@ curl -X POST http://localhost:8000/api/v1/webhook \
   -d '{"url": "https://your-app.com/hook", "events": ["bot.done", "bot.error"], "secret": "my-signing-secret"}'
 ```
 
-**HMAC signing:** Pass `secret` when registering. All deliveries include an `X-MeetingBot-Signature: sha256=<hmac-sha256>` header computed over the raw request body. Verify this on your server to confirm the payload is authentic.
+**HMAC signing:** Pass `secret` when registering. All deliveries include two headers:
+- `X-MeetingBot-Signature: sha256=<hmac-sha256>` — HMAC-SHA256 computed over `"{timestamp}.{body}"`
+- `X-MeetingBot-Timestamp` — Unix timestamp (seconds) of when the delivery was created
+
+Verify by recomputing the HMAC over `f"{X-MeetingBot-Timestamp}.{raw_body}"` with your secret. Reject deliveries where `abs(time.time() - int(X-MeetingBot-Timestamp)) > 300` to prevent replay attacks.
 
 After **5 consecutive delivery failures** the webhook is automatically disabled. Re-enable it by deleting and re-registering.
 
@@ -1116,6 +1135,7 @@ Connect to `ws://host/api/v1/ws?token=<your-api-key-or-jwt>` for real-time event
 - Send `ping` to keep the connection alive.
 - Close code `4001` — auth required but no token provided.
 - Close code `4003` — invalid token.
+- Close code `4503` — database error during token lookup (transient; retry shortly).
 
 > **Rate limits:** `POST /api/v1/auth/register` is limited to 3 requests/min per IP, `POST /api/v1/auth/login` to 5/min, and `POST /api/v1/bot` to 20/min. Exceeded limits return HTTP 429.
 

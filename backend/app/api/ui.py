@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Form, Request, Response
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from jose import JWTError, jwt
 from sqlalchemy import select
@@ -464,20 +464,45 @@ async def create_key_ui(
 ):
     account = await _get_account_from_request(request, db)
     if not account:
+        _wants_json = "application/json" in request.headers.get("Accept", "")
+        if _wants_json:
+            return JSONResponse({"detail": "Unauthenticated"}, status_code=401)
         return RedirectResponse("/login")
+
+    # Support JSON body (async fetch from dashboard)
+    _wants_json = "application/json" in request.headers.get("Accept", "")
+    key_name = name or "New Key"
+    mode = "live"
+    if _wants_json:
+        try:
+            body = await request.json()
+            key_name = (body.get("name") or "New Key").strip()[:100]
+            mode = body.get("mode", "live")
+        except Exception:
+            pass
 
     from app.api.auth import generate_api_key
     import uuid
-    key_value = generate_api_key()
+    key_value = generate_api_key(mode=mode)
     api_key = ApiKey(
         id=str(uuid.uuid4()),
         account_id=account.id,
         key=key_value,
-        name=name or "New Key",
+        name=key_name,
+        mode=mode,
     )
     db.add(api_key)
     await db.commit()
 
+    if _wants_json:
+        return JSONResponse({
+            "id": api_key.id,
+            "name": api_key.name,
+            "full_key": key_value,
+            "key_preview": key_value[:16] + "...",
+            "mode": mode,
+            "created_at": api_key.created_at.isoformat() if api_key.created_at else None,
+        })
     return RedirectResponse(f"/dashboard?created=1&new_key={key_value}", status_code=303)
 
 
@@ -487,8 +512,11 @@ async def revoke_key_ui(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
+    _wants_json = "application/json" in request.headers.get("Accept", "")
     account = await _get_account_from_request(request, db)
     if not account:
+        if _wants_json:
+            return JSONResponse({"detail": "Unauthenticated"}, status_code=401)
         return RedirectResponse("/login")
 
     result = await db.execute(
@@ -499,37 +527,54 @@ async def revoke_key_ui(
         key.is_active = False
         await db.commit()
 
+    if _wants_json:
+        return JSONResponse({"revoked": True})
     return RedirectResponse("/dashboard", status_code=303)
 
 
 @router.post("/dashboard/wallet", include_in_schema=False)
 async def save_wallet_ui(
     request: Request,
-    wallet_address: str = Form(...),
+    wallet_address: str = Form(default=""),
     db: AsyncSession = Depends(get_db),
 ):
+    _wants_json = "application/json" in request.headers.get("Accept", "")
     account = await _get_account_from_request(request, db)
     if not account:
+        if _wants_json:
+            return JSONResponse({"detail": "Unauthenticated"}, status_code=401)
         return RedirectResponse("/login")
 
+    # Support JSON body
+    raw_address = wallet_address
+    if _wants_json:
+        try:
+            body = await request.json()
+            raw_address = body.get("wallet_address", "")
+        except Exception:
+            pass
+
     import re
-    # Normalize to lowercase — Ethereum addresses are case-insensitive;
-    # consistent storage ensures the monitor's case-folded lookup always matches.
-    address = wallet_address.strip().lower()
+    address = raw_address.strip().lower()
     if not re.match(r"^0x[0-9a-f]{40}$", address):
+        if _wants_json:
+            return JSONResponse({"detail": "Invalid Ethereum address"}, status_code=400)
         return RedirectResponse("/dashboard?wallet=error", status_code=303)
 
-    # Check uniqueness
     from app.models.account import Account as AccountModel
     existing = await db.execute(
         select(AccountModel).where(AccountModel.wallet_address == address, AccountModel.id != account.id)
     )
     if existing.scalar_one_or_none():
+        if _wants_json:
+            return JSONResponse({"detail": "Wallet address already registered to another account"}, status_code=409)
         return RedirectResponse("/dashboard?wallet=taken", status_code=303)
 
     account.wallet_address = address
     await db.commit()
 
+    if _wants_json:
+        return JSONResponse({"wallet_address": address, "message": "Wallet address saved"})
     return RedirectResponse("/dashboard?wallet=saved", status_code=303)
 
 
@@ -540,13 +585,29 @@ async def update_notifications_ui(
     notify_email: str = Form(default=""),
     db: AsyncSession = Depends(get_db),
 ):
+    _wants_json = "application/json" in request.headers.get("Accept", "")
     account = await _get_account_from_request(request, db)
     if not account:
+        if _wants_json:
+            return JSONResponse({"detail": "Unauthenticated"}, status_code=401)
         return RedirectResponse("/login")
 
-    account.notify_on_done = notify_on_done == "on"
-    account.notify_email = notify_email.strip() or None
+    notify_flag = notify_on_done
+    email_val = notify_email
+    if _wants_json:
+        try:
+            body = await request.json()
+            notify_flag = "on" if body.get("notify_on_done") else ""
+            email_val = body.get("notify_email", "")
+        except Exception:
+            pass
+
+    account.notify_on_done = notify_flag == "on"
+    account.notify_email = (email_val or "").strip() or None
     await db.commit()
+
+    if _wants_json:
+        return JSONResponse({"notify_on_done": account.notify_on_done, "message": "Preferences saved"})
     return RedirectResponse("/dashboard?notify=saved", status_code=303)
 
 
@@ -1142,7 +1203,7 @@ async def admin_set_account_type(
 @router.post("/dashboard/integrations/add", include_in_schema=False)
 async def add_integration_ui(
     request: Request,
-    integ_type: str = Form(...),
+    integ_type: str = Form(default=""),
     name: str = Form(default=""),
     slack_webhook_url: str = Form(default=""),
     notion_api_token: str = Form(default=""),
@@ -1151,13 +1212,30 @@ async def add_integration_ui(
 ):
     """Add a Slack or Notion integration from the dashboard UI."""
     import json, uuid
+    _wants_json = "application/json" in request.headers.get("Accept", "")
     account = await _get_account_from_request(request, db)
     if not account:
+        if _wants_json:
+            return JSONResponse({"detail": "Unauthenticated"}, status_code=401)
         return RedirectResponse("/login")
+
+    # Support JSON body
+    if _wants_json:
+        try:
+            body = await request.json()
+            integ_type = body.get("integ_type", integ_type)
+            name = body.get("name", name)
+            slack_webhook_url = body.get("slack_webhook_url", slack_webhook_url)
+            notion_api_token = body.get("notion_api_token", notion_api_token)
+            notion_database_id = body.get("notion_database_id", notion_database_id)
+        except Exception:
+            pass
 
     if integ_type == "slack":
         url = slack_webhook_url.strip()
         if not url.startswith("https://hooks.slack.com/"):
+            if _wants_json:
+                return JSONResponse({"detail": "Invalid Slack webhook URL"}, status_code=400)
             return RedirectResponse("/dashboard?integ_error=invalid_slack_url#integrations", status_code=303)
         config = json.dumps({"webhook_url": url})
         display_name = name.strip() or "Slack"
@@ -1165,10 +1243,14 @@ async def add_integration_ui(
         token = notion_api_token.strip()
         db_id = notion_database_id.strip()
         if not token or not db_id:
+            if _wants_json:
+                return JSONResponse({"detail": "Notion API token and database ID are required"}, status_code=400)
             return RedirectResponse("/dashboard?integ_error=notion_missing_fields#integrations", status_code=303)
         config = json.dumps({"api_token": token, "database_id": db_id})
         display_name = name.strip() or "Notion"
     else:
+        if _wants_json:
+            return JSONResponse({"detail": "Invalid integration type"}, status_code=400)
         return RedirectResponse("/dashboard?integ_error=invalid_type#integrations", status_code=303)
 
     from app.models.account import Integration
@@ -1183,6 +1265,9 @@ async def add_integration_ui(
     db.add(integ)
     await db.commit()
     logger.info("Added %s integration for account %s", integ_type, account.email)
+
+    if _wants_json:
+        return JSONResponse({"id": integ.id, "type": integ_type, "name": display_name, "is_active": True})
     return RedirectResponse("/dashboard?integ_added=1#integrations", status_code=303)
 
 
@@ -1192,8 +1277,11 @@ async def delete_integration_ui(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
+    _wants_json = "application/json" in request.headers.get("Accept", "")
     account = await _get_account_from_request(request, db)
     if not account:
+        if _wants_json:
+            return JSONResponse({"detail": "Unauthenticated"}, status_code=401)
         return RedirectResponse("/login")
 
     from app.models.account import Integration
@@ -1204,6 +1292,9 @@ async def delete_integration_ui(
     if integ:
         await db.delete(integ)
         await db.commit()
+
+    if _wants_json:
+        return JSONResponse({"deleted": True})
     return RedirectResponse("/dashboard?integ_deleted=1#integrations", status_code=303)
 
 
@@ -1213,8 +1304,11 @@ async def toggle_integration_ui(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
+    _wants_json = "application/json" in request.headers.get("Accept", "")
     account = await _get_account_from_request(request, db)
     if not account:
+        if _wants_json:
+            return JSONResponse({"detail": "Unauthenticated"}, status_code=401)
         return RedirectResponse("/login")
 
     from app.models.account import Integration
@@ -1225,6 +1319,9 @@ async def toggle_integration_ui(
     if integ:
         integ.is_active = not integ.is_active
         await db.commit()
+
+    if _wants_json:
+        return JSONResponse({"id": integ_id, "is_active": integ.is_active if integ else False})
     return RedirectResponse("/dashboard#integrations", status_code=303)
 
 
@@ -1234,34 +1331,54 @@ async def toggle_integration_ui(
 async def add_calendar_ui(
     request: Request,
     name: str = Form(default="My Calendar"),
-    ical_url: str = Form(...),
+    ical_url: str = Form(default=""),
     bot_name: str = Form(default=""),
     auto_record: str = Form(default="on"),
     db: AsyncSession = Depends(get_db),
 ):
     """Add an iCal calendar feed from the dashboard UI."""
     import uuid
+    _wants_json = "application/json" in request.headers.get("Accept", "")
     account = await _get_account_from_request(request, db)
     if not account:
+        if _wants_json:
+            return JSONResponse({"detail": "Unauthenticated"}, status_code=401)
         return RedirectResponse("/login")
 
-    url = ical_url.strip()
+    # Support JSON body
+    cal_name, cal_url, cal_bot_name, cal_auto = name, ical_url, bot_name, auto_record
+    if _wants_json:
+        try:
+            body = await request.json()
+            cal_name = body.get("name", name)
+            cal_url = body.get("ical_url", ical_url)
+            cal_bot_name = body.get("bot_name", bot_name)
+            cal_auto = "on" if body.get("auto_record", True) else "off"
+        except Exception:
+            pass
+
+    url = cal_url.strip()
     if not url.startswith(("http://", "https://")):
+        if _wants_json:
+            return JSONResponse({"detail": "Invalid calendar URL — must start with http:// or https://"}, status_code=400)
         return RedirectResponse("/dashboard?cal_error=invalid_url#calendar", status_code=303)
 
     from app.models.account import CalendarFeed
     feed = CalendarFeed(
         id=str(uuid.uuid4()),
         account_id=account.id,
-        name=(name.strip() or "My Calendar")[:100],
+        name=(cal_name.strip() or "My Calendar")[:100],
         ical_url=url,
-        bot_name=(bot_name.strip() or None),
-        auto_record=(auto_record == "on"),
+        bot_name=(cal_bot_name.strip() or None),
+        auto_record=(cal_auto == "on"),
         is_active=True,
     )
     db.add(feed)
     await db.commit()
     logger.info("Added calendar feed '%s' for account %s", feed.name, account.email)
+
+    if _wants_json:
+        return JSONResponse({"id": feed.id, "name": feed.name, "url": feed.ical_url, "is_active": True})
     return RedirectResponse("/dashboard?cal_added=1#calendar", status_code=303)
 
 
@@ -1271,8 +1388,11 @@ async def delete_calendar_ui(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
+    _wants_json = "application/json" in request.headers.get("Accept", "")
     account = await _get_account_from_request(request, db)
     if not account:
+        if _wants_json:
+            return JSONResponse({"detail": "Unauthenticated"}, status_code=401)
         return RedirectResponse("/login")
 
     from app.models.account import CalendarFeed
@@ -1283,6 +1403,9 @@ async def delete_calendar_ui(
     if feed:
         await db.delete(feed)
         await db.commit()
+
+    if _wants_json:
+        return JSONResponse({"deleted": True})
     return RedirectResponse("/dashboard?cal_deleted=1#calendar", status_code=303)
 
 
@@ -1292,8 +1415,11 @@ async def toggle_calendar_ui(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
+    _wants_json = "application/json" in request.headers.get("Accept", "")
     account = await _get_account_from_request(request, db)
     if not account:
+        if _wants_json:
+            return JSONResponse({"detail": "Unauthenticated"}, status_code=401)
         return RedirectResponse("/login")
 
     from app.models.account import CalendarFeed
@@ -1304,4 +1430,47 @@ async def toggle_calendar_ui(
     if feed:
         feed.is_active = not feed.is_active
         await db.commit()
+
+    if _wants_json:
+        return JSONResponse({"id": feed_id, "is_active": feed.is_active if feed else False})
     return RedirectResponse("/dashboard#calendar", status_code=303)
+
+
+# ── Webhook proxy (cookie-auth bridge for dashboard) ──────────────────────────
+
+@router.post("/dashboard/webhook", include_in_schema=False)
+async def create_webhook_ui(request: Request, db: AsyncSession = Depends(get_db)):
+    """Proxy webhook creation through cookie auth so the dashboard can use fetch().
+
+    The main /api/v1/webhook endpoint requires Bearer auth; this route accepts the
+    JWT cookie used by the dashboard and delegates to the same store logic.
+    """
+    account = await _get_account_from_request(request, db)
+    if not account:
+        return JSONResponse({"detail": "Unauthenticated"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"detail": "Invalid JSON body"}, status_code=400)
+
+    url = (body.get("url") or "").strip()
+    if not url:
+        return JSONResponse({"detail": "url is required"}, status_code=400)
+
+    from app.api.webhooks import _block_ssrf
+    from app.store import store as _wh_store
+    try:
+        await _block_ssrf(url)
+    except Exception as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=400)
+
+    events = body.get("events") or ["*"]
+    secret = body.get("secret") or None
+    wh = await _wh_store.new_webhook(url=url, events=events, secret=secret)
+    return JSONResponse({
+        "id": wh.id,
+        "url": wh.url,
+        "events": wh.events,
+        "is_active": wh.is_active,
+        "created_at": wh.created_at.isoformat() if wh.created_at else None,
+    })
