@@ -4,7 +4,14 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.5.7 — **Last updated:** 2026-03-21
+> **Latest version:** 2.5.8 — **Last updated:** 2026-03-21
+
+---
+
+## [2.5.8] - 2026-03-21
+
+### Fixed
+- **OnePizza join button disabled** — The lobby disables the join button until a name is entered; the `?name=` URL param doesn't always auto-populate. Now force-fills the name field, waits 0.5s for UI to react, and retries up to 3x if button is disabled (re-filling name each time). Added logging at every step for diagnostics.
 
 ---
 

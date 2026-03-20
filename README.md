@@ -1,8 +1,8 @@
 # MeetingBot API
 
-**Version 2.5.7** — A stateless meeting bot API service with multi-tenant billing, business account support, Google/Microsoft SSO, Python & JS SDKs, webhook retry/delivery logs, bot persona customization, video recording, Prometheus metrics, idempotency keys, cloud storage, email notifications, calendar auto-join, Slack/Notion integrations, and GDPR compliance.
+**Version 2.5.8** — A stateless meeting bot API service with multi-tenant billing, business account support, Google/Microsoft SSO, Python & JS SDKs, webhook retry/delivery logs, bot persona customization, video recording, Prometheus metrics, idempotency keys, cloud storage, email notifications, calendar auto-join, Slack/Notion integrations, and GDPR compliance.
 
-> **Last updated:** 2026-03-20 · **API version in Swagger UI:** 2.5.7 · **Build:** modern light theme UI redesign, comprehensive admin analytics <!-- auto-updated on each release -->
+> **Last updated:** 2026-03-20 · **API version in Swagger UI:** 2.5.8 · **Build:** modern light theme UI redesign, comprehensive admin analytics <!-- auto-updated on each release -->
 
 Send bots into **Zoom**, **Google Meet**, and **Microsoft Teams** meetings to record, transcribe, and analyse them with **Claude** (Anthropic) or **Gemini** (Google) AI.
 
