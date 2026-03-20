@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import uuid
+from collections import deque
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -39,7 +40,7 @@ class BotStatsResponse(BaseModel):
 _running_tasks: dict[str, asyncio.Task] = {}
 
 # FIFO queue of bot IDs waiting for a free slot
-_bot_queue: list[str] = []
+_bot_queue: deque[str] = deque()
 
 _ACTIVE_STATUSES = ("ready", "scheduled", "queued", "joining", "in_call", "call_ended")
 _queue_event = asyncio.Event()
@@ -64,7 +65,7 @@ async def _queue_processor() -> None:
         active = sum(1 for t in _running_tasks.values() if not t.done())
         if active >= settings.MAX_CONCURRENT_BOTS:
             continue
-        bot_id = _bot_queue.pop(0)
+        bot_id = _bot_queue.popleft()
         if await store.get_bot(bot_id) is None:
             logger.warning("Queue: bot %s was deleted — skipping", bot_id)
             continue
@@ -151,8 +152,8 @@ async def _check_workspace_role(bot: BotSession, account_id: Optional[str], min_
     except HTTPException:
         raise
     except Exception as exc:
-        logger.warning("Workspace RBAC check failed: %s", exc)
-        # Fail open — don't block on DB errors
+        logger.error("Workspace RBAC check failed: %s", exc)
+        raise HTTPException(status_code=500, detail="Authorization check temporarily unavailable")
 
 
 def _to_response(bot: BotSession) -> BotResponse:

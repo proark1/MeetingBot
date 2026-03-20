@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, HttpUrl
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.webhooks import _block_ssrf
 from app.db import get_db
 from app.deps import get_current_account_id, SUPERADMIN_ACCOUNT_ID
 from app.models.account import CalendarFeed
@@ -101,8 +102,7 @@ async def create_feed(
     if not account_id or account_id == SUPERADMIN_ACCOUNT_ID:
         raise HTTPException(status_code=403, detail="Use per-user authentication")
 
-    if not payload.ical_url.startswith(("http://", "https://")):
-        raise HTTPException(status_code=422, detail="ical_url must be an http(s) URL")
+    await _block_ssrf(payload.ical_url)
 
     feed = CalendarFeed(
         id=str(uuid.uuid4()),
@@ -142,6 +142,7 @@ async def update_feed(
     if not feed:
         raise HTTPException(status_code=404, detail="Calendar feed not found")
 
+    await _block_ssrf(payload.ical_url)
     feed.name = payload.name
     feed.ical_url = payload.ical_url
     feed.bot_name = payload.bot_name

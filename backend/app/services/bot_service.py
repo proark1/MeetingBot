@@ -415,6 +415,7 @@ async def _do_analysis_inner(bot: BotSession, audio_path: str, use_real_bot: boo
                 account_id=bot.account_id,
                 bot_id=bot.id,
                 items=analysis_result.get("action_items", []),
+                sub_user_id=bot.sub_user_id,
             )
         except Exception as exc:
             logger.warning("Bot %s: action item upsert failed: %s", bot.id, exc)
@@ -569,9 +570,9 @@ async def _post_completion_notifications(account_id: str, bot_data: dict, bot=No
     if bot:
         try:
             from urllib.parse import urlparse
-            base_url = urlparse(bot.meeting_url).scheme + "://" + (urlparse(bot.meeting_url).netloc or "")
-            path = urlparse(bot.meeting_url).path.split("?")[0]
-            canonical_url = base_url + path
+            parsed = urlparse(bot.meeting_url)
+            path = parsed.path.split("?")[0]
+            canonical_url = parsed.scheme + "://" + (parsed.netloc or "") + path
 
             recent_bots, _ = await store.list_bots(limit=500, account_id=account_id)
             matching = [
@@ -676,15 +677,25 @@ async def run_bot_lifecycle(bot_id: str) -> None:
                 # Push to SSE subscribers
                 try:
                     from app.services.sse_manager import push_entry as _sse_push
-                    asyncio.create_task(_sse_push(bot_id, entry))
+
+                    async def _safe_sse_push(_bid=bot_id, _e=entry):
+                        try:
+                            await _sse_push(_bid, _e)
+                        except Exception:
+                            logger.debug("SSE push failed for bot %s", _bid, exc_info=True)
+
+                    asyncio.create_task(_safe_sse_push())
                 except Exception:
                     pass
 
                 if should_flush:
                     async with _live_lock:
                         snapshot = list(_live_buffer)
-                    await store.update_bot(bot_id, transcript=snapshot)
-                    _last_flush = time.monotonic()
+                    try:
+                        await store.update_bot(bot_id, transcript=snapshot)
+                        _last_flush = time.monotonic()
+                    except Exception:
+                        logger.warning("Bot %s: transcript flush failed, will retry", bot_id)
 
                 # ── Real-time translation ─────────────────────────────────────
                 if getattr(bot, "translation_language", None):

@@ -22,6 +22,15 @@ logger = logging.getLogger(__name__)
 
 _http_client: httpx.AsyncClient | None = None
 
+# Per-webhook locks to prevent concurrent state mutation race conditions
+_webhook_locks: dict[str, asyncio.Lock] = {}
+
+
+def _get_webhook_lock(wh_id: str) -> asyncio.Lock:
+    if wh_id not in _webhook_locks:
+        _webhook_locks[wh_id] = asyncio.Lock()
+    return _webhook_locks[wh_id]
+
 
 def _get_client() -> httpx.AsyncClient:
     global _http_client
@@ -153,52 +162,53 @@ async def dispatch_event(
         if not subscribed:
             continue
 
-        hdrs = dict(headers_base)
-        if wh.secret:
-            sig, ts = _sign(body, wh.secret)
-            hdrs["X-MeetingBot-Signature"] = sig
-            hdrs["X-MeetingBot-Timestamp"] = ts
+        async with _get_webhook_lock(wh.id):
+            hdrs = dict(headers_base)
+            if wh.secret:
+                sig, ts = _sign(body, wh.secret)
+                hdrs["X-MeetingBot-Signature"] = sig
+                hdrs["X-MeetingBot-Timestamp"] = ts
 
-        delivery_id = await _log_delivery(
-            webhook_id=wh.id, bot_id=bot_id, event=event,
-            request_body=body, status="pending",
-        )
-
-        status_code, resp_text = await _attempt_delivery(wh.url, body, hdrs)
-        now = datetime.now(timezone.utc)
-
-        if status_code is not None and status_code < 500:
-            await _log_delivery(
+            delivery_id = await _log_delivery(
                 webhook_id=wh.id, bot_id=bot_id, event=event,
-                request_body=body, status="success", attempt_number=1,
-                response_status_code=status_code, response_body=resp_text,
-                delivered_at=now, delivery_id=delivery_id,
+                request_body=body, status="pending",
             )
-            logger.info("Webhook delivered  wh=%s  url=%s  status=%d", wh.id, wh.url, status_code)
-            wh.consecutive_failures = 0
-        else:
-            delays = _retry_delays()
-            next_retry_at = now + timedelta(seconds=delays[0]) if delays else None
-            await _log_delivery(
-                webhook_id=wh.id, bot_id=bot_id, event=event,
-                request_body=body, status="retrying", attempt_number=1,
-                response_status_code=status_code, response_body=resp_text,
-                error_message=resp_text if status_code is None else None,
-                next_retry_at=next_retry_at, delivery_id=delivery_id,
-            )
-            logger.warning(
-                "Webhook delivery failed  wh=%s  url=%s  status=%s — retry at %s",
-                wh.id, wh.url, status_code, next_retry_at,
-            )
-            wh.consecutive_failures = (wh.consecutive_failures or 0) + 1
-            if wh.consecutive_failures >= 5:
-                wh.is_active = False
-                logger.warning("Webhook %s auto-disabled (5 consecutive failures)", wh.id)
 
-        wh.delivery_attempts += 1
-        wh.last_delivery_at = now
-        wh.last_delivery_status = status_code
-        await store._persist_webhook(wh)
+            status_code, resp_text = await _attempt_delivery(wh.url, body, hdrs)
+            now = datetime.now(timezone.utc)
+
+            if status_code is not None and status_code < 500:
+                await _log_delivery(
+                    webhook_id=wh.id, bot_id=bot_id, event=event,
+                    request_body=body, status="success", attempt_number=1,
+                    response_status_code=status_code, response_body=resp_text,
+                    delivered_at=now, delivery_id=delivery_id,
+                )
+                logger.info("Webhook delivered  wh=%s  url=%s  status=%d", wh.id, wh.url, status_code)
+                wh.consecutive_failures = 0
+            else:
+                delays = _retry_delays()
+                next_retry_at = now + timedelta(seconds=delays[0]) if delays else None
+                await _log_delivery(
+                    webhook_id=wh.id, bot_id=bot_id, event=event,
+                    request_body=body, status="retrying", attempt_number=1,
+                    response_status_code=status_code, response_body=resp_text,
+                    error_message=resp_text if status_code is None else None,
+                    next_retry_at=next_retry_at, delivery_id=delivery_id,
+                )
+                logger.warning(
+                    "Webhook delivery failed  wh=%s  url=%s  status=%s — retry at %s",
+                    wh.id, wh.url, status_code, next_retry_at,
+                )
+                wh.consecutive_failures = (wh.consecutive_failures or 0) + 1
+                if wh.consecutive_failures >= 5:
+                    wh.is_active = False
+                    logger.warning("Webhook %s auto-disabled (5 consecutive failures)", wh.id)
+
+            wh.delivery_attempts += 1
+            wh.last_delivery_at = now
+            wh.last_delivery_status = status_code
+            await store._persist_webhook(wh)
 
     # Per-bot best-effort webhook (no retry, no DB log)
     if extra_webhook_url:

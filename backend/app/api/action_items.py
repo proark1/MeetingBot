@@ -63,11 +63,14 @@ async def list_action_items(
 ):
     """List action items for the authenticated account."""
     account_id: Optional[str] = getattr(request.state, "account_id", None)
+    sub_user_id = (request.headers.get("X-Sub-User", "").strip()[:255]) or None
 
     async with AsyncSessionLocal() as session:
         q = select(ActionItem)
         if account_id and account_id != SUPERADMIN_ACCOUNT_ID:
             q = q.where(ActionItem.account_id == account_id)
+        if sub_user_id is not None:
+            q = q.where(ActionItem.sub_user_id == sub_user_id)
         if status:
             q = q.where(ActionItem.status == status)
         if assignee:
@@ -83,6 +86,7 @@ async def list_action_items(
 async def patch_action_item(item_id: str, request: Request, payload: ActionItemPatch):
     """Update an action item's status, assignee, or due date."""
     account_id: Optional[str] = getattr(request.state, "account_id", None)
+    sub_user_id = (request.headers.get("X-Sub-User", "").strip()[:255]) or None
 
     async with AsyncSessionLocal() as session:
         result = await session.execute(select(ActionItem).where(ActionItem.id == item_id))
@@ -90,6 +94,8 @@ async def patch_action_item(item_id: str, request: Request, payload: ActionItemP
         if row is None:
             raise HTTPException(status_code=404, detail=f"Action item {item_id!r} not found")
         if account_id and account_id != SUPERADMIN_ACCOUNT_ID and row.account_id != account_id:
+            raise HTTPException(status_code=404, detail=f"Action item {item_id!r} not found")
+        if sub_user_id is not None and getattr(row, "sub_user_id", None) != sub_user_id:
             raise HTTPException(status_code=404, detail=f"Action item {item_id!r} not found")
 
         if payload.status is not None:
@@ -111,7 +117,7 @@ async def patch_action_item(item_id: str, request: Request, payload: ActionItemP
     return _to_response(row)
 
 
-async def upsert_action_items(account_id: Optional[str], bot_id: str, items: list[dict]) -> None:
+async def upsert_action_items(account_id: Optional[str], bot_id: str, items: list[dict], sub_user_id: Optional[str] = None) -> None:
     """Called after analysis completes to persist action items to the DB.
 
     Uses a content hash (sha256 of bot_id + task text) for idempotent upsert.
@@ -133,6 +139,7 @@ async def upsert_action_items(account_id: Optional[str], bot_id: str, items: lis
             row = ActionItem(
                 id=hashlib.sha256(f"{bot_id}:{task_text}".encode()).hexdigest()[:36],
                 account_id=account_id,
+                sub_user_id=sub_user_id,
                 bot_id=bot_id,
                 content_hash=content_hash,
                 task=task_text,

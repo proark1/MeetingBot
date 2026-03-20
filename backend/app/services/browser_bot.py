@@ -3141,6 +3141,11 @@ async def run_browser_bot(
         live_transcript: list of {speaker, text, timestamp} dicts produced by
         the streaming VAD loop (may be empty if Gemini key is absent).
     """
+    try:
+        _prune_screenshots()
+    except Exception:
+        pass
+
     pulse_idx:          Optional[str] = None
     pulse_mic_idx:      Optional[str] = None   # null-sink module index
     pulse_mic_virt_idx: Optional[str] = None   # virtual-source module index

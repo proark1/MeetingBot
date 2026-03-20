@@ -428,6 +428,7 @@ class ActionItem(Base):
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True, default=_uuid)
     account_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
+    sub_user_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
     bot_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     # Stable content hash so upsert is idempotent: sha256(bot_id + task.lower().strip())
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)

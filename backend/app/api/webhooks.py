@@ -6,6 +6,7 @@ For per-bot webhooks, pass `webhook_url` when creating a bot.
 
 import asyncio
 import ipaddress
+import logging
 import socket
 from urllib.parse import urlparse
 
@@ -16,6 +17,7 @@ from slowapi.util import get_remote_address as _get_remote_address
 from app.schemas.webhook import WebhookCreate, WebhookResponse
 from app.store import store
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/webhook", tags=["Webhooks"])
 _limiter = _Limiter(key_func=_get_remote_address)
 
@@ -255,8 +257,9 @@ async def list_all_deliveries(
                 .offset(offset)
             )
             rows = result.scalars().all()
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+    except Exception:
+        logger.exception("Failed to list webhook deliveries")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
     return [
         DeliveryResponse(
@@ -305,8 +308,9 @@ async def list_deliveries(
                 .offset(offset)
             )
             rows = result.scalars().all()
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+    except Exception:
+        logger.exception("Failed to list webhook deliveries for webhook %s", webhook_id)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
     return [
         DeliveryResponse(
