@@ -73,6 +73,31 @@
   .admin-section { display: none; }
   .admin-section.active { display: block; }
 
+  /* ── Analytics sub-tabs ──────────────────────────────────────────────── */
+  .analytics-tabs {
+    display: flex;
+    gap: 0.15rem;
+    margin-bottom: 1.25rem;
+    border-bottom: 1px solid #e5e7eb;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .analytics-tab {
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 0.55rem 0.85rem;
+    font-size: 13px;
+    font-weight: 500;
+    color: #6b7280;
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .analytics-tab:hover { color: #111827; }
+  .analytics-tab.active { color: #4f46e5; border-bottom-color: #6366f1; font-weight: 600; }
+
   .admin-section-hdr {
     display: flex;
     justify-content: space-between;
@@ -252,7 +277,7 @@
 
       <!-- Plan breakdown + Bot activity -->
       <div class="row g-3 mb-3">
-        <div class="col-md-4">
+        <div class="col-md-6">
           <div class="card card-pad h-100">
             <div class="section-title mb-3">Subscription Plans</div>
             {% for plan_name, plan_label, chip_class in [("free","Free","chip-gray"),("starter","Starter","chip-info"),("pro","Pro","chip-purple"),("business","Business","chip-warning")] %}
@@ -264,9 +289,9 @@
           </div>
         </div>
 
-        <div class="col-md-4">
+        <div class="col-md-6">
           <div class="card card-pad h-100">
-            <div class="section-title mb-3">Bot Activity <span style="font-weight:400;color:#94a3b8;font-size:11px">(24h)</span></div>
+            <div class="section-title mb-3">Bot Activity <span style="font-weight:400;color:#9ca3af;font-size:11px">(24h)</span></div>
             <div class="d-flex justify-content-between align-items-center py-2 border-bottom">
               <span style="font-size:13px;color:#64748b">Total</span>
               <span class="fw-bold">{{ bot_stats.total }}</span>
@@ -286,46 +311,6 @@
           </div>
         </div>
 
-        <div class="col-md-4">
-          <div class="card card-pad h-100">
-            <div class="section-title mb-3">Platform Features</div>
-            <div class="status-row"><span class="status-key">Active Webhooks</span><span class="fw-bold">{{ active_webhook_count }}</span></div>
-            <div class="status-row"><span class="status-key">Integrations</span><span class="fw-bold">{{ active_integration_count }}</span></div>
-            <div class="status-row"><span class="status-key">Calendar Feeds</span><span class="fw-bold">{{ active_calendar_feed_count }}</span></div>
-            <div class="status-row"><span class="status-key">SSO-Linked</span><span class="fw-bold">{{ oauth_linked_count }}</span></div>
-            <div class="status-row"><span class="status-key">Total AI Tokens</span><span class="fw-bold">{{ "{:,}".format(bot_stats.total_ai_tokens) }}</span></div>
-            <div class="status-row"><span class="status-key">Total AI Cost</span><span class="fw-bold">${{ "%.4f"|format(bot_stats.total_ai_cost_usd) }}</span></div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Bot activity details -->
-      <div class="card card-pad mb-3">
-        <div class="section-title mb-3">Bot Breakdown</div>
-        <div class="row g-3">
-          <div class="col-md-4">
-            <div class="small fw-semibold text-muted mb-2">By Status</div>
-            {% if bot_stats.by_status %}
-            {% for status, count in bot_stats.by_status.items() %}
-            <div class="d-flex justify-content-between small py-1 border-bottom">
-              <span>{{ status.replace("_", " ").title() }}</span>
-              <span class="fw-bold">{{ count }}</span>
-            </div>
-            {% endfor %}
-            {% else %}<div class="text-muted small">No bots yet</div>{% endif %}
-          </div>
-          <div class="col-md-4">
-            <div class="small fw-semibold text-muted mb-2">By Platform</div>
-            {% if bot_stats.by_platform %}
-            {% for platform, count in bot_stats.by_platform.items() %}
-            <div class="d-flex justify-content-between small py-1 border-bottom">
-              <span>{{ platform.replace("_", " ").title() }}</span>
-              <span class="fw-bold">{{ count }}</span>
-            </div>
-            {% endfor %}
-            {% else %}<div class="text-muted small">No bots yet</div>{% endif %}
-          </div>
-        </div>
       </div>
 
       <!-- Recent transactions summary -->
@@ -629,7 +614,15 @@
       <div class="admin-section-hdr">
         <div>
           <h2>System Status</h2>
-          <p>Integration health, storage backend, and feature flags</p>
+          <p>Runtime health, integration status, and feature flags</p>
+        </div>
+      </div>
+
+      <!-- Runtime status (populated by analytics JS) -->
+      <div class="card card-pad mb-3">
+        <div class="section-title mb-2">Runtime Status</div>
+        <div class="admin-kpi-grid" id="system-kpi-grid" style="grid-template-columns:repeat(4,1fr)">
+          <div class="text-muted small py-2">Load analytics to populate runtime metrics.</div>
         </div>
       </div>
 
@@ -827,162 +820,180 @@
 
       <div id="analytics-content" style="display:none">
 
-        <!-- KPI row -->
-        <div class="admin-kpi-grid" id="analytics-kpi-grid" style="grid-template-columns:repeat(4,1fr)"></div>
+        <!-- ── Analytics sub-tabs ──────────────────────────────────────────── -->
+        <div class="analytics-tabs">
+          <button class="analytics-tab active" data-atab="overview">Overview</button>
+          <button class="analytics-tab" data-atab="ai">AI & Costs</button>
+          <button class="analytics-tab" data-atab="errors">Errors & Health</button>
+          <button class="analytics-tab" data-atab="features">Features</button>
+          <button class="analytics-tab" data-atab="users">Users</button>
+        </div>
 
-        <!-- Activity chart + Platform doughnut -->
-        <div class="row g-3 mb-3">
-          <div class="col-md-8">
-            <div class="card card-pad h-100">
-              <div class="section-title mb-2">Bot Activity — last 30 days</div>
-              <canvas id="chart-activity" height="130"></canvas>
+        <!-- ═══ TAB: Overview ═══════════════════════════════════════════════ -->
+        <div class="atab-panel" data-atab="overview">
+          <!-- KPI row -->
+          <div class="admin-kpi-grid" id="analytics-kpi-grid" style="grid-template-columns:repeat(4,1fr)"></div>
+
+          <!-- Activity chart + Platform doughnut -->
+          <div class="row g-3 mb-3">
+            <div class="col-md-8">
+              <div class="card card-pad h-100">
+                <div class="section-title mb-2">Bot Activity — last 30 days</div>
+                <canvas id="chart-activity" height="130"></canvas>
+              </div>
             </div>
-          </div>
-          <div class="col-md-4">
-            <div class="card card-pad h-100 d-flex flex-column">
-              <div class="section-title mb-2">Platform Breakdown</div>
-              <div style="flex:1;display:flex;align-items:center;justify-content:center">
-                <canvas id="chart-platforms" style="max-height:200px"></canvas>
+            <div class="col-md-4">
+              <div class="card card-pad h-100 d-flex flex-column">
+                <div class="section-title mb-2">Platform Breakdown</div>
+                <div style="flex:1;display:flex;align-items:center;justify-content:center">
+                  <canvas id="chart-platforms" style="max-height:200px"></canvas>
+                </div>
               </div>
             </div>
           </div>
         </div>
 
-        <!-- AI usage row -->
-        <div class="row g-3 mb-3">
-          <div class="col-md-6">
-            <div class="card card-pad h-100">
-              <div class="section-title mb-2">AI Usage by Model</div>
-              <div id="ai-model-table"></div>
+        <!-- ═══ TAB: AI & Costs ═════════════════════════════════════════════ -->
+        <div class="atab-panel" data-atab="ai" style="display:none">
+          <!-- AI usage row -->
+          <div class="row g-3 mb-3">
+            <div class="col-md-6">
+              <div class="card card-pad h-100">
+                <div class="section-title mb-2">AI Usage by Model</div>
+                <div id="ai-model-table"></div>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="card card-pad h-100">
+                <div class="section-title mb-2">AI Usage by Operation</div>
+                <div id="ai-op-table"></div>
+              </div>
             </div>
           </div>
-          <div class="col-md-6">
-            <div class="card card-pad h-100">
-              <div class="section-title mb-2">AI Usage by Operation</div>
-              <div id="ai-op-table"></div>
+
+          <!-- AI token trend -->
+          <div class="card card-pad mb-3">
+            <div class="section-title mb-2">AI Token Usage — last 30 days</div>
+            <canvas id="chart-ai-trend" height="100"></canvas>
+          </div>
+
+          <!-- Revenue & Credit Flow -->
+          <div class="row g-3 mb-3">
+            <div class="col-md-8">
+              <div class="card card-pad h-100">
+                <div class="section-title mb-2">Revenue — last 30 days</div>
+                <canvas id="chart-revenue" height="100"></canvas>
+              </div>
+            </div>
+            <div class="col-md-4">
+              <div class="card card-pad h-100">
+                <div class="section-title mb-2">Credit Flow</div>
+                <div id="billing-stats"></div>
+              </div>
             </div>
           </div>
         </div>
 
-        <!-- AI token trend -->
-        <div class="card card-pad mb-3">
-          <div class="section-title mb-2">AI Token Usage — last 30 days</div>
-          <canvas id="chart-ai-trend" height="100"></canvas>
-        </div>
-
-        <!-- Feature adoption -->
-        <div class="card card-pad mb-3">
-          <div class="section-title mb-2">Feature Adoption (% of all bots)</div>
-          <div id="feature-bars"></div>
-        </div>
-
-        <!-- Status & Plan distribution -->
-        <div class="row g-3 mb-3">
-          <div class="col-md-6">
-            <div class="card card-pad h-100">
-              <div class="section-title mb-2">Bot Status Distribution</div>
-              <canvas id="chart-status" style="max-height:220px"></canvas>
+        <!-- ═══ TAB: Errors & Health ════════════════════════════════════════ -->
+        <div class="atab-panel" data-atab="errors" style="display:none">
+          <!-- Error Analysis -->
+          <div class="row g-3 mb-3">
+            <div class="col-md-6">
+              <div class="card card-pad h-100">
+                <div class="section-title mb-2">Errors by Platform</div>
+                <canvas id="chart-errors-platform" style="max-height:220px"></canvas>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="card card-pad h-100">
+                <div class="section-title mb-2">Top Error Messages</div>
+                <div id="error-messages-table" style="max-height:220px;overflow-y:auto"></div>
+              </div>
             </div>
           </div>
-          <div class="col-md-6">
-            <div class="card card-pad h-100">
-              <div class="section-title mb-2">Plan Distribution</div>
-              <canvas id="chart-plans" style="max-height:220px"></canvas>
-            </div>
-          </div>
-        </div>
 
-        <!-- Billing & Revenue -->
-        <div class="row g-3 mb-3">
-          <div class="col-md-8">
-            <div class="card card-pad h-100">
-              <div class="section-title mb-2">Revenue — last 30 days</div>
-              <canvas id="chart-revenue" height="100"></canvas>
+          <!-- Webhook & Action Items -->
+          <div class="row g-3 mb-3">
+            <div class="col-md-6">
+              <div class="card card-pad h-100">
+                <div class="section-title mb-2">Webhook Delivery Health</div>
+                <div id="webhook-stats"></div>
+              </div>
             </div>
-          </div>
-          <div class="col-md-4">
-            <div class="card card-pad h-100">
-              <div class="section-title mb-2">Credit Flow</div>
-              <div id="billing-stats"></div>
+            <div class="col-md-6">
+              <div class="card card-pad h-100">
+                <div class="section-title mb-2">Action Items</div>
+                <div id="action-items-stats"></div>
+              </div>
             </div>
           </div>
         </div>
 
-        <!-- Error Analysis -->
-        <div class="row g-3 mb-3">
-          <div class="col-md-6">
-            <div class="card card-pad h-100">
-              <div class="section-title mb-2">Errors by Platform</div>
-              <canvas id="chart-errors-platform" style="max-height:220px"></canvas>
+        <!-- ═══ TAB: Features ═══════════════════════════════════════════════ -->
+        <div class="atab-panel" data-atab="features" style="display:none">
+          <!-- Feature adoption -->
+          <div class="card card-pad mb-3">
+            <div class="section-title mb-2">Feature Adoption (% of all bots)</div>
+            <div id="feature-bars"></div>
+          </div>
+
+          <!-- Status & Plan distribution -->
+          <div class="row g-3 mb-3">
+            <div class="col-md-6">
+              <div class="card card-pad h-100">
+                <div class="section-title mb-2">Bot Status Distribution</div>
+                <canvas id="chart-status" style="max-height:220px"></canvas>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="card card-pad h-100">
+                <div class="section-title mb-2">Plan Distribution</div>
+                <canvas id="chart-plans" style="max-height:220px"></canvas>
+              </div>
             </div>
           </div>
-          <div class="col-md-6">
-            <div class="card card-pad h-100">
-              <div class="section-title mb-2">Top Error Messages</div>
-              <div id="error-messages-table" style="max-height:220px;overflow-y:auto"></div>
+
+          <!-- Template & Transcription -->
+          <div class="row g-3 mb-3">
+            <div class="col-md-6">
+              <div class="card card-pad h-100">
+                <div class="section-title mb-2">Analysis Templates Used</div>
+                <div id="template-table"></div>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="card card-pad h-100">
+                <div class="section-title mb-2">Transcription Providers</div>
+                <canvas id="chart-transcription" style="max-height:220px"></canvas>
+              </div>
             </div>
           </div>
         </div>
 
-        <!-- Webhook & Action Items -->
-        <div class="row g-3 mb-3">
-          <div class="col-md-6">
-            <div class="card card-pad h-100">
-              <div class="section-title mb-2">Webhook Delivery Health</div>
-              <div id="webhook-stats"></div>
+        <!-- ═══ TAB: Users ══════════════════════════════════════════════════ -->
+        <div class="atab-panel" data-atab="users" style="display:none">
+          <div class="card">
+            <div class="px-4 pt-3 pb-2 d-flex justify-content-between align-items-center">
+              <div class="section-title mb-0">Per-User Activity <span style="font-size:11px;font-weight:400;color:#9ca3af">(no private data — top 100 by bots)</span></div>
+              <input type="text" id="analytics-user-search" class="form-control form-control-sm" placeholder="Search email…"
+                oninput="_filterAnalyticsUsers(this.value)" style="width:180px">
             </div>
-          </div>
-          <div class="col-md-6">
-            <div class="card card-pad h-100">
-              <div class="section-title mb-2">Action Items</div>
-              <div id="action-items-stats"></div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Template & Transcription -->
-        <div class="row g-3 mb-3">
-          <div class="col-md-6">
-            <div class="card card-pad h-100">
-              <div class="section-title mb-2">Analysis Templates Used</div>
-              <div id="template-table"></div>
-            </div>
-          </div>
-          <div class="col-md-6">
-            <div class="card card-pad h-100">
-              <div class="section-title mb-2">Transcription Providers</div>
-              <canvas id="chart-transcription" style="max-height:220px"></canvas>
+            <div class="table-responsive" style="max-height:520px;overflow-y:auto">
+              <table class="table table-sm table-hover mb-0" id="analytics-user-table">
+                <thead class="table-light sticky-top">
+                  <tr>
+                    <th>Email</th><th>Plan</th><th>Total</th><th>30d</th><th>7d</th>
+                    <th>Last Active</th><th>Platform</th><th>AI Tokens</th><th>AI Cost</th><th>Features</th>
+                  </tr>
+                </thead>
+                <tbody id="analytics-user-tbody">
+                  <tr><td colspan="10" class="text-center text-muted py-3">—</td></tr>
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
 
-        <!-- System Status -->
-        <div class="card card-pad mb-3">
-          <div class="section-title mb-2">System Status</div>
-          <div class="admin-kpi-grid" id="system-kpi-grid" style="grid-template-columns:repeat(4,1fr)"></div>
-        </div>
-
-        <!-- Per-user table -->
-        <div class="card">
-          <div class="px-4 pt-3 pb-2 d-flex justify-content-between align-items-center">
-            <div class="section-title mb-0">Per-User Activity <span style="font-size:11px;font-weight:400;color:#94a3b8">(no private data — top 100 by bots)</span></div>
-            <input type="text" id="analytics-user-search" class="form-control form-control-sm" placeholder="Search email…"
-              oninput="_filterAnalyticsUsers(this.value)" style="width:180px">
-          </div>
-          <div class="table-responsive" style="max-height:420px;overflow-y:auto">
-            <table class="table table-sm table-hover mb-0" id="analytics-user-table">
-              <thead class="table-light sticky-top">
-                <tr>
-                  <th>Email</th><th>Plan</th><th>Total</th><th>30d</th><th>7d</th>
-                  <th>Last Active</th><th>Platform</th><th>AI Tokens</th><th>AI Cost</th><th>Features</th>
-                </tr>
-              </thead>
-              <tbody id="analytics-user-tbody">
-                <tr><td colspan="10" class="text-center text-muted py-3">—</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
       </div>
     </div>
 
@@ -1128,6 +1139,19 @@ function auditPage(dir) {
   _auditOffset = Math.max(0, _auditOffset + dir * _auditLimit);
   loadAuditLog();
 }
+
+// ── Analytics sub-tab switching ───────────────────────────────────────────────
+document.querySelectorAll('.analytics-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.analytics-tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    document.querySelectorAll('.atab-panel').forEach(p => p.style.display = 'none');
+    const panel = document.querySelector('.atab-panel[data-atab="' + tab.dataset.atab + '"]');
+    if (panel) panel.style.display = '';
+    // Trigger Chart.js resize for hidden canvas elements
+    Object.values(_analyticsCharts).forEach(c => { try { c.resize(); } catch(e) {} });
+  });
+});
 
 // ── Platform Analytics ────────────────────────────────────────────────────────
 let _analyticsData = null;

@@ -4,7 +4,17 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.5.0 — **Last updated:** 2026-03-20
+> **Latest version:** 2.5.1 — **Last updated:** 2026-03-20
+
+---
+
+## [2.5.1] - 2026-03-20
+
+### Changed
+- **Analytics reorganized with tabbed sub-navigation** — All analytics data consolidated into 5 clear tabs: Overview, AI & Costs, Errors & Health, Features, Users
+- **Admin Overview slimmed** — Removed duplicated Platform Features card and Bot Breakdown (same data now lives in Analytics tabs)
+- **System Status moved** — Runtime metrics (running tasks, queue depth) relocated from Analytics to the System tab where they belong
+- **Chart.js resize fix** — Charts properly resize when switching between hidden/visible tabs
 
 ---
 
