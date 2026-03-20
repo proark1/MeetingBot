@@ -1,0 +1,1280 @@
+{% extends "base.html" %}
+{% block title %}Admin — JustHereToListen.io{% endblock %}
+
+{% block content %}
+<style>
+  /* ── Admin sidebar layout ─────────────────────────────────────────────── */
+  .admin-layout {
+    display: grid;
+    grid-template-columns: 210px 1fr;
+    gap: 1.5rem;
+    align-items: start;
+    margin: -0.5rem 0;
+  }
+
+  .admin-sidebar {
+    position: sticky;
+    top: 70px;
+    background: #0f172a;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 14px;
+    padding: 1rem 0.5rem;
+  }
+
+  .admin-sidebar-label {
+    font-size: 10.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: #475569;
+    padding: 0.35rem 0.75rem;
+    margin-top: 0.5rem;
+  }
+  .admin-sidebar-label:first-child { margin-top: 0; }
+
+  .admin-nav-item {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    color: #94a3b8;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+    user-select: none;
+    border: none;
+    background: none;
+    width: 100%;
+    text-align: left;
+    text-decoration: none;
+  }
+  .admin-nav-item:hover { background: rgba(255,255,255,0.07); color: #e2e8f0; }
+  .admin-nav-item.active { background: rgba(99,102,241,0.2); color: #a5b4fc; font-weight: 600; }
+
+  .admin-nav-badge {
+    margin-left: auto;
+    background: rgba(239,68,68,0.25);
+    color: #fca5a5;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 1px 5px;
+    border-radius: 10px;
+    line-height: 1.5;
+  }
+  .admin-nav-badge.warn {
+    background: rgba(245,158,11,0.2);
+    color: #fcd34d;
+  }
+
+  /* ── Admin sections ────────────────────────────────────────────────────── */
+  .admin-section { display: none; }
+  .admin-section.active { display: block; }
+
+  .admin-section-hdr {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 1.25rem;
+  }
+  .admin-section-hdr h2 {
+    font-size: 1.1rem;
+    font-weight: 700;
+    letter-spacing: -0.3px;
+    color: #0f172a;
+    margin: 0 0 0.2rem;
+  }
+  .admin-section-hdr p {
+    font-size: 12.5px;
+    color: #64748b;
+    margin: 0;
+  }
+
+  /* ── KPI grid ────────────────────────────────────────────────────────── */
+  .admin-kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.75rem;
+    margin-bottom: 1.25rem;
+  }
+  @media (max-width: 900px) { .admin-kpi-grid { grid-template-columns: repeat(2,1fr); } }
+
+  /* ── System status row ───────────────────────────────────────────────── */
+  .status-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.55rem 0;
+    border-bottom: 1px solid #f1f5f9;
+    font-size: 13px;
+  }
+  .status-row:last-child { border-bottom: none; }
+  .status-key { color: #64748b; font-weight: 500; }
+
+  /* ── Responsive ──────────────────────────────────────────────────────── */
+  @media (max-width: 768px) {
+    .admin-layout { grid-template-columns: 1fr; }
+    .admin-sidebar { position: static; border-radius: 10px; }
+    .admin-nav-items { display: flex; flex-wrap: wrap; gap: 0.25rem; }
+    .admin-sidebar-label { display: none; }
+    .admin-nav-item { flex: 0 0 auto; font-size: 12px; padding: 0.4rem 0.65rem; }
+  }
+</style>
+
+<div class="admin-layout">
+
+  <!-- ═══════════════════════════════════════════════
+       ADMIN SIDEBAR
+  ════════════════════════════════════════════════ -->
+  <aside class="admin-sidebar">
+    <div class="admin-nav-items" id="admin-sidebar-nav">
+      <div class="admin-sidebar-label">Navigate</div>
+
+      <a href="/" class="admin-nav-item" style="color:#94a3b8">
+        <span>🏠</span> Home
+      </a>
+      <a href="/dashboard" class="admin-nav-item" style="color:#94a3b8">
+        <span>◀</span> Back to Dashboard
+      </a>
+      <a href="/logout" class="admin-nav-item" style="color:#f87171">
+        <span>⎋</span> Log Out
+      </a>
+
+      <div class="admin-sidebar-label">Admin</div>
+
+      <button class="admin-nav-item active" data-section="overview">
+        <span>📊</span> Overview
+      </button>
+      <button class="admin-nav-item" data-section="users">
+        <span>👥</span> Users
+        <span class="admin-nav-badge warn">{{ stats.total_accounts }}</span>
+      </button>
+      <button class="admin-nav-item" data-section="billing">
+        <span>💵</span> Billing
+        {% if stats.unmatched_pending > 0 %}
+        <span class="admin-nav-badge">{{ stats.unmatched_pending }}</span>
+        {% endif %}
+      </button>
+
+      <div class="admin-sidebar-label">Infrastructure</div>
+
+      <button class="admin-nav-item" data-section="analytics">
+        <span>📈</span> Analytics
+      </button>
+      <button class="admin-nav-item" data-section="support">
+        <span>🔑</span> Support Lookup
+      </button>
+      <button class="admin-nav-item" data-section="audit">
+        <span>🛡️</span> Audit Log
+      </button>
+
+      <button class="admin-nav-item" data-section="system">
+        <span>⚙️</span> System Status
+        {% if not crypto_rpc_configured %}
+        <span class="admin-nav-badge">!</span>
+        {% endif %}
+      </button>
+      <button class="admin-nav-item" data-section="crypto">
+        <span>⛓️</span> USDC / Crypto
+        {% if stats.unmatched_pending > 0 %}
+        <span class="admin-nav-badge">{{ stats.unmatched_pending }}</span>
+        {% endif %}
+      </button>
+
+      <div class="admin-sidebar-label">Links</div>
+
+      <a href="/api/v1/admin/docs" target="_blank" class="admin-nav-item" style="font-size:12px;color:#6366f1">
+        <span>↗</span> Admin API Docs
+      </a>
+      <a href="/api/docs" target="_blank" class="admin-nav-item" style="font-size:12px;color:#6366f1">
+        <span>↗</span> Public API Docs
+      </a>
+      <a href="/webhook-playground" target="_blank" class="admin-nav-item" style="font-size:12px;color:#6366f1">
+        <span>↗</span> Webhook Playground
+      </a>
+    </div>
+  </aside>
+
+  <!-- ═══════════════════════════════════════════════
+       ADMIN MAIN CONTENT
+  ════════════════════════════════════════════════ -->
+  <main>
+
+    <!-- ── Critical alert ──────────────────────────────────────────────── -->
+    {% if not crypto_rpc_configured %}
+    <div class="alert alert-danger d-flex align-items-start gap-3 mb-3" role="alert">
+      <div style="font-size:1.3rem;flex-shrink:0">🚨</div>
+      <div>
+        <strong>USDC monitoring disabled — Crypto RPC URL not configured.</strong><br>
+        USDC deposits will never be detected until this is set.
+        <a href="#" onclick="adminSwitch('crypto');return false;" class="alert-link ms-1">Configure RPC →</a>
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- ────────────────────────────────────────────
+         OVERVIEW
+    ──────────────────────────────────────────── -->
+    <div class="admin-section active" id="admin-section-overview">
+      <div class="admin-section-hdr">
+        <div>
+          <h2>Platform Overview</h2>
+          <p>Logged in as <strong>{{ account.email }}</strong></p>
+        </div>
+      </div>
+
+      <!-- KPI row -->
+      <div class="admin-kpi-grid">
+        <div class="stat-card">
+          <div class="stat-label">Total Accounts</div>
+          <div class="stat-value mt-1">{{ stats.total_accounts }}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Credits Outstanding</div>
+          <div class="stat-value mt-1">${{ "%.2f"|format(stats.total_credits_usd) }}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Total Revenue</div>
+          <div class="stat-value text-success mt-1">${{ "%.2f"|format(stats.total_usdc_received + stats.total_stripe_received) }}</div>
+          <div class="stat-label mt-1">USDC ${{ "%.2f"|format(stats.total_usdc_received) }} · Stripe ${{ "%.2f"|format(stats.total_stripe_received) }}</div>
+        </div>
+        <div class="stat-card {% if stats.unmatched_pending > 0 %}border border-warning{% endif %}">
+          <div class="stat-label">Unmatched Transfers</div>
+          <div class="stat-value mt-1 {% if stats.unmatched_pending > 0 %}text-warning{% endif %}">{{ stats.unmatched_pending }}</div>
+          {% if stats.unmatched_pending > 0 %}
+          <a href="#" onclick="adminSwitch('crypto');return false;" style="font-size:12px;color:#d97706;font-weight:600">Resolve →</a>
+          {% endif %}
+        </div>
+      </div>
+
+      <!-- Plan breakdown + Bot activity -->
+      <div class="row g-3 mb-3">
+        <div class="col-md-4">
+          <div class="card card-pad h-100">
+            <div class="section-title mb-3">Subscription Plans</div>
+            {% for plan_name, plan_label, chip_class in [("free","Free","chip-gray"),("starter","Starter","chip-info"),("pro","Pro","chip-purple"),("business","Business","chip-warning")] %}
+            <div class="d-flex justify-content-between align-items-center py-2 border-bottom">
+              <span class="chip {{ chip_class }}">{{ plan_label }}</span>
+              <span class="stat-value" style="font-size:1.3rem">{{ plan_counts.get(plan_name, 0) }}</span>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+
+        <div class="col-md-4">
+          <div class="card card-pad h-100">
+            <div class="section-title mb-3">Bot Activity <span style="font-weight:400;color:#94a3b8;font-size:11px">(24h)</span></div>
+            <div class="d-flex justify-content-between align-items-center py-2 border-bottom">
+              <span style="font-size:13px;color:#64748b">Total</span>
+              <span class="fw-bold">{{ bot_stats.total }}</span>
+            </div>
+            <div class="d-flex justify-content-between align-items-center py-2 border-bottom">
+              <span style="font-size:13px;color:#64748b">Active now</span>
+              <span class="fw-bold {% if bot_stats.active > 0 %}text-primary{% endif %}">{{ bot_stats.active }}</span>
+            </div>
+            <div class="d-flex justify-content-between align-items-center py-2 border-bottom">
+              <span style="font-size:13px;color:#64748b">Completed</span>
+              <span class="fw-bold text-success">{{ bot_stats.done }}</span>
+            </div>
+            <div class="d-flex justify-content-between align-items-center py-2">
+              <span style="font-size:13px;color:#64748b">Errors</span>
+              <span class="fw-bold {% if bot_stats.error > 0 %}text-danger{% endif %}">{{ bot_stats.error }}</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-md-4">
+          <div class="card card-pad h-100">
+            <div class="section-title mb-3">Platform Features</div>
+            <div class="status-row"><span class="status-key">Active Webhooks</span><span class="fw-bold">{{ active_webhook_count }}</span></div>
+            <div class="status-row"><span class="status-key">Integrations</span><span class="fw-bold">{{ active_integration_count }}</span></div>
+            <div class="status-row"><span class="status-key">Calendar Feeds</span><span class="fw-bold">{{ active_calendar_feed_count }}</span></div>
+            <div class="status-row"><span class="status-key">SSO-Linked</span><span class="fw-bold">{{ oauth_linked_count }}</span></div>
+            <div class="status-row"><span class="status-key">Total AI Tokens</span><span class="fw-bold">{{ "{:,}".format(bot_stats.total_ai_tokens) }}</span></div>
+            <div class="status-row"><span class="status-key">Total AI Cost</span><span class="fw-bold">${{ "%.4f"|format(bot_stats.total_ai_cost_usd) }}</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bot activity details -->
+      <div class="card card-pad mb-3">
+        <div class="section-title mb-3">Bot Breakdown</div>
+        <div class="row g-3">
+          <div class="col-md-4">
+            <div class="small fw-semibold text-muted mb-2">By Status</div>
+            {% if bot_stats.by_status %}
+            {% for status, count in bot_stats.by_status.items() %}
+            <div class="d-flex justify-content-between small py-1 border-bottom">
+              <span>{{ status.replace("_", " ").title() }}</span>
+              <span class="fw-bold">{{ count }}</span>
+            </div>
+            {% endfor %}
+            {% else %}<div class="text-muted small">No bots yet</div>{% endif %}
+          </div>
+          <div class="col-md-4">
+            <div class="small fw-semibold text-muted mb-2">By Platform</div>
+            {% if bot_stats.by_platform %}
+            {% for platform, count in bot_stats.by_platform.items() %}
+            <div class="d-flex justify-content-between small py-1 border-bottom">
+              <span>{{ platform.replace("_", " ").title() }}</span>
+              <span class="fw-bold">{{ count }}</span>
+            </div>
+            {% endfor %}
+            {% else %}<div class="text-muted small">No bots yet</div>{% endif %}
+          </div>
+        </div>
+      </div>
+
+      <!-- Recent transactions summary -->
+      <div class="card card-pad">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <div class="section-title">Recent Transactions</div>
+          <button class="btn btn-outline-secondary btn-sm" onclick="adminSwitch('billing')">View all →</button>
+        </div>
+        {% if recent_txns %}
+        <div style="overflow-x:auto">
+          <table class="table table-hover">
+            <thead>
+              <tr><th>Time</th><th>User</th><th>Type</th><th>Description</th><th class="text-end">Amount</th></tr>
+            </thead>
+            <tbody>
+              {% for t in recent_txns[:8] %}
+              <tr>
+                <td style="color:#94a3b8;font-size:12px;white-space:nowrap">{{ t.created_at }}</td>
+                <td style="font-size:12.5px">{{ t.email }}</td>
+                <td>
+                  {% if t.type == "usdc_topup" %}<span class="chip chip-info">USDC</span>
+                  {% elif t.type == "stripe_topup" %}<span class="chip chip-success">Stripe</span>
+                  {% elif t.type == "bot_usage" %}<span class="chip chip-gray">Bot</span>
+                  {% else %}<span class="chip chip-gray">{{ t.type }}</span>{% endif %}
+                </td>
+                <td style="font-size:12.5px;color:#64748b">{{ t.description }}</td>
+                <td class="text-end small fw-semibold {% if t.amount_usd >= 0 %}tx-credit{% else %}tx-debit{% endif %}">
+                  {% if t.amount_usd >= 0 %}+{% endif %}${{ "%.4f"|format(t.amount_usd) }}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="text-muted small text-center py-3">No transactions yet.</div>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- ────────────────────────────────────────────
+         USERS
+    ──────────────────────────────────────────── -->
+    <div class="admin-section" id="admin-section-users">
+      <div class="admin-section-hdr">
+        <div>
+          <h2>User Accounts</h2>
+          <p>{{ all_accounts|length }} registered accounts</p>
+        </div>
+        <input type="text" class="form-control form-control-sm w-auto" id="acct-search" placeholder="Filter by email…" oninput="filterAccounts(this.value)" style="width:200px!important">
+      </div>
+
+      <!-- Manual credit -->
+      <div class="card card-pad mb-3">
+        <div class="section-title mb-1">Manual Credit</div>
+        <div class="section-subtitle mb-3">Add credits to any account — for missed USDC deposits, refunds, or promotions.</div>
+        <form method="post" action="/admin/credit">
+          <div class="row g-2 align-items-end">
+            <div class="col-md-3">
+              <label class="form-label">User Email</label>
+              <input type="email" class="form-control form-control-sm" name="email" placeholder="user@example.com" required>
+            </div>
+            <div class="col-md-2">
+              <label class="form-label">Amount (USD)</label>
+              <input type="number" class="form-control form-control-sm" name="amount_usd" placeholder="2.00" min="0.01" step="0.01" required>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Note</label>
+              <input type="text" class="form-control form-control-sm" name="note" placeholder="e.g. Missed USDC deposit tx 0x...">
+            </div>
+            <div class="col-md-2">
+              <button type="submit" class="btn btn-success btn-sm w-100">Apply Credit</button>
+            </div>
+          </div>
+        </form>
+      </div>
+
+      <!-- Accounts table -->
+      <div class="card">
+        <div class="table-responsive" style="max-height:520px;overflow-y:auto">
+          <table class="table table-sm table-hover mb-0" id="acct-table">
+            <thead class="table-light sticky-top">
+              <tr>
+                <th>Email</th>
+                <th>Type</th>
+                <th>Plan</th>
+                <th>Balance</th>
+                <th>Bots Used</th>
+                <th>Joined</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for a in all_accounts %}
+              <tr class="{% if not a.is_active %}table-secondary{% endif %}">
+                <td style="font-size:12.5px">
+                  {{ a.email }}
+                  {% if a.is_admin %}<span class="chip chip-warning ms-1" style="font-size:10px;padding:1px 5px">Admin</span>{% endif %}
+                </td>
+                <td>
+                  <form method="post" action="/admin/accounts/{{ a.id }}/set-account-type">
+                    <select name="account_type" onchange="this.form.submit()" class="form-select form-select-sm py-0" style="width:95px;font-size:.75rem">
+                      <option value="personal" {% if a.account_type != 'business' %}selected{% endif %}>Personal</option>
+                      <option value="business" {% if a.account_type == 'business' %}selected{% endif %}>Business</option>
+                    </select>
+                  </form>
+                </td>
+                <td>
+                  <form method="post" action="/admin/accounts/{{ a.id }}/set-plan">
+                    <select name="plan" onchange="this.form.submit()" class="form-select form-select-sm py-0" style="width:85px;font-size:.75rem">
+                      {% for p in ["free","starter","pro","business"] %}
+                      <option value="{{ p }}" {% if a.plan == p %}selected{% endif %}>{{ p|title }}</option>
+                      {% endfor %}
+                    </select>
+                  </form>
+                </td>
+                <td class="fw-semibold {% if a.credits_usd < 1 %}text-danger{% else %}text-success{% endif %}" style="font-size:12.5px">
+                  ${{ "%.2f"|format(a.credits_usd) }}
+                </td>
+                <td style="font-size:12.5px;color:#64748b">{{ a.monthly_bots_used }}</td>
+                <td style="font-size:12px;color:#94a3b8">{{ a.created_at }}</td>
+                <td>
+                  {% if a.is_active %}
+                  <span class="chip chip-success" style="font-size:10px;padding:1px 6px">Active</span>
+                  {% else %}
+                  <span class="chip chip-danger" style="font-size:10px;padding:1px 6px">Disabled</span>
+                  {% endif %}
+                </td>
+                <td>
+                  <div class="d-flex gap-1">
+                    <form method="post" action="/admin/accounts/{{ a.id }}/toggle-active">
+                      <button type="submit" class="btn btn-xs {% if a.is_active %}btn-outline-danger{% else %}btn-outline-success{% endif %} btn-sm"
+                        onclick="return confirm('{{ 'Disable' if a.is_active else 'Enable' }} account for {{ a.email }}?')">
+                        {{ "Disable" if a.is_active else "Enable" }}
+                      </button>
+                    </form>
+                    <form method="post" action="/admin/accounts/{{ a.id }}/toggle-admin">
+                      <button type="submit" class="btn btn-xs {% if a.is_admin %}btn-outline-secondary{% else %}btn-outline-warning{% endif %} btn-sm"
+                        onclick="return confirm('{{ 'Revoke admin from' if a.is_admin else 'Grant admin to' }} {{ a.email }}?')">
+                        {{ "Revoke" if a.is_admin else "Admin" }}
+                      </button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ────────────────────────────────────────────
+         BILLING
+    ──────────────────────────────────────────── -->
+    <div class="admin-section" id="admin-section-billing">
+      <div class="admin-section-hdr">
+        <div>
+          <h2>Billing Overview</h2>
+          <p>Revenue, transactions, and payment method breakdown</p>
+        </div>
+      </div>
+
+      <!-- Revenue summary -->
+      <div class="row g-3 mb-3">
+        <div class="col-md-4">
+          <div class="stat-card">
+            <div class="stat-label">Total Revenue</div>
+            <div class="stat-value text-success mt-1">${{ "%.2f"|format(stats.total_usdc_received + stats.total_stripe_received) }}</div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="stat-card">
+            <div class="stat-label">USDC Revenue</div>
+            <div class="stat-value mt-1">${{ "%.2f"|format(stats.total_usdc_received) }}</div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="stat-card">
+            <div class="stat-label">Stripe Revenue</div>
+            <div class="stat-value mt-1">${{ "%.2f"|format(stats.total_stripe_received) }}</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- All transactions -->
+      <div class="card">
+        <div class="px-4 pt-3 pb-2">
+          <div class="section-title">All Transactions</div>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-sm table-hover mb-0">
+            <thead class="table-light">
+              <tr><th>Time</th><th>User</th><th>Type</th><th>Description</th><th class="text-end">Amount</th><th>Ref</th></tr>
+            </thead>
+            <tbody>
+              {% for t in recent_txns %}
+              <tr>
+                <td style="color:#94a3b8;font-size:12px;white-space:nowrap">{{ t.created_at }}</td>
+                <td style="font-size:12.5px">{{ t.email }}</td>
+                <td>
+                  {% if t.type == "usdc_topup" %}<span class="chip chip-info">USDC</span>
+                  {% elif t.type == "stripe_topup" %}<span class="chip chip-success">Stripe</span>
+                  {% elif t.type == "bot_usage" %}<span class="chip chip-gray">Bot</span>
+                  {% else %}<span class="chip chip-gray">{{ t.type }}</span>{% endif %}
+                </td>
+                <td style="font-size:12.5px;color:#64748b">{{ t.description }}</td>
+                <td class="text-end small fw-semibold {% if t.amount_usd >= 0 %}tx-credit{% else %}tx-debit{% endif %}">
+                  {% if t.amount_usd >= 0 %}+{% endif %}${{ "%.4f"|format(t.amount_usd) }}
+                </td>
+                <td class="font-mono small text-muted">
+                  {% if t.reference_id %}{{ t.reference_id[:14] }}…{% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+              {% if not recent_txns %}
+              <tr><td colspan="6" class="text-center text-muted py-3">No transactions yet.</td></tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ────────────────────────────────────────────
+         AUDIT LOG
+    ──────────────────────────────────────────── -->
+    <div class="admin-section" id="admin-section-audit">
+      <div class="admin-section-hdr">
+        <div>
+          <h2>Audit Log</h2>
+          <p class="text-muted mb-0" style="font-size:13px">Tamper-evident, append-only record of platform actions (SOC 2).</p>
+        </div>
+      </div>
+
+      <!-- Filter bar -->
+      <div class="card mb-3" style="background:#1e293b;border:1px solid rgba(255,255,255,0.08);">
+        <div class="card-body py-2">
+          <div class="row g-2 align-items-end">
+            <div class="col-md-3">
+              <label class="form-label text-muted" style="font-size:11px;font-weight:600;text-transform:uppercase">Action filter</label>
+              <select id="auditActionFilter" class="form-select form-select-sm" style="background:#0f172a;border-color:rgba(255,255,255,0.12);color:#e2e8f0;">
+                <option value="">All actions</option>
+                <option value="bot.created">bot.created</option>
+                <option value="bot.deleted">bot.deleted</option>
+                <option value="auth.login">auth.login</option>
+                <option value="auth.register">auth.register</option>
+                <option value="api_key.created">api_key.created</option>
+                <option value="api_key.revoked">api_key.revoked</option>
+                <option value="webhook.created">webhook.created</option>
+                <option value="webhook.deleted">webhook.deleted</option>
+                <option value="admin.">admin.*</option>
+              </select>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label text-muted" style="font-size:11px;font-weight:600;text-transform:uppercase">Account ID</label>
+              <input type="text" id="auditAccountFilter" class="form-control form-control-sm" placeholder="(any)" style="background:#0f172a;border-color:rgba(255,255,255,0.12);color:#e2e8f0;">
+            </div>
+            <div class="col-md-2">
+              <button class="btn btn-sm btn-primary w-100" onclick="loadAuditLog()">Search</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Audit table -->
+      <div class="card" style="background:#1e293b;border:1px solid rgba(255,255,255,0.08);">
+        <div class="card-body p-0">
+          <div id="auditTableWrap" style="overflow-x:auto;">
+            <table class="table table-sm mb-0" style="font-size:12.5px;color:#cbd5e1;">
+              <thead>
+                <tr style="border-bottom:1px solid rgba(255,255,255,0.08);">
+                  <th class="px-3 py-2" style="color:#64748b;font-weight:600;">Time (UTC)</th>
+                  <th class="px-3 py-2" style="color:#64748b;font-weight:600;">Action</th>
+                  <th class="px-3 py-2" style="color:#64748b;font-weight:600;">Resource</th>
+                  <th class="px-3 py-2" style="color:#64748b;font-weight:600;">Actor / Details</th>
+                  <th class="px-3 py-2" style="color:#64748b;font-weight:600;">IP</th>
+                </tr>
+              </thead>
+              <tbody id="auditTableBody">
+                <tr><td colspan="5" class="text-center text-muted py-4">Click Search to load entries.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="d-flex justify-content-between align-items-center px-3 py-2" style="border-top:1px solid rgba(255,255,255,0.06);">
+            <span id="auditCount" class="text-muted" style="font-size:12px;"></span>
+            <div class="d-flex gap-2">
+              <button id="auditPrevBtn" class="btn btn-sm btn-outline-secondary" onclick="auditPage(-1)" disabled>← Prev</button>
+              <button id="auditNextBtn" class="btn btn-sm btn-outline-secondary" onclick="auditPage(1)">Next →</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ────────────────────────────────────────────
+         SYSTEM STATUS
+    ──────────────────────────────────────────── -->
+    <div class="admin-section" id="admin-section-system">
+      <div class="admin-section-hdr">
+        <div>
+          <h2>System Status</h2>
+          <p>Integration health, storage backend, and feature flags</p>
+        </div>
+      </div>
+
+      <div class="row g-3">
+        <div class="col-md-6">
+          <div class="card card-pad">
+            <div class="section-title mb-3">Service Health</div>
+            <div class="status-row">
+              <span class="status-key">Crypto RPC</span>
+              {% if crypto_rpc_configured %}
+              <span class="chip chip-success">{{ "env var" if crypto_rpc_source == "env" else "admin-set" }}</span>
+              {% else %}
+              <span class="chip chip-danger">Not set ⚠</span>
+              {% endif %}
+            </div>
+            {% if crypto_rpc_configured and crypto_rpc_preview %}
+            <div style="font-size:11px;color:#94a3b8;font-family:monospace;padding:0 0 0.5rem 0">{{ crypto_rpc_preview }}</div>
+            {% endif %}
+            <div class="status-row">
+              <span class="status-key">Stripe</span>
+              {% if stripe_configured %}<span class="chip chip-success">Configured</span>{% else %}<span class="chip chip-gray">Not set</span>{% endif %}
+            </div>
+            <div class="status-row">
+              <span class="status-key">HD Seed (USDC wallets)</span>
+              {% if hd_seed_configured %}<span class="chip chip-success">Configured</span>{% else %}<span class="chip chip-gray">Not set</span>{% endif %}
+            </div>
+            <div class="status-row">
+              <span class="status-key">Email (SMTP)</span>
+              {% if email_configured %}<span class="chip chip-success">Configured</span>{% else %}<span class="chip chip-gray">Not set</span>{% endif %}
+            </div>
+            <div class="status-row">
+              <span class="status-key">Storage Backend</span>
+              {% if storage_backend == "s3" %}<span class="chip chip-success">S3 / Cloud</span>{% else %}<span class="chip chip-gray">Local disk</span>{% endif %}
+            </div>
+            <div class="status-row">
+              <span class="status-key">Video Recording</span>
+              {% if video_recording_enabled %}<span class="chip chip-success">Enabled</span>{% else %}<span class="chip chip-gray">Disabled</span>{% endif %}
+            </div>
+            <div class="status-row">
+              <span class="status-key">Google SSO</span>
+              {% if google_sso_configured %}<span class="chip chip-success">Configured</span>{% else %}<span class="chip chip-gray">Not set</span>{% endif %}
+            </div>
+            <div class="status-row">
+              <span class="status-key">Microsoft SSO</span>
+              {% if microsoft_sso_configured %}<span class="chip chip-success">Configured</span>{% else %}<span class="chip chip-gray">Not set</span>{% endif %}
+            </div>
+            <div class="status-row">
+              <span class="status-key">USDC Contract</span>
+              <span class="font-mono small text-muted">{{ usdc_contract[:10] }}…</span>
+            </div>
+            <div class="status-row">
+              <span class="status-key">Last Block Scanned</span>
+              <span class="font-mono small">{{ monitor_last_block or "—" }}</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-md-6">
+          <!-- RPC URL config -->
+          {% if crypto_rpc_source != "env" %}
+          <div class="card card-pad mb-3" id="rpc-section">
+            <div class="section-title mb-1">
+              {% if not crypto_rpc_configured %}<span style="color:#dc2626">⚠ Configure RPC URL</span>{% else %}Update RPC URL{% endif %}
+            </div>
+            <div class="section-subtitle mb-3">Infura, Alchemy, QuickNode, or any Ethereum JSON-RPC endpoint.</div>
+            <form method="post" action="/admin/rpc-url">
+              <div class="d-flex gap-2">
+                <input type="url" class="form-control form-control-sm font-mono flex-grow-1" name="rpc_url"
+                  placeholder="https://mainnet.infura.io/v3/YOUR_KEY" required>
+                <button type="submit" class="btn btn-sm {% if not crypto_rpc_configured %}btn-danger{% else %}btn-outline-secondary{% endif %}">Save</button>
+              </div>
+            </form>
+          </div>
+          {% else %}
+          <div class="card card-pad mb-3">
+            <div class="section-title mb-1">RPC URL (env)</div>
+            <div class="section-subtitle">RPC URL is set via <code>CRYPTO_RPC_URL</code> environment variable. Override it in env to change.</div>
+          </div>
+          {% endif %}
+
+          <!-- USDC collection wallet -->
+          <div class="card card-pad">
+            <div class="section-title mb-1">USDC Collection Wallet</div>
+            <div class="section-subtitle mb-3">Ethereum address where users send USDC (ERC-20).</div>
+            <form method="post" action="/admin/wallet">
+              <div class="mb-2">
+                <input type="text" class="form-control form-control-sm font-mono" name="wallet_address"
+                  value="{{ wallet_address or '' }}" placeholder="0x0000000000000000000000000000000000000000"
+                  pattern="0x[0-9a-fA-F]{40}" required>
+              </div>
+              <button type="submit" class="btn btn-sm btn-primary">Save Wallet</button>
+            </form>
+            {% if wallet_address %}
+            <div class="mt-2 small text-success">Current: <code>{{ wallet_address }}</code></div>
+            {% else %}
+            <div class="alert alert-warning mt-2 mb-0 small">No collection wallet set — users cannot see a deposit address.</div>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ────────────────────────────────────────────
+         USDC / CRYPTO
+    ──────────────────────────────────────────── -->
+    <div class="admin-section" id="admin-section-crypto">
+      <div class="admin-section-hdr">
+        <div>
+          <h2>USDC / Crypto</h2>
+          <p>Monitor on-chain deposits, resolve unmatched transfers, and rescan blocks</p>
+        </div>
+      </div>
+
+      <!-- Rescan tool -->
+      <div class="card card-pad mb-3">
+        <div class="section-title mb-1">Block Rescan</div>
+        <div class="section-subtitle mb-3">Reset the monitor to re-check from a specific block — use after registering a previously-unregistered wallet.</div>
+        <form method="post" action="/admin/rescan">
+          <div class="d-flex gap-2 align-items-end">
+            <div>
+              <label class="form-label">From block number</label>
+              <input type="number" class="form-control form-control-sm" name="from_block" placeholder="Block number" min="0" required style="width:180px">
+            </div>
+            <button type="submit" class="btn btn-sm btn-outline-secondary">Rescan</button>
+          </div>
+          <div class="form-text mt-1">Current last-block: {{ monitor_last_block or "none" }}</div>
+        </form>
+      </div>
+
+      <!-- Unmatched transfers -->
+      {% if unmatched_transfers %}
+      <div class="card">
+        <div class="px-4 pt-3 pb-2 d-flex justify-content-between align-items-center">
+          <div class="section-title">
+            Unmatched USDC Transfers
+            {% if stats.unmatched_pending > 0 %}<span class="chip chip-warning ms-1">{{ stats.unmatched_pending }} pending</span>{% endif %}
+          </div>
+          <span class="text-muted small">Transfers that couldn't be auto-attributed to a user</span>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-sm table-hover mb-0">
+            <thead class="table-light">
+              <tr><th>Detected</th><th>From</th><th>Amount</th><th>Block</th><th>Tx Hash</th><th>Status</th><th>Action</th></tr>
+            </thead>
+            <tbody>
+              {% for t in unmatched_transfers %}
+              <tr class="{% if not t.resolved %}table-warning{% endif %}">
+                <td style="font-size:12px;color:#64748b">{{ t.detected_at }}</td>
+                <td class="font-mono small">{{ t.from_address[:10] }}…{{ t.from_address[-6:] }}</td>
+                <td><strong>${{ "%.2f"|format(t.amount_usdc) }}</strong></td>
+                <td class="small">{{ t.block_number }}</td>
+                <td class="font-mono small">{{ t.tx_hash[:12] }}…</td>
+                <td>
+                  {% if t.resolved %}<span class="chip chip-success">Resolved</span>
+                  {% if t.resolution_note %}<br><span class="text-muted" style="font-size:.7rem">{{ t.resolution_note }}</span>{% endif %}
+                  {% else %}<span class="chip chip-warning">Pending</span>{% endif %}
+                </td>
+                <td>
+                  {% if not t.resolved %}
+                  <form method="post" action="/admin/usdc/unmatched/{{ t.tx_hash }}/resolve">
+                    <input type="hidden" name="note" value="Manually reviewed and credited">
+                    <button type="submit" class="btn btn-xs btn-outline-success btn-sm py-0 px-2">Mark Resolved</button>
+                  </form>
+                  {% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {% else %}
+      <div class="card card-pad">
+        <div class="text-center py-3">
+          <div style="font-size:2rem;margin-bottom:0.5rem">✅</div>
+          <div style="font-size:13.5px;color:#64748b">No unmatched transfers. All USDC deposits have been attributed.</div>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- ────────────────────────────────────────────
+         ANALYTICS
+    ──────────────────────────────────────────── -->
+    <div class="admin-section" id="admin-section-analytics">
+      <div class="admin-section-hdr">
+        <div>
+          <h2>Platform Analytics</h2>
+          <p>Aggregated usage metrics — no private user data. Cached 5 minutes.</p>
+        </div>
+        <button class="btn btn-outline-secondary btn-sm" id="analytics-refresh-btn" onclick="_loadAnalytics(true)">↺ Refresh</button>
+      </div>
+
+      <div id="analytics-loading" class="text-center py-5 text-muted" style="font-size:13.5px">Loading analytics…</div>
+
+      <div id="analytics-content" style="display:none">
+
+        <!-- KPI row -->
+        <div class="admin-kpi-grid" id="analytics-kpi-grid" style="grid-template-columns:repeat(4,1fr)"></div>
+
+        <!-- Activity chart + Platform doughnut -->
+        <div class="row g-3 mb-3">
+          <div class="col-md-8">
+            <div class="card card-pad h-100">
+              <div class="section-title mb-2">Bot Activity — last 30 days</div>
+              <canvas id="chart-activity" height="130"></canvas>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <div class="card card-pad h-100 d-flex flex-column">
+              <div class="section-title mb-2">Platform Breakdown</div>
+              <div style="flex:1;display:flex;align-items:center;justify-content:center">
+                <canvas id="chart-platforms" style="max-height:200px"></canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- AI usage row -->
+        <div class="row g-3 mb-3">
+          <div class="col-md-6">
+            <div class="card card-pad h-100">
+              <div class="section-title mb-2">AI Usage by Model</div>
+              <div id="ai-model-table"></div>
+            </div>
+          </div>
+          <div class="col-md-6">
+            <div class="card card-pad h-100">
+              <div class="section-title mb-2">AI Usage by Operation</div>
+              <div id="ai-op-table"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- AI token trend -->
+        <div class="card card-pad mb-3">
+          <div class="section-title mb-2">AI Token Usage — last 30 days</div>
+          <canvas id="chart-ai-trend" height="100"></canvas>
+        </div>
+
+        <!-- Feature adoption -->
+        <div class="card card-pad mb-3">
+          <div class="section-title mb-2">Feature Adoption (% of all bots)</div>
+          <div id="feature-bars"></div>
+        </div>
+
+        <!-- Per-user table -->
+        <div class="card">
+          <div class="px-4 pt-3 pb-2 d-flex justify-content-between align-items-center">
+            <div class="section-title mb-0">Per-User Activity <span style="font-size:11px;font-weight:400;color:#94a3b8">(no private data — top 100 by bots)</span></div>
+            <input type="text" id="analytics-user-search" class="form-control form-control-sm" placeholder="Search email…"
+              oninput="_filterAnalyticsUsers(this.value)" style="width:180px">
+          </div>
+          <div class="table-responsive" style="max-height:420px;overflow-y:auto">
+            <table class="table table-sm table-hover mb-0" id="analytics-user-table">
+              <thead class="table-light sticky-top">
+                <tr>
+                  <th>Email</th><th>Plan</th><th>Total</th><th>30d</th><th>7d</th>
+                  <th>Last Active</th><th>Platform</th><th>AI Tokens</th><th>AI Cost</th><th>Features</th>
+                </tr>
+              </thead>
+              <tbody id="analytics-user-tbody">
+                <tr><td colspan="10" class="text-center text-muted py-3">—</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ────────────────────────────────────────────
+         SUPPORT LOOKUP
+    ──────────────────────────────────────────── -->
+    <div class="admin-section" id="admin-section-support">
+      <div class="admin-section-hdr">
+        <div>
+          <h2>Support Lookup</h2>
+          <p>Users generate a temporary support key in Dashboard → Settings → Support Access.
+             Enter the plaintext key to view their account and bot metadata. No transcript content is returned.</p>
+        </div>
+      </div>
+
+      <div class="card card-pad mb-3">
+        <div class="section-title mb-1">Enter Support Key</div>
+        <div class="section-subtitle mb-3">
+          The key cannot be recovered from the database (only the SHA-256 hash is stored).
+          The user must share the plaintext key with you directly.
+        </div>
+        <div class="d-flex gap-2" style="max-width:480px">
+          <input type="text" id="support-key-input" class="form-control form-control-sm font-mono"
+            placeholder="Paste the support key here…" autocomplete="off" spellcheck="false">
+          <button class="btn btn-sm btn-primary flex-shrink-0" id="support-lookup-btn" onclick="_doSupportLookup()">Look Up</button>
+        </div>
+      </div>
+
+      <div id="support-lookup-result" class="d-none">
+        <!-- filled by JS -->
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<script>
+function filterAccounts(q) {
+  q = q.toLowerCase();
+  document.querySelectorAll('#acct-table tbody tr').forEach(row => {
+    row.style.display = row.cells[0].textContent.toLowerCase().includes(q) ? '' : 'none';
+  });
+}
+
+function adminSwitch(name) {
+  document.querySelectorAll('.admin-section').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.admin-nav-item[data-section]').forEach(el => el.classList.remove('active'));
+  const section = document.getElementById('admin-section-' + name);
+  if (section) section.classList.add('active');
+  const btn = document.querySelector('.admin-nav-item[data-section="' + name + '"]');
+  if (btn) btn.classList.add('active');
+  window.history.replaceState(null, '', '#' + name);
+}
+
+document.querySelectorAll('.admin-nav-item[data-section]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    adminSwitch(btn.dataset.section);
+    if (btn.dataset.section === 'analytics') _loadAnalytics();
+  });
+});
+
+document.addEventListener('DOMContentLoaded', () => {
+  const hash = window.location.hash.replace('#', '');
+  const valid = ['overview','users','billing','analytics','support','audit','system','crypto'];
+  if (hash && valid.includes(hash)) adminSwitch(hash);
+  if (hash === 'analytics') _loadAnalytics();
+});
+
+// ── Audit Log ─────────────────────────────────────────────────────────────────
+let _auditOffset = 0;
+const _auditLimit = 50;
+
+const _ACTION_COLORS = {
+  'bot.created':    '#22c55e',
+  'auth.register':  '#22c55e',
+  'api_key.created':'#22c55e',
+  'webhook.created':'#22c55e',
+  'bot.deleted':    '#ef4444',
+  'api_key.revoked':'#ef4444',
+  'webhook.deleted':'#ef4444',
+  'auth.login':     '#94a3b8',
+};
+function _auditColor(action) {
+  if (_ACTION_COLORS[action]) return _ACTION_COLORS[action];
+  if (action.startsWith('admin.')) return '#f59e0b';
+  return '#94a3b8';
+}
+
+async function loadAuditLog() {
+  const action = document.getElementById('auditActionFilter').value;
+  const acct   = document.getElementById('auditAccountFilter').value.trim();
+  let url = `/api/v1/audit-log?limit=${_auditLimit}&offset=${_auditOffset}`;
+  if (action) url += `&action=${encodeURIComponent(action)}`;
+  if (acct)   url += `&account_id=${encodeURIComponent(acct)}`;
+
+  const tbody = document.getElementById('auditTableBody');
+  tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3">Loading...</td></tr>';
+
+  try {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(await r.text());
+    const rows = await r.json();
+
+    document.getElementById('auditCount').textContent =
+      `Showing ${_auditOffset + 1}–${_auditOffset + rows.length}`;
+    document.getElementById('auditPrevBtn').disabled = _auditOffset === 0;
+    document.getElementById('auditNextBtn').disabled = rows.length < _auditLimit;
+
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">No entries found.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = rows.map(r => {
+      const ts = new Date(r.created_at).toISOString().replace('T',' ').slice(0,19);
+      const color = _auditColor(r.action);
+      const resource = r.resource_type
+        ? `<span style="color:#94a3b8">${r.resource_type}</span> <code style="font-size:11px;color:#7dd3fc">${(r.resource_id||'').slice(0,8)}…</code>`
+        : '<span class="text-muted">—</span>';
+      let details = '';
+      if (r.details) {
+        try {
+          const d = JSON.parse(r.details);
+          details = d.actor_email
+            ? `<span style="color:#a5b4fc">${d.actor_email}</span>`
+            : Object.entries(d).map(([k,v])=>`<span class="text-muted">${k}:</span> ${v}`).join(' · ');
+        } catch { details = r.details; }
+      }
+      return `<tr style="border-bottom:1px solid rgba(255,255,255,0.04);">
+        <td class="px-3 py-2" style="white-space:nowrap;color:#64748b">${ts}</td>
+        <td class="px-3 py-2"><span style="color:${color};font-weight:600">${r.action}</span></td>
+        <td class="px-3 py-2">${resource}</td>
+        <td class="px-3 py-2" style="max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${details}</td>
+        <td class="px-3 py-2" style="font-family:monospace;color:#64748b">${r.ip_address||'—'}</td>
+      </tr>`;
+    }).join('');
+  } catch(e) {
+    tbody.innerHTML = `<tr><td colspan="5" class="text-center text-danger py-3">${e.message}</td></tr>`;
+  }
+}
+
+function auditPage(dir) {
+  _auditOffset = Math.max(0, _auditOffset + dir * _auditLimit);
+  loadAuditLog();
+}
+
+// ── Platform Analytics ────────────────────────────────────────────────────────
+let _analyticsData = null;
+let _analyticsCharts = {};
+
+async function _loadAnalytics(force = false) {
+  if (_analyticsData && !force) return; // already loaded
+  document.getElementById('analytics-loading').style.display = '';
+  document.getElementById('analytics-content').style.display = 'none';
+  try {
+    const r = await fetch('/admin/analytics-data');
+    if (!r.ok) throw new Error(await r.text());
+    _analyticsData = await r.json();
+    _renderAnalytics(_analyticsData);
+  } catch(e) {
+    document.getElementById('analytics-loading').textContent = 'Failed to load: ' + e.message;
+  }
+}
+
+function _fmt(n) { return (n||0).toLocaleString(); }
+function _fmtCost(n) { return '$' + (+(n||0)).toFixed(4); }
+
+function _renderAnalytics(d) {
+  const ov = d.overview || {};
+
+  // KPI grid
+  const kpis = [
+    ['Total Bots', _fmt(ov.total_bots), ''],
+    ['Bots (30d)', _fmt(ov.bots_30d), ''],
+    ['Active Now', _fmt(ov.active_now), ov.active_now > 0 ? 'color:#4f46e5' : ''],
+    ['Success Rate', (ov.success_rate_pct || 0) + '%', 'color:#16a34a'],
+    ['Total Accounts', _fmt(ov.total_accounts), ''],
+    ['New Accounts (30d)', _fmt(ov.new_accounts_30d), ''],
+    ['AI Tokens (all time)', _fmt(ov.total_ai_tokens), ''],
+    ['AI Cost (all time)', _fmtCost(ov.total_ai_cost_usd), ''],
+  ];
+  document.getElementById('analytics-kpi-grid').style.gridTemplateColumns = 'repeat(4,1fr)';
+  document.getElementById('analytics-kpi-grid').innerHTML = kpis.map(([label, val, style]) => `
+    <div class="stat-card">
+      <div class="stat-label">${label}</div>
+      <div class="stat-value mt-1" style="${style}">${val}</div>
+    </div>`).join('');
+
+  // Destroy old charts
+  Object.values(_analyticsCharts).forEach(c => c.destroy());
+  _analyticsCharts = {};
+
+  // Activity line chart
+  const trends = d.trends || [];
+  const actCtx = document.getElementById('chart-activity').getContext('2d');
+  _analyticsCharts.activity = new Chart(actCtx, {
+    type: 'line',
+    data: {
+      labels: trends.map(t => t.date.slice(5)),
+      datasets: [
+        { label: 'Bots', data: trends.map(t => t.bots), borderColor: '#6366f1', backgroundColor: 'rgba(99,102,241,0.1)', fill: true, tension: 0.3, pointRadius: 2 },
+        { label: 'Errors', data: trends.map(t => t.errors), borderColor: '#ef4444', backgroundColor: 'rgba(239,68,68,0.08)', fill: true, tension: 0.3, pointRadius: 2 },
+      ],
+    },
+    options: { plugins: { legend: { position: 'top' } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } }, x: { ticks: { maxTicksLimit: 10 } } } },
+  });
+
+  // Platform doughnut
+  const platforms = d.platforms || {};
+  const platLabels = Object.keys(platforms);
+  const platColors = ['#6366f1','#22c55e','#3b82f6','#f59e0b','#ef4444','#94a3b8'];
+  const platCtx = document.getElementById('chart-platforms').getContext('2d');
+  _analyticsCharts.platforms = new Chart(platCtx, {
+    type: 'doughnut',
+    data: {
+      labels: platLabels,
+      datasets: [{ data: platLabels.map(k => platforms[k]), backgroundColor: platColors }],
+    },
+    options: { plugins: { legend: { position: 'bottom', labels: { font: { size: 11 } } } }, cutout: '60%' },
+  });
+
+  // AI daily trend
+  const aiTrend = (d.ai_usage || {}).daily || [];
+  const aiCtx = document.getElementById('chart-ai-trend').getContext('2d');
+  _analyticsCharts.aiTrend = new Chart(aiCtx, {
+    type: 'bar',
+    data: {
+      labels: aiTrend.map(t => t.date.slice(5)),
+      datasets: [{ label: 'Tokens', data: aiTrend.map(t => t.tokens), backgroundColor: 'rgba(99,102,241,0.7)' }],
+    },
+    options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } }, x: { ticks: { maxTicksLimit: 10 } } } },
+  });
+
+  // AI model table
+  const byModel = (d.ai_usage || {}).by_model || {};
+  document.getElementById('ai-model-table').innerHTML = Object.keys(byModel).length
+    ? `<table class="table table-sm mb-0"><thead><tr><th>Model</th><th class="text-end">Calls</th><th class="text-end">Tokens</th><th class="text-end">Cost</th></tr></thead><tbody>` +
+      Object.entries(byModel).map(([m,v]) =>
+        `<tr><td style="font-size:12px">${m}</td><td class="text-end small">${_fmt(v.calls)}</td><td class="text-end small">${_fmt(v.tokens)}</td><td class="text-end small">${_fmtCost(v.cost)}</td></tr>`
+      ).join('') + '</tbody></table>'
+    : '<div class="text-muted small py-2">No AI usage recorded.</div>';
+
+  // AI operation table
+  const byOp = (d.ai_usage || {}).by_operation || {};
+  document.getElementById('ai-op-table').innerHTML = Object.keys(byOp).length
+    ? `<table class="table table-sm mb-0"><thead><tr><th>Operation</th><th class="text-end">Calls</th><th class="text-end">Tokens</th><th class="text-end">Cost</th></tr></thead><tbody>` +
+      Object.entries(byOp).map(([op,v]) =>
+        `<tr><td style="font-size:12px">${op}</td><td class="text-end small">${_fmt(v.calls)}</td><td class="text-end small">${_fmt(v.tokens)}</td><td class="text-end small">${_fmtCost(v.cost)}</td></tr>`
+      ).join('') + '</tbody></table>'
+    : '<div class="text-muted small py-2">No AI usage recorded.</div>';
+
+  // Feature adoption bars
+  const features = d.features || {};
+  const total = ov.total_bots || 1;
+  const featureLabels = {
+    analysis_full: 'Full Analysis', analysis_transcript_only: 'Transcript Only',
+    consent_enabled: 'Consent Gate', live_transcription: 'Live Transcription',
+    record_video: 'Video Recording', pii_redaction: 'PII Redaction',
+    translation: 'Translation', keyword_alerts: 'Keyword Alerts',
+    workspace: 'Workspaces', scheduled: 'Scheduled Bots',
+    custom_template: 'Custom Template', custom_prompt: 'Custom Prompt', auto_followup: 'Auto Follow-up',
+  };
+  document.getElementById('feature-bars').innerHTML = Object.entries(featureLabels).map(([k, label]) => {
+    const count = features[k] || 0;
+    const pct = Math.round(100 * count / total);
+    return `<div class="mb-2">
+      <div class="d-flex justify-content-between" style="font-size:12.5px">
+        <span>${label}</span><span class="text-muted">${_fmt(count)} bots (${pct}%)</span>
+      </div>
+      <div style="background:#e2e8f0;border-radius:4px;height:6px">
+        <div style="background:#6366f1;border-radius:4px;height:6px;width:${pct}%;transition:width 0.4s"></div>
+      </div>
+    </div>`;
+  }).join('');
+
+  // Per-user table
+  _renderAnalyticsUsers(d.per_user || []);
+
+  document.getElementById('analytics-loading').style.display = 'none';
+  document.getElementById('analytics-content').style.display = '';
+}
+
+let _allUsers = [];
+function _renderAnalyticsUsers(users) {
+  _allUsers = users;
+  _filterAnalyticsUsers('');
+}
+
+function _filterAnalyticsUsers(q) {
+  q = q.toLowerCase();
+  const filtered = q ? _allUsers.filter(u => u.email.toLowerCase().includes(q)) : _allUsers;
+  const tbody = document.getElementById('analytics-user-tbody');
+  if (!filtered.length) {
+    tbody.innerHTML = '<tr><td colspan="10" class="text-center text-muted py-3">No users found.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = filtered.map(u => `<tr>
+    <td style="font-size:12.5px">${u.email}</td>
+    <td><span class="chip chip-gray" style="font-size:10px;padding:1px 5px">${u.plan}</span></td>
+    <td class="fw-semibold">${u.total_bots}</td>
+    <td>${u.bots_30d}</td>
+    <td>${u.bots_7d}</td>
+    <td style="font-size:12px;color:#94a3b8">${u.last_active || '—'}</td>
+    <td style="font-size:12px">${u.platform_pref || '—'}</td>
+    <td style="font-size:12px">${_fmt(u.ai_tokens)}</td>
+    <td style="font-size:12px">${_fmtCost(u.ai_cost_usd)}</td>
+    <td style="font-size:11px;color:#64748b">${(u.features_used||[]).join(', ') || '—'}</td>
+  </tr>`).join('');
+}
+
+// ── Support Lookup ────────────────────────────────────────────────────────────
+
+async function _doSupportLookup() {
+  const key = (document.getElementById('support-key-input').value || '').trim();
+  if (!key) { alert('Please enter a support key.'); return; }
+
+  const btn = document.getElementById('support-lookup-btn');
+  const resultEl = document.getElementById('support-lookup-result');
+  btn.disabled = true;
+  resultEl.className = 'd-none';
+
+  try {
+    const r = await fetch(`/admin/support-lookup-data?key=${encodeURIComponent(key)}`);
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({ detail: r.statusText }));
+      resultEl.className = '';
+      resultEl.innerHTML = `<div class="alert alert-danger">${err.detail || 'Lookup failed.'}</div>`;
+      return;
+    }
+    const d = await r.json();
+    const bots = (d.recent_bots || []).map(b => `<tr>
+      <td style="font-size:12px">${b.id.slice(0,8)}…</td>
+      <td><span class="chip chip-gray" style="font-size:10px">${b.status}</span></td>
+      <td style="font-size:12px">${b.meeting_platform || '—'}</td>
+      <td style="font-size:11.5px;word-break:break-all;max-width:200px">${b.meeting_url || '—'}</td>
+      <td style="font-size:12px">${b.created_at ? b.created_at.slice(0,10) : '—'}</td>
+      <td style="font-size:12px">${b.duration_seconds ? (b.duration_seconds/60).toFixed(1)+'m' : '—'}</td>
+      <td style="font-size:12px">${b.transcript_entries || 0}</td>
+      <td style="font-size:12px;color:${b.has_analysis ? '#16a34a' : '#94a3b8'}">${b.has_analysis ? '✓' : '—'}</td>
+      <td style="font-size:12px">${b.error_message ? '<span class="text-danger">'+b.error_message.slice(0,40)+'</span>' : '—'}</td>
+    </tr>`).join('');
+
+    resultEl.className = '';
+    resultEl.innerHTML = `
+      <div class="card card-pad mb-3">
+        <div class="section-title mb-3">Account: ${d.email}</div>
+        <div class="row g-3">
+          <div class="col-md-3"><div class="stat-card"><div class="stat-label">Plan</div><div class="fw-semibold mt-1">${d.plan}</div></div></div>
+          <div class="col-md-3"><div class="stat-card"><div class="stat-label">Type</div><div class="fw-semibold mt-1">${d.account_type}</div></div></div>
+          <div class="col-md-3"><div class="stat-card"><div class="stat-label">Monthly Bots</div><div class="fw-semibold mt-1">${d.monthly_bots_used}</div></div></div>
+          <div class="col-md-3"><div class="stat-card"><div class="stat-label">Joined</div><div class="fw-semibold mt-1 small">${(d.created_at||'').slice(0,10)}</div></div></div>
+        </div>
+        <div class="mt-2 small text-muted">Key: <strong>${d.key_label}</strong> · Issued ${(d.key_created_at||'').slice(0,10)}${d.key_expires_at ? ' · Expires '+d.key_expires_at.slice(0,10) : ''}</div>
+      </div>
+      <div class="card">
+        <div class="px-4 pt-3 pb-2"><div class="section-title">Recent Bots (last 30)</div></div>
+        <div class="table-responsive">
+          <table class="table table-sm table-hover mb-0">
+            <thead class="table-light">
+              <tr><th>ID</th><th>Status</th><th>Platform</th><th>Meeting URL</th><th>Date</th><th>Duration</th><th>Transcript Entries</th><th>Analysis</th><th>Error</th></tr>
+            </thead>
+            <tbody>${bots || '<tr><td colspan="9" class="text-center text-muted py-3">No bots yet.</td></tr>'}</tbody>
+          </table>
+        </div>
+      </div>`;
+  } catch(e) {
+    resultEl.className = '';
+    resultEl.innerHTML = `<div class="alert alert-danger">${e.message}</div>`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// Allow Enter key in support key input
+document.getElementById('support-key-input')?.addEventListener('keydown', e => {
+  if (e.key === 'Enter') _doSupportLookup();
+});
+</script>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+{% endblock %}

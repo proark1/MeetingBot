@@ -1,0 +1,1632 @@
+"""Web UI routes — HTML pages for account management and billing."""
+
+import logging
+from pathlib import Path
+from typing import Optional
+
+from fastapi import APIRouter, Depends, Form, Request, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.templating import Jinja2Templates
+from jose import JWTError, jwt
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.config import settings
+from app.db import get_db
+from app.deps import _admin_emails
+from app.models.account import (
+    Account, ApiKey, CreditTransaction, PlatformConfig, MonitorState,
+    UnmatchedUsdcTransfer, Integration, CalendarFeed, OAuthAccount, Webhook,
+)
+
+logger = logging.getLogger(__name__)
+router = APIRouter(tags=["UI"])
+
+_TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
+templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
+
+_COOKIE = "mb_token"
+
+
+def _get_token_from_request(request: Request) -> Optional[str]:
+    return request.cookies.get(_COOKIE)
+
+
+async def _get_account_from_request(request: Request, db: AsyncSession) -> Optional[Account]:
+    token = _get_token_from_request(request)
+    if not token:
+        return None
+    try:
+        payload = jwt.decode(token, settings.JWT_SECRET, algorithms=["HS256"])
+        account_id = payload.get("sub", "")
+        if not account_id:
+            return None
+    except JWTError:
+        return None
+    result = await db.execute(select(Account).where(Account.id == account_id))
+    return result.scalar_one_or_none()
+
+
+def _flash(type: str, message: str) -> dict:
+    return {"type": type, "message": message}
+
+
+# ── Root ──────────────────────────────────────────────────────────────────────
+
+@router.get("/", response_class=HTMLResponse, include_in_schema=False)
+async def root(request: Request, db: AsyncSession = Depends(get_db)):
+    try:
+        account = await _get_account_from_request(request, db)
+        if account:
+            return RedirectResponse("/dashboard")
+    except Exception as exc:
+        logger.warning("Root route DB lookup failed (serving landing page): %s", exc)
+    return templates.TemplateResponse("landing.html", {"request": request})
+
+
+# ── Register ──────────────────────────────────────────────────────────────────
+
+@router.get("/register", response_class=HTMLResponse, include_in_schema=False)
+async def register_page(request: Request):
+    return templates.TemplateResponse("register.html", {
+        "request": request,
+        "account": None,
+        "google_sso_enabled": bool(settings.GOOGLE_CLIENT_ID),
+        "microsoft_sso_enabled": bool(settings.MICROSOFT_CLIENT_ID),
+    })
+
+
+@router.post("/register", response_class=HTMLResponse, include_in_schema=False)
+async def register_submit(
+    request: Request,
+    email: str = Form(...),
+    password: str = Form(...),
+    account_type: str = Form(default="personal"),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.api.auth import _hash_password, generate_api_key
+    import uuid
+    from decimal import Decimal
+
+    # Check password length
+    if len(password) < 8:
+        return templates.TemplateResponse("register.html", {
+            "request": request,
+            "account": None,
+            "flash": _flash("danger", "Password must be at least 8 characters."),
+        })
+
+    # Check email not taken
+    existing = await db.execute(select(Account).where(Account.email == email))
+    if existing.scalar_one_or_none():
+        return templates.TemplateResponse("register.html", {
+            "request": request,
+            "account": None,
+            "flash": _flash("danger", "Email already registered. Try logging in."),
+        })
+
+    # Validate account_type
+    if account_type not in ("personal", "business"):
+        account_type = "personal"
+
+    account = Account(
+        id=str(uuid.uuid4()),
+        email=email,
+        hashed_password=_hash_password(password),
+        credits_usd=Decimal("0"),
+        account_type=account_type,
+    )
+    db.add(account)
+
+    api_key_value = generate_api_key()
+    api_key = ApiKey(
+        id=str(uuid.uuid4()),
+        account_id=account.id,
+        key=api_key_value,
+        name="Default",
+    )
+    db.add(api_key)
+    await db.commit()
+
+    # Log in immediately
+    from app.api.auth import _create_jwt
+    token = _create_jwt(account.id)
+    response = RedirectResponse("/dashboard", status_code=303)
+    response.set_cookie(_COOKIE, token, httponly=True, samesite="lax", secure=True, max_age=settings.JWT_EXPIRE_HOURS * 3600)
+    return response
+
+
+# ── Login ─────────────────────────────────────────────────────────────────────
+
+@router.get("/login", response_class=HTMLResponse, include_in_schema=False)
+async def login_page(request: Request):
+    return templates.TemplateResponse("login.html", {
+        "request": request,
+        "account": None,
+        "google_sso_enabled": bool(settings.GOOGLE_CLIENT_ID),
+        "microsoft_sso_enabled": bool(settings.MICROSOFT_CLIENT_ID),
+    })
+
+
+@router.post("/login", response_class=HTMLResponse, include_in_schema=False)
+async def login_submit(
+    request: Request,
+    email: str = Form(...),
+    password: str = Form(...),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.api.auth import _verify_password, _create_jwt
+
+    result = await db.execute(select(Account).where(Account.email == email))
+    account = result.scalar_one_or_none()
+    if not account or not _verify_password(password, account.hashed_password):
+        return templates.TemplateResponse("login.html", {
+            "request": request,
+            "account": None,
+            "flash": _flash("danger", "Invalid email or password."),
+            "google_sso_enabled": bool(settings.GOOGLE_CLIENT_ID),
+            "microsoft_sso_enabled": bool(settings.MICROSOFT_CLIENT_ID),
+        })
+
+    token = _create_jwt(account.id)
+    response = RedirectResponse("/dashboard", status_code=303)
+    response.set_cookie(_COOKIE, token, httponly=True, samesite="lax", secure=True, max_age=settings.JWT_EXPIRE_HOURS * 3600)
+    return response
+
+
+# ── Logout ────────────────────────────────────────────────────────────────────
+
+@router.get("/logout", include_in_schema=False)
+async def logout():
+    response = RedirectResponse("/login", status_code=303)
+    response.delete_cookie(_COOKIE, httponly=True, samesite="lax")
+    return response
+
+
+# ── Dashboard ─────────────────────────────────────────────────────────────────
+
+@router.get("/dashboard", response_class=HTMLResponse, include_in_schema=False)
+async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
+    account = await _get_account_from_request(request, db)
+    if not account:
+        return RedirectResponse("/login")
+
+    keys_result = await db.execute(
+        select(ApiKey)
+        .where(ApiKey.account_id == account.id, ApiKey.is_active == True)  # noqa: E712
+        .order_by(ApiKey.created_at.desc())
+    )
+    api_keys = [
+        {
+            "id": k.id,
+            "name": k.name,
+            "key_preview": k.key[:16] + "...",
+            "last_used_at": k.last_used_at.strftime("%Y-%m-%d %H:%M") if k.last_used_at else None,
+        }
+        for k in keys_result.scalars().all()
+    ]
+
+    txns_result = await db.execute(
+        select(CreditTransaction)
+        .where(CreditTransaction.account_id == account.id)
+        .order_by(CreditTransaction.created_at.desc())
+        .limit(30)
+    )
+    transactions = [
+        {
+            "created_at": t.created_at.isoformat(),
+            "type": t.type,
+            "description": t.description,
+            "amount_usd": float(t.amount_usd),
+        }
+        for t in txns_result.scalars().all()
+    ]
+
+    # Subscription plan info
+    plan_limits = {
+        "free": settings.PLAN_FREE_BOTS_PER_MONTH,
+        "starter": settings.PLAN_STARTER_BOTS_PER_MONTH,
+        "pro": settings.PLAN_PRO_BOTS_PER_MONTH,
+        "business": settings.PLAN_BUSINESS_BOTS_PER_MONTH,
+    }
+    plan = account.plan or "free"
+    plan_limit = plan_limits.get(plan, settings.PLAN_FREE_BOTS_PER_MONTH)
+
+    # Linked SSO accounts
+    oauth_result = await db.execute(
+        select(OAuthAccount).where(OAuthAccount.account_id == account.id)
+    )
+    oauth_accounts = [
+        {"provider": o.provider, "email": o.email}
+        for o in oauth_result.scalars().all()
+    ]
+
+    # Active integrations
+    integ_result = await db.execute(
+        select(Integration).where(
+            Integration.account_id == account.id, Integration.is_active == True  # noqa: E712
+        )
+    )
+    active_integrations = [
+        {"id": i.id, "type": i.type, "name": i.name}
+        for i in integ_result.scalars().all()
+    ]
+
+    # Calendar feeds
+    cal_result = await db.execute(
+        select(CalendarFeed).where(CalendarFeed.account_id == account.id)
+    )
+    calendar_feeds = [
+        {"id": f.id, "name": f.name, "is_active": f.is_active,
+         "last_synced_at": f.last_synced_at.strftime("%Y-%m-%d %H:%M") if f.last_synced_at else None}
+        for f in cal_result.scalars().all()
+    ]
+
+    # All integrations (not just active, for full management UI)
+    all_integ_result = await db.execute(
+        select(Integration).where(Integration.account_id == account.id)
+        .order_by(Integration.created_at.desc())
+    )
+    all_integrations = [
+        {
+            "id": i.id,
+            "type": i.type,
+            "name": i.name,
+            "is_active": i.is_active,
+            "created_at": i.created_at.strftime("%Y-%m-%d"),
+        }
+        for i in all_integ_result.scalars().all()
+    ]
+
+    # All calendar feeds
+    all_cal_result = await db.execute(
+        select(CalendarFeed).where(CalendarFeed.account_id == account.id)
+        .order_by(CalendarFeed.created_at.desc())
+    )
+    all_calendar_feeds = [
+        {
+            "id": f.id,
+            "name": f.name,
+            "is_active": f.is_active,
+            "auto_record": f.auto_record,
+            "bot_name": f.bot_name,
+            "last_synced_at": f.last_synced_at.strftime("%Y-%m-%d %H:%M") if f.last_synced_at else None,
+            "created_at": f.created_at.strftime("%Y-%m-%d"),
+        }
+        for f in all_cal_result.scalars().all()
+    ]
+
+    # Recent bots (from in-memory store)
+    recent_bots = []
+    try:
+        from app.store import store as _store
+        bots_list, _total = await _store.list_bots(limit=8, account_id=account.id)
+        recent_bots = [
+            {
+                "id": b.id,
+                "meeting_url": b.meeting_url,
+                "meeting_platform": b.meeting_platform,
+                "status": b.status,
+                "created_at": b.created_at.strftime("%Y-%m-%d %H:%M"),
+                "bot_name": b.bot_name,
+            }
+            for b in bots_list
+        ]
+    except Exception:
+        pass
+
+    flash = None
+    if request.query_params.get("payment") == "success":
+        flash = _flash("success", "Payment successful! Your credits will be added shortly.")
+    if request.query_params.get("wallet") == "saved":
+        flash = _flash("success", "Wallet address saved successfully.")
+    if request.query_params.get("wallet") == "error":
+        flash = _flash("danger", "Invalid Ethereum address. Must be 0x followed by 40 hex characters.")
+    if request.query_params.get("wallet") == "taken":
+        flash = _flash("danger", "This wallet address is already linked to another account.")
+    if request.query_params.get("notify") == "saved":
+        flash = _flash("success", "Notification preferences updated.")
+    if request.query_params.get("acct_type") == "saved":
+        flash = _flash("success", "Account type updated successfully.")
+    if request.query_params.get("integ_added") == "1":
+        flash = _flash("success", "Integration added successfully.")
+    if request.query_params.get("integ_deleted") == "1":
+        flash = _flash("success", "Integration removed.")
+    if request.query_params.get("integ_error"):
+        err = request.query_params.get("integ_error")
+        messages = {
+            "invalid_slack_url": "Invalid Slack Webhook URL. Must start with https://hooks.slack.com/",
+            "notion_missing_fields": "Please provide both Notion API token and Database ID.",
+            "invalid_type": "Invalid integration type.",
+        }
+        flash = _flash("danger", messages.get(err, "Integration error."))
+    if request.query_params.get("cal_added") == "1":
+        flash = _flash("success", "Calendar feed added. It will sync within 5 minutes.")
+    if request.query_params.get("cal_deleted") == "1":
+        flash = _flash("success", "Calendar feed removed.")
+    if request.query_params.get("cal_error") == "invalid_url":
+        flash = _flash("danger", "Invalid iCal URL. Must start with http:// or https://")
+
+    new_key = request.query_params.get("new_key")
+    if new_key and request.query_params.get("created") == "1":
+        flash = _flash("success", "API key created successfully.")
+
+    return templates.TemplateResponse("dashboard.html", {
+        "request": request,
+        "account": account,
+        "is_admin": _is_admin(account),
+        "balance": float(account.credits_usd or 0),
+        "wallet_address": account.wallet_address,
+        "api_keys": api_keys,
+        "transactions": transactions,
+        "flash": flash,
+        "new_key": new_key if request.query_params.get("created") == "1" else None,
+        # Plan info
+        "plan": plan,
+        "plan_limit": plan_limit,
+        "monthly_bots_used": account.monthly_bots_used or 0,
+        # Notification prefs
+        "notify_on_done": account.notify_on_done,
+        "notify_email": account.notify_email or "",
+        # SSO
+        "oauth_accounts": oauth_accounts,
+        "google_sso_enabled": bool(settings.GOOGLE_CLIENT_ID),
+        "microsoft_sso_enabled": bool(settings.MICROSOFT_CLIENT_ID),
+        # Integrations & calendar
+        "active_integrations": active_integrations,
+        "all_integrations": all_integrations,
+        "calendar_feeds": calendar_feeds,
+        "all_calendar_feeds": all_calendar_feeds,
+        # Recent bots
+        "recent_bots": recent_bots,
+    })
+
+
+# ── Bot session / transcript viewer ───────────────────────────────────────────
+
+@router.get("/bot/{bot_id}", response_class=HTMLResponse, include_in_schema=False)
+async def bot_session_page(
+    bot_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    account = await _get_account_from_request(request, db)
+    if not account:
+        return RedirectResponse(f"/login?next=/bot/{bot_id}")
+
+    from app.store import store as _store
+    bot = await _store.get_bot(bot_id)
+
+    if bot is None or bot.account_id != account.id:
+        return templates.TemplateResponse("dashboard.html", {
+            "request": request,
+            "account": account,
+            "is_admin": _is_admin(account),
+            "flash": _flash("danger", "Session not found or you do not have access."),
+            "balance": float(account.credits_usd or 0),
+            "recent_bots": [],
+            "transactions": [],
+            "api_keys": [],
+            "plan": account.plan or "free",
+            "plan_limit": 5,
+            "monthly_bots_used": account.monthly_bots_used or 0,
+            "notify_on_done": account.notify_on_done,
+            "notify_email": account.notify_email or "",
+            "wallet_address": account.wallet_address,
+            "oauth_accounts": [],
+            "google_sso_enabled": bool(settings.GOOGLE_CLIENT_ID),
+            "microsoft_sso_enabled": bool(settings.MICROSOFT_CLIENT_ID),
+            "active_integrations": [],
+            "all_integrations": [],
+            "calendar_feeds": [],
+            "all_calendar_feeds": [],
+        })
+
+    import os as _os
+    _recording_ok = bool(bot.recording_path and _os.path.exists(bot.recording_path))
+    _video_ok = bool(bot.video_path and _os.path.exists(bot.video_path))
+
+    return templates.TemplateResponse("bot.html", {
+        "request": request,
+        "account": account,
+        "is_admin": _is_admin(account),
+        "bot": {
+            "id": bot.id,
+            "meeting_url": bot.meeting_url,
+            "meeting_platform": bot.meeting_platform,
+            "bot_name": bot.bot_name,
+            "status": bot.status,
+            "error_message": bot.error_message,
+            "created_at": bot.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+            "updated_at": bot.updated_at.strftime("%Y-%m-%d %H:%M:%S"),
+            "started_at": bot.started_at.strftime("%Y-%m-%d %H:%M:%S") if bot.started_at else None,
+            "ended_at": bot.ended_at.strftime("%Y-%m-%d %H:%M:%S") if bot.ended_at else None,
+            "duration_seconds": bot.duration_seconds,
+            "participants": bot.participants,
+            "transcript": bot.transcript,
+            "analysis": bot.analysis,
+            "chapters": bot.chapters,
+            "speaker_stats": bot.speaker_stats,
+            "recording_available": _recording_ok,
+            "video_available": _video_ok,
+            "is_demo_transcript": bot.is_demo_transcript,
+            "sub_user_id": bot.sub_user_id,
+            "metadata": bot.metadata,
+        },
+    })
+
+
+@router.post("/dashboard/keys", include_in_schema=False)
+async def create_key_ui(
+    request: Request,
+    name: str = Form(default="New Key"),
+    db: AsyncSession = Depends(get_db),
+):
+    account = await _get_account_from_request(request, db)
+    if not account:
+        _wants_json = "application/json" in request.headers.get("Accept", "")
+        if _wants_json:
+            return JSONResponse({"detail": "Unauthenticated"}, status_code=401)
+        return RedirectResponse("/login")
+
+    # Support JSON body (async fetch from dashboard)
+    _wants_json = "application/json" in request.headers.get("Accept", "")
+    key_name = name or "New Key"
+    mode = "live"
+    if _wants_json:
+        try:
+            body = await request.json()
+            key_name = (body.get("name") or "New Key").strip()[:100]
+            mode = body.get("mode", "live")
+        except Exception:
+            pass
+
+    from app.api.auth import generate_api_key
+    import uuid
+    key_value = generate_api_key(mode=mode)
+    api_key = ApiKey(
+        id=str(uuid.uuid4()),
+        account_id=account.id,
+        key=key_value,
+        name=key_name,
+        mode=mode,
+    )
+    db.add(api_key)
+    await db.commit()
+
+    if _wants_json:
+        return JSONResponse({
+            "id": api_key.id,
+            "name": api_key.name,
+            "full_key": key_value,
+            "key_preview": key_value[:16] + "...",
+            "mode": mode,
+            "created_at": api_key.created_at.isoformat() if api_key.created_at else None,
+        })
+    return RedirectResponse(f"/dashboard?created=1&new_key={key_value}", status_code=303)
+
+
+@router.post("/dashboard/keys/{key_id}/revoke", include_in_schema=False)
+async def revoke_key_ui(
+    key_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    _wants_json = "application/json" in request.headers.get("Accept", "")
+    account = await _get_account_from_request(request, db)
+    if not account:
+        if _wants_json:
+            return JSONResponse({"detail": "Unauthenticated"}, status_code=401)
+        return RedirectResponse("/login")
+
+    result = await db.execute(
+        select(ApiKey).where(ApiKey.id == key_id, ApiKey.account_id == account.id)
+    )
+    key = result.scalar_one_or_none()
+    if key:
+        key.is_active = False
+        await db.commit()
+
+    if _wants_json:
+        return JSONResponse({"revoked": True})
+    return RedirectResponse("/dashboard", status_code=303)
+
+
+@router.post("/dashboard/wallet", include_in_schema=False)
+async def save_wallet_ui(
+    request: Request,
+    wallet_address: str = Form(default=""),
+    db: AsyncSession = Depends(get_db),
+):
+    _wants_json = "application/json" in request.headers.get("Accept", "")
+    account = await _get_account_from_request(request, db)
+    if not account:
+        if _wants_json:
+            return JSONResponse({"detail": "Unauthenticated"}, status_code=401)
+        return RedirectResponse("/login")
+
+    # Support JSON body
+    raw_address = wallet_address
+    if _wants_json:
+        try:
+            body = await request.json()
+            raw_address = body.get("wallet_address", "")
+        except Exception:
+            pass
+
+    import re
+    address = raw_address.strip().lower()
+    if not re.match(r"^0x[0-9a-f]{40}$", address):
+        if _wants_json:
+            return JSONResponse({"detail": "Invalid Ethereum address"}, status_code=400)
+        return RedirectResponse("/dashboard?wallet=error", status_code=303)
+
+    from app.models.account import Account as AccountModel
+    existing = await db.execute(
+        select(AccountModel).where(AccountModel.wallet_address == address, AccountModel.id != account.id)
+    )
+    if existing.scalar_one_or_none():
+        if _wants_json:
+            return JSONResponse({"detail": "Wallet address already registered to another account"}, status_code=409)
+        return RedirectResponse("/dashboard?wallet=taken", status_code=303)
+
+    account.wallet_address = address
+    await db.commit()
+
+    if _wants_json:
+        return JSONResponse({"wallet_address": address, "message": "Wallet address saved"})
+    return RedirectResponse("/dashboard?wallet=saved", status_code=303)
+
+
+@router.post("/dashboard/notifications", include_in_schema=False)
+async def update_notifications_ui(
+    request: Request,
+    notify_on_done: str = Form(default=""),
+    notify_email: str = Form(default=""),
+    db: AsyncSession = Depends(get_db),
+):
+    _wants_json = "application/json" in request.headers.get("Accept", "")
+    account = await _get_account_from_request(request, db)
+    if not account:
+        if _wants_json:
+            return JSONResponse({"detail": "Unauthenticated"}, status_code=401)
+        return RedirectResponse("/login")
+
+    notify_flag = notify_on_done
+    email_val = notify_email
+    if _wants_json:
+        try:
+            body = await request.json()
+            notify_flag = "on" if body.get("notify_on_done") else ""
+            email_val = body.get("notify_email", "")
+        except Exception:
+            pass
+
+    account.notify_on_done = notify_flag == "on"
+    account.notify_email = (email_val or "").strip() or None
+    await db.commit()
+
+    if _wants_json:
+        return JSONResponse({"notify_on_done": account.notify_on_done, "message": "Preferences saved"})
+    return RedirectResponse("/dashboard?notify=saved", status_code=303)
+
+
+@router.post("/dashboard/account-type", include_in_schema=False)
+async def update_account_type_ui(
+    request: Request,
+    account_type: str = Form(...),
+    db: AsyncSession = Depends(get_db),
+):
+    account = await _get_account_from_request(request, db)
+    if not account:
+        return RedirectResponse("/login")
+
+    if account_type in ("personal", "business"):
+        account.account_type = account_type
+        await db.commit()
+        logger.info("Account %s changed account_type to %s via dashboard", account.id, account_type)
+    return RedirectResponse("/dashboard?acct_type=saved", status_code=303)
+
+
+# ── Top Up ────────────────────────────────────────────────────────────────────
+
+@router.get("/topup", response_class=HTMLResponse, include_in_schema=False)
+async def topup_page(request: Request, db: AsyncSession = Depends(get_db)):
+    account = await _get_account_from_request(request, db)
+    if not account:
+        return RedirectResponse("/login")
+
+    usdc_address = None
+    # Check for admin-configured platform wallet first
+    from app.api.admin import WALLET_KEY
+    wallet_result = await db.execute(
+        select(PlatformConfig).where(PlatformConfig.key == WALLET_KEY)
+    )
+    wallet_config = wallet_result.scalar_one_or_none()
+    if wallet_config and wallet_config.value:
+        usdc_address = wallet_config.value
+    elif settings.CRYPTO_HD_SEED:
+        try:
+            from app.services.crypto_service import get_or_create_deposit_address
+            usdc_address = await get_or_create_deposit_address(account.id, db)
+        except Exception:
+            pass
+
+    flash = None
+    if request.query_params.get("payment") == "cancelled":
+        flash = _flash("warning", "Payment cancelled.")
+
+    amounts = []
+    try:
+        amounts = [int(x.strip()) for x in settings.STRIPE_TOP_UP_AMOUNTS.split(",") if x.strip()]
+    except ValueError:
+        amounts = [10, 25, 50, 100]
+
+    return templates.TemplateResponse("topup.html", {
+        "request": request,
+        "account": account,
+        "is_admin": _is_admin(account),
+        "amounts": amounts,
+        "stripe_enabled": bool(settings.STRIPE_SECRET_KEY),
+        "usdc_enabled": bool(usdc_address),
+        "usdc_address": usdc_address,
+        "usdc_contract": settings.USDC_CONTRACT,
+        "user_wallet": account.wallet_address,
+        "flash": flash,
+    })
+
+
+@router.post("/topup/stripe", include_in_schema=False)
+async def topup_stripe_submit(
+    request: Request,
+    amount_usd: int = Form(...),
+    db: AsyncSession = Depends(get_db),
+):
+    account = await _get_account_from_request(request, db)
+    if not account:
+        return RedirectResponse("/login")
+
+    valid_amounts = []
+    try:
+        valid_amounts = [int(x.strip()) for x in settings.STRIPE_TOP_UP_AMOUNTS.split(",") if x.strip()]
+    except ValueError:
+        valid_amounts = [10, 25, 50, 100]
+
+    if amount_usd not in valid_amounts:
+        return RedirectResponse("/topup?error=invalid_amount", status_code=303)
+
+    base_url = str(request.base_url).rstrip("/")
+    from app.services.stripe_service import create_checkout_session
+    _, checkout_url = create_checkout_session(
+        account_id=account.id,
+        amount_usd=amount_usd,
+        success_url=f"{base_url}/dashboard?payment=success",
+        cancel_url=f"{base_url}/topup?payment=cancelled",
+    )
+    return RedirectResponse(checkout_url, status_code=303)
+
+
+# ── Admin ────────────────────────────────────────────────────────────────────
+
+def _is_admin(account: Optional[Account]) -> bool:
+    if not account:
+        return False
+    return account.email.lower() in _admin_emails() or account.is_admin
+
+
+@router.get("/admin", response_class=HTMLResponse, include_in_schema=False)
+async def admin_page(request: Request, db: AsyncSession = Depends(get_db)):
+    account = await _get_account_from_request(request, db)
+    if not _is_admin(account):
+        return RedirectResponse("/dashboard")
+
+    from app.api.admin import WALLET_KEY, RPC_URL_KEY
+    from sqlalchemy import func, desc, case
+
+    # Platform wallet
+    wallet_result = await db.execute(
+        select(PlatformConfig).where(PlatformConfig.key == WALLET_KEY)
+    )
+    wallet_config = wallet_result.scalar_one_or_none()
+
+    # RPC URL — check env first, then DB
+    rpc_url_source = "none"
+    rpc_url_preview = None
+    if settings.CRYPTO_RPC_URL:
+        rpc_url_source = "env"
+        u = settings.CRYPTO_RPC_URL
+        rpc_url_preview = u[:30] + "..." if len(u) > 30 else u
+    else:
+        rpc_result = await db.execute(
+            select(PlatformConfig).where(PlatformConfig.key == RPC_URL_KEY)
+        )
+        rpc_config = rpc_result.scalar_one_or_none()
+        if rpc_config and rpc_config.value:
+            rpc_url_source = "db"
+            u = rpc_config.value
+            rpc_url_preview = u[:30] + "..." if len(u) > 30 else u
+
+    # Monitor state
+    monitor_result = await db.execute(
+        select(MonitorState).where(MonitorState.key == "usdc_last_block")
+    )
+    monitor_state = monitor_result.scalar_one_or_none()
+
+    # Stats
+    total_accounts = (await db.execute(select(func.count(Account.id)))).scalar_one()
+    total_credits = (await db.execute(select(func.sum(Account.credits_usd)))).scalar_one() or 0
+    total_usdc_in = (await db.execute(
+        select(func.sum(CreditTransaction.amount_usd)).where(CreditTransaction.type == "usdc_topup")
+    )).scalar_one() or 0
+    total_stripe_in = (await db.execute(
+        select(func.sum(CreditTransaction.amount_usd)).where(CreditTransaction.type == "stripe_topup")
+    )).scalar_one() or 0
+    total_unmatched_pending = (await db.execute(
+        select(func.count(UnmatchedUsdcTransfer.tx_hash)).where(UnmatchedUsdcTransfer.resolved == False)  # noqa: E712
+    )).scalar_one()
+
+    # Plan breakdown
+    plan_counts_result = await db.execute(
+        select(Account.plan, func.count(Account.id))
+        .group_by(Account.plan)
+    )
+    plan_counts = {row[0] or "free": row[1] for row in plan_counts_result.all()}
+
+    # Webhook count
+    webhook_count_result = await db.execute(
+        select(func.count(Webhook.id)).where(Webhook.is_active == True)  # noqa: E712
+    )
+    active_webhook_count = webhook_count_result.scalar_one()
+
+    # Integration count
+    integration_count_result = await db.execute(
+        select(func.count(Integration.id)).where(Integration.is_active == True)  # noqa: E712
+    )
+    active_integration_count = integration_count_result.scalar_one()
+
+    # Calendar feeds count
+    calendar_feed_count_result = await db.execute(
+        select(func.count(CalendarFeed.id)).where(CalendarFeed.is_active == True)  # noqa: E712
+    )
+    active_calendar_feed_count = calendar_feed_count_result.scalar_one()
+
+    # OAuth (SSO) linked accounts
+    oauth_linked_count_result = await db.execute(
+        select(func.count(OAuthAccount.id))
+    )
+    oauth_linked_count = oauth_linked_count_result.scalar_one()
+
+    # All user accounts
+    accounts_result = await db.execute(
+        select(Account).order_by(desc(Account.credits_usd))
+    )
+    all_accounts = [
+        {
+            "id": a.id,
+            "email": a.email,
+            "account_type": a.account_type,
+            "plan": a.plan or "free",
+            "credits_usd": float(a.credits_usd or 0),
+            "wallet_address": a.wallet_address,
+            "is_active": a.is_active,
+            "is_admin": a.is_admin,
+            "monthly_bots_used": a.monthly_bots_used or 0,
+            "created_at": a.created_at.strftime("%Y-%m-%d %H:%M"),
+        }
+        for a in accounts_result.scalars().all()
+    ]
+
+    # Recent transactions (all users, last 50)
+    txns_result = await db.execute(
+        select(CreditTransaction, Account.email)
+        .join(Account, CreditTransaction.account_id == Account.id)
+        .order_by(desc(CreditTransaction.created_at))
+        .limit(50)
+    )
+    recent_txns = [
+        {
+            "created_at": t.created_at.strftime("%Y-%m-%d %H:%M"),
+            "email": email,
+            "type": t.type,
+            "description": t.description,
+            "amount_usd": float(t.amount_usd),
+            "reference_id": t.reference_id,
+        }
+        for t, email in txns_result.all()
+    ]
+
+    # Unmatched USDC transfers (most recent first, pending first)
+    unmatched_result = await db.execute(
+        select(UnmatchedUsdcTransfer).order_by(
+            UnmatchedUsdcTransfer.resolved.asc(),
+            desc(UnmatchedUsdcTransfer.detected_at),
+        )
+    )
+    unmatched_transfers = [
+        {
+            "tx_hash": u.tx_hash,
+            "from_address": u.from_address,
+            "amount_usdc": float(u.amount_usdc),
+            "block_number": u.block_number,
+            "detected_at": u.detected_at.strftime("%Y-%m-%d %H:%M"),
+            "resolved": u.resolved,
+            "resolution_note": u.resolution_note,
+        }
+        for u in unmatched_result.scalars().all()
+    ]
+
+    # Bot activity stats (platform-wide from in-memory store)
+    try:
+        from app.store import store as _store
+        all_bots, total_bots_mem = await _store.list_bots(limit=10000)
+        bot_status_counts: dict[str, int] = {}
+        bot_platform_counts: dict[str, int] = {}
+        total_ai_cost = 0.0
+        total_ai_tokens = 0
+        active_statuses = ("ready", "scheduled", "queued", "joining", "in_call", "call_ended")
+        for b in all_bots:
+            bot_status_counts[b.status] = bot_status_counts.get(b.status, 0) + 1
+            bot_platform_counts[b.meeting_platform] = bot_platform_counts.get(b.meeting_platform, 0) + 1
+            total_ai_cost += b.ai_total_cost_usd
+            total_ai_tokens += b.ai_total_tokens
+        active_bots = sum(bot_status_counts.get(s, 0) for s in active_statuses)
+        bot_stats = {
+            "total": total_bots_mem,
+            "active": active_bots,
+            "done": bot_status_counts.get("done", 0),
+            "error": bot_status_counts.get("error", 0),
+            "by_status": bot_status_counts,
+            "by_platform": bot_platform_counts,
+            "total_ai_cost_usd": round(total_ai_cost, 4),
+            "total_ai_tokens": total_ai_tokens,
+        }
+    except Exception:
+        bot_stats = {"total": 0, "active": 0, "done": 0, "error": 0, "by_status": {}, "by_platform": {}, "total_ai_cost_usd": 0.0, "total_ai_tokens": 0}
+
+    flash = None
+    msg = request.query_params.get("msg")
+    err = request.query_params.get("error")
+    if msg == "wallet_saved":
+        flash = _flash("success", "Wallet address saved.")
+    elif msg == "credit_ok":
+        flash = _flash("success", "Account credited successfully.")
+    elif msg == "rescan_ok":
+        flash = _flash("success", "USDC monitor rescan scheduled.")
+    elif msg == "resolved":
+        flash = _flash("success", "Transfer marked as resolved.")
+    elif msg == "rpc_saved":
+        flash = _flash("success", "RPC URL saved. The USDC monitor will use it on the next cycle (within 60 s).")
+    elif msg == "account_updated":
+        flash = _flash("success", "Account updated successfully.")
+    elif err == "invalid_address":
+        flash = _flash("danger", "Invalid Ethereum address.")
+    elif err == "invalid_rpc_url":
+        flash = _flash("danger", "Invalid RPC URL — must start with http:// or https://")
+    elif err == "rpc_unreachable":
+        reason = request.query_params.get("reason", "connection failed")
+        flash = _flash("danger", f"RPC URL validation failed: {reason}")
+    elif err == "account_not_found":
+        flash = _flash("danger", "Account not found for that email.")
+    elif err == "credit_failed":
+        flash = _flash("danger", "Failed to apply credit — check server logs.")
+    elif err == "invalid_amount":
+        flash = _flash("danger", "Invalid amount.")
+
+    return templates.TemplateResponse("admin.html", {
+        "request": request,
+        "account": account,
+        "is_admin": True,
+        "wallet_address": wallet_config.value if wallet_config else None,
+        "usdc_contract": settings.USDC_CONTRACT,
+        "crypto_rpc_configured": rpc_url_source != "none",
+        "crypto_rpc_source": rpc_url_source,
+        "crypto_rpc_preview": rpc_url_preview,
+        "hd_seed_configured": bool(settings.CRYPTO_HD_SEED),
+        "stripe_configured": bool(settings.STRIPE_SECRET_KEY),
+        "monitor_last_block": monitor_state.value if monitor_state else None,
+        "stats": {
+            "total_accounts": total_accounts,
+            "total_credits_usd": float(total_credits),
+            "total_usdc_received": float(total_usdc_in),
+            "total_stripe_received": float(total_stripe_in),
+            "unmatched_pending": total_unmatched_pending,
+        },
+        "plan_counts": plan_counts,
+        "active_webhook_count": active_webhook_count,
+        "active_integration_count": active_integration_count,
+        "active_calendar_feed_count": active_calendar_feed_count,
+        "oauth_linked_count": oauth_linked_count,
+        # SSO / email / storage config status
+        "google_sso_configured": bool(settings.GOOGLE_CLIENT_ID),
+        "microsoft_sso_configured": bool(settings.MICROSOFT_CLIENT_ID),
+        "email_configured": settings.EMAIL_BACKEND not in ("none", ""),
+        "storage_backend": settings.STORAGE_BACKEND,
+        "video_recording_enabled": settings.VIDEO_RECORDING_ENABLED,
+        "all_accounts": all_accounts,
+        "recent_txns": recent_txns,
+        "unmatched_transfers": unmatched_transfers,
+        "bot_stats": bot_stats,
+        "flash": flash,
+    })
+
+
+@router.post("/admin/wallet", include_in_schema=False)
+async def admin_wallet_submit(
+    request: Request,
+    wallet_address: str = Form(...),
+    db: AsyncSession = Depends(get_db),
+):
+    account = await _get_account_from_request(request, db)
+    if not _is_admin(account):
+        return RedirectResponse("/dashboard")
+
+    import re
+    address = wallet_address.strip().lower()
+    if not re.match(r"^0x[0-9a-f]{40}$", address):
+        return RedirectResponse("/admin?error=invalid_address", status_code=303)
+
+    from app.api.admin import WALLET_KEY
+    result = await db.execute(
+        select(PlatformConfig).where(PlatformConfig.key == WALLET_KEY)
+    )
+    config = result.scalar_one_or_none()
+
+    if config:
+        config.value = address
+    else:
+        config = PlatformConfig(key=WALLET_KEY, value=address)
+        db.add(config)
+
+    await db.commit()
+    logger.info("Admin updated platform wallet to %s", address)
+    return RedirectResponse("/admin?msg=wallet_saved", status_code=303)
+
+
+@router.post("/admin/rpc-url", include_in_schema=False)
+async def admin_rpc_url_submit(
+    request: Request,
+    rpc_url: str = Form(...),
+    db: AsyncSession = Depends(get_db),
+):
+    account = await _get_account_from_request(request, db)
+    if not _is_admin(account):
+        return RedirectResponse("/dashboard")
+
+    url = rpc_url.strip()
+    if not url.startswith(("http://", "https://")):
+        return RedirectResponse("/admin?error=invalid_rpc_url", status_code=303)
+
+    from app.services.crypto_service import test_rpc_url
+    ok, reason = await test_rpc_url(url)
+    if not ok:
+        import urllib.parse
+        return RedirectResponse(
+            f"/admin?error=rpc_unreachable&reason={urllib.parse.quote(reason[:200])}",
+            status_code=303,
+        )
+
+    from app.api.admin import RPC_URL_KEY
+    result = await db.execute(
+        select(PlatformConfig).where(PlatformConfig.key == RPC_URL_KEY)
+    )
+    config = result.scalar_one_or_none()
+    if config:
+        config.value = url
+    else:
+        config = PlatformConfig(key=RPC_URL_KEY, value=url)
+        db.add(config)
+    await db.commit()
+    logger.info("Admin set CRYPTO_RPC_URL via admin panel")
+    return RedirectResponse("/admin?msg=rpc_saved", status_code=303)
+
+
+@router.post("/admin/credit", include_in_schema=False)
+async def admin_credit_submit(
+    request: Request,
+    email: str = Form(...),
+    amount_usd: float = Form(...),
+    note: str = Form(default=""),
+    db: AsyncSession = Depends(get_db),
+):
+    account = await _get_account_from_request(request, db)
+    if not _is_admin(account):
+        return RedirectResponse("/dashboard")
+
+    if amount_usd <= 0:
+        return RedirectResponse("/admin?error=invalid_amount", status_code=303)
+
+    from decimal import Decimal
+    result = await db.execute(select(Account).where(Account.email == email))
+    target = result.scalar_one_or_none()
+    if not target:
+        return RedirectResponse("/admin?error=account_not_found", status_code=303)
+
+    try:
+        from app.services.credit_service import add_credits
+        await add_credits(
+            account_id=target.id,
+            amount_usd=Decimal(str(amount_usd)),
+            type="usdc_topup",
+            description=f"Admin manual credit: {note or 'Manual credit'}",
+            reference_id=None,
+            db=db,
+        )
+        logger.info("Admin credited $%.4f to %s. Note: %s", amount_usd, email, note)
+    except Exception as exc:
+        logger.error("Admin credit failed: %s", exc)
+        return RedirectResponse("/admin?error=credit_failed", status_code=303)
+
+    return RedirectResponse("/admin?msg=credit_ok", status_code=303)
+
+
+@router.post("/admin/rescan", include_in_schema=False)
+async def admin_rescan_submit(
+    request: Request,
+    from_block: int = Form(...),
+    db: AsyncSession = Depends(get_db),
+):
+    account = await _get_account_from_request(request, db)
+    if not _is_admin(account):
+        return RedirectResponse("/dashboard")
+
+    new_value = str(max(0, from_block - 1))
+    result = await db.execute(
+        select(MonitorState).where(MonitorState.key == "usdc_last_block")
+    )
+    state = result.scalar_one_or_none()
+    if state is None:
+        state = MonitorState(key="usdc_last_block", value=new_value)
+        db.add(state)
+    else:
+        state.value = new_value
+    await db.commit()
+    logger.info("Admin reset USDC monitor last-block to %s (rescan from %d)", new_value, from_block)
+    return RedirectResponse("/admin?msg=rescan_ok", status_code=303)
+
+
+@router.post("/admin/usdc/unmatched/{tx_hash}/resolve", include_in_schema=False)
+async def admin_resolve_unmatched(
+    tx_hash: str,
+    request: Request,
+    note: str = Form(default=""),
+    db: AsyncSession = Depends(get_db),
+):
+    account = await _get_account_from_request(request, db)
+    if not _is_admin(account):
+        return RedirectResponse("/dashboard")
+
+    result = await db.execute(
+        select(UnmatchedUsdcTransfer).where(UnmatchedUsdcTransfer.tx_hash == tx_hash)
+    )
+    transfer = result.scalar_one_or_none()
+    if transfer:
+        transfer.resolved = True
+        transfer.resolution_note = note or "Resolved by admin"
+        await db.commit()
+        logger.info("Admin resolved unmatched transfer %s. Note: %s", tx_hash, transfer.resolution_note)
+    return RedirectResponse("/admin?msg=resolved", status_code=303)
+
+
+@router.post("/admin/accounts/{account_id}/toggle-active", include_in_schema=False)
+async def admin_toggle_account_active(
+    account_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Enable or disable a user account."""
+    admin = await _get_account_from_request(request, db)
+    if not _is_admin(admin):
+        return RedirectResponse("/dashboard")
+
+    result = await db.execute(select(Account).where(Account.id == account_id))
+    target = result.scalar_one_or_none()
+    if target and target.id != admin.id:  # prevent self-disable
+        target.is_active = not target.is_active
+        await db.commit()
+        state = "enabled" if target.is_active else "disabled"
+        logger.info("Admin %s %s account %s", admin.email, state, target.email)
+    return RedirectResponse("/admin?msg=account_updated", status_code=303)
+
+
+@router.post("/admin/accounts/{account_id}/toggle-admin", include_in_schema=False)
+async def admin_toggle_account_admin(
+    account_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Grant or revoke admin privileges for a user account."""
+    admin = await _get_account_from_request(request, db)
+    if not _is_admin(admin):
+        return RedirectResponse("/dashboard")
+
+    result = await db.execute(select(Account).where(Account.id == account_id))
+    target = result.scalar_one_or_none()
+    if target and target.id != admin.id:  # prevent self-de-admin
+        target.is_admin = not target.is_admin
+        await db.commit()
+        state = "granted" if target.is_admin else "revoked"
+        logger.info("Admin %s %s admin for account %s", admin.email, state, target.email)
+    return RedirectResponse("/admin?msg=account_updated", status_code=303)
+
+
+@router.post("/admin/accounts/{account_id}/set-plan", include_in_schema=False)
+async def admin_set_account_plan(
+    account_id: str,
+    request: Request,
+    plan: str = Form(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Set the subscription plan for a user account."""
+    admin = await _get_account_from_request(request, db)
+    if not _is_admin(admin):
+        return RedirectResponse("/dashboard")
+
+    valid_plans = ("free", "starter", "pro", "business")
+    if plan not in valid_plans:
+        return RedirectResponse("/admin?error=invalid_amount", status_code=303)
+
+    result = await db.execute(select(Account).where(Account.id == account_id))
+    target = result.scalar_one_or_none()
+    if target:
+        target.plan = plan
+        await db.commit()
+        logger.info("Admin %s set plan=%s for account %s", admin.email, plan, target.email)
+    return RedirectResponse("/admin?msg=account_updated", status_code=303)
+
+
+@router.post("/admin/accounts/{account_id}/set-account-type", include_in_schema=False)
+async def admin_set_account_type(
+    account_id: str,
+    request: Request,
+    account_type: str = Form(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Set the account type (personal / business) for a user account."""
+    admin = await _get_account_from_request(request, db)
+    if not _is_admin(admin):
+        return RedirectResponse("/dashboard")
+
+    if account_type not in ("personal", "business"):
+        return RedirectResponse("/admin?error=invalid_account_type", status_code=303)
+
+    result = await db.execute(select(Account).where(Account.id == account_id))
+    target = result.scalar_one_or_none()
+    if target:
+        target.account_type = account_type
+        await db.commit()
+        logger.info("Admin %s set account_type=%s for account %s", admin.email, account_type, target.email)
+    return RedirectResponse("/admin?msg=account_updated", status_code=303)
+
+
+# ── Integrations UI ───────────────────────────────────────────────────────────
+
+@router.post("/dashboard/integrations/add", include_in_schema=False)
+async def add_integration_ui(
+    request: Request,
+    integ_type: str = Form(default=""),
+    name: str = Form(default=""),
+    slack_webhook_url: str = Form(default=""),
+    notion_api_token: str = Form(default=""),
+    notion_database_id: str = Form(default=""),
+    db: AsyncSession = Depends(get_db),
+):
+    """Add a Slack or Notion integration from the dashboard UI."""
+    import json, uuid
+    _wants_json = "application/json" in request.headers.get("Accept", "")
+    account = await _get_account_from_request(request, db)
+    if not account:
+        if _wants_json:
+            return JSONResponse({"detail": "Unauthenticated"}, status_code=401)
+        return RedirectResponse("/login")
+
+    # Support JSON body
+    if _wants_json:
+        try:
+            body = await request.json()
+            integ_type = body.get("integ_type", integ_type)
+            name = body.get("name", name)
+            slack_webhook_url = body.get("slack_webhook_url", slack_webhook_url)
+            notion_api_token = body.get("notion_api_token", notion_api_token)
+            notion_database_id = body.get("notion_database_id", notion_database_id)
+        except Exception:
+            pass
+
+    if integ_type == "slack":
+        url = slack_webhook_url.strip()
+        if not url.startswith("https://hooks.slack.com/"):
+            if _wants_json:
+                return JSONResponse({"detail": "Invalid Slack webhook URL"}, status_code=400)
+            return RedirectResponse("/dashboard?integ_error=invalid_slack_url#integrations", status_code=303)
+        config = json.dumps({"webhook_url": url})
+        display_name = name.strip() or "Slack"
+    elif integ_type == "notion":
+        token = notion_api_token.strip()
+        db_id = notion_database_id.strip()
+        if not token or not db_id:
+            if _wants_json:
+                return JSONResponse({"detail": "Notion API token and database ID are required"}, status_code=400)
+            return RedirectResponse("/dashboard?integ_error=notion_missing_fields#integrations", status_code=303)
+        config = json.dumps({"api_token": token, "database_id": db_id})
+        display_name = name.strip() or "Notion"
+    else:
+        if _wants_json:
+            return JSONResponse({"detail": "Invalid integration type"}, status_code=400)
+        return RedirectResponse("/dashboard?integ_error=invalid_type#integrations", status_code=303)
+
+    from app.models.account import Integration
+    integ = Integration(
+        id=str(uuid.uuid4()),
+        account_id=account.id,
+        type=integ_type,
+        name=display_name,
+        config=config,
+        is_active=True,
+    )
+    db.add(integ)
+    await db.commit()
+    logger.info("Added %s integration for account %s", integ_type, account.email)
+
+    if _wants_json:
+        return JSONResponse({"id": integ.id, "type": integ_type, "name": display_name, "is_active": True})
+    return RedirectResponse("/dashboard?integ_added=1#integrations", status_code=303)
+
+
+@router.post("/dashboard/integrations/{integ_id}/delete", include_in_schema=False)
+async def delete_integration_ui(
+    integ_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    _wants_json = "application/json" in request.headers.get("Accept", "")
+    account = await _get_account_from_request(request, db)
+    if not account:
+        if _wants_json:
+            return JSONResponse({"detail": "Unauthenticated"}, status_code=401)
+        return RedirectResponse("/login")
+
+    from app.models.account import Integration
+    result = await db.execute(
+        select(Integration).where(Integration.id == integ_id, Integration.account_id == account.id)
+    )
+    integ = result.scalar_one_or_none()
+    if integ:
+        await db.delete(integ)
+        await db.commit()
+
+    if _wants_json:
+        return JSONResponse({"deleted": True})
+    return RedirectResponse("/dashboard?integ_deleted=1#integrations", status_code=303)
+
+
+@router.post("/dashboard/integrations/{integ_id}/toggle", include_in_schema=False)
+async def toggle_integration_ui(
+    integ_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    _wants_json = "application/json" in request.headers.get("Accept", "")
+    account = await _get_account_from_request(request, db)
+    if not account:
+        if _wants_json:
+            return JSONResponse({"detail": "Unauthenticated"}, status_code=401)
+        return RedirectResponse("/login")
+
+    from app.models.account import Integration
+    result = await db.execute(
+        select(Integration).where(Integration.id == integ_id, Integration.account_id == account.id)
+    )
+    integ = result.scalar_one_or_none()
+    if integ:
+        integ.is_active = not integ.is_active
+        await db.commit()
+
+    if _wants_json:
+        return JSONResponse({"id": integ_id, "is_active": integ.is_active if integ else False})
+    return RedirectResponse("/dashboard#integrations", status_code=303)
+
+
+# ── Calendar feeds UI ─────────────────────────────────────────────────────────
+
+@router.post("/dashboard/calendar/add", include_in_schema=False)
+async def add_calendar_ui(
+    request: Request,
+    name: str = Form(default="My Calendar"),
+    ical_url: str = Form(default=""),
+    bot_name: str = Form(default=""),
+    auto_record: str = Form(default="on"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Add an iCal calendar feed from the dashboard UI."""
+    import uuid
+    _wants_json = "application/json" in request.headers.get("Accept", "")
+    account = await _get_account_from_request(request, db)
+    if not account:
+        if _wants_json:
+            return JSONResponse({"detail": "Unauthenticated"}, status_code=401)
+        return RedirectResponse("/login")
+
+    # Support JSON body
+    cal_name, cal_url, cal_bot_name, cal_auto = name, ical_url, bot_name, auto_record
+    if _wants_json:
+        try:
+            body = await request.json()
+            cal_name = body.get("name", name)
+            cal_url = body.get("ical_url", ical_url)
+            cal_bot_name = body.get("bot_name", bot_name)
+            cal_auto = "on" if body.get("auto_record", True) else "off"
+        except Exception:
+            pass
+
+    url = cal_url.strip()
+    if not url.startswith(("http://", "https://")):
+        if _wants_json:
+            return JSONResponse({"detail": "Invalid calendar URL — must start with http:// or https://"}, status_code=400)
+        return RedirectResponse("/dashboard?cal_error=invalid_url#calendar", status_code=303)
+
+    from app.models.account import CalendarFeed
+    feed = CalendarFeed(
+        id=str(uuid.uuid4()),
+        account_id=account.id,
+        name=(cal_name.strip() or "My Calendar")[:100],
+        ical_url=url,
+        bot_name=(cal_bot_name.strip() or None),
+        auto_record=(cal_auto == "on"),
+        is_active=True,
+    )
+    db.add(feed)
+    await db.commit()
+    logger.info("Added calendar feed '%s' for account %s", feed.name, account.email)
+
+    if _wants_json:
+        return JSONResponse({"id": feed.id, "name": feed.name, "url": feed.ical_url, "is_active": True})
+    return RedirectResponse("/dashboard?cal_added=1#calendar", status_code=303)
+
+
+@router.post("/dashboard/calendar/{feed_id}/delete", include_in_schema=False)
+async def delete_calendar_ui(
+    feed_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    _wants_json = "application/json" in request.headers.get("Accept", "")
+    account = await _get_account_from_request(request, db)
+    if not account:
+        if _wants_json:
+            return JSONResponse({"detail": "Unauthenticated"}, status_code=401)
+        return RedirectResponse("/login")
+
+    from app.models.account import CalendarFeed
+    result = await db.execute(
+        select(CalendarFeed).where(CalendarFeed.id == feed_id, CalendarFeed.account_id == account.id)
+    )
+    feed = result.scalar_one_or_none()
+    if feed:
+        await db.delete(feed)
+        await db.commit()
+
+    if _wants_json:
+        return JSONResponse({"deleted": True})
+    return RedirectResponse("/dashboard?cal_deleted=1#calendar", status_code=303)
+
+
+@router.post("/dashboard/calendar/{feed_id}/toggle", include_in_schema=False)
+async def toggle_calendar_ui(
+    feed_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    _wants_json = "application/json" in request.headers.get("Accept", "")
+    account = await _get_account_from_request(request, db)
+    if not account:
+        if _wants_json:
+            return JSONResponse({"detail": "Unauthenticated"}, status_code=401)
+        return RedirectResponse("/login")
+
+    from app.models.account import CalendarFeed
+    result = await db.execute(
+        select(CalendarFeed).where(CalendarFeed.id == feed_id, CalendarFeed.account_id == account.id)
+    )
+    feed = result.scalar_one_or_none()
+    if feed:
+        feed.is_active = not feed.is_active
+        await db.commit()
+
+    if _wants_json:
+        return JSONResponse({"id": feed_id, "is_active": feed.is_active if feed else False})
+    return RedirectResponse("/dashboard#calendar", status_code=303)
+
+
+# ── Webhook proxy (cookie-auth bridge for dashboard) ──────────────────────────
+
+@router.post("/dashboard/webhook", include_in_schema=False)
+async def create_webhook_ui(request: Request, db: AsyncSession = Depends(get_db)):
+    """Proxy webhook creation through cookie auth so the dashboard can use fetch().
+
+    The main /api/v1/webhook endpoint requires Bearer auth; this route accepts the
+    JWT cookie used by the dashboard and delegates to the same store logic.
+    """
+    account = await _get_account_from_request(request, db)
+    if not account:
+        return JSONResponse({"detail": "Unauthenticated"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"detail": "Invalid JSON body"}, status_code=400)
+
+    url = (body.get("url") or "").strip()
+    if not url:
+        return JSONResponse({"detail": "url is required"}, status_code=400)
+
+    from app.api.webhooks import _block_ssrf
+    from app.store import store as _wh_store
+    try:
+        await _block_ssrf(url)
+    except Exception as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=400)
+
+    events = body.get("events") or ["*"]
+    secret = body.get("secret") or None
+    wh = await _wh_store.new_webhook(url=url, events=events, secret=secret)
+    return JSONResponse({
+        "id": wh.id,
+        "url": wh.url,
+        "events": wh.events,
+        "is_active": wh.is_active,
+        "created_at": wh.created_at.isoformat() if wh.created_at else None,
+    })
+
+
+# ── Support key proxy routes (cookie-auth wrappers) ───────────────────────────
+
+@router.get("/dashboard/support-keys", include_in_schema=False)
+async def list_support_keys_ui(request: Request, db: AsyncSession = Depends(get_db)):
+    """Return the current user's active support keys as JSON (no plaintext)."""
+    account = await _get_account_from_request(request, db)
+    if not account:
+        return JSONResponse({"detail": "Unauthenticated"}, status_code=401)
+
+    from app.models.account import SupportKey
+    result = await db.execute(
+        select(SupportKey)
+        .where(SupportKey.account_id == account.id, SupportKey.is_active == True)  # noqa: E712
+        .order_by(SupportKey.created_at.desc())
+    )
+    keys = result.scalars().all()
+    return JSONResponse([
+        {
+            "id": k.id,
+            "label": k.label,
+            "created_at": k.created_at.isoformat(),
+            "expires_at": k.expires_at.isoformat() if k.expires_at else None,
+            "last_used_at": k.last_used_at.isoformat() if k.last_used_at else None,
+        }
+        for k in keys
+    ])
+
+
+@router.post("/dashboard/support-key", include_in_schema=False)
+async def create_support_key_ui(request: Request, db: AsyncSession = Depends(get_db)):
+    """Generate a support key and return the plaintext once."""
+    account = await _get_account_from_request(request, db)
+    if not account:
+        return JSONResponse({"detail": "Unauthenticated"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"detail": "Invalid JSON body"}, status_code=400)
+
+    import hashlib as _hl
+    import secrets as _sec
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+    from app.models.account import SupportKey
+
+    label = (body.get("label") or "Support Key")[:100]
+    expires_in_h = body.get("expires_in_hours")
+    plaintext = _sec.token_urlsafe(24)
+    key_hash = _hl.sha256(plaintext.encode()).hexdigest()
+    expires_at = (_dt.now(_tz.utc) + _td(hours=int(expires_in_h))) if expires_in_h else None
+
+    import uuid as _uuid
+    sk = SupportKey(
+        id=str(_uuid.uuid4()),
+        account_id=account.id,
+        key_hash=key_hash,
+        label=label,
+        expires_at=expires_at,
+    )
+    db.add(sk)
+    await db.commit()
+
+    return JSONResponse({
+        "id": sk.id,
+        "plaintext_key": plaintext,
+        "label": sk.label,
+        "created_at": sk.created_at.isoformat(),
+        "expires_at": sk.expires_at.isoformat() if sk.expires_at else None,
+    })
+
+
+@router.post("/dashboard/support-key/{key_id}/revoke", include_in_schema=False)
+async def revoke_support_key_ui(
+    key_id: str, request: Request, db: AsyncSession = Depends(get_db)
+):
+    """Revoke a support key via cookie auth."""
+    account = await _get_account_from_request(request, db)
+    if not account:
+        return JSONResponse({"detail": "Unauthenticated"}, status_code=401)
+
+    from app.models.account import SupportKey
+    result = await db.execute(
+        select(SupportKey).where(SupportKey.id == key_id, SupportKey.account_id == account.id)
+    )
+    sk = result.scalar_one_or_none()
+    if not sk:
+        return JSONResponse({"detail": "Support key not found"}, status_code=404)
+    sk.is_active = False
+    await db.commit()
+    return JSONResponse({"revoked": True})
+
+
+# ── Admin UI API proxies (cookie-auth wrappers for admin JS fetches) ───────────
+
+@router.get("/admin/analytics-data", include_in_schema=False)
+async def admin_analytics_data_ui(request: Request, db: AsyncSession = Depends(get_db)):
+    """Cookie-auth proxy for platform analytics used by admin.html JS."""
+    account = await _get_account_from_request(request, db)
+    if not _is_admin(account):
+        return JSONResponse({"detail": "Forbidden"}, status_code=403)
+    from app.api.admin import platform_analytics
+    return await platform_analytics(db=db, _admin=account.id)
+
+
+@router.get("/admin/support-lookup-data", include_in_schema=False)
+async def admin_support_lookup_ui(
+    request: Request, key: str = "", db: AsyncSession = Depends(get_db)
+):
+    """Cookie-auth proxy for support-key lookup used by admin.html JS."""
+    account = await _get_account_from_request(request, db)
+    if not _is_admin(account):
+        return JSONResponse({"detail": "Forbidden"}, status_code=403)
+    if not key:
+        return JSONResponse({"detail": "key is required"}, status_code=400)
+    from app.api.admin import support_lookup
+    return await support_lookup(key=key, db=db, _admin=account.id)
+
+
+# ── GET /share/{token} — public shareable meeting view ────────────────────────
+
+@router.get("/share/{token}", response_class=HTMLResponse, include_in_schema=False)
+async def share_meeting(token: str, request: Request):
+    """Public, no-auth view of a shared meeting. Token must match the stored hash."""
+    import hashlib
+    from app.store import store
+
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    # Search for a bot with this share token hash
+    all_bots, _ = await store.list_bots(limit=10000)
+    bot = next((b for b in all_bots if getattr(b, "share_token_hash", None) == token_hash), None)
+
+    if bot is None:
+        return HTMLResponse("<h1>Not Found</h1><p>This share link is invalid or has expired.</p>", status_code=404)
+
+    # Build a sanitised view — strip sensitive fields
+    analysis = bot.analysis or {}
+    return templates.TemplateResponse("share.html", {
+        "request": request,
+        "bot_id": bot.id[:12] + "…",
+        "platform": bot.meeting_platform,
+        "status": bot.status,
+        "participants": bot.participants,
+        "duration_seconds": bot.duration_seconds,
+        "summary": analysis.get("summary", ""),
+        "key_points": analysis.get("key_points", []),
+        "action_items": analysis.get("action_items", []),
+        "decisions": analysis.get("decisions", []),
+        "topics": analysis.get("topics", []),
+        "sentiment": analysis.get("sentiment", "neutral"),
+        "risks_blockers": analysis.get("risks_blockers", []),
+        "unresolved_items": analysis.get("unresolved_items", []),
+        "next_meeting": analysis.get("next_meeting"),
+        "transcript": bot.transcript,
+        "created_at": bot.created_at,
+    })

@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>JustHereToListen.io API</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --brand: #4361ee;
+      --brand-light: #e8ecfd;
+      --bg: #f8f9fc;
+      --card: #ffffff;
+      --text: #1a1a2e;
+      --muted: #6b7280;
+      --border: #e5e7eb;
+      --code-bg: #1e1e2e;
+      --code-text: #cdd6f4;
+      --radius: 10px;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+    }
+
+    .hero {
+      background: linear-gradient(135deg, #4361ee 0%, #7209b7 100%);
+      color: white;
+      padding: 64px 24px 56px;
+      text-align: center;
+    }
+    .hero h1 { font-size: clamp(2rem, 5vw, 3rem); font-weight: 800; letter-spacing: -0.02em; }
+    .hero p  { font-size: 1.15rem; opacity: .85; margin: 12px auto 0; max-width: 560px; }
+
+    .badge-row {
+      display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 28px;
+    }
+    .badge {
+      background: rgba(255,255,255,.15); border: 1px solid rgba(255,255,255,.3);
+      border-radius: 20px; padding: 6px 16px; font-size: .85rem; font-weight: 500;
+    }
+
+    .cta-row {
+      display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin-top: 32px;
+    }
+    .btn {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 12px 24px; border-radius: 8px; font-weight: 600; font-size: .95rem;
+      text-decoration: none; transition: opacity .15s;
+    }
+    .btn:hover { opacity: .85; }
+    .btn-primary { background: white; color: var(--brand); }
+    .btn-outline { background: transparent; color: white; border: 2px solid rgba(255,255,255,.5); }
+
+    .container { max-width: 960px; margin: 0 auto; padding: 0 24px; }
+
+    section { padding: 56px 0 0; }
+    section h2 {
+      font-size: 1.4rem; font-weight: 700; margin-bottom: 24px;
+      padding-bottom: 12px; border-bottom: 2px solid var(--brand-light);
+    }
+
+    .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; }
+    .step {
+      background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 24px;
+    }
+    .step-num {
+      width: 32px; height: 32px; background: var(--brand); color: white;
+      border-radius: 50%; display: flex; align-items: center; justify-content: center;
+      font-weight: 700; font-size: .9rem; margin-bottom: 12px;
+    }
+    .step h3 { font-size: 1rem; margin-bottom: 6px; }
+    .step p  { font-size: .88rem; color: var(--muted); }
+
+    .endpoint-list { display: flex; flex-direction: column; gap: 12px; }
+    .endpoint {
+      background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 16px 20px; display: flex; align-items: center; gap: 14px;
+    }
+    .method {
+      font-family: "Courier New", monospace; font-size: .8rem; font-weight: 700;
+      padding: 4px 10px; border-radius: 5px; white-space: nowrap;
+    }
+    .method.get    { background: #dcfce7; color: #166534; }
+    .method.post   { background: #dbeafe; color: #1e40af; }
+    .method.put    { background: #fef9c3; color: #854d0e; }
+    .method.delete { background: #fee2e2; color: #991b1b; }
+    .path { font-family: "Courier New", monospace; font-size: .9rem; color: var(--brand); font-weight: 600; }
+    .ep-desc { font-size: .88rem; color: var(--muted); margin-left: auto; }
+
+    .code-block {
+      background: var(--code-bg); color: var(--code-text);
+      border-radius: var(--radius); padding: 20px 24px; overflow-x: auto;
+      font-family: "Courier New", Courier, monospace; font-size: .85rem; line-height: 1.7;
+      white-space: pre;
+    }
+    .code-title { font-size: .8rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 8px; }
+
+    .status-flow {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0;
+    }
+    .pill {
+      padding: 4px 12px; border-radius: 20px; font-size: .8rem; font-weight: 600;
+    }
+    .pill.a { background: #fef9c3; color: #854d0e; }
+    .pill.b { background: #dcfce7; color: #166534; }
+    .pill.c { background: #dbeafe; color: #1e40af; }
+    .pill.d { background: #fee2e2; color: #991b1b; }
+    .arrow  { color: var(--muted); font-size: .85rem; }
+
+    footer {
+      margin-top: 72px; padding: 32px 24px;
+      border-top: 1px solid var(--border); text-align: center;
+      font-size: .85rem; color: var(--muted);
+    }
+    footer a { color: var(--brand); text-decoration: none; }
+  </style>
+</head>
+<body>
+
+<div class="hero">
+  <h1>JustHereToListen.io API</h1>
+  <p>Drop a bot into any Zoom, Google Meet, or Teams call. Get back a full transcript and AI analysis. No database required — you store the data.</p>
+  <div class="badge-row">
+    <span class="badge">Google Meet</span>
+    <span class="badge">Zoom</span>
+    <span class="badge">Microsoft Teams</span>
+    <span class="badge">Claude / Gemini</span>
+    <span class="badge">Multi-Tenant</span>
+    <span class="badge">Stripe + USDC</span>
+  </div>
+  <div class="cta-row">
+    <a href="/api/docs" class="btn btn-primary">Interactive API Docs</a>
+    <a href="/api/redoc" class="btn btn-outline">ReDoc Reference</a>
+    <a href="/register" class="btn btn-outline">Register Account</a>
+  </div>
+</div>
+
+<div class="container">
+
+  <section>
+    <h2>How it works</h2>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <h3>Send the URL</h3>
+        <p>POST your meeting URL and optional <code>webhook_url</code> to <strong>/api/v1/bot</strong>.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <h3>Bot joins</h3>
+        <p>A headless Chromium browser joins the call, records audio, and monitors captions.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <h3>Transcribe &amp; analyse</h3>
+        <p>Audio is transcribed and analysed by Claude or Gemini AI.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">4</div>
+        <h3>Get results</h3>
+        <p>Full payload delivered to your <code>webhook_url</code>, or poll <strong>GET /api/v1/bot/{id}</strong>.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Bot lifecycle</h2>
+    <div class="status-flow">
+      <span class="pill a">joining</span>
+      <span class="arrow">→</span>
+      <span class="pill b">in_call</span>
+      <span class="arrow">→</span>
+      <span class="pill a">call_ended</span>
+      <span class="arrow">→</span>
+      <span class="pill c">done</span>
+      <span class="arrow">or</span>
+      <span class="pill d">error</span>
+    </div>
+    <p style="font-size:.88rem;color:var(--muted);margin-top:8px">
+      Results are kept in memory for <strong>24 hours</strong> — save them to your own storage before then.
+    </p>
+  </section>
+
+  <section>
+    <h2>Quick start</h2>
+    <p class="code-title">Create a bot</p>
+    <div class="code-block">curl -X POST https://your-meetingbot.com/api/v1/bot \
+  -H "Content-Type: application/json" \
+  -d '{
+    "meeting_url":  "https://meet.google.com/abc-defg-hij",
+    "bot_name":     "Notetaker",
+    "webhook_url":  "https://your-app.com/webhook/meeting-done",
+    "template":     "default"
+  }'</div>
+
+    <br /><p class="code-title">Poll for status</p>
+    <div class="code-block">curl https://your-meetingbot.com/api/v1/bot/{id}</div>
+
+    <br /><p class="code-title">Webhook payload (POST to your webhook_url when done)</p>
+    <div class="code-block">{
+  "event": "bot.done",
+  "data": {
+    "bot_id": "550e8400-...",
+    "status": "done",
+    "participants": ["Alice", "Bob"],
+    "transcript": [{ "speaker": "Alice", "text": "...", "timestamp": 2.0 }],
+    "analysis": {
+      "summary": "...",
+      "action_items": [{ "task": "...", "assignee": "Alice" }],
+      "decisions": [...],
+      "sentiment": "positive"
+    },
+    "ai_usage": { "total_tokens": 4200, "total_cost_usd": 0.021 }
+  }
+}</div>
+  </section>
+
+  <section>
+    <h2>API Endpoints</h2>
+    <div class="endpoint-list">
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/api/v1/bot</span><span class="ep-desc">Create a bot &amp; join a meeting</span></div>
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/v1/bot</span><span class="ep-desc">List all in-memory bots</span></div>
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/v1/bot/{id}</span><span class="ep-desc">Full details — transcript, analysis, stats</span></div>
+      <div class="endpoint"><span class="method delete">DELETE</span><span class="path">/api/v1/bot/{id}</span><span class="ep-desc">Stop &amp; remove a bot</span></div>
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/v1/bot/{id}/transcript</span><span class="ep-desc">Raw transcript only</span></div>
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/v1/bot/{id}/recording</span><span class="ep-desc">Download WAV audio</span></div>
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/api/v1/bot/{id}/analyze</span><span class="ep-desc">Re-run AI analysis</span></div>
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/api/v1/bot/{id}/ask</span><span class="ep-desc">Q&amp;A on the transcript</span></div>
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/api/v1/bot/{id}/followup-email</span><span class="ep-desc">Draft a follow-up email</span></div>
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/v1/bot/{id}/export/markdown</span><span class="ep-desc">Export as Markdown</span></div>
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/v1/bot/{id}/export/pdf</span><span class="ep-desc">Export as PDF</span></div>
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/api/v1/webhook</span><span class="ep-desc">Register global webhook</span></div>
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/v1/templates</span><span class="ep-desc">List analysis templates</span></div>
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/health</span><span class="ep-desc">Health check</span></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Templates</h2>
+    <p style="font-size:.9rem;color:var(--muted);margin-bottom:12px">
+      Pass <code>template</code> in your bot creation request. Use <code>prompt_override</code> for a custom prompt.
+    </p>
+    <div class="code-block">default · sales · standup · 1on1 · retro · kickoff
+allhands · postmortem · interview · design-review</div>
+  </section>
+
+  <section>
+    <h2>Authentication &amp; Accounts</h2>
+    <p style="font-size:.9rem;color:var(--muted);margin-bottom:12px">
+      Register an account to receive an <code>sk_live_...</code> API key. Use it as a Bearer token on all requests.
+    </p>
+    <div class="endpoint-list">
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/api/v1/auth/register</span><span class="ep-desc">Create account → get API key</span></div>
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/api/v1/auth/login</span><span class="ep-desc">Email + password → JWT for web UI</span></div>
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/v1/auth/me</span><span class="ep-desc">Account info + balance</span></div>
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/api/v1/auth/keys</span><span class="ep-desc">Generate new API key</span></div>
+      <div class="endpoint"><span class="method put">PUT</span><span class="path">/api/v1/auth/wallet</span><span class="ep-desc">Register your Ethereum wallet for USDC</span></div>
+    </div>
+    <div class="code-block" style="margin-top:16px">Authorization: Bearer sk_live_&lt;your-api-key&gt;</div>
+  </section>
+
+  <section>
+    <h2>Billing &amp; Credits</h2>
+    <p style="font-size:.9rem;color:var(--muted);margin-bottom:12px">
+      Pre-fund your credit balance via Stripe card or USDC (ERC-20). Credits are deducted per bot run.
+    </p>
+    <div class="endpoint-list">
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/v1/billing/balance</span><span class="ep-desc">Current balance + transaction history</span></div>
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/api/v1/billing/stripe/checkout</span><span class="ep-desc">Create Stripe checkout session</span></div>
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/v1/billing/usdc/address</span><span class="ep-desc">Get USDC deposit address (1 USDC = $1)</span></div>
+    </div>
+  </section>
+
+  <section style="padding-bottom:0">
+    <h2>Admin (restricted)</h2>
+    <p style="font-size:.9rem;color:var(--muted);margin-bottom:12px">
+      Platform administration — only admin accounts can access these endpoints.
+    </p>
+    <div class="endpoint-list">
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/v1/admin/wallet</span><span class="ep-desc">View platform USDC collection wallet</span></div>
+      <div class="endpoint"><span class="method post">PUT</span><span class="path">/api/v1/admin/wallet</span><span class="ep-desc">Set/update platform USDC wallet</span></div>
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/v1/admin/config</span><span class="ep-desc">List platform configuration</span></div>
+    </div>
+    <p style="font-size:.85rem;color:var(--muted);margin-top:12px">
+      Web admin panel: <a href="/admin" style="color:var(--brand);text-decoration:none">/admin</a>
+    </p>
+  </section>
+
+</div>
+
+<footer>
+  <p>JustHereToListen.io API v2.1 &nbsp;·&nbsp; <a href="/api/docs">Swagger UI</a> &nbsp;·&nbsp; <a href="/api/redoc">ReDoc</a> &nbsp;·&nbsp; <a href="/register">Register</a> &nbsp;·&nbsp; <a href="/dashboard">Dashboard</a></p>
+</footer>
+
+</body>
+</html>

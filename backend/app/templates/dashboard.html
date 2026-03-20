@@ -1,0 +1,1903 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — JustHereToListen.io{% endblock %}
+
+{% block content %}
+<style>
+  /* ── Sidebar layout ─────────────────────────────────────────────────────── */
+  .dash-layout {
+    display: grid;
+    grid-template-columns: 210px 1fr;
+    gap: 1.5rem;
+    align-items: start;
+    margin: -0.5rem 0;
+  }
+
+  .dash-sidebar {
+    position: sticky;
+    top: 70px;
+    background: white;
+    border: 1px solid #e2e8f0;
+    border-radius: 14px;
+    padding: 1rem 0.5rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,.05);
+  }
+
+  .sidebar-section-label {
+    font-size: 10.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: #94a3b8;
+    padding: 0.35rem 0.75rem;
+    margin-top: 0.5rem;
+  }
+  .sidebar-section-label:first-child { margin-top: 0; }
+
+  .sidebar-nav-item {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    color: #475569;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+    user-select: none;
+    border: none;
+    background: none;
+    width: 100%;
+    text-align: left;
+    text-decoration: none;
+  }
+  .sidebar-nav-item:hover { background: #f8fafc; color: #0f172a; }
+  .sidebar-nav-item.active { background: #eff2ff; color: #4338ca; font-weight: 600; }
+  .sidebar-nav-item.active .nav-icon { opacity: 1; }
+
+  .nav-icon { font-size: 15px; flex-shrink: 0; opacity: 0.7; }
+
+  .sidebar-badge {
+    margin-left: auto;
+    background: #fee2e2;
+    color: #b91c1c;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 1px 5px;
+    border-radius: 10px;
+    line-height: 1.5;
+  }
+  .sidebar-badge.blue {
+    background: #dbeafe;
+    color: #1d4ed8;
+  }
+
+  /* ── Sections ───────────────────────────────────────────────────────────── */
+  .dash-section { display: none; }
+  .dash-section.active { display: block; }
+
+  /* ── Section header ─────────────────────────────────────────────────────── */
+  .section-hdr {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 1.25rem;
+  }
+  .section-hdr h2 {
+    font-size: 1.1rem;
+    font-weight: 700;
+    letter-spacing: -0.3px;
+    color: #0f172a;
+    margin: 0 0 0.2rem;
+  }
+  .section-hdr p {
+    font-size: 12.5px;
+    color: #64748b;
+    margin: 0;
+  }
+
+  /* ── Overview cards ─────────────────────────────────────────────────────── */
+  .kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.75rem;
+    margin-bottom: 1.25rem;
+  }
+  @media (max-width: 900px) { .kpi-grid { grid-template-columns: repeat(2,1fr); } }
+
+  .kpi-card {
+    background: white;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 1.1rem;
+  }
+
+  /* ── Empty states ───────────────────────────────────────────────────────── */
+  .empty-state {
+    text-align: center;
+    padding: 2.5rem 1rem;
+    color: #94a3b8;
+  }
+  .empty-state-icon { font-size: 2.2rem; margin-bottom: 0.75rem; }
+  .empty-state-title { font-size: 14px; font-weight: 600; color: #475569; margin-bottom: 0.4rem; }
+  .empty-state-desc { font-size: 13px; line-height: 1.5; margin-bottom: 1.25rem; }
+
+  /* ── Status chips ───────────────────────────────────────────────────────── */
+  .status-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    display: inline-block;
+    flex-shrink: 0;
+  }
+
+  /* ── Health score ring ──────────────────────────────────────────────────── */
+  .health-ring {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 13px;
+    flex-shrink: 0;
+  }
+
+  /* ── Mobile ─────────────────────────────────────────────────────────────── */
+  @media (max-width: 768px) {
+    .dash-layout { grid-template-columns: 1fr; }
+    .dash-sidebar { position: static; border-radius: 10px; padding: 0.5rem; }
+    .dash-sidebar-nav { display: flex; flex-wrap: wrap; gap: 0.25rem; }
+    .sidebar-section-label { display: none; }
+    .sidebar-nav-item { padding: 0.4rem 0.65rem; flex: 0 0 auto; font-size: 12px; }
+  }
+</style>
+
+<div class="dash-layout">
+
+  <!-- ═══════════════════════════════════════════════
+       SIDEBAR
+  ════════════════════════════════════════════════ -->
+  <aside class="dash-sidebar">
+    <div class="dash-sidebar-nav" id="sidebar-nav">
+      <div class="sidebar-section-label">Main</div>
+
+      <button class="sidebar-nav-item active" data-section="overview">
+        <span class="nav-icon">📊</span> Overview
+      </button>
+      <button class="sidebar-nav-item" data-section="bots">
+        <span class="nav-icon">🤖</span> Bots
+        {% if recent_bots %}
+        <span class="sidebar-badge blue">{{ recent_bots|length }}</span>
+        {% endif %}
+      </button>
+      <button class="sidebar-nav-item" data-section="analytics">
+        <span class="nav-icon">📈</span> Analytics
+      </button>
+
+      <button class="sidebar-nav-item" data-section="action-items">
+        <span class="nav-icon">✅</span> Action Items
+      </button>
+
+      <div class="sidebar-section-label">Developer</div>
+
+      <button class="sidebar-nav-item" data-section="api-keys">
+        <span class="nav-icon">🔑</span> API Keys
+        {% if balance < 0.10 %}
+        <span class="sidebar-badge">!</span>
+        {% endif %}
+      </button>
+      <button class="sidebar-nav-item" data-section="webhooks">
+        <span class="nav-icon">🪝</span> Webhooks
+      </button>
+      <a href="/webhook-playground" class="sidebar-nav-item" target="_blank" style="font-size:12px;color:#6366f1">
+        <span class="nav-icon" style="font-size:12px">↗</span> Webhook Playground
+      </a>
+      <a href="/api-dashboard" class="sidebar-nav-item" target="_blank" style="font-size:12px;color:#6366f1">
+        <span class="nav-icon" style="font-size:12px">↗</span> API Dashboard
+      </a>
+
+      <div class="sidebar-section-label">Connections</div>
+
+      <button class="sidebar-nav-item" data-section="integrations">
+        <span class="nav-icon">🔌</span> Integrations
+        {% if all_integrations %}
+        <span class="sidebar-badge blue">{{ all_integrations|length }}</span>
+        {% endif %}
+      </button>
+      <button class="sidebar-nav-item" data-section="calendar">
+        <span class="nav-icon">📅</span> Calendar
+        {% if all_calendar_feeds %}
+        <span class="sidebar-badge blue">{{ all_calendar_feeds|length }}</span>
+        {% endif %}
+      </button>
+      <button class="sidebar-nav-item" data-section="workspaces">
+        <span class="nav-icon">🏢</span> Workspaces
+      </button>
+
+      <div class="sidebar-section-label">Account</div>
+
+      <button class="sidebar-nav-item" data-section="billing">
+        <span class="nav-icon">💳</span> Billing
+        {% if balance < 0.10 %}
+        <span class="sidebar-badge">Low</span>
+        {% endif %}
+      </button>
+      <button class="sidebar-nav-item" data-section="settings">
+        <span class="nav-icon">⚙️</span> Settings
+      </button>
+    </div>
+  </aside>
+
+  <!-- ═══════════════════════════════════════════════
+       MAIN CONTENT
+  ════════════════════════════════════════════════ -->
+  <main>
+
+    <!-- ────────────────────────────────────────────
+         OVERVIEW
+    ──────────────────────────────────────────── -->
+    <div class="dash-section active" id="section-overview">
+      <div class="section-hdr">
+        <div>
+          <h2>Overview</h2>
+          <p>{{ account.email }}
+            {% if account.account_type == "business" %}<span class="chip chip-info ms-1">Business</span>{% endif %}
+          </p>
+        </div>
+        <a href="/topup" class="btn btn-primary btn-sm">+ Add Credits</a>
+      </div>
+
+      <!-- KPI row -->
+      <div class="kpi-grid">
+        <div class="kpi-card">
+          <div class="stat-label">Credit Balance</div>
+          <div class="stat-value {% if balance < 1.0 %}text-danger{% else %}text-success{% endif %} mt-1">
+            ${{ "%.4f"|format(balance) }}
+          </div>
+          {% if balance < 0.10 %}
+          <a href="/topup" style="font-size:11.5px;color:#ef4444;font-weight:600">⚠ Top up →</a>
+          {% else %}
+          <div style="font-size:11.5px;color:#94a3b8;margin-top:4px">min $0.10 to create bots</div>
+          {% endif %}
+        </div>
+
+        <div class="kpi-card">
+          <div class="stat-label">Plan</div>
+          <div class="stat-value mt-1" style="font-size:1.35rem;color:{% if plan == 'pro' %}#6366f1{% elif plan == 'business' %}#f59e0b{% elif plan == 'starter' %}#0ea5e9{% else %}#64748b{% endif %}">
+            {{ plan|title }}
+          </div>
+          {% if plan_limit == -1 %}
+          <div style="font-size:11.5px;color:#94a3b8;margin-top:4px">{{ monthly_bots_used }} bots (unlimited)</div>
+          {% else %}
+          <div style="font-size:11.5px;color:#94a3b8;margin-top:4px">{{ monthly_bots_used }}/{{ plan_limit }} bots</div>
+          <div class="progress mt-1">
+            <div class="progress-bar {% if monthly_bots_used / plan_limit > 0.8 %}bg-warning{% else %}bg-success{% endif %}" style="width:{{ [((monthly_bots_used / plan_limit) * 100)|int, 100]|min }}%"></div>
+          </div>
+          {% endif %}
+        </div>
+
+        <div class="kpi-card">
+          <div class="stat-label">API Keys</div>
+          <div class="stat-value mt-1">{{ api_keys|length }}</div>
+          <div style="font-size:11.5px;color:#94a3b8;margin-top:4px">active keys</div>
+        </div>
+
+        <div class="kpi-card">
+          <div class="stat-label">Connections</div>
+          <div class="stat-value mt-1">{{ all_integrations|length + all_calendar_feeds|length }}</div>
+          <div style="font-size:11.5px;color:#94a3b8;margin-top:4px">
+            {{ all_integrations|length }} integration{% if all_integrations|length != 1 %}s{% endif %},
+            {{ all_calendar_feeds|length }} calendar{% if all_calendar_feeds|length != 1 %}s{% endif %}
+          </div>
+        </div>
+      </div>
+
+      <!-- My Stats -->
+      <div class="card card-pad mb-3" id="my-stats-card">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <div class="section-title" style="margin-bottom:0">My Stats — This Month</div>
+          <span id="my-stats-loading" style="font-size:12px;color:#94a3b8">Loading…</span>
+        </div>
+        <div id="my-stats-content" class="row g-3" style="display:none">
+          <div class="col-6 col-md-3">
+            <div class="kpi-card" style="background:#f8fafc">
+              <div class="stat-label">Meetings</div>
+              <div class="stat-value mt-1" id="ms-meetings">—</div>
+            </div>
+          </div>
+          <div class="col-6 col-md-3">
+            <div class="kpi-card" style="background:#f8fafc">
+              <div class="stat-label">AI Cost</div>
+              <div class="stat-value mt-1" id="ms-cost">—</div>
+            </div>
+          </div>
+          <div class="col-6 col-md-3">
+            <div class="kpi-card" style="background:#f8fafc">
+              <div class="stat-label">Open Tasks</div>
+              <div class="stat-value mt-1" id="ms-tasks">—</div>
+            </div>
+          </div>
+          <div class="col-6 col-md-3">
+            <div class="kpi-card" style="background:#f8fafc">
+              <div class="stat-label">Avg Duration</div>
+              <div class="stat-value mt-1" id="ms-duration">—</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick actions -->
+      <div class="card card-pad mb-3">
+        <div class="section-title mb-2">Quick Actions</div>
+        <div class="d-flex flex-wrap gap-2">
+          <a href="/api/docs" target="_blank" class="btn btn-outline-secondary btn-sm">📖 API Docs ↗</a>
+          <button class="btn btn-outline-secondary btn-sm" onclick="switchSection('api-keys')">🔑 Manage API Keys</button>
+          <button class="btn btn-outline-secondary btn-sm" onclick="switchSection('webhooks')">🪝 Manage Webhooks</button>
+          <button class="btn btn-outline-secondary btn-sm" onclick="switchSection('integrations')">🔌 Add Integration</button>
+          <a href="/topup" class="btn btn-outline-secondary btn-sm">💳 Add Credits</a>
+        </div>
+      </div>
+
+      <!-- Recent bots -->
+      <div class="card card-pad">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <div>
+            <div class="section-title">Recent Bots</div>
+            <div class="section-subtitle">Last 24-hour window</div>
+          </div>
+          <button class="btn btn-outline-secondary btn-sm" onclick="switchSection('bots')">View all →</button>
+        </div>
+        {% if recent_bots %}
+        <div style="overflow-x:auto">
+          <table class="table table-hover">
+            <thead>
+              <tr>
+                <th>Bot ID</th>
+                <th>Meeting</th>
+                <th>Platform</th>
+                <th>Status</th>
+                <th>Health</th>
+                <th>Created</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for bot in recent_bots[:8] %}
+              <tr>
+                <td><code style="font-size:11.5px">{{ bot.id[:12] }}…</code></td>
+                <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+                  <span title="{{ bot.meeting_url }}" style="font-size:12px;color:#64748b">{{ bot.meeting_url[:35] }}{% if bot.meeting_url|length > 35 %}…{% endif %}</span>
+                </td>
+                <td><span class="chip chip-gray">{{ bot.meeting_platform|title }}</span></td>
+                <td>
+                  {% if bot.status == "done" %}<span class="chip chip-success">Done</span>
+                  {% elif bot.status == "error" %}<span class="chip chip-danger">Error</span>
+                  {% elif bot.status == "cancelled" %}<span class="chip chip-gray">Cancelled</span>
+                  {% elif bot.status in ["joining","in_call","call_ended","transcribing"] %}<span class="chip chip-info">{{ bot.status|replace("_"," ")|title }}</span>
+                  {% else %}<span class="chip chip-warning">{{ bot.status|title }}</span>{% endif %}
+                </td>
+                <td>
+                  {% if bot.health_score is defined and bot.health_score is not none %}
+                  <div class="health-ring" style="background:{% if bot.health_score >= 70 %}#dcfce7;color:#15803d{% elif bot.health_score >= 40 %}#fef3c7;color:#b45309{% else %}#fee2e2;color:#b91c1c{% endif %}">
+                    {{ bot.health_score }}
+                  </div>
+                  {% else %}
+                  <span style="color:#94a3b8;font-size:12px">—</span>
+                  {% endif %}
+                </td>
+                <td style="color:#94a3b8;font-size:12px;white-space:nowrap">{{ bot.created_at }}</td>
+                <td><a href="/bot/{{ bot.id }}" class="btn btn-outline-secondary btn-sm" style="font-size:11px;padding:2px 8px">View</a></td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="empty-state">
+          <div class="empty-state-icon">🤖</div>
+          <div class="empty-state-title">No bots yet</div>
+          <div class="empty-state-desc">Send your first bot into a meeting using the API.</div>
+          <button class="btn btn-outline-primary btn-sm" onclick="switchSection('api-keys')">Get API Key →</button>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- ────────────────────────────────────────────
+         BOTS
+    ──────────────────────────────────────────── -->
+    <div class="dash-section" id="section-bots">
+      <div class="section-hdr">
+        <div>
+          <h2>Bots</h2>
+          <p>All meeting bots from the last 24 hours</p>
+        </div>
+        <div class="d-flex gap-2">
+          <button class="btn btn-outline-secondary btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#scheduleBotPanel" aria-expanded="false">
+            📅 Schedule a Bot
+          </button>
+          <a href="/api/docs#/Bots/create_bot_api_v1_bot_post" target="_blank" class="btn btn-primary btn-sm">Create Bot via API ↗</a>
+        </div>
+      </div>
+
+      <!-- Schedule a Bot panel -->
+      <div class="collapse mb-3" id="scheduleBotPanel">
+        <div class="card card-pad">
+          <div class="section-title mb-3">📅 Schedule a Bot</div>
+          <form id="scheduleBotForm">
+            <div class="row g-3">
+              <div class="col-md-6">
+                <label class="form-label" style="font-size:12.5px;font-weight:600">Meeting URL <span class="text-danger">*</span></label>
+                <input type="url" class="form-control form-control-sm" id="sbMeetingUrl" placeholder="https://zoom.us/j/..." required>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label" style="font-size:12.5px;font-weight:600">Schedule Date &amp; Time <span class="text-danger">*</span></label>
+                <input type="datetime-local" class="form-control form-control-sm" id="sbJoinAt" required>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label" style="font-size:12.5px;font-weight:600">Meeting Template</label>
+                <select class="form-select form-select-sm" id="sbTemplate">
+                  <option value="default">Default</option>
+                  <option value="sales">Sales</option>
+                  <option value="standup">Standup</option>
+                  <option value="1on1">1-on-1</option>
+                  <option value="retro">Retro</option>
+                  <option value="kickoff">Kickoff</option>
+                  <option value="allhands">All Hands</option>
+                  <option value="postmortem">Post-Mortem</option>
+                  <option value="interview">Interview</option>
+                  <option value="design-review">Design Review</option>
+                </select>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label" style="font-size:12.5px;font-weight:600">Bot Display Name</label>
+                <input type="text" class="form-control form-control-sm" id="sbBotName" placeholder="Meeting Notetaker">
+              </div>
+              <div class="col-md-4">
+                <label class="form-label" style="font-size:12.5px;font-weight:600">Webhook URL (optional)</label>
+                <input type="url" class="form-control form-control-sm" id="sbWebhookUrl" placeholder="https://yourapp.com/webhook">
+              </div>
+            </div>
+            <div class="d-flex gap-2 mt-3 align-items-center">
+              <button type="submit" class="btn btn-primary btn-sm" id="sbSubmitBtn">Schedule Bot</button>
+              <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="collapse" data-bs-target="#scheduleBotPanel">Cancel</button>
+              <span id="sbStatus" class="ms-2" style="font-size:13px"></span>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <!-- Quickstart snippet if no bots -->
+      {% if not recent_bots %}
+      <div class="card card-pad mb-3">
+        <div class="section-title mb-2">Create your first bot</div>
+        <div class="section-subtitle mb-3">Use your API key to send a bot into any meeting. It joins immediately.</div>
+        <div style="position:relative">
+          <pre id="quickstart-snippet" style="margin:0"><code>curl -X POST {{ request.base_url }}api/v1/bot \
+  -H "Authorization: Bearer sk_live_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "meeting_url": "https://zoom.us/j/123456789",
+    "webhook_url": "https://yourapp.com/webhook",
+    "pii_redaction": true,
+    "translation_language": "es"
+  }'</code></pre>
+          <button type="button" id="copy-quickstart-snippet" class="btn btn-sm btn-outline-secondary" style="position:absolute;top:10px;right:10px">Copy</button>
+        </div>
+      </div>
+      {% endif %}
+
+      {% if account.account_type == "business" %}
+      <div class="card card-pad mb-3" style="border-left:3px solid #6366f1">
+        <div class="section-title mb-1">🏢 Business Account — Multi-User Isolation</div>
+        <div class="section-subtitle mb-2">Pass the <code>X-Sub-User</code> header to scope bot data per end-user.</div>
+        <pre style="margin:0;font-size:12px"><code>curl ... -H "X-Sub-User: user-123" ...</code></pre>
+      </div>
+      {% endif %}
+
+      {% if recent_bots %}
+      <div class="card">
+        <div class="table-responsive">
+          <table class="table table-hover">
+            <thead>
+              <tr>
+                <th>Bot ID</th>
+                <th>Meeting URL</th>
+                <th>Platform</th>
+                <th>Status</th>
+                <th>Health</th>
+                <th>Cost</th>
+                <th>Duration</th>
+                <th>Created</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for bot in recent_bots %}
+              <tr>
+                <td><code style="font-size:11.5px">{{ bot.id[:12] }}…</code></td>
+                <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+                  <span title="{{ bot.meeting_url }}" style="font-size:12px;color:#64748b">{{ bot.meeting_url }}</span>
+                </td>
+                <td><span class="chip chip-gray">{{ bot.meeting_platform|title }}</span></td>
+                <td>
+                  {% if bot.status == "done" %}<span class="chip chip-success">Done</span>
+                  {% elif bot.status == "error" %}<span class="chip chip-danger">Error</span>
+                  {% elif bot.status == "cancelled" %}<span class="chip chip-gray">Cancelled</span>
+                  {% elif bot.status in ["joining","in_call","call_ended","transcribing"] %}<span class="chip chip-info">{{ bot.status|replace("_"," ")|title }}</span>
+                  {% else %}<span class="chip chip-warning">{{ bot.status|title }}</span>{% endif %}
+                </td>
+                <td>
+                  {% if bot.health_score is defined and bot.health_score is not none %}
+                  <div class="health-ring" style="background:{% if bot.health_score >= 70 %}#dcfce7;color:#15803d{% elif bot.health_score >= 40 %}#fef3c7;color:#b45309{% else %}#fee2e2;color:#b91c1c{% endif %}">
+                    {{ bot.health_score }}
+                  </div>
+                  {% else %}<span style="color:#94a3b8">—</span>{% endif %}
+                </td>
+                <td style="font-size:12.5px">
+                  {% if bot.meeting_cost_usd is defined and bot.meeting_cost_usd %}
+                  ${{ "%.2f"|format(bot.meeting_cost_usd) }}
+                  {% else %}<span style="color:#94a3b8">—</span>{% endif %}
+                </td>
+                <td style="font-size:12.5px;color:#64748b">
+                  {% if bot.duration_seconds %}{{ (bot.duration_seconds / 60)|int }}m{% else %}—{% endif %}
+                </td>
+                <td style="color:#94a3b8;font-size:12px;white-space:nowrap">
+                  {% if bot.status == "scheduled" and bot.join_at %}
+                    <span style="color:#f59e0b">📅 {{ bot.join_at }}</span>
+                  {% else %}
+                    {{ bot.created_at }}
+                  {% endif %}
+                </td>
+                <td><a href="/bot/{{ bot.id }}" class="btn btn-outline-secondary btn-sm" style="font-size:11px;padding:2px 8px">View</a></td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- ────────────────────────────────────────────
+         ANALYTICS
+    ──────────────────────────────────────────── -->
+    <div class="dash-section" id="section-analytics">
+      <div class="section-hdr">
+        <div>
+          <h2>Analytics</h2>
+          <p>Usage statistics and meeting intelligence trends</p>
+        </div>
+        <a href="/api-dashboard" target="_blank" class="btn btn-outline-secondary btn-sm">Full API Dashboard ↗</a>
+      </div>
+
+      <div class="row g-3 mb-3">
+        <div class="col-md-3">
+          <div class="kpi-card">
+            <div class="stat-label">Bots this month</div>
+            <div class="stat-value mt-1" style="font-size:1.6rem">{{ monthly_bots_used }}</div>
+            {% if plan_limit != -1 %}
+            <div style="font-size:11.5px;color:#94a3b8;margin-top:4px">of {{ plan_limit }} limit</div>
+            {% endif %}
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="kpi-card">
+            <div class="stat-label">Integrations</div>
+            <div class="stat-value mt-1" style="font-size:1.6rem">{{ all_integrations|length }}</div>
+            <div style="font-size:11.5px;color:#94a3b8;margin-top:4px">active connections</div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="kpi-card">
+            <div class="stat-label">Calendar Feeds</div>
+            <div class="stat-value mt-1" style="font-size:1.6rem">{{ all_calendar_feeds|length }}</div>
+            <div style="font-size:11.5px;color:#94a3b8;margin-top:4px">auto-join configured</div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="kpi-card">
+            <div class="stat-label">API Keys</div>
+            <div class="stat-value mt-1" style="font-size:1.6rem">{{ api_keys|length }}</div>
+            <div style="font-size:11.5px;color:#94a3b8;margin-top:4px">live &amp; test</div>
+          </div>
+        </div>
+      </div>
+
+      {% if recent_bots %}
+      <div class="card card-pad mb-3">
+        <div class="section-title mb-3">Recent Bot Performance</div>
+        <div style="overflow-x:auto">
+          <table class="table table-hover">
+            <thead>
+              <tr>
+                <th>Bot</th>
+                <th>Platform</th>
+                <th>Duration</th>
+                <th>Health Score</th>
+                <th>Participants</th>
+                <th>Cost</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for bot in recent_bots if bot.status == "done" %}
+              <tr>
+                <td><code style="font-size:11px">{{ bot.id[:10] }}…</code></td>
+                <td><span class="chip chip-gray">{{ bot.meeting_platform|title }}</span></td>
+                <td>{% if bot.duration_seconds %}{{ (bot.duration_seconds / 60)|int }}m {% if bot.duration_seconds % 60 %}{{ bot.duration_seconds % 60 }}s{% endif %}{% else %}—{% endif %}</td>
+                <td>
+                  {% if bot.health_score is defined and bot.health_score is not none %}
+                  <div style="display:inline-flex;align-items:center;gap:0.5rem">
+                    <div style="width:40px;height:6px;background:#e2e8f0;border-radius:3px;overflow:hidden">
+                      <div style="width:{{ bot.health_score }}%;height:100%;background:{% if bot.health_score >= 70 %}#10b981{% elif bot.health_score >= 40 %}#f59e0b{% else %}#ef4444{% endif %};border-radius:3px"></div>
+                    </div>
+                    <span style="font-size:12.5px;font-weight:600">{{ bot.health_score }}</span>
+                  </div>
+                  {% else %}—{% endif %}
+                </td>
+                <td>{{ bot.participants|length if bot.participants else "—" }}</td>
+                <td>{% if bot.meeting_cost_usd is defined and bot.meeting_cost_usd %}${{ "%.2f"|format(bot.meeting_cost_usd) }}{% else %}—{% endif %}</td>
+                <td><span class="chip chip-success">Done</span></td>
+              </tr>
+              {% else %}
+              <tr><td colspan="7" class="text-center text-muted py-3">No completed bots in the last 24 hours.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {% endif %}
+
+      <div class="card card-pad">
+        <div class="section-title mb-2">Full Analytics API</div>
+        <div class="section-subtitle mb-3">Recurring meeting insights, org-level trends, and API usage statistics are available via the REST API.</div>
+        <div class="d-flex flex-wrap gap-2">
+          <a href="/api/docs#/Analytics" target="_blank" class="btn btn-outline-secondary btn-sm">📊 Analytics API ↗</a>
+          <a href="/api-dashboard" target="_blank" class="btn btn-outline-secondary btn-sm">📈 API Dashboard ↗</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- ────────────────────────────────────────────
+         ACTION ITEMS
+    ──────────────────────────────────────────── -->
+    <div class="dash-section" id="section-action-items">
+      <div class="section-hdr">
+        <div>
+          <h2>Action Items</h2>
+          <p>Track open tasks and commitments extracted from your meetings</p>
+        </div>
+        <div class="d-flex gap-2">
+          <select id="ai-filter-status" class="form-select form-select-sm" style="width:120px">
+            <option value="">All</option>
+            <option value="open">Open</option>
+            <option value="done">Done</option>
+          </select>
+          <input type="text" id="ai-filter-assignee" class="form-control form-control-sm" placeholder="Filter assignee…" style="width:160px">
+          <button class="btn btn-sm btn-outline-secondary" onclick="loadActionItems()">Refresh</button>
+        </div>
+      </div>
+      <div class="card card-pad" id="action-items-container">
+        <div style="color:#94a3b8;text-align:center;padding:2rem">Loading action items…</div>
+      </div>
+    </div>
+
+    <!-- ────────────────────────────────────────────
+         API KEYS
+    ──────────────────────────────────────────── -->
+    <div class="dash-section" id="section-api-keys">
+      <div class="section-hdr">
+        <div>
+          <h2>API Keys</h2>
+          <p>Create, manage, and revoke API keys. Keys are shown once — copy immediately.</p>
+        </div>
+      </div>
+
+      <!-- Balance alert -->
+      {% if balance < 0.10 %}
+      <div class="alert alert-warning mb-3">
+        ⚠ Credit balance is low (${{ "%.4f"|format(balance) }}). <a href="/topup" class="alert-link">Top up now →</a>
+      </div>
+      {% endif %}
+
+      {% if new_key %}
+      <div class="alert alert-success d-flex align-items-start gap-2 mb-3">
+        <span>✓</span>
+        <div>
+          <strong>New API key created</strong> — copy it now, it won't be shown again:<br>
+          <code id="new-key-value" style="font-size:13px;display:inline-block;margin:.35rem 0">{{ new_key }}</code>
+          <button type="button" class="btn btn-xs btn-outline-success ms-2 copy-key-btn" data-key="{{ new_key }}">Copy</button>
+        </div>
+      </div>
+      {% endif %}
+
+      <!-- Live keys -->
+      <div class="card card-pad mb-3">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <div>
+            <div class="section-title">Live Keys <span style="color:#94a3b8;font-weight:400;font-size:12px">(sk_live_...)</span></div>
+            <div class="section-subtitle">Used in production — credits are deducted on each bot</div>
+          </div>
+          <div class="d-flex gap-2">
+            <input type="text" id="live-key-name" class="form-control form-control-sm" placeholder="Key name" style="width:120px">
+            <button type="button" class="btn btn-primary btn-sm" data-create-key="live">+ New Key</button>
+          </div>
+        </div>
+        {% set live_keys = api_keys | selectattr("key_preview", "string") | list %}
+        {% if api_keys %}
+        <div style="overflow-x:auto">
+          <table class="table table-hover" id="live-keys-table">
+            <thead>
+              <tr><th>Name</th><th>Key</th><th>Last used</th><th></th></tr>
+            </thead>
+            <tbody>
+              {% for key in api_keys if not key.key_preview.startswith("sk_test_") %}
+              <tr>
+                <td style="font-weight:500">{{ key.name }}</td>
+                <td>
+                  <code>{{ key.key_preview }}</code>
+                  {% if key.full_key %}
+                  <button type="button" class="btn btn-xs btn-outline-secondary ms-1 copy-key-btn" data-key="{{ key.full_key }}" title="Copy key">⎘</button>
+                  {% endif %}
+                </td>
+                <td style="color:#94a3b8;font-size:12.5px">{{ key.last_used_at or "Never" }}</td>
+                <td>
+                  <button type="button" class="btn btn-xs btn-outline-danger" data-revoke-key="{{ key.id }}">Revoke</button>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="empty-state" style="padding:1.25rem" id="live-keys-empty">
+          <div class="empty-state-desc">No API keys yet. Create one to start using the API.</div>
+        </div>
+        {% endif %}
+      </div>
+
+      <!-- Test keys -->
+      <div class="card card-pad">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <div>
+            <div class="section-title">Test Keys <span style="color:#94a3b8;font-weight:400;font-size:12px">(sk_test_...)</span></div>
+            <div class="section-subtitle">Bots complete instantly with demo transcripts — zero credits deducted. Use in CI/CD.</div>
+          </div>
+          <div class="d-flex gap-2">
+            <input type="text" id="test-key-name" class="form-control form-control-sm" placeholder="Test key name" style="width:140px">
+            <button type="button" class="btn btn-outline-secondary btn-sm" data-create-key="test">+ New Test Key</button>
+          </div>
+        </div>
+        {% set test_keys = api_keys | selectattr("key_preview", "defined") | list %}
+        {% if api_keys %}
+        <div style="overflow-x:auto">
+          <table class="table table-hover" id="test-keys-table">
+            <thead>
+              <tr><th>Name</th><th>Key</th><th>Last used</th><th></th></tr>
+            </thead>
+            <tbody>
+              {% for key in api_keys if key.key_preview.startswith("sk_test_") %}
+              <tr>
+                <td style="font-weight:500">{{ key.name }}</td>
+                <td>
+                  <code>{{ key.key_preview }}</code>
+                  {% if key.full_key %}
+                  <button type="button" class="btn btn-xs btn-outline-secondary ms-1 copy-key-btn" data-key="{{ key.full_key }}">⎘</button>
+                  {% endif %}
+                </td>
+                <td style="color:#94a3b8;font-size:12.5px">{{ key.last_used_at or "Never" }}</td>
+                <td>
+                  <button type="button" class="btn btn-xs btn-outline-danger" data-revoke-key="{{ key.id }}">Revoke</button>
+                </td>
+              </tr>
+              {% else %}
+              <tr><td colspan="4" class="text-center text-muted py-3" style="font-size:13px">No test keys yet.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- ────────────────────────────────────────────
+         WEBHOOKS
+    ──────────────────────────────────────────── -->
+    <div class="dash-section" id="section-webhooks">
+      <div class="section-hdr">
+        <div>
+          <h2>Webhooks</h2>
+          <p>Register global webhooks that receive events from all bots</p>
+        </div>
+        <a href="/webhook-playground" target="_blank" class="btn btn-outline-secondary btn-sm">Open Playground ↗</a>
+      </div>
+
+      <div class="card card-pad mb-3">
+        <div class="section-title mb-3">Register a Webhook</div>
+        <form id="webhook-register-form">
+          <div class="row g-3">
+            <div class="col-md-5">
+              <label class="form-label">Endpoint URL</label>
+              <input type="url" name="url" class="form-control form-control-sm" placeholder="https://yourapp.com/webhook" required>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Signing Secret <span style="color:#94a3b8;font-weight:400">(optional)</span></label>
+              <input type="password" name="secret" class="form-control form-control-sm" placeholder="For HMAC-SHA256 signature">
+            </div>
+          </div>
+          <div class="mt-3">
+            <label class="form-label">Events <span style="color:#94a3b8;font-weight:400">(leave all unchecked to receive every event)</span></label>
+            <div id="wh-events-group" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:0.25rem 1.5rem;padding:0.5rem;border:1px solid #e2e8f0;border-radius:6px;background:#f8fafc">
+              {% for ev in ["bot.joining","bot.in_call","bot.call_ended","bot.transcript_ready","bot.analysis_ready","bot.done","bot.error","bot.cancelled","bot.keyword_alert","bot.live_transcript","bot.live_transcript_translated","bot.recurring_intel_ready","bot.test"] %}
+              <label class="form-check-label" style="display:flex;align-items:center;gap:0.4rem;font-size:12px;cursor:pointer">
+                <input type="checkbox" class="form-check-input wh-event-cb" value="{{ ev }}" style="margin-top:0">
+                <code style="font-size:11px">{{ ev }}</code>
+              </label>
+              {% endfor %}
+            </div>
+          </div>
+          <div class="mt-3">
+            <button type="submit" class="btn btn-primary btn-sm">Register Webhook</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="card card-pad">
+        <div class="section-title mb-1">Webhook Events Reference</div>
+        <div class="section-subtitle mb-3">Events fired during and after each bot session</div>
+        <div class="row g-2">
+          {% for event, desc in [
+            ("bot.joining", "Bot is connecting to the meeting"),
+            ("bot.in_call", "Bot has joined and is recording"),
+            ("bot.live_transcript", "Live transcript entry (WebSocket + webhook)"),
+            ("bot.live_action_items", "AI-extracted action items during call"),
+            ("bot.coaching_alert", "Dominant speaker alert (>70% talk time)"),
+            ("bot.live_keyword_alert", "Competitor/keyword mention with sentiment"),
+            ("bot.call_ended", "Meeting has ended, processing begins"),
+            ("bot.transcript_ready", "Full transcript available"),
+            ("bot.analysis_ready", "AI summary, decisions, action items ready"),
+            ("bot.done", "All processing complete"),
+            ("bot.error", "Bot encountered an error"),
+          ] %}
+          <div class="col-md-6">
+            <div style="display:flex;gap:0.5rem;align-items:flex-start;padding:0.4rem 0;border-bottom:1px solid #f1f5f9">
+              <code style="font-size:11px;flex-shrink:0">{{ event }}</code>
+              <span style="font-size:12px;color:#64748b">{{ desc }}</span>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+
+    <!-- ────────────────────────────────────────────
+         INTEGRATIONS
+    ──────────────────────────────────────────── -->
+    <div class="dash-section" id="section-integrations">
+      <div class="section-hdr">
+        <div>
+          <h2>Integrations</h2>
+          <p>Automatically post meeting summaries and action items after each bot session</p>
+        </div>
+        <button class="btn btn-primary btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#add-integ-form">
+          + Add Integration
+        </button>
+      </div>
+
+      <!-- Add integration form -->
+      <div class="collapse mb-3" id="add-integ-form">
+        <div class="card card-pad">
+          <div class="section-title mb-3">Add new integration</div>
+          <form id="integration-add-form">
+            <div class="row g-3">
+              <div class="col-md-3">
+                <label class="form-label">Type</label>
+                <select id="integ-type-select" class="form-select form-select-sm" onchange="toggleIntegFields(this.value)">
+                  <option value="slack">Slack</option>
+                  <option value="notion">Notion</option>
+                </select>
+              </div>
+              <div class="col-md-3">
+                <label class="form-label">Display name</label>
+                <input type="text" id="integ-name" class="form-control form-control-sm" placeholder="e.g. Team Channel">
+              </div>
+              <div class="col-md-6" id="slack-fields">
+                <label class="form-label">Slack Webhook URL</label>
+                <input type="url" id="integ-slack-url" class="form-control form-control-sm" placeholder="https://hooks.slack.com/services/...">
+                <div class="form-text"><a href="https://api.slack.com/messaging/webhooks" target="_blank" style="color:#6366f1">How to get a Slack webhook ↗</a></div>
+              </div>
+              <div class="col-md-3 d-none" id="notion-token-field">
+                <label class="form-label">Notion API Token</label>
+                <input type="password" id="integ-notion-token" class="form-control form-control-sm" placeholder="secret_...">
+              </div>
+              <div class="col-md-3 d-none" id="notion-db-field">
+                <label class="form-label">Database ID</label>
+                <input type="text" id="integ-notion-db" class="form-control form-control-sm" placeholder="32-char ID">
+              </div>
+            </div>
+            <div class="mt-3 d-flex gap-2">
+              <button type="submit" class="btn btn-primary btn-sm">Add Integration</button>
+              <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="collapse" data-bs-target="#add-integ-form">Cancel</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      {% if all_integrations %}
+      <div class="card">
+        <div class="table-responsive">
+          <table class="table table-hover" id="integrations-table">
+            <thead>
+              <tr><th>Type</th><th>Name</th><th>Status</th><th>Added</th><th></th></tr>
+            </thead>
+            <tbody>
+              {% for integ in all_integrations %}
+              <tr>
+                <td>
+                  {% if integ.type == "slack" %}💬 Slack
+                  {% elif integ.type == "notion" %}📝 Notion
+                  {% else %}{{ integ.type|title }}{% endif %}
+                </td>
+                <td style="font-weight:500">{{ integ.name or "—" }}</td>
+                <td>
+                  {% if integ.is_active %}<span class="chip chip-success">Active</span>
+                  {% else %}<span class="chip chip-gray">Paused</span>{% endif %}
+                </td>
+                <td style="color:#94a3b8;font-size:12.5px">{{ integ.created_at }}</td>
+                <td>
+                  <div class="d-flex gap-1">
+                    <button type="button" class="btn btn-xs btn-outline-secondary" data-toggle-integ="{{ integ.id }}">{% if integ.is_active %}Pause{% else %}Enable{% endif %}</button>
+                    <button type="button" class="btn btn-xs btn-outline-danger" data-delete-integ="{{ integ.id }}">Delete</button>
+                  </div>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {% else %}
+      <div class="card card-pad">
+        <div class="empty-state">
+          <div class="empty-state-icon">🔌</div>
+          <div class="empty-state-title">No integrations yet</div>
+          <div class="empty-state-desc">Connect Slack or Notion to automatically receive meeting summaries after each bot session.</div>
+          <button class="btn btn-outline-primary btn-sm" data-bs-toggle="collapse" data-bs-target="#add-integ-form">+ Add Integration</button>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- ────────────────────────────────────────────
+         CALENDAR
+    ──────────────────────────────────────────── -->
+    <div class="dash-section" id="section-calendar">
+      <div class="section-hdr">
+        <div>
+          <h2>Calendar Auto-Join</h2>
+          <p>Connect iCal feeds — bots join meetings automatically 2 minutes before they start</p>
+        </div>
+        <button class="btn btn-primary btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#add-cal-form">
+          + Add Calendar
+        </button>
+      </div>
+
+      <!-- Add calendar form -->
+      <div class="collapse mb-3" id="add-cal-form">
+        <div class="card card-pad">
+          <div class="section-title mb-3">Add iCal feed</div>
+          <form id="cal-add-form">
+            <div class="row g-3">
+              <div class="col-md-4">
+                <label class="form-label">Calendar name</label>
+                <input type="text" id="cal-name" class="form-control form-control-sm" placeholder="My Work Calendar" value="My Calendar">
+              </div>
+              <div class="col-md-5">
+                <label class="form-label">iCal URL</label>
+                <input type="url" id="cal-ical-url" class="form-control form-control-sm" placeholder="https://calendar.google.com/calendar/ical/..." required>
+                <div class="form-text">Google Calendar → Settings → Integrate → Secret iCal address</div>
+              </div>
+              <div class="col-md-3">
+                <label class="form-label">Bot display name</label>
+                <input type="text" id="cal-bot-name" class="form-control form-control-sm" placeholder="JustHereToListen.io">
+              </div>
+              <div class="col-12">
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" id="auto-record-check" checked>
+                  <label class="form-check-label" for="auto-record-check" style="font-size:13.5px">Auto-join meetings when they start</label>
+                </div>
+              </div>
+            </div>
+            <div class="mt-3 d-flex gap-2">
+              <button type="button" id="cal-add-btn" class="btn btn-primary btn-sm">Add Calendar</button>
+              <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="collapse" data-bs-target="#add-cal-form">Cancel</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      {% if all_calendar_feeds %}
+      <div class="card">
+        <div class="table-responsive">
+          <table class="table table-hover" id="cal-feeds-table">
+            <thead>
+              <tr><th>Name</th><th>Status</th><th>Auto-join</th><th>Bot name</th><th>Last synced</th><th></th></tr>
+            </thead>
+            <tbody>
+              {% for feed in all_calendar_feeds %}
+              <tr>
+                <td style="font-weight:500">{{ feed.name }}</td>
+                <td>{% if feed.is_active %}<span class="chip chip-success">Active</span>{% else %}<span class="chip chip-gray">Paused</span>{% endif %}</td>
+                <td>{% if feed.auto_record %}<span class="chip chip-info">On</span>{% else %}<span class="chip chip-gray">Off</span>{% endif %}</td>
+                <td style="color:#64748b;font-size:13px">{{ feed.bot_name or "JustHereToListen.io" }}</td>
+                <td style="color:#94a3b8;font-size:12.5px">{{ feed.last_synced_at or "Never" }}</td>
+                <td>
+                  <div class="d-flex gap-1">
+                    <button type="button" class="btn btn-xs btn-outline-secondary" data-toggle-cal="{{ feed.id }}">{% if feed.is_active %}Pause{% else %}Enable{% endif %}</button>
+                    <button type="button" class="btn btn-xs btn-outline-danger" data-delete-cal="{{ feed.id }}">Remove</button>
+                  </div>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {% else %}
+      <div class="card card-pad">
+        <div class="empty-state">
+          <div class="empty-state-icon">📅</div>
+          <div class="empty-state-title">No calendar feeds</div>
+          <div class="empty-state-desc">Add a Google or Outlook iCal feed to automatically send bots to upcoming meetings.</div>
+          <button class="btn btn-outline-primary btn-sm" data-bs-toggle="collapse" data-bs-target="#add-cal-form">+ Add Calendar</button>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- ────────────────────────────────────────────
+         WORKSPACES
+    ──────────────────────────────────────────── -->
+    <div class="dash-section" id="section-workspaces">
+      <div class="section-hdr">
+        <div>
+          <h2>Workspaces</h2>
+          <p>Organize bots and share access with your team using role-based permissions</p>
+        </div>
+        <a href="/api/docs#/Workspaces" target="_blank" class="btn btn-outline-secondary btn-sm">Workspace API ↗</a>
+      </div>
+
+      <div class="card card-pad mb-3">
+        <div class="section-title mb-2">Role-Based Access</div>
+        <div class="section-subtitle mb-3">Each workspace member is assigned a role that controls what they can do.</div>
+        <div class="row g-2">
+          {% for role, perms in [
+            ("viewer", "View bots and transcripts"),
+            ("member", "View bots + download recordings and trigger re-analysis"),
+            ("admin", "Full access: view, download, re-analyze, and delete bots"),
+          ] %}
+          <div class="col-md-4">
+            <div style="border:1px solid #e2e8f0;border-radius:10px;padding:0.85rem">
+              <div style="font-weight:700;font-size:13px;text-transform:capitalize;margin-bottom:0.3rem;color:#0f172a">{{ role }}</div>
+              <div style="font-size:12.5px;color:#64748b">{{ perms }}</div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="card card-pad">
+        <div class="empty-state">
+          <div class="empty-state-icon">🏢</div>
+          <div class="empty-state-title">Manage workspaces via API</div>
+          <div class="empty-state-desc">Create workspaces, invite members, and assign roles through the REST API. Workspace UI is coming soon.</div>
+          <a href="/api/docs#/Workspaces" target="_blank" class="btn btn-outline-primary btn-sm">View Workspace API →</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- ────────────────────────────────────────────
+         BILLING
+    ──────────────────────────────────────────── -->
+    <div class="dash-section" id="section-billing">
+      <div class="section-hdr">
+        <div>
+          <h2>Billing</h2>
+          <p>Credits, transactions, and payment methods</p>
+        </div>
+        <a href="/topup" class="btn btn-primary btn-sm">+ Add Credits</a>
+      </div>
+
+      <!-- Balance card -->
+      <div class="row g-3 mb-3">
+        <div class="col-md-4">
+          <div class="kpi-card">
+            <div class="stat-label">Current Balance</div>
+            <div class="stat-value {% if balance < 1.0 %}text-danger{% else %}text-success{% endif %} mt-1">
+              ${{ "%.4f"|format(balance) }}
+            </div>
+            <div style="margin-top:6px">
+              <a href="/topup" class="btn btn-sm btn-primary">Add Credits</a>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="kpi-card">
+            <div class="stat-label">Plan</div>
+            <div class="stat-value mt-1" style="font-size:1.35rem">{{ plan|title }}</div>
+            <div style="font-size:11.5px;color:#94a3b8;margin-top:4px">
+              {% if plan_limit == -1 %}Unlimited bots{% else %}{{ plan_limit }} bots/month{% endif %}
+            </div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="kpi-card">
+            <div class="stat-label">Bots Used This Month</div>
+            <div class="stat-value mt-1" style="font-size:1.35rem">{{ monthly_bots_used }}</div>
+            {% if plan_limit != -1 %}
+            <div class="progress mt-2">
+              <div class="progress-bar {% if monthly_bots_used / plan_limit > 0.8 %}bg-warning{% else %}bg-success{% endif %}" style="width:{{ [((monthly_bots_used / plan_limit) * 100)|int, 100]|min }}%"></div>
+            </div>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+
+      <!-- USDC wallet -->
+      <div class="card card-pad mb-3">
+        <div class="section-title mb-1">USDC Payments</div>
+        <div class="section-subtitle mb-3">Register your Ethereum wallet to top up with USDC (ERC-20). Credits are applied automatically on deposit.</div>
+        <form method="post" action="/dashboard/wallet">
+          <div class="row g-2 align-items-end">
+            <div class="col-md-7">
+              <label class="form-label">Ethereum wallet address</label>
+              <input type="text" name="wallet_address" class="form-control form-control-sm font-mono"
+                value="{{ wallet_address or '' }}" placeholder="0x0000000000000000000000000000000000000000"
+                pattern="0x[0-9a-fA-F]{40}" required>
+            </div>
+            <div class="col-md-2">
+              <button type="submit" class="btn btn-primary btn-sm w-100">Save</button>
+            </div>
+          </div>
+        </form>
+        {% if wallet_address %}
+        <div class="mt-2" style="font-size:12.5px;color:#059669">✓ Registered: <code>{{ wallet_address }}</code></div>
+        {% else %}
+        <div class="mt-2" style="font-size:12.5px;color:#f59e0b">⚠ No wallet set — USDC deposits won't be attributed automatically.</div>
+        {% endif %}
+      </div>
+
+      <!-- Transaction history -->
+      <div class="card card-pad">
+        <div class="section-title mb-3">Transaction History</div>
+        {% if transactions %}
+        <div style="overflow-x:auto">
+          <table class="table table-hover">
+            <thead>
+              <tr><th>Date</th><th>Type</th><th>Description</th><th class="text-end">Amount</th></tr>
+            </thead>
+            <tbody>
+              {% for tx in transactions %}
+              <tr>
+                <td style="color:#94a3b8;font-size:12.5px;white-space:nowrap">{{ tx.created_at[:19].replace("T", " ") }}</td>
+                <td>
+                  {% if tx.type == "stripe_topup" %}<span class="chip chip-success">Stripe</span>
+                  {% elif tx.type == "usdc_topup" %}<span class="chip chip-info">USDC</span>
+                  {% elif tx.type == "bot_usage" %}<span class="chip chip-gray">Bot</span>
+                  {% else %}<span class="chip chip-gray">{{ tx.type }}</span>{% endif %}
+                </td>
+                <td style="font-size:13px;color:#374151">{{ tx.description }}</td>
+                <td class="text-end {% if tx.amount_usd > 0 %}tx-credit{% else %}tx-debit{% endif %}">
+                  {% if tx.amount_usd > 0 %}+{% endif %}${{ "%.4f"|format(tx.amount_usd) }}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="empty-state" style="padding:1.5rem">
+          <div class="empty-state-desc">No transactions yet. <a href="/topup" style="color:#6366f1">Add credits</a> to get started.</div>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- ────────────────────────────────────────────
+         SETTINGS
+    ──────────────────────────────────────────── -->
+    <div class="dash-section" id="section-settings">
+      <div class="section-hdr">
+        <div><h2>Settings</h2><p>Profile, notifications, account type, and security</p></div>
+      </div>
+
+      <!-- Notifications -->
+      <div class="card card-pad mb-3">
+        <div class="section-title mb-1">Email Notifications</div>
+        <div class="section-subtitle mb-3">Get notified when a bot completes analysis.</div>
+        <form method="post" action="/dashboard/notifications">
+          <div class="form-check form-switch mb-2">
+            <input class="form-check-input" type="checkbox" role="switch" name="notify_on_done" id="notify-switch" {% if notify_on_done %}checked{% endif %}>
+            <label class="form-check-label" for="notify-switch" style="font-size:13.5px">Notify me when a bot finishes</label>
+          </div>
+          <div class="mb-3" style="max-width:320px">
+            <label class="form-label">Notification email <span style="color:#94a3b8;font-weight:400">(defaults to account email)</span></label>
+            <input type="email" name="notify_email" class="form-control form-control-sm" value="{{ notify_email }}" placeholder="{{ account.email }}">
+          </div>
+          <button type="submit" class="btn btn-primary btn-sm">Save Preferences</button>
+        </form>
+      </div>
+
+      <!-- Account type -->
+      <div class="card card-pad mb-3">
+        <div class="section-title mb-1">Account Type</div>
+        <div class="section-subtitle mb-3">Switch at any time — existing data and credits are not affected.</div>
+        <form method="post" action="/dashboard/account-type">
+          <div class="d-flex gap-2 flex-wrap">
+            <label style="flex:1;min-width:200px">
+              <input type="radio" name="account_type" value="personal" {% if account.account_type != 'business' %}checked{% endif %} onchange="this.form.submit()" style="display:none">
+              <div class="p-3" style="border:2px solid {% if account.account_type != 'business' %}#6366f1{% else %}#e2e8f0{% endif %};border-radius:10px;cursor:pointer">
+                <div style="font-weight:600;font-size:13.5px;margin-bottom:3px">Personal</div>
+                <div style="font-size:12.5px;color:#64748b">Standard single-user account.</div>
+              </div>
+            </label>
+            <label style="flex:1;min-width:200px">
+              <input type="radio" name="account_type" value="business" {% if account.account_type == 'business' %}checked{% endif %} onchange="this.form.submit()" style="display:none">
+              <div class="p-3" style="border:2px solid {% if account.account_type == 'business' %}#6366f1{% else %}#e2e8f0{% endif %};border-radius:10px;cursor:pointer">
+                <div style="font-weight:600;font-size:13.5px;margin-bottom:3px">Business <span class="chip chip-info ms-1" style="font-size:10px;padding:1px 7px">Multi-tenant</span></div>
+                <div style="font-size:12.5px;color:#64748b">Use <code>X-Sub-User</code> to isolate data per end-user.</div>
+              </div>
+            </label>
+          </div>
+        </form>
+      </div>
+
+      <!-- SSO -->
+      {% if google_sso_enabled or microsoft_sso_enabled or oauth_accounts %}
+      <div class="card card-pad mb-3">
+        <div class="section-title mb-3">Linked Accounts (SSO)</div>
+        {% if oauth_accounts %}
+        <div class="d-flex flex-wrap gap-2 mb-3">
+          {% for oa in oauth_accounts %}
+          <span class="chip chip-gray" style="padding:5px 12px;font-size:12.5px">
+            {{ oa.provider|title }}
+            {% if oa.email %}<span style="color:#94a3b8">· {{ oa.email }}</span>{% endif %}
+            <span class="chip chip-success ms-1" style="padding:1px 6px;font-size:11px">Linked</span>
+          </span>
+          {% endfor %}
+        </div>
+        {% endif %}
+        <div class="d-flex flex-wrap gap-2">
+          {% if google_sso_enabled %}
+          {% set google_linked = oauth_accounts | selectattr("provider", "equalto", "google") | list %}
+          {% if not google_linked %}
+          <a href="/api/v1/auth/oauth/google/authorize?redirect=1" class="btn btn-outline-secondary btn-sm">Link Google Account</a>
+          {% endif %}
+          {% endif %}
+          {% if microsoft_sso_enabled %}
+          {% set ms_linked = oauth_accounts | selectattr("provider", "equalto", "microsoft") | list %}
+          {% if not ms_linked %}
+          <a href="/api/v1/auth/oauth/microsoft/authorize?redirect=1" class="btn btn-outline-secondary btn-sm">Link Microsoft Account</a>
+          {% endif %}
+          {% endif %}
+        </div>
+      </div>
+      {% endif %}
+
+      <!-- Support Access Keys -->
+      <div class="card card-pad mb-3" id="support-key-card">
+        <div class="section-title mb-1">Support Access</div>
+        <div class="section-subtitle mb-3">
+          Generate a temporary key to share with our support team. Only the hash is stored — support cannot read the plaintext key from the database, only verify it. Revoke the key immediately after the support session.
+        </div>
+
+        <div class="d-flex gap-2 flex-wrap align-items-end mb-3">
+          <div>
+            <label class="form-label">Key label</label>
+            <input type="text" id="support-key-label" class="form-control form-control-sm" placeholder="e.g. May support session" maxlength="100" style="width:220px">
+          </div>
+          <div>
+            <label class="form-label">Expires in</label>
+            <select id="support-key-expires" class="form-select form-select-sm" style="width:130px">
+              <option value="24">24 hours</option>
+              <option value="72" selected>3 days</option>
+              <option value="168">7 days</option>
+              <option value="">Never</option>
+            </select>
+          </div>
+          <button type="button" class="btn btn-primary btn-sm" id="generate-support-key-btn">Generate Key</button>
+        </div>
+
+        <!-- Plaintext key reveal (hidden until generated) -->
+        <div id="support-key-reveal" class="d-none mb-3 p-3" style="background:#fefce8;border:1px solid #fde68a;border-radius:10px">
+          <div style="font-size:12px;font-weight:700;color:#92400e;margin-bottom:0.5rem">⚠ Copy this key now — it will not be shown again.</div>
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <code id="support-key-value" style="font-size:13px;word-break:break-all;flex:1;background:#fef9c3;padding:0.4rem 0.65rem;border-radius:6px;border:1px solid #fde68a"></code>
+            <button type="button" class="btn btn-sm btn-warning flex-shrink-0" id="copy-support-key-btn">Copy</button>
+          </div>
+          <div style="font-size:12px;color:#78716c">Share with support only. Revoke it as soon as the session ends.</div>
+        </div>
+
+        <!-- Active keys list -->
+        <div id="support-keys-list">
+          <div class="text-muted small text-center py-2" style="font-size:12.5px">Loading keys…</div>
+        </div>
+      </div>
+
+      <!-- Danger zone -->
+      <div class="card card-pad" style="border-color:#fecaca">
+        <div class="section-title mb-1" style="color:#dc2626">Danger Zone</div>
+        <div class="section-subtitle mb-3">Irreversible actions. Proceed with caution.</div>
+        <a href="/logout" class="btn btn-outline-danger btn-sm">Sign out of this session</a>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ── Section navigation ─────────────────────────────────────────────────────
+const _VALID_SECTIONS = ['overview','bots','analytics','api-keys','webhooks','integrations','calendar','workspaces','billing','settings'];
+
+function _activateSection(name) {
+  document.querySelectorAll('.dash-section').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.sidebar-nav-item[data-section]').forEach(el => el.classList.remove('active'));
+  document.getElementById('section-' + name)?.classList.add('active');
+  document.querySelector(`.sidebar-nav-item[data-section="${name}"]`)?.classList.add('active');
+}
+
+function switchSection(name) {
+  _activateSection(name);
+  window.history.pushState({ section: name }, '', '#' + name);
+}
+
+document.querySelectorAll('.sidebar-nav-item[data-section]').forEach(btn => {
+  btn.addEventListener('click', () => switchSection(btn.dataset.section));
+});
+
+window.addEventListener('popstate', (e) => {
+  const name = e.state?.section || window.location.hash.replace('#', '') || 'overview';
+  if (_VALID_SECTIONS.includes(name)) _activateSection(name);
+});
+
+// Handle hash on load
+document.addEventListener('DOMContentLoaded', () => {
+  const hash = window.location.hash.replace('#', '');
+  if (hash && _VALID_SECTIONS.includes(hash)) {
+    switchSection(hash);
+    if (hash === 'settings') _loadSupportKeys();
+  }
+});
+
+// ── Copy API keys ─────────────────────────────────────────────────────────
+document.querySelectorAll('.copy-key-btn').forEach(btn => {
+  btn.addEventListener('click', function() {
+    navigator.clipboard.writeText(this.getAttribute('data-key')).then(() => {
+      showToast('API key copied to clipboard', 'success');
+      const orig = this.innerHTML;
+      this.innerHTML = '✓';
+      setTimeout(() => { this.innerHTML = orig; }, 2000);
+    }).catch(() => showToast('Copy failed', 'danger'));
+  });
+});
+
+// Quickstart copy
+const qsSnippet = document.getElementById('quickstart-snippet');
+const qsBtn = document.getElementById('copy-quickstart-snippet');
+if (qsSnippet && qsBtn) {
+  qsBtn.addEventListener('click', () => {
+    navigator.clipboard.writeText(qsSnippet.innerText)
+      .then(() => showToast('Copied!', 'success'))
+      .catch(() => showToast('Copy failed', 'danger'));
+  });
+}
+
+// ── API Key helpers ────────────────────────────────────────────────────────
+function _prependKeyRow(data, mode) {
+  const tbody = document.querySelector(`#${mode}-keys-table tbody`);
+  if (!tbody) return;
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td><code style="font-size:11.5px">${data.key_preview}</code>
+      <button class="btn btn-xs btn-outline-secondary ms-1 copy-key-btn" data-key="${data.full_key}" title="Copy full key">Copy</button>
+    </td>
+    <td style="color:#64748b;font-size:13px">${data.name || '—'}</td>
+    <td style="color:#94a3b8;font-size:12px">${new Date(data.created_at).toLocaleDateString()}</td>
+    <td>
+      <button type="button" class="btn btn-xs btn-outline-danger" data-revoke-key="${data.id}">Revoke</button>
+    </td>`;
+  tbody.prepend(tr);
+  // wire up copy button on new row
+  tr.querySelector('.copy-key-btn')?.addEventListener('click', function() {
+    navigator.clipboard.writeText(this.getAttribute('data-key')).then(() => {
+      showToast('Key copied!', 'success');
+    }).catch(() => showToast('Copy failed', 'danger'));
+  });
+  // wire up revoke button on new row
+  tr.querySelector('[data-revoke-key]')?.addEventListener('click', _handleRevoke);
+}
+
+async function _handleRevoke() {
+  if (!confirm('Revoke this key?')) return;
+  const btn = this;
+  btn.disabled = true;
+  try {
+    await apiFetch(`/dashboard/keys/${btn.dataset.revokeKey}`, { method: 'POST' });
+    btn.closest('tr').remove();
+    showToast('Key revoked', 'success');
+  } catch(e) { showToast(e.message, 'danger'); btn.disabled = false; }
+}
+
+// Create key buttons (live + test)
+document.querySelectorAll('[data-create-key]').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    const mode = btn.dataset.createKey;
+    const nameInput = document.getElementById(`${mode}-key-name`);
+    btn.disabled = true;
+    try {
+      const data = await apiFetch('/dashboard/keys', {
+        method: 'POST',
+        body: JSON.stringify({ name: nameInput?.value.trim() || '', mode }),
+      });
+      showToast(`Key created: ${data.key_preview}`, 'success', 6000);
+      _prependKeyRow(data, mode);
+      if (nameInput) nameInput.value = '';
+    } catch(e) { showToast(e.message, 'danger'); }
+    finally { btn.disabled = false; }
+  });
+});
+
+// Revoke key buttons (server-rendered rows)
+document.querySelectorAll('[data-revoke-key]').forEach(btn => {
+  btn.addEventListener('click', _handleRevoke);
+});
+
+// ── Webhook form ──────────────────────────────────────────────────────────
+(function() {
+  const form = document.getElementById('webhook-register-form');
+  if (!form) return;
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = form.querySelector('button[type=submit]');
+    btn.disabled = true;
+    try {
+      const url = form.querySelector('[name=url]')?.value.trim() || '';
+      const secret = form.querySelector('[name=secret]')?.value.trim() || '';
+      const checkedEvents = Array.from(form.querySelectorAll('.wh-event-cb:checked')).map(cb => cb.value);
+      const events = checkedEvents.length > 0 ? checkedEvents : ['*'];
+      const data = await apiFetch('/dashboard/webhook', {
+        method: 'POST',
+        body: JSON.stringify({ url, events, secret: secret || null }),
+      });
+      showToast(`Webhook registered: ${data.url}`, 'success');
+      form.reset();
+      // Append row to webhook table if it exists
+      const tbody = document.querySelector('#webhooks-table tbody');
+      if (tbody) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td style="font-size:12px;word-break:break-all">${data.url}</td>
+          <td><code style="font-size:11px">${(data.events||[]).join(', ')}</code></td>
+          <td><span class="chip chip-success">Active</span></td>
+          <td style="color:#94a3b8;font-size:12px">${new Date(data.created_at||Date.now()).toLocaleDateString()}</td>`;
+        tbody.prepend(tr);
+      }
+    } catch(e) { showToast(e.message, 'danger'); }
+    finally { btn.disabled = false; }
+  });
+})();
+
+// ── Integration form ──────────────────────────────────────────────────────
+(function() {
+  const form = document.getElementById('integration-add-form');
+  if (!form) return;
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = form.querySelector('button[type=submit]');
+    btn.disabled = true;
+    try {
+      const type = document.getElementById('integ-type-select')?.value || '';
+      const name = document.getElementById('integ-name')?.value.trim() || '';
+      const webhookUrl = document.getElementById('integ-slack-url')?.value.trim() || '';
+      const botToken = document.getElementById('integ-bot-token')?.value.trim() || '';
+      const notionToken = document.getElementById('integ-notion-token')?.value.trim() || '';
+      const notionDb = document.getElementById('integ-notion-db')?.value.trim() || '';
+      const data = await apiFetch('/dashboard/integrations/add', {
+        method: 'POST',
+        body: JSON.stringify({ type, name, webhook_url: webhookUrl, bot_token: botToken, notion_token: notionToken, notion_database_id: notionDb }),
+      });
+      showToast(`Integration "${data.name}" added`, 'success');
+      form.reset();
+      const tbody = document.querySelector('#integrations-table tbody');
+      if (tbody) {
+        const tr = document.createElement('tr');
+        tr.dataset.integId = data.id;
+        tr.innerHTML = `<td style="font-weight:500">${data.name}</td>
+          <td><span class="chip chip-gray">${data.type}</span></td>
+          <td><span class="chip chip-success">Active</span></td>
+          <td>
+            <div class="d-flex gap-1">
+              <button type="button" class="btn btn-xs btn-outline-secondary" data-toggle-integ="${data.id}">Pause</button>
+              <button type="button" class="btn btn-xs btn-outline-danger" data-delete-integ="${data.id}">Delete</button>
+            </div>
+          </td>`;
+        tbody.prepend(tr);
+        tr.querySelector('[data-toggle-integ]')?.addEventListener('click', _handleIntegToggle);
+        tr.querySelector('[data-delete-integ]')?.addEventListener('click', _handleIntegDelete);
+      }
+    } catch(e) { showToast(e.message, 'danger'); }
+    finally { btn.disabled = false; }
+  });
+})();
+
+async function _handleIntegToggle() {
+  const btn = this;
+  btn.disabled = true;
+  try {
+    const data = await apiFetch(`/dashboard/integrations/${btn.dataset.toggleInteg}/toggle`, { method: 'POST' });
+    btn.textContent = data.is_active ? 'Pause' : 'Enable';
+    const row = btn.closest('tr');
+    const chip = row?.querySelector('.chip');
+    if (chip) { chip.className = `chip ${data.is_active ? 'chip-success' : 'chip-gray'}`; chip.textContent = data.is_active ? 'Active' : 'Paused'; }
+  } catch(e) { showToast(e.message, 'danger'); }
+  finally { btn.disabled = false; }
+}
+
+async function _handleIntegDelete() {
+  if (!confirm('Delete this integration?')) return;
+  const btn = this;
+  btn.disabled = true;
+  try {
+    await apiFetch(`/dashboard/integrations/${btn.dataset.deleteInteg}/delete`, { method: 'POST' });
+    btn.closest('tr').remove();
+    showToast('Integration deleted', 'success');
+  } catch(e) { showToast(e.message, 'danger'); btn.disabled = false; }
+}
+
+document.querySelectorAll('[data-toggle-integ]').forEach(btn => btn.addEventListener('click', _handleIntegToggle));
+document.querySelectorAll('[data-delete-integ]').forEach(btn => btn.addEventListener('click', _handleIntegDelete));
+
+// ── Calendar form ─────────────────────────────────────────────────────────
+document.getElementById('cal-add-btn')?.addEventListener('click', async () => {
+  const btn = document.getElementById('cal-add-btn');
+  btn.disabled = true;
+  try {
+    const name = document.getElementById('cal-name')?.value.trim() || 'My Calendar';
+    const icalUrl = document.getElementById('cal-ical-url')?.value.trim() || '';
+    const botName = document.getElementById('cal-bot-name')?.value.trim() || '';
+    const autoRecord = document.getElementById('auto-record-check')?.checked ?? true;
+    if (!icalUrl) { showToast('iCal URL is required', 'danger'); return; }
+    const data = await apiFetch('/dashboard/calendar/add', {
+      method: 'POST',
+      body: JSON.stringify({ name, ical_url: icalUrl, bot_name: botName, auto_record: autoRecord }),
+    });
+    showToast(`Calendar "${data.name}" added`, 'success');
+    document.getElementById('cal-name').value = 'My Calendar';
+    document.getElementById('cal-ical-url').value = '';
+    document.getElementById('cal-bot-name').value = '';
+    // Collapse the add form
+    const panel = document.getElementById('add-cal-form');
+    if (panel?.classList.contains('show')) bootstrap.Collapse.getInstance(panel)?.hide();
+    // Append row to calendar table if it exists
+    const tbody = document.querySelector('#cal-feeds-table tbody');
+    if (tbody) {
+      const tr = document.createElement('tr');
+      tr.dataset.calId = data.id;
+      tr.innerHTML = `<td style="font-weight:500">${data.name}</td>
+        <td><span class="chip chip-success">Active</span></td>
+        <td><span class="chip chip-info">On</span></td>
+        <td style="color:#64748b;font-size:13px">${botName || 'JustHereToListen.io'}</td>
+        <td style="color:#94a3b8;font-size:12.5px">Never</td>
+        <td>
+          <div class="d-flex gap-1">
+            <button type="button" class="btn btn-xs btn-outline-secondary" data-toggle-cal="${data.id}">Pause</button>
+            <button type="button" class="btn btn-xs btn-outline-danger" data-delete-cal="${data.id}">Remove</button>
+          </div>
+        </td>`;
+      tbody.prepend(tr);
+      tr.querySelector('[data-toggle-cal]')?.addEventListener('click', _handleCalToggle);
+      tr.querySelector('[data-delete-cal]')?.addEventListener('click', _handleCalDelete);
+    }
+  } catch(e) { showToast(e.message, 'danger'); }
+  finally { btn.disabled = false; }
+});
+
+async function _handleCalToggle() {
+  const btn = this;
+  btn.disabled = true;
+  try {
+    const data = await apiFetch(`/dashboard/calendar/${btn.dataset.toggleCal}/toggle`, { method: 'POST' });
+    btn.textContent = data.is_active ? 'Pause' : 'Enable';
+    const row = btn.closest('tr');
+    const chip = row?.querySelector('.chip');
+    if (chip) { chip.className = `chip ${data.is_active ? 'chip-success' : 'chip-gray'}`; chip.textContent = data.is_active ? 'Active' : 'Paused'; }
+  } catch(e) { showToast(e.message, 'danger'); }
+  finally { btn.disabled = false; }
+}
+
+async function _handleCalDelete() {
+  if (!confirm('Remove this calendar feed?')) return;
+  const btn = this;
+  btn.disabled = true;
+  try {
+    await apiFetch(`/dashboard/calendar/${btn.dataset.deleteCal}/delete`, { method: 'POST' });
+    btn.closest('tr').remove();
+    showToast('Calendar feed removed', 'success');
+  } catch(e) { showToast(e.message, 'danger'); btn.disabled = false; }
+}
+
+document.querySelectorAll('[data-toggle-cal]').forEach(btn => btn.addEventListener('click', _handleCalToggle));
+document.querySelectorAll('[data-delete-cal]').forEach(btn => btn.addEventListener('click', _handleCalDelete));
+
+// ── Schedule a Bot ────────────────────────────────────────────────────────
+(function() {
+  const form = document.getElementById('scheduleBotForm');
+  if (!form) return;
+
+  const pad = n => String(n).padStart(2, '0');
+  function _oneHourStr() {
+    const d = new Date(Date.now() + 60 * 60 * 1000);
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+  const joinAtInput = document.getElementById('sbJoinAt');
+  if (joinAtInput) joinAtInput.value = _oneHourStr();
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = document.getElementById('sbSubmitBtn');
+    const status = document.getElementById('sbStatus');
+    const meetingUrl = document.getElementById('sbMeetingUrl').value.trim();
+    const joinAt = joinAtInput?.value;
+    const template = document.getElementById('sbTemplate').value;
+    const botName = document.getElementById('sbBotName').value.trim();
+    const webhookUrl = document.getElementById('sbWebhookUrl').value.trim();
+
+    if (!meetingUrl || !joinAt) {
+      status.textContent = 'Meeting URL and schedule time are required.';
+      status.style.color = '#ef4444';
+      return;
+    }
+
+    const payload = { meeting_url: meetingUrl, join_at: new Date(joinAt).toISOString(), template };
+    if (botName) payload.bot_name = botName;
+    if (webhookUrl) payload.webhook_url = webhookUrl;
+
+    btn.disabled = true;
+    status.textContent = 'Scheduling…';
+    status.style.color = '#94a3b8';
+
+    try {
+      const resp = await fetch('/api/v1/bot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+        throw new Error(err.detail || resp.statusText);
+      }
+      const bot = await resp.json();
+      status.textContent = `✓ Bot scheduled (ID: ${bot.id.slice(0,8)}…)`;
+      status.style.color = '#22c55e';
+      form.reset();
+      if (joinAtInput) joinAtInput.value = _oneHourStr();
+      setTimeout(() => {
+        const panel = document.getElementById('scheduleBotPanel');
+        if (panel?.classList.contains('show')) bootstrap.Collapse.getInstance(panel)?.hide();
+        status.textContent = '';
+      }, 1500);
+      _prependBotRow(bot);
+    } catch(err) {
+      status.textContent = `Error: ${err.message}`;
+      status.style.color = '#ef4444';
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  function _prependBotRow(bot) {
+    const tbody = document.querySelector('#section-bots .table tbody, #section-overview .table tbody');
+    if (!tbody) return;
+    const tr = document.createElement('tr');
+    const shortId = (bot.id || '').slice(0, 12);
+    const meetUrl = bot.meeting_url || '';
+    const platform = (bot.meeting_platform || 'unknown').replace(/^\w/, c => c.toUpperCase());
+    const joinAt = bot.join_at ? new Date(bot.join_at).toLocaleString() : '';
+    const created = bot.created_at ? new Date(bot.created_at).toLocaleString() : new Date().toLocaleString();
+    tr.innerHTML = `
+      <td><code style="font-size:11.5px">${shortId}…</code></td>
+      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+        <span title="${meetUrl}" style="font-size:12px;color:#64748b">${meetUrl}</span>
+      </td>
+      <td><span class="chip chip-gray">${platform}</span></td>
+      <td><span class="chip chip-warning">Scheduled</span></td>
+      <td><span style="color:#94a3b8">—</span></td>
+      <td><span style="color:#94a3b8">—</span></td>
+      <td style="font-size:12.5px;color:#64748b">—</td>
+      <td style="color:#94a3b8;font-size:12px;white-space:nowrap">
+        ${joinAt ? `<span style="color:#f59e0b">📅 ${joinAt}</span>` : created}
+      </td>
+      <td><a href="/bot/${bot.id}" class="btn btn-outline-secondary btn-sm" style="font-size:11px;padding:2px 8px">View</a></td>`;
+    tbody.prepend(tr);
+  }
+})();
+
+// ── Integration type toggle ───────────────────────────────────────────────
+function toggleIntegFields(type) {
+  const slackFields = document.getElementById('slack-fields');
+  const notionToken = document.getElementById('notion-token-field');
+  const notionDb = document.getElementById('notion-db-field');
+  if (!slackFields) return;
+  if (type === 'slack') {
+    slackFields.classList.remove('d-none');
+    notionToken?.classList.add('d-none');
+    notionDb?.classList.add('d-none');
+  } else {
+    slackFields.classList.add('d-none');
+    notionToken?.classList.remove('d-none');
+    notionDb?.classList.remove('d-none');
+  }
+}
+
+// ── Support Access Keys ───────────────────────────────────────────────────────
+async function _loadSupportKeys() {
+  const container = document.getElementById('support-keys-list');
+  if (!container) return;
+  try {
+    const keys = await apiFetch('/dashboard/support-keys');
+    if (!keys.length) {
+      container.innerHTML = '<div class="text-muted small py-1" style="font-size:12.5px">No active support keys.</div>';
+      return;
+    }
+    const header = '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8;margin-bottom:0.5rem">Active Keys</div>';
+    container.innerHTML = header + keys.map(k => `
+      <div class="d-flex align-items-center justify-content-between py-2 border-bottom" id="sk-row-${k.id}">
+        <div>
+          <div style="font-size:13px;font-weight:600">${k.label}</div>
+          <div style="font-size:11.5px;color:#94a3b8">
+            Created ${new Date(k.created_at).toLocaleDateString()}
+            ${k.expires_at ? ' · Expires ' + new Date(k.expires_at).toLocaleDateString() : ' · No expiry'}
+            ${k.last_used_at ? ' · Last used ' + new Date(k.last_used_at).toLocaleDateString() : ''}
+          </div>
+        </div>
+        <button type="button" class="btn btn-xs btn-outline-danger" onclick="_revokeSupportKey('${k.id}')">Revoke</button>
+      </div>`).join('');
+  } catch(e) {
+    const container = document.getElementById('support-keys-list');
+    if (container) container.innerHTML = `<div class="text-danger small">${e.message}</div>`;
+  }
+}
+
+async function _revokeSupportKey(id) {
+  if (!confirm('Revoke this support key?')) return;
+  try {
+    await apiFetch(`/dashboard/support-key/${id}/revoke`, { method: 'POST' });
+    document.getElementById(`sk-row-${id}`)?.remove();
+    showToast('Support key revoked', 'success');
+    // Refresh list if it's now empty
+    const container = document.getElementById('support-keys-list');
+    if (container && !container.querySelector('[id^="sk-row-"]')) {
+      container.innerHTML = '<div class="text-muted small py-1" style="font-size:12.5px">No active support keys.</div>';
+    }
+  } catch(e) { showToast(e.message, 'danger'); }
+}
+
+(function() {
+  // Load keys when settings section is activated
+  document.querySelector('.sidebar-nav-item[data-section="settings"]')?.addEventListener('click', _loadSupportKeys);
+  // Load now if already on settings
+  if (document.getElementById('section-settings')?.classList.contains('active')) _loadSupportKeys();
+
+  const generateBtn = document.getElementById('generate-support-key-btn');
+  if (!generateBtn) return;
+
+  generateBtn.addEventListener('click', async () => {
+    generateBtn.disabled = true;
+    const label = (document.getElementById('support-key-label')?.value || '').trim() || 'Support Key';
+    const expiresVal = document.getElementById('support-key-expires')?.value;
+    const expiresInHours = expiresVal ? parseInt(expiresVal) : null;
+    try {
+      const data = await apiFetch('/dashboard/support-key', {
+        method: 'POST',
+        body: JSON.stringify({ label, expires_in_hours: expiresInHours }),
+      });
+      // Show one-time plaintext reveal
+      const reveal = document.getElementById('support-key-reveal');
+      const keyEl = document.getElementById('support-key-value');
+      if (reveal && keyEl) {
+        keyEl.textContent = data.plaintext_key;
+        reveal.classList.remove('d-none');
+        document.getElementById('copy-support-key-btn').onclick = () => {
+          navigator.clipboard.writeText(data.plaintext_key)
+            .then(() => showToast('Support key copied!', 'success'))
+            .catch(() => showToast('Copy failed', 'danger'));
+        };
+      }
+      showToast('Support key generated — copy it now!', 'warning', 8000);
+      document.getElementById('support-key-label').value = '';
+      await _loadSupportKeys();
+    } catch(e) { showToast(e.message, 'danger'); }
+    finally { generateBtn.disabled = false; }
+  });
+})();
+
+// ── My Stats ─────────────────────────────────────────────────────────────────
+(async function() {
+  try {
+    const data = await apiFetch('/api/v1/analytics/me');
+    document.getElementById('ms-meetings').textContent = data.meetings_this_month ?? '—';
+    document.getElementById('ms-cost').textContent = data.ai_cost_this_month != null ? `$${data.ai_cost_this_month.toFixed(4)}` : '—';
+    document.getElementById('ms-tasks').textContent = data.total_action_items_open ?? '—';
+    document.getElementById('ms-duration').textContent = data.avg_meeting_duration_min != null ? `${data.avg_meeting_duration_min}m` : '—';
+    document.getElementById('my-stats-content').style.display = 'flex';
+    document.getElementById('my-stats-loading').style.display = 'none';
+  } catch(e) {
+    document.getElementById('my-stats-loading').textContent = 'Stats unavailable';
+  }
+})();
+
+// ── Action Items ──────────────────────────────────────────────────────────────
+async function loadActionItems() {
+  const container = document.getElementById('action-items-container');
+  if (!container) return;
+  const status = document.getElementById('ai-filter-status')?.value || '';
+  const assignee = document.getElementById('ai-filter-assignee')?.value.trim() || '';
+  try {
+    let url = '/api/v1/action-items?limit=100';
+    if (status) url += `&status=${encodeURIComponent(status)}`;
+    if (assignee) url += `&assignee=${encodeURIComponent(assignee)}`;
+    const items = await apiFetch(url);
+    if (!items || items.length === 0) {
+      container.innerHTML = '<div style="color:#94a3b8;text-align:center;padding:2rem">No action items found. Action items are extracted from your meetings automatically.</div>';
+      return;
+    }
+    const rows = items.map(item => {
+      const isDone = item.status === 'done';
+      const conf = item.confidence != null ? `<span style="font-size:11px;color:#94a3b8">${Math.round(item.confidence * 100)}% confidence</span>` : '';
+      const due = item.due_date ? `<span style="font-size:11px;color:#64748b">Due: ${item.due_date}</span>` : '';
+      const assigneeHtml = item.assignee ? `<span style="font-size:11px;color:#475569">${item.assignee}</span>` : '';
+      return `<div style="display:flex;align-items:flex-start;gap:.75rem;padding:.6rem .5rem;border-bottom:1px solid #f1f5f9;${isDone ? 'opacity:0.5' : ''}">
+        <input type="checkbox" class="form-check-input ai-status-cb" data-id="${item.id}" ${isDone ? 'checked' : ''} style="margin-top:3px;cursor:pointer">
+        <div style="flex:1">
+          <div style="font-size:13.5px;${isDone ? 'text-decoration:line-through' : ''}">${item.task}</div>
+          <div style="display:flex;gap:.75rem;margin-top:.2rem;flex-wrap:wrap">${assigneeHtml}${due}${conf}</div>
+        </div>
+      </div>`;
+    }).join('');
+    container.innerHTML = `<div>${rows}</div>`;
+    container.querySelectorAll('.ai-status-cb').forEach(cb => {
+      cb.addEventListener('change', async function() {
+        const id = this.getAttribute('data-id');
+        const newStatus = this.checked ? 'done' : 'open';
+        try {
+          await apiFetch(`/api/v1/action-items/${id}`, {method:'PATCH', body: JSON.stringify({status: newStatus})});
+          loadActionItems();
+        } catch(e) { showToast(e.message, 'danger'); this.checked = !this.checked; }
+      });
+    });
+  } catch(e) { container.innerHTML = `<div style="color:#dc2626;padding:1rem">${e.message}</div>`; }
+}
+
+// Load when action-items section becomes active
+document.addEventListener('DOMContentLoaded', function() {
+  document.querySelectorAll('[data-section]').forEach(btn => {
+    btn.addEventListener('click', function() {
+      if (this.getAttribute('data-section') === 'action-items') {
+        loadActionItems();
+      }
+    });
+  });
+  // Also wire filter controls
+  document.getElementById('ai-filter-status')?.addEventListener('change', loadActionItems);
+  document.getElementById('ai-filter-assignee')?.addEventListener('input', function() {
+    clearTimeout(this._debounce);
+    this._debounce = setTimeout(loadActionItems, 400);
+  });
+});
+</script>
+{% endblock %}

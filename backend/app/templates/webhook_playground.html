@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Webhook Playground — JustHereToListen.io</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --primary: #6366f1; --primary-dark: #4f46e5;
+      --dark: #0f172a; --dark-2: #1e293b; --gray: #64748b;
+      --success: #10b981; --warning: #f59e0b; --danger: #ef4444;
+      --border: #e2e8f0;
+    }
+    * { box-sizing: border-box; }
+    body { font-family: 'Inter', sans-serif; background: #f1f5f9; color: #0f172a; font-size: 14px; margin: 0; }
+
+    .app-nav {
+      background: var(--dark); padding: 0 1.75rem; height: 58px;
+      display: flex; align-items: center; justify-content: space-between;
+      border-bottom: 1px solid rgba(255,255,255,.05); position: sticky; top: 0; z-index: 1000;
+    }
+    .app-nav-brand { font-weight: 700; font-size: 1.05rem; color: white; text-decoration: none; }
+    .app-nav a { color: rgba(255,255,255,.65); font-size: .85rem; text-decoration: none; }
+    .app-nav a:hover { color: white; }
+
+    .page-header { background: white; border-bottom: 1px solid var(--border); padding: 1.25rem 1.75rem; }
+    .page-header h1 { font-size: 1.3rem; font-weight: 700; margin: 0; }
+    .page-header p { color: var(--gray); margin: .25rem 0 0; font-size: .875rem; }
+
+    .main { max-width: 1100px; margin: 0 auto; padding: 1.5rem 1.25rem; }
+
+    .card { background: white; border: 1px solid var(--border); border-radius: 10px; margin-bottom: 1.25rem; }
+    .card-header { padding: .875rem 1.25rem; border-bottom: 1px solid var(--border); font-weight: 600; font-size: .9rem; display: flex; align-items: center; justify-content: space-between; }
+    .card-body { padding: 1.25rem; }
+
+    table { width: 100%; border-collapse: collapse; font-size: .83rem; }
+    th { background: #f8fafc; font-weight: 600; color: var(--gray); text-transform: uppercase; font-size: .7rem; letter-spacing: .05em; padding: .6rem 1rem; border-bottom: 1px solid var(--border); text-align: left; }
+    td { padding: .65rem 1rem; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: #f8fafc; }
+
+    .badge { display: inline-flex; align-items: center; padding: .2rem .55rem; border-radius: 999px; font-size: .72rem; font-weight: 600; }
+    .badge-success { background: #d1fae5; color: #065f46; }
+    .badge-danger  { background: #fee2e2; color: #991b1b; }
+    .badge-warning { background: #fef3c7; color: #92400e; }
+    .badge-info    { background: #dbeafe; color: #1e40af; }
+
+    .btn { display: inline-flex; align-items: center; gap: .35rem; padding: .45rem .9rem; border-radius: 6px; font-size: .82rem; font-weight: 500; cursor: pointer; border: none; text-decoration: none; transition: opacity .15s; }
+    .btn:hover { opacity: .85; }
+    .btn-primary { background: var(--primary); color: white; }
+    .btn-sm { padding: .3rem .65rem; font-size: .78rem; }
+    .btn-outline { background: transparent; border: 1px solid var(--border); color: #374151; }
+
+    .form-control { width: 100%; padding: .45rem .75rem; border: 1px solid var(--border); border-radius: 6px; font-size: .85rem; outline: none; }
+    .form-control:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(99,102,241,.1); }
+    .form-label { font-size: .82rem; font-weight: 500; margin-bottom: .3rem; display: block; }
+
+    .ws-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--gray); display: inline-block; margin-right: .4rem; }
+    .ws-dot.connected { background: var(--success); animation: pulse 2s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+    .empty-state { text-align: center; padding: 2.5rem 1rem; color: var(--gray); }
+    .empty-state svg { width: 40px; height: 40px; margin-bottom: .75rem; opacity: .4; }
+
+    #toastContainer { position: fixed; bottom: 1.5rem; right: 1.5rem; z-index: 9999; display: flex; flex-direction: column; gap: .5rem; }
+    .toast { background: var(--dark-2); color: white; padding: .65rem 1rem; border-radius: 8px; font-size: .83rem; max-width: 320px; box-shadow: 0 4px 12px rgba(0,0,0,.2); }
+    .toast.success { border-left: 3px solid var(--success); }
+    .toast.error   { border-left: 3px solid var(--danger); }
+  </style>
+</head>
+<body>
+
+<nav class="app-nav">
+  <a href="/" class="app-nav-brand">🎧 JustHereToListen.io</a>
+  <div style="display:flex;gap:1.25rem;align-items:center;">
+    <a href="/dashboard">Dashboard</a>
+    <a href="/api/docs">API Docs</a>
+    <a href="/api-dashboard">API Usage</a>
+  </div>
+</nav>
+
+<div class="page-header">
+  <h1>Webhook Playground</h1>
+  <p>View delivery history, test webhook endpoints, and monitor real-time events.</p>
+</div>
+
+<div class="main">
+  <div class="row g-3">
+
+    <!-- Webhook list + test panel -->
+    <div class="col-12 col-lg-4">
+      <div class="card">
+        <div class="card-header">
+          Registered Webhooks
+          <button class="btn btn-primary btn-sm" onclick="loadWebhooks()">↻ Refresh</button>
+        </div>
+        <div class="card-body" style="padding:.75rem;">
+          <div id="webhookList"><p class="text-muted" style="font-size:.82rem;padding:.5rem;">Loading…</p></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">Send Test Event</div>
+        <div class="card-body">
+          <label class="form-label">Webhook ID</label>
+          <input id="testWebhookId" class="form-control" placeholder="wh_…" style="margin-bottom:.75rem;">
+          <button class="btn btn-primary" style="width:100%;" onclick="sendTest()">▶ Send Test Ping</button>
+          <div id="testResult" style="margin-top:.75rem;font-size:.8rem;display:none;"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <span><span class="ws-dot" id="wsDot"></span>Live Events</span>
+          <button class="btn btn-outline btn-sm" onclick="toggleWs()" id="wsBtn">Connect</button>
+        </div>
+        <div class="card-body" style="padding:.5rem;">
+          <div id="liveEvents" style="font-size:.75rem;font-family:monospace;max-height:180px;overflow-y:auto;background:#f8fafc;border-radius:6px;padding:.5rem;color:#374151;">
+            <em>Not connected.</em>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Delivery log -->
+    <div class="col-12 col-lg-8">
+      <div class="card">
+        <div class="card-header">
+          Recent Deliveries (all webhooks)
+          <button class="btn btn-outline btn-sm" onclick="loadDeliveries()">↻ Refresh</button>
+        </div>
+        <div id="deliveriesWrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Event</th>
+                <th>Webhook</th>
+                <th>Status</th>
+                <th>HTTP</th>
+                <th>Attempt</th>
+                <th>Time</th>
+              </tr>
+            </thead>
+            <tbody id="deliveriesBody">
+              <tr><td colspan="6"><div class="empty-state">Loading…</div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toastContainer"></div>
+
+<script>
+const API = '/api/v1';
+let wsConn = null;
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
+function authHeaders() {
+  const t = localStorage.getItem('access_token') || '';
+  return t ? { 'Authorization': 'Bearer ' + t } : {};
+}
+
+function toast(msg, type='success') {
+  const el = document.createElement('div');
+  el.className = 'toast ' + type;
+  el.textContent = msg;
+  document.getElementById('toastContainer').appendChild(el);
+  setTimeout(() => el.remove(), 4000);
+}
+
+function fmtTime(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleTimeString() + ' ' + d.toLocaleDateString();
+}
+
+function statusBadge(status) {
+  const m = { delivered:'badge-success', failed:'badge-danger', pending:'badge-warning', retrying:'badge-info' };
+  return `<span class="badge ${m[status]||'badge-info'}">${status}</span>`;
+}
+
+// ── Load webhooks ──────────────────────────────────────────────────────────────
+async function loadWebhooks() {
+  const res = await fetch(API + '/webhook', { headers: authHeaders() });
+  const list = await res.json();
+  const el = document.getElementById('webhookList');
+  if (!list.length) { el.innerHTML = '<p class="text-muted" style="font-size:.82rem;padding:.5rem 0;">No webhooks registered.</p>'; return; }
+  el.innerHTML = list.map(wh => `
+    <div style="border:1px solid var(--border);border-radius:6px;padding:.6rem .75rem;margin-bottom:.5rem;cursor:pointer;" onclick="selectWebhook('${wh.id}')">
+      <div style="font-size:.78rem;color:var(--gray);margin-bottom:.15rem;">${wh.id.slice(0,12)}…</div>
+      <div style="font-weight:500;font-size:.82rem;word-break:break-all;">${wh.url}</div>
+      <div style="display:flex;gap:.5rem;margin-top:.3rem;font-size:.72rem;color:var(--gray);">
+        <span>${wh.events.join(', ')}</span>
+        <span style="margin-left:auto;">${statusBadge(wh.is_active ? 'delivered' : 'pending')}</span>
+      </div>
+    </div>`).join('');
+}
+
+function selectWebhook(id) {
+  document.getElementById('testWebhookId').value = id;
+}
+
+// ── Load deliveries ────────────────────────────────────────────────────────────
+async function loadDeliveries() {
+  const res = await fetch(API + '/webhook/deliveries?limit=50', { headers: authHeaders() });
+  const rows = await res.json();
+  const body = document.getElementById('deliveriesBody');
+  if (!rows.length) {
+    body.innerHTML = `<tr><td colspan="6"><div class="empty-state">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="M9 9h.01M15 9h.01M9 13a3 3 0 006 0"/></svg>
+      <div>No deliveries yet</div>
+    </div></td></tr>`;
+    return;
+  }
+  body.innerHTML = rows.map(r => `
+    <tr>
+      <td><code style="font-size:.75rem;">${r.event}</code></td>
+      <td style="color:var(--gray);font-size:.75rem;">${r.webhook_id.slice(0,12)}…</td>
+      <td>${statusBadge(r.status)}</td>
+      <td>${r.response_status_code !== null ? `<span style="font-weight:600;color:${r.response_status_code<300?'var(--success)':'var(--danger)'}">${r.response_status_code}</span>` : '—'}</td>
+      <td style="color:var(--gray);">#${r.attempt_number}</td>
+      <td style="color:var(--gray);font-size:.75rem;">${fmtTime(r.created_at)}</td>
+    </tr>`).join('');
+}
+
+// ── Send test event ────────────────────────────────────────────────────────────
+async function sendTest() {
+  const id = document.getElementById('testWebhookId').value.trim();
+  if (!id) { toast('Enter a webhook ID', 'error'); return; }
+  const el = document.getElementById('testResult');
+  el.style.display = 'block';
+  el.textContent = 'Sending…';
+  try {
+    const res = await fetch(API + '/webhook/' + id + '/test', { method: 'POST', headers: authHeaders() });
+    const data = await res.json();
+    if (res.ok) {
+      el.innerHTML = `<span style="color:var(--success);">✓ Delivered — HTTP ${data.status_code}</span>`;
+      toast('Test event sent!');
+      loadDeliveries();
+    } else {
+      el.innerHTML = `<span style="color:var(--danger);">✗ ${data.detail || 'Failed'}</span>`;
+      toast('Delivery failed', 'error');
+    }
+  } catch (e) {
+    el.innerHTML = `<span style="color:var(--danger);">✗ Network error</span>`;
+    toast('Network error', 'error');
+  }
+}
+
+// ── WebSocket live events ──────────────────────────────────────────────────────
+function toggleWs() {
+  if (wsConn) {
+    wsConn.close();
+    wsConn = null;
+    document.getElementById('wsBtn').textContent = 'Connect';
+    document.getElementById('wsDot').classList.remove('connected');
+    return;
+  }
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const token = localStorage.getItem('access_token') || '';
+  const url = `${proto}://${location.host}/api/v1/ws${token ? '?token=' + token : ''}`;
+  wsConn = new WebSocket(url);
+  wsConn.onopen = () => {
+    document.getElementById('wsBtn').textContent = 'Disconnect';
+    document.getElementById('wsDot').classList.add('connected');
+    appendLive('Connected to WebSocket');
+  };
+  wsConn.onmessage = (e) => appendLive(e.data);
+  wsConn.onclose = () => {
+    document.getElementById('wsBtn').textContent = 'Connect';
+    document.getElementById('wsDot').classList.remove('connected');
+    appendLive('Disconnected.');
+    wsConn = null;
+  };
+  wsConn.onerror = () => appendLive('WebSocket error.');
+}
+
+function appendLive(msg) {
+  const el = document.getElementById('liveEvents');
+  const line = document.createElement('div');
+  line.textContent = new Date().toLocaleTimeString() + ' — ' + msg;
+  el.appendChild(line);
+  el.scrollTop = el.scrollHeight;
+}
+
+// ── Init ───────────────────────────────────────────────────────────────────────
+loadWebhooks();
+loadDeliveries();
+</script>
+</body>
+</html>

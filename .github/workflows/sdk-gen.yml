@@ -1,0 +1,122 @@
+name: Generate & Publish SDKs
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  sdk-gen:
+    name: Generate OpenAPI SDKs
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: meetingbot_test
+          POSTGRES_USER: meetingbot
+          POSTGRES_PASSWORD: meetingbot
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install Python dependencies
+        working-directory: backend
+        run: pip install -r requirements.txt
+
+      - name: Start FastAPI server (background)
+        working-directory: backend
+        env:
+          DATABASE_URL: "postgresql+asyncpg://meetingbot:meetingbot@localhost:5432/meetingbot_test"
+          JWT_SECRET: "sdk-gen-secret-not-for-prod"
+          API_KEY: "sdk-gen-key"
+          ANTHROPIC_API_KEY: ""
+          GEMINI_API_KEY: ""
+        run: |
+          uvicorn app.main:app --host 0.0.0.0 --port 8000 &
+          echo "Waiting for server…"
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8000/health && break || sleep 1
+          done
+
+      - name: Download OpenAPI schema
+        run: |
+          curl -sf http://localhost:8000/api/openapi.json -o openapi.json
+          echo "Schema downloaded ($(wc -c < openapi.json) bytes)"
+
+      - name: Set up Java (for openapi-generator-cli)
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Download openapi-generator-cli
+        run: |
+          curl -sL https://repo1.maven.org/maven2/org/openapitools/openapi-generator-cli/7.4.0/openapi-generator-cli-7.4.0.jar \
+            -o /usr/local/bin/openapi-generator-cli.jar
+          echo '#!/bin/sh
+          exec java -jar /usr/local/bin/openapi-generator-cli.jar "$@"' > /usr/local/bin/openapi-generator-cli
+          chmod +x /usr/local/bin/openapi-generator-cli
+
+      - name: Generate Python SDK
+        run: |
+          openapi-generator-cli generate \
+            -i openapi.json \
+            -g python \
+            -o sdk/python/generated \
+            --package-name meetingbot \
+            --additional-properties=projectName=meetingbot-sdk,packageVersion=${{ github.ref_name }}
+
+      - name: Generate JavaScript SDK
+        run: |
+          openapi-generator-cli generate \
+            -i openapi.json \
+            -g javascript \
+            -o sdk/js/generated \
+            --additional-properties=projectName=@meetingbot/sdk,projectVersion=${{ github.ref_name }},usePromises=true
+
+      - name: Commit generated SDKs
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add sdk/
+          git diff --cached --quiet || git commit -m "chore: regenerate SDKs for ${{ github.ref_name }}"
+          git push origin HEAD:main || echo "Nothing to push"
+
+      - name: Upload SDK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: meetingbot-sdks-${{ github.ref_name }}
+          path: |
+            sdk/python/generated/
+            sdk/js/generated/
+          retention-days: 30
+
+      # Optional: publish Python SDK to PyPI when PYPI_TOKEN secret is configured
+      - name: Publish Python SDK to PyPI
+        if: env.PYPI_TOKEN != ''
+        env:
+          PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
+        working-directory: sdk/python/generated
+        run: |
+          pip install build twine
+          python -m build
+          twine upload --username __token__ --password "$PYPI_TOKEN" dist/*

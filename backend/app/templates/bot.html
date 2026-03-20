@@ -1,0 +1,457 @@
+{% extends "base.html" %}
+{% block title %}Session {{ bot.id[:12] }}… — JustHereToListen.io{% endblock %}
+{% block content %}
+
+<div class="page-header d-flex justify-content-between align-items-start">
+  <div>
+    <div class="mb-1">
+      <a href="/dashboard" style="color:#64748b;font-size:13px;text-decoration:none">← Back to Dashboard</a>
+    </div>
+    <h1 class="page-title">Meeting Session</h1>
+    <p class="page-subtitle" style="font-family:monospace;font-size:13px">{{ bot.id }}</p>
+  </div>
+  <div class="d-flex gap-2 align-items-center flex-wrap">
+    {% if bot.status == "done" %}
+    <a href="/api/v1/bot/{{ bot.id }}/export/markdown" class="btn btn-outline-secondary btn-sm">↓ Markdown</a>
+    <a href="/api/v1/bot/{{ bot.id }}/export/pdf" class="btn btn-outline-secondary btn-sm">↓ PDF</a>
+    <button class="btn btn-outline-primary btn-sm" id="share-btn" onclick="shareBot()">🔗 Share</button>
+    {% endif %}
+    {% if bot.recording_available %}
+    <a href="/api/v1/bot/{{ bot.id }}/recording" class="btn btn-outline-secondary btn-sm">↓ Audio</a>
+    {% endif %}
+    {% if bot.video_available %}
+    <a href="/api/v1/bot/{{ bot.id }}/video" class="btn btn-outline-secondary btn-sm">↓ Video</a>
+    {% endif %}
+  </div>
+</div>
+
+<!-- ── Meta row ──────────────────────────────────────────────────────────── -->
+<div class="row g-3 mb-4">
+  <div class="col-6 col-md-3">
+    <div class="stat-card">
+      <div class="stat-label">Status</div>
+      <div class="mt-1">
+        {% if bot.status == "done" %}
+        <span class="chip chip-success">Done</span>
+        {% elif bot.status == "error" %}
+        <span class="chip chip-danger">Error</span>
+        {% elif bot.status == "cancelled" %}
+        <span class="chip chip-gray">Cancelled</span>
+        {% elif bot.status in ["joining", "in_call", "call_ended", "transcribing"] %}
+        <span class="chip chip-info">{{ bot.status|replace("_"," ")|title }}</span>
+        {% elif bot.status in ["ready", "queued", "scheduled"] %}
+        <span class="chip chip-warning">{{ bot.status|title }}</span>
+        {% else %}
+        <span class="chip chip-gray">{{ bot.status }}</span>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="stat-card">
+      <div class="stat-label">Platform</div>
+      <div class="stat-value mt-1" style="font-size:1rem">{{ bot.meeting_platform|title }}</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="stat-card">
+      <div class="stat-label">Duration</div>
+      <div class="stat-value mt-1" style="font-size:1rem">
+        {% if bot.duration_seconds %}
+          {% set mins = (bot.duration_seconds // 60)|int %}
+          {% set secs = (bot.duration_seconds % 60)|int %}
+          {{ mins }}m {{ secs }}s
+        {% else %}
+          —
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="stat-card">
+      <div class="stat-label">Participants</div>
+      <div class="stat-value mt-1" style="font-size:1rem">{{ bot.participants|length }}</div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Meeting details ───────────────────────────────────────────────────── -->
+<div class="card card-pad mb-4">
+  <div class="section-title mb-3">Meeting Details</div>
+  <table class="table table-sm" style="margin:0">
+    <tbody>
+      <tr>
+        <td style="color:#64748b;width:140px">Meeting URL</td>
+        <td><a href="{{ bot.meeting_url }}" target="_blank" style="word-break:break-all">{{ bot.meeting_url }}</a></td>
+      </tr>
+      <tr>
+        <td style="color:#64748b">Bot Name</td>
+        <td>{{ bot.bot_name }}</td>
+      </tr>
+      <tr>
+        <td style="color:#64748b">Created</td>
+        <td>{{ bot.created_at }}</td>
+      </tr>
+      {% if bot.started_at %}
+      <tr>
+        <td style="color:#64748b">Started</td>
+        <td>{{ bot.started_at }}</td>
+      </tr>
+      {% endif %}
+      {% if bot.ended_at %}
+      <tr>
+        <td style="color:#64748b">Ended</td>
+        <td>{{ bot.ended_at }}</td>
+      </tr>
+      {% endif %}
+      {% if bot.sub_user_id %}
+      <tr>
+        <td style="color:#64748b">Sub-User</td>
+        <td><code>{{ bot.sub_user_id }}</code></td>
+      </tr>
+      {% endif %}
+      {% if bot.error_message %}
+      <tr>
+        <td style="color:#64748b">Error</td>
+        <td style="color:#ef4444">{{ bot.error_message }}</td>
+      </tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+
+{% if bot.participants %}
+<!-- ── Participants ──────────────────────────────────────────────────────── -->
+<div class="card card-pad mb-4">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.75rem">
+    <div class="section-title" style="margin-bottom:0">Participants</div>
+    {% if bot.status == "done" %}
+    <button class="btn btn-sm btn-outline-secondary" onclick="openSpeakerModal()">✏️ Edit Speakers</button>
+    {% endif %}
+  </div>
+  <div class="d-flex flex-wrap gap-2" id="participants-chips">
+    {% for p in bot.participants %}
+    <span class="chip chip-gray">{{ p }}</span>
+    {% endfor %}
+  </div>
+</div>
+
+<!-- ── Speaker rename modal ─────────────────────────────────────────────── -->
+<div class="modal fade" id="speaker-modal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Edit Speaker Names</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size:13px;color:#64748b">Rename speaker labels in the transcript. This does not re-run AI analysis.</p>
+        <form id="speaker-rename-form">
+          {% for p in bot.participants %}
+          <div class="mb-2 d-flex align-items-center gap-2">
+            <label style="font-size:13px;width:140px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ p }}">{{ p }}</label>
+            <span style="color:#94a3b8">→</span>
+            <input type="text" class="form-control form-control-sm" data-original="{{ p }}" value="{{ p }}" style="flex:1">
+          </div>
+          {% endfor %}
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary btn-sm" id="speaker-rename-save">Save Changes</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{% if bot.speaker_stats %}
+<!-- ── Speaker stats ─────────────────────────────────────────────────────── -->
+<div class="card card-pad mb-4">
+  <div class="section-title mb-3">Speaker Breakdown</div>
+  <div style="overflow-x:auto">
+    <table class="table table-sm table-hover">
+      <thead>
+        <tr>
+          <th>Speaker</th>
+          <th>Talk Time</th>
+          <th>Share</th>
+          <th>Turns</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in bot.speaker_stats %}
+        <tr>
+          <td>{{ s.name }}</td>
+          <td>
+            {% set mins = (s.talk_time_s // 60)|int %}
+            {% set secs = (s.talk_time_s % 60)|int %}
+            {{ mins }}m {{ secs }}s
+          </td>
+          <td>
+            <div class="d-flex align-items-center gap-2">
+              <div style="background:#e2e8f0;border-radius:4px;height:6px;width:80px;overflow:hidden">
+                <div style="background:#6366f1;height:100%;width:{{ s.talk_pct }}%"></div>
+              </div>
+              {{ "%.0f"|format(s.talk_pct) }}%
+            </div>
+          </td>
+          <td>{{ s.turns }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+{% if bot.analysis %}
+<!-- ── AI Analysis ───────────────────────────────────────────────────────── -->
+<div class="card card-pad mb-4">
+  <div class="section-title mb-3">AI Analysis</div>
+
+  {% if bot.analysis.summary %}
+  <div class="mb-4">
+    <div class="section-subtitle mb-2" style="font-weight:600;color:#0f172a">Summary</div>
+    <p style="color:#334155;margin:0;line-height:1.7">{{ bot.analysis.summary }}</p>
+  </div>
+  {% endif %}
+
+  {% if bot.analysis.sentiment %}
+  <div class="mb-3">
+    <div class="section-subtitle mb-1" style="font-weight:600;color:#0f172a">Sentiment</div>
+    {% if bot.analysis.sentiment == "positive" %}
+    <span class="chip chip-success">Positive</span>
+    {% elif bot.analysis.sentiment == "negative" %}
+    <span class="chip chip-danger">Negative</span>
+    {% else %}
+    <span class="chip chip-gray">{{ bot.analysis.sentiment|title }}</span>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% if bot.analysis.topics %}
+  <div class="mb-3">
+    <div class="section-subtitle mb-2" style="font-weight:600;color:#0f172a">Topics</div>
+    <div class="d-flex flex-wrap gap-2">
+      {% for topic in bot.analysis.topics %}
+      <span class="chip chip-gray">{{ topic.name if topic is mapping else topic }}</span>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  {% if bot.analysis.key_points %}
+  <div class="mb-3">
+    <div class="section-subtitle mb-2" style="font-weight:600;color:#0f172a">Key Points</div>
+    <ul style="margin:0;padding-left:1.25rem;color:#334155">
+      {% for point in bot.analysis.key_points %}
+      <li style="margin-bottom:4px">{{ point }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  {% if bot.analysis.action_items %}
+  <div class="mb-3">
+    <div class="section-subtitle mb-2" style="font-weight:600;color:#0f172a">Action Items</div>
+    <div style="display:flex;flex-direction:column;gap:6px">
+      {% for item in bot.analysis.action_items %}
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 14px;display:flex;gap:10px;align-items:flex-start">
+        <span style="color:#6366f1;margin-top:1px">☐</span>
+        <div>
+          <span style="color:#0f172a">{{ item.task if item.task else item }}</span>
+          {% if item.assignee %}<span style="color:#64748b;font-size:12px;margin-left:8px">→ {{ item.assignee }}</span>{% endif %}
+          {% if item.due_date %}<span style="color:#94a3b8;font-size:12px;margin-left:8px">{{ item.due_date }}</span>{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  {% if bot.analysis.decisions %}
+  <div class="mb-3">
+    <div class="section-subtitle mb-2" style="font-weight:600;color:#0f172a">Decisions</div>
+    <ul style="margin:0;padding-left:1.25rem;color:#334155">
+      {% for d in bot.analysis.decisions %}
+      <li style="margin-bottom:4px">{{ d }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  {% if bot.analysis.next_steps %}
+  <div class="mb-3">
+    <div class="section-subtitle mb-2" style="font-weight:600;color:#0f172a">Next Steps</div>
+    <ul style="margin:0;padding-left:1.25rem;color:#334155">
+      {% for step in bot.analysis.next_steps %}
+      <li style="margin-bottom:4px">{{ step }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  {% if bot.analysis.risks_blockers %}
+  <div class="mb-3">
+    <div class="section-subtitle mb-2" style="font-weight:600;color:#0f172a">Risks &amp; Blockers</div>
+    <ul style="margin:0;padding-left:1.25rem;color:#dc2626">
+      {% for item in bot.analysis.risks_blockers %}
+      <li style="margin-bottom:4px">{{ item }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  {% if bot.analysis.unresolved_items %}
+  <div class="mb-3">
+    <div class="section-subtitle mb-2" style="font-weight:600;color:#0f172a">Unresolved Items</div>
+    <ul style="margin:0;padding-left:1.25rem;color:#92400e">
+      {% for item in bot.analysis.unresolved_items %}
+      <li style="margin-bottom:4px">{{ item }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  {% if bot.analysis.next_meeting %}
+  <div class="mb-3">
+    <div class="section-subtitle mb-1" style="font-weight:600;color:#0f172a">Next Meeting</div>
+    <span class="chip chip-gray" style="background:#eff6ff;color:#1d4ed8">📅 {{ bot.analysis.next_meeting }}</span>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
+{% if bot.chapters %}
+<!-- ── Chapters ──────────────────────────────────────────────────────────── -->
+<div class="card card-pad mb-4">
+  <div class="section-title mb-3">Chapters</div>
+  <div style="display:flex;flex-direction:column;gap:10px">
+    {% for ch in bot.chapters %}
+    <div style="border-left:3px solid #6366f1;padding-left:12px">
+      <div style="font-weight:600;color:#0f172a">
+        {% if ch.start_time is not none %}
+        <span style="font-size:12px;color:#94a3b8;font-weight:400;margin-right:8px">
+          {% set cm = (ch.start_time // 60)|int %}{% set cs = (ch.start_time % 60)|int %}{{ "%d:%02d"|format(cm, cs) }}
+        </span>
+        {% endif %}
+        {{ ch.title }}
+      </div>
+      {% if ch.summary %}<div style="color:#64748b;font-size:13px;margin-top:2px">{{ ch.summary }}</div>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{% if bot.transcript %}
+<!-- ── Transcript ────────────────────────────────────────────────────────── -->
+<div class="card card-pad mb-4">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <div class="section-title">Transcript</div>
+    <span style="color:#94a3b8;font-size:13px">{{ bot.transcript|length }} entries</span>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:6px;max-height:600px;overflow-y:auto;padding-right:4px" id="transcript-container">
+    {% for entry in bot.transcript %}
+    <div style="display:flex;gap:10px;padding:8px 0;border-bottom:1px solid #f1f5f9">
+      <div style="min-width:90px">
+        {% if entry.timestamp is not none %}
+        <span style="font-size:11px;color:#94a3b8;font-family:monospace">
+          {% set em = (entry.timestamp // 60)|int %}{% set es = (entry.timestamp % 60)|int %}{{ "%d:%02d"|format(em, es) }}
+        </span>
+        {% endif %}
+      </div>
+      <div style="min-width:110px;font-weight:500;color:#475569;font-size:13px">{{ entry.speaker or "Unknown" }}</div>
+      <div style="color:#0f172a;flex:1;font-size:13.5px;line-height:1.6">{{ entry.text }}</div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% elif bot.status == "done" %}
+<div class="card card-pad mb-4" style="text-align:center;color:#94a3b8;padding:2rem">
+  No transcript available for this session.
+</div>
+{% elif bot.status not in ["done", "error", "cancelled"] %}
+<div class="card card-pad mb-4">
+  <div class="section-title mb-2">Transcript</div>
+  <div style="color:#64748b">
+    Session is currently <strong>{{ bot.status|replace("_"," ") }}</strong>. Transcript will be available once the bot completes.
+    <br><small style="color:#94a3b8">Refresh the page to check for updates.</small>
+  </div>
+</div>
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+function openSpeakerModal() {
+  const modal = new bootstrap.Modal(document.getElementById('speaker-modal'));
+  modal.show();
+}
+
+async function shareBot() {
+  const btn = document.getElementById('share-btn');
+  btn.disabled = true;
+  try {
+    const botId = '{{ bot.id }}';
+    const resp = await fetch(`/api/v1/bot/${botId}/share`, {
+      method: 'POST',
+      credentials: 'include',
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to generate share link');
+    }
+    const data = await resp.json();
+    await navigator.clipboard.writeText(data.share_url).catch(() => {});
+    alert('Share link copied to clipboard:\n' + data.share_url);
+  } catch(e) {
+    alert(e.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  const saveBtn = document.getElementById('speaker-rename-save');
+  if (!saveBtn) return;
+
+  saveBtn.addEventListener('click', async function() {
+    saveBtn.disabled = true;
+    try {
+      const inputs = document.querySelectorAll('#speaker-rename-form input[data-original]');
+      const renames = {};
+      inputs.forEach(inp => {
+        const orig = inp.getAttribute('data-original');
+        const newVal = inp.value.trim();
+        if (newVal && newVal !== orig) {
+          renames[orig] = newVal;
+        }
+      });
+      if (Object.keys(renames).length === 0) {
+        bootstrap.Modal.getInstance(document.getElementById('speaker-modal')).hide();
+        return;
+      }
+      const botId = '{{ bot.id }}';
+      const resp = await fetch(`/api/v1/bot/${botId}/speakers`, {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        credentials: 'include',
+        body: JSON.stringify({renames}),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.detail || 'Failed to rename speakers');
+      }
+      location.reload();
+    } catch(e) {
+      alert(e.message);
+      saveBtn.disabled = false;
+    }
+  });
+});
+</script>
+{% endblock %}

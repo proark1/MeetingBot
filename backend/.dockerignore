@@ -1,0 +1,21 @@
+# Never bundle local SQLite databases into the image.
+# The app creates meetingbot.db at runtime; stale WAL files from a
+# developer machine can leave the DB in an inconsistent state inside
+# the container.
+*.db
+*.db-shm
+*.db-wal
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Logs
+*.log
+server.log
+
+# Local env files
+.env
+.env.*

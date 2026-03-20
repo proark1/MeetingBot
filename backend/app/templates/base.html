@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}JustHereToListen.io{% endblock %}</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --primary: #6366f1;
+      --primary-dark: #4f46e5;
+      --primary-light: #818cf8;
+      --dark: #0f172a;
+      --dark-2: #1e293b;
+      --gray: #64748b;
+      --light: #f8fafc;
+      --white: #ffffff;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --border: #e2e8f0;
+      --shadow: 0 1px 3px rgba(0,0,0,.06), 0 1px 2px rgba(0,0,0,.04);
+      --shadow-md: 0 4px 6px -1px rgba(0,0,0,.07), 0 2px 4px -2px rgba(0,0,0,.05);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #f1f5f9;
+      color: #0f172a;
+      min-height: 100vh;
+      margin: 0;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    /* ── Navbar ──────────────────────────────────────────────────────────── */
+    .app-nav {
+      background: var(--dark);
+      padding: 0 1.75rem;
+      height: 58px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+      position: sticky;
+      top: 0;
+      z-index: 1000;
+    }
+
+    .app-nav-brand {
+      font-weight: 700;
+      font-size: 1.05rem;
+      color: white;
+      text-decoration: none;
+      letter-spacing: -0.3px;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      flex-shrink: 0;
+    }
+    .app-nav-brand:hover { color: white; }
+
+    .brand-icon {
+      width: 28px;
+      height: 28px;
+      background: linear-gradient(135deg, #6366f1 0%, #06b6d4 100%);
+      border-radius: 7px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      flex-shrink: 0;
+    }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 0.15rem;
+      list-style: none;
+      margin: 0 0 0 1.5rem;
+      padding: 0;
+    }
+
+    .nav-links a {
+      color: rgba(255,255,255,0.65);
+      text-decoration: none;
+      padding: 0.38rem 0.7rem;
+      border-radius: 6px;
+      font-size: 13.5px;
+      font-weight: 500;
+      transition: color 0.15s, background 0.15s;
+      white-space: nowrap;
+    }
+    .nav-links a:hover { color: white; background: rgba(255,255,255,0.08); }
+    .nav-links a.nav-active { color: white; background: rgba(255,255,255,0.11); }
+    .nav-links a.admin-link { color: #fbbf24; }
+    .nav-links a.admin-link:hover { color: #fde68a; background: rgba(251,191,36,0.1); }
+
+    .nav-right {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+    }
+
+    .balance-pill {
+      background: rgba(16,185,129,0.14);
+      color: #6ee7b7;
+      border: 1px solid rgba(16,185,129,0.22);
+      border-radius: 20px;
+      padding: 3px 11px;
+      font-size: 12.5px;
+      font-weight: 600;
+      letter-spacing: 0.2px;
+      text-decoration: none;
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+    .balance-pill:hover { background: rgba(16,185,129,0.22); color: #6ee7b7; }
+    .balance-pill.low {
+      background: rgba(239,68,68,0.14);
+      color: #fca5a5;
+      border-color: rgba(239,68,68,0.22);
+    }
+    .balance-pill.low:hover { background: rgba(239,68,68,0.22); color: #fca5a5; }
+
+    .user-pill {
+      display: flex;
+      align-items: center;
+      gap: 0.45rem;
+    }
+
+    .user-avatar {
+      width: 27px;
+      height: 27px;
+      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      font-weight: 700;
+      color: white;
+      flex-shrink: 0;
+    }
+
+    .user-email-text {
+      color: rgba(255,255,255,0.6);
+      font-size: 13px;
+      max-width: 180px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .btn-nav-logout {
+      background: transparent;
+      border: 1px solid rgba(255,255,255,0.18);
+      color: rgba(255,255,255,0.65);
+      border-radius: 6px;
+      padding: 4px 12px;
+      font-size: 12.5px;
+      font-weight: 500;
+      text-decoration: none;
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+    .btn-nav-logout:hover { border-color: rgba(255,255,255,0.3); color: white; }
+
+    .btn-nav-cta {
+      background: #6366f1;
+      border: none;
+      color: white;
+      border-radius: 6px;
+      padding: 4px 14px;
+      font-size: 12.5px;
+      font-weight: 600;
+      text-decoration: none;
+      transition: background 0.15s;
+      white-space: nowrap;
+    }
+    .btn-nav-cta:hover { background: #4f46e5; color: white; }
+
+    /* ── Layout ──────────────────────────────────────────────────────────── */
+    .app-container {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 2rem 1.5rem 3rem;
+    }
+
+    /* ── Cards ───────────────────────────────────────────────────────────── */
+    .card {
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      box-shadow: var(--shadow);
+    }
+
+    .card-pad { padding: 1.35rem; }
+
+    /* ── Headings ────────────────────────────────────────────────────────── */
+    .page-header { margin-bottom: 1.5rem; }
+    .page-title {
+      font-size: 1.35rem;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+      color: #0f172a;
+      margin: 0 0 0.2rem;
+    }
+    .page-subtitle {
+      font-size: 13.5px;
+      color: #64748b;
+      margin: 0;
+    }
+    .section-title {
+      font-size: 13.5px;
+      font-weight: 600;
+      color: #0f172a;
+      margin: 0;
+    }
+    .section-subtitle {
+      font-size: 12.5px;
+      color: #64748b;
+      margin: 0;
+    }
+
+    /* ── Stat cards ──────────────────────────────────────────────────────── */
+    .stat-card {
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.25rem;
+    }
+    .stat-value {
+      font-size: 1.85rem;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      line-height: 1.1;
+    }
+    .stat-label {
+      font-size: 12px;
+      color: #64748b;
+      margin-top: 3px;
+      font-weight: 500;
+    }
+
+    /* ── Badges ──────────────────────────────────────────────────────────── */
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 9px;
+      border-radius: 20px;
+      font-size: 11.5px;
+      font-weight: 600;
+    }
+    .chip-success { background: #dcfce7; color: #15803d; }
+    .chip-warning { background: #fef3c7; color: #b45309; }
+    .chip-danger  { background: #fee2e2; color: #b91c1c; }
+    .chip-info    { background: #dbeafe; color: #1d4ed8; }
+    .chip-gray    { background: #f1f5f9; color: #475569; }
+    .chip-purple  { background: #ede9fe; color: #6d28d9; }
+
+    /* ── Alerts ──────────────────────────────────────────────────────────── */
+    .alert { border-radius: 10px; border: 1px solid transparent; font-size: 13.5px; }
+    .alert-success { background: #f0fdf4; border-color: #bbf7d0; color: #166534; }
+    .alert-danger  { background: #fef2f2; border-color: #fecaca; color: #991b1b; }
+    .alert-warning { background: #fffbeb; border-color: #fde68a; color: #92400e; }
+    .alert-info    { background: #eff6ff; border-color: #bfdbfe; color: #1e40af; }
+
+    /* ── Forms ───────────────────────────────────────────────────────────── */
+    .form-label {
+      font-size: 13px;
+      font-weight: 500;
+      color: #374151;
+      margin-bottom: 5px;
+    }
+    .form-control, .form-select {
+      border-radius: 8px;
+      border: 1px solid #cbd5e1;
+      font-size: 13.5px;
+      padding: 0.45rem 0.75rem;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    .form-control:focus, .form-select:focus {
+      border-color: #6366f1;
+      box-shadow: 0 0 0 3px rgba(99,102,241,0.12);
+      outline: none;
+    }
+    .form-control-sm, .form-select-sm { font-size: 13px; padding: 0.35rem 0.65rem; }
+    .form-text { font-size: 12px; color: #94a3b8; margin-top: 3px; }
+
+    /* ── Buttons ─────────────────────────────────────────────────────────── */
+    .btn {
+      border-radius: 8px;
+      font-weight: 500;
+      font-size: 13.5px;
+      transition: all 0.15s;
+      border-width: 1px;
+    }
+    .btn-sm { font-size: 12.5px; border-radius: 6px; padding: 0.3rem 0.65rem; }
+    .btn-xs { font-size: 12px; border-radius: 5px; padding: 0.2rem 0.55rem; }
+    .btn-primary { background: #6366f1; border-color: #6366f1; color: white; }
+    .btn-primary:hover { background: #4f46e5; border-color: #4f46e5; color: white; }
+    .btn-outline-primary { border-color: #6366f1; color: #6366f1; }
+    .btn-outline-primary:hover { background: #6366f1; border-color: #6366f1; color: white; }
+    .btn-danger { background: #ef4444; border-color: #ef4444; color: white; }
+    .btn-danger:hover { background: #dc2626; border-color: #dc2626; color: white; }
+    .btn-outline-danger { border-color: #fca5a5; color: #dc2626; }
+    .btn-outline-danger:hover { background: #fee2e2; border-color: #fca5a5; color: #dc2626; }
+    .btn-success { background: #10b981; border-color: #10b981; color: white; }
+    .btn-success:hover { background: #059669; border-color: #059669; color: white; }
+    .btn-outline-secondary { border-color: #cbd5e1; color: #64748b; background: white; }
+    .btn-outline-secondary:hover { background: #f8fafc; border-color: #94a3b8; color: #475569; }
+
+    /* ── Tables ──────────────────────────────────────────────────────────── */
+    .table { font-size: 13.5px; margin-bottom: 0; }
+    .table thead th {
+      font-weight: 600;
+      font-size: 12px;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+      border-bottom: 1px solid #e2e8f0;
+      padding: 0.6rem 0.75rem;
+      background: #f8fafc;
+    }
+    .table tbody td { padding: 0.65rem 0.75rem; border-color: #f1f5f9; vertical-align: middle; }
+    .table-hover tbody tr:hover { background: #f8fafc; }
+
+    /* ── Code ────────────────────────────────────────────────────────────── */
+    code {
+      background: #f1f5f9;
+      color: #6366f1;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: .82em;
+      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+    }
+    pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+    pre {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 0.85rem 1rem;
+      font-size: 12.5px;
+      overflow-x: auto;
+    }
+
+    /* ── Transactions ────────────────────────────────────────────────────── */
+    .tx-credit { color: #059669; font-weight: 600; }
+    .tx-debit  { color: #dc2626; font-weight: 600; }
+
+    /* ── Progress ────────────────────────────────────────────────────────── */
+    .progress { height: 6px; border-radius: 3px; background: #e2e8f0; }
+    .progress-bar { border-radius: 3px; }
+
+    /* ── Dividers ────────────────────────────────────────────────────────── */
+    hr { border-color: #e2e8f0; margin: 1.25rem 0; }
+
+    /* ── Misc ────────────────────────────────────────────────────────────── */
+    .text-muted { color: #64748b !important; }
+    .font-mono { font-family: 'SF Mono', 'Fira Code', monospace; }
+
+    /* ── Responsive ──────────────────────────────────────────────────────── */
+    @media (max-width: 768px) {
+      .app-container { padding: 1rem; }
+      .user-email-text { display: none !important; }
+      .nav-links { display: none !important; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── Navbar ──────────────────────────────────────────────────────────── -->
+<nav class="app-nav">
+  <div class="d-flex align-items-center">
+    <a class="app-nav-brand" href="{% if account %}/dashboard{% else %}/{% endif %}">
+      <div class="brand-icon">🎧</div>
+      JustHereToListen.io
+    </a>
+    {% if account %}
+    <ul class="nav-links d-none d-md-flex">
+      <li><a href="/dashboard" {% if request.url.path == '/dashboard' %}class="nav-active"{% endif %}>Dashboard</a></li>
+      <li><a href="/topup">Top Up</a></li>
+      <li><a href="/api/docs" target="_blank">API Docs</a></li>
+      {% if is_admin %}
+      <li><a href="/admin" class="admin-link {% if request.url.path == '/admin' %}nav-active{% endif %}">Admin</a></li>
+      {% endif %}
+    </ul>
+    {% endif %}
+  </div>
+
+  <div class="nav-right">
+    {% if account %}
+      {% if balance is defined %}
+      <a href="/topup" class="balance-pill {% if balance < 1.0 %}low{% endif %}">
+        ${{ "%.2f"|format(balance) }}
+      </a>
+      {% endif %}
+      <div class="user-pill">
+        <div class="user-avatar">{{ account.email[0].upper() }}</div>
+        <span class="user-email-text d-none d-lg-inline">{{ account.email }}</span>
+      </div>
+      <a href="/logout" class="btn-nav-logout">Logout</a>
+    {% else %}
+      <a href="/login" class="btn-nav-logout">Login</a>
+      <a href="/register" class="btn-nav-cta">Get started</a>
+    {% endif %}
+  </div>
+</nav>
+
+<!-- ── Main ────────────────────────────────────────────────────────────── -->
+<div class="app-container">
+  {% if flash %}
+  <div class="alert alert-{{ flash.type }} alert-dismissible fade show mb-4" role="alert">
+    {{ flash.message }}
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+  </div>
+  {% endif %}
+  {% block content %}{% endblock %}
+</div>
+
+<!-- Toast container (used for inline interactions like "Copied" feedback) -->
+<div id="toast-container" class="position-fixed bottom-0 end-0 p-3" style="z-index: 1100;">
+  <!-- Toasts are injected here via JS -->
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+  /**
+   * apiFetch — shared async helper for all dashboard mutations.
+   * Sends JSON, expects JSON back. Throws Error with detail message on failure.
+   */
+  async function apiFetch(url, options = {}) {
+    const resp = await fetch(url, {
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', ...(options.headers || {}) },
+      ...options,
+    });
+    if (resp.status === 204) return null;
+    const body = await resp.json().catch(() => ({ detail: resp.statusText }));
+    if (!resp.ok) throw new Error(body.detail || `HTTP ${resp.status}`);
+    return body;
+  }
+
+  function showToast(message, variant = 'success', duration = 2500) {
+    const container = document.getElementById('toast-container');
+    if (!container) return;
+
+    const toastEl = document.createElement('div');
+    toastEl.className = `toast align-items-center text-bg-${variant} border-0`;
+    toastEl.role = 'alert';
+    toastEl.ariaLive = 'assertive';
+    toastEl.ariaAtomic = 'true';
+
+    toastEl.innerHTML = `
+      <div class="d-flex">
+        <div class="toast-body" style="font-size:0.9rem;">
+          ${message}
+        </div>
+        <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+      </div>
+    `;
+
+    container.appendChild(toastEl);
+    const toast = new bootstrap.Toast(toastEl, { delay: duration });
+    toast.show();
+    toastEl.addEventListener('hidden.bs.toast', () => toastEl.remove());
+    return toast;
+  }
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

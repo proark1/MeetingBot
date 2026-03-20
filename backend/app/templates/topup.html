@@ -1,0 +1,254 @@
+{% extends "base.html" %}
+{% block title %}Add Credits — JustHereToListen.io{% endblock %}
+{% block content %}
+
+<div class="page-header">
+  <h1 class="page-title">Add Credits</h1>
+  <p class="page-subtitle">Prepay for bot usage — credits are deducted automatically per bot run ($0.10 flat fee by default).</p>
+</div>
+
+<div class="row g-4">
+
+  <!-- Left: amount + payment -->
+  <div class="col-lg-7">
+
+    <!-- Amount selector -->
+    <div class="card card-pad mb-4">
+      <div class="section-title mb-3">Select amount</div>
+      <div class="d-flex flex-wrap gap-2" id="amount-selector">
+        {% for amt in amounts %}
+        <button type="button"
+          class="btn {% if amt == 25 %}btn-primary{% else %}btn-outline-secondary{% endif %} amount-btn"
+          data-amount="{{ amt }}"
+          onclick="selectAmount({{ amt }})">
+          ${{ amt }}
+        </button>
+        {% endfor %}
+      </div>
+      <div class="mt-3 pt-3" style="border-top:1px solid #f1f5f9">
+        <div class="d-flex align-items-center gap-2">
+          <span class="section-subtitle">Custom amount:</span>
+          <div class="input-group input-group-sm" style="max-width:160px">
+            <span class="input-group-text">$</span>
+            <input type="number" id="custom-amount" class="form-control" placeholder="Other"
+              min="1" max="9999" step="1" oninput="applyCustom(this.value)">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Payment method tabs -->
+    <div class="card">
+      <div style="border-bottom:1px solid #f1f5f9;padding:0 1.35rem">
+        <ul class="nav nav-tabs border-0 pt-1" role="tablist" style="gap:.25rem">
+          <li class="nav-item">
+            <button class="nav-link active px-3 py-2" data-bs-toggle="tab" data-bs-target="#tab-card"
+              style="font-size:13.5px;font-weight:500;border-radius:8px 8px 0 0">
+              💳 Credit Card
+            </button>
+          </li>
+          {% if usdc_enabled %}
+          <li class="nav-item">
+            <button class="nav-link px-3 py-2" data-bs-toggle="tab" data-bs-target="#tab-usdc"
+              style="font-size:13.5px;font-weight:500;border-radius:8px 8px 0 0">
+              🔷 USDC
+            </button>
+          </li>
+          {% endif %}
+        </ul>
+      </div>
+
+      <div class="tab-content card-pad">
+
+        <!-- Stripe Card Tab -->
+        <div class="tab-pane fade show active" id="tab-card">
+          {% if stripe_enabled %}
+          <div class="d-flex align-items-start gap-3 mb-4">
+            <div style="width:40px;height:40px;background:#f0f9ff;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">💳</div>
+            <div>
+              <div class="section-title mb-1">Secure Stripe Checkout</div>
+              <div class="section-subtitle">Pay securely via Stripe. Visa, Mastercard, Amex accepted. Credits are applied instantly after payment.</div>
+            </div>
+          </div>
+          <form id="stripe-form" method="post" action="/topup/stripe">
+            <input type="hidden" name="amount_usd" id="stripe-amount" value="25">
+            <button type="submit" class="btn btn-primary" style="padding:.6rem 1.5rem">
+              Pay $<span id="stripe-amount-display">25</span> with Card →
+            </button>
+          </form>
+          {% else %}
+          <div class="d-flex align-items-start gap-3">
+            <div style="font-size:24px">🔒</div>
+            <div>
+              <div class="section-title text-muted mb-1">Card Payments Unavailable</div>
+              <div class="section-subtitle">Stripe is not configured on this server. Contact the platform administrator or use USDC to add credits.</div>
+            </div>
+          </div>
+          {% endif %}
+        </div>
+
+        <!-- USDC Tab -->
+        {% if usdc_enabled %}
+        <div class="tab-pane fade" id="tab-usdc">
+          <div class="d-flex align-items-start gap-3 mb-4">
+            <div style="width:40px;height:40px;background:#eff6ff;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">🔷</div>
+            <div>
+              <div class="section-title mb-1">Pay with USDC (ERC-20)</div>
+              <div class="section-subtitle">Send USDC from your registered wallet. 1 USDC = $1.00 credit, applied automatically within ~1 minute of on-chain confirmation.</div>
+            </div>
+          </div>
+
+          {% if not user_wallet %}
+          <div class="alert alert-warning d-flex align-items-start gap-2 mb-3" style="font-size:13px">
+            <span>⚠</span>
+            <div>
+              <strong>Wallet not registered.</strong> You must <a href="/dashboard" class="alert-link">add your Ethereum wallet address</a> on your dashboard before sending USDC — otherwise we cannot attribute your deposit to your account.
+            </div>
+          </div>
+          {% else %}
+          <div class="alert alert-info d-flex align-items-start gap-2 mb-3" style="font-size:13px;background:#f0f9ff;border-color:#bae6fd;color:#075985">
+            <span>ℹ</span>
+            <div>Send USDC <strong>from</strong> your registered wallet: <code>{{ user_wallet }}</code>. Deposits from other addresses will not be credited automatically.</div>
+          </div>
+          {% endif %}
+
+          <div class="mb-3">
+            <label class="form-label">Platform deposit address</label>
+            <div class="input-group">
+              <input type="text" class="form-control font-mono" id="usdc-address"
+                value="{{ usdc_address }}" readonly style="font-size:12.5px;background:#f8fafc">
+              <button class="btn btn-outline-secondary" type="button" onclick="copyAddress(this)" style="font-size:13px">
+                Copy
+              </button>
+            </div>
+          </div>
+
+          <div class="row g-2 mb-3" style="font-size:12.5px;color:#64748b">
+            <div class="col-6">
+              <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:.65rem .85rem">
+                <div style="font-weight:500;color:#374151;margin-bottom:2px">Contract</div>
+                <code style="font-size:11px">{{ usdc_contract }}</code>
+              </div>
+            </div>
+            <div class="col-6">
+              <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:.65rem .85rem">
+                <div style="font-weight:500;color:#374151;margin-bottom:2px">Network</div>
+                <span>Ethereum Mainnet</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="alert" style="background:#fffbeb;border:1px solid #fde68a;color:#92400e;font-size:12.5px;border-radius:8px;padding:.65rem .85rem">
+            ⚠ Send USDC only. Other tokens cannot be credited and may not be recoverable.
+          </div>
+        </div>
+        {% endif %}
+
+      </div><!-- .tab-content -->
+    </div><!-- .card -->
+
+  </div><!-- col-lg-7 -->
+
+  <!-- Right: summary + info -->
+  <div class="col-lg-5">
+
+    <div class="card card-pad mb-4">
+      <div class="section-title mb-3">Order summary</div>
+      <div class="d-flex justify-content-between align-items-center mb-2" style="font-size:14px">
+        <span style="color:#64748b">Credits to add</span>
+        <span class="fw-semibold">$<span id="summary-amount">25</span>.00</span>
+      </div>
+      <div class="d-flex justify-content-between align-items-center mb-2" style="font-size:14px">
+        <span style="color:#64748b">Processing fee</span>
+        <span class="text-success" style="font-size:13px">Free</span>
+      </div>
+      <div style="border-top:1px solid #f1f5f9;margin:0.75rem 0"></div>
+      <div class="d-flex justify-content-between align-items-center" style="font-size:15px;font-weight:600">
+        <span>Total</span>
+        <span>$<span id="summary-total">25</span>.00</span>
+      </div>
+    </div>
+
+    <div class="card card-pad">
+      <div class="section-title mb-3">Billing details</div>
+      <div style="font-size:13px;color:#64748b;line-height:1.8">
+        <div class="d-flex align-items-start gap-2 mb-2">
+          <span style="color:#10b981;margin-top:1px">✓</span>
+          <span>Credits never expire</span>
+        </div>
+        <div class="d-flex align-items-start gap-2 mb-2">
+          <span style="color:#10b981;margin-top:1px">✓</span>
+          <span>$0.10 flat fee per bot run (default)</span>
+        </div>
+        <div class="d-flex align-items-start gap-2 mb-2">
+          <span style="color:#10b981;margin-top:1px">✓</span>
+          <span>Current balance: <strong>${{ "%.2f"|format(account.credits_usd|float) }}</strong></span>
+        </div>
+        <div class="d-flex align-items-start gap-2 mb-2">
+          <span style="color:#10b981;margin-top:1px">✓</span>
+          <span>Minimum balance to create a bot: $0.10</span>
+        </div>
+        <div class="d-flex align-items-start gap-2">
+          <span style="color:#10b981;margin-top:1px">✓</span>
+          <span>View all transactions on your <a href="/dashboard" style="color:#6366f1">dashboard</a></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="mt-3">
+      <a href="/api/docs#/Billing" target="_blank" style="font-size:12.5px;color:#94a3b8;text-decoration:none">
+        ↗ Billing API reference
+      </a>
+    </div>
+
+  </div><!-- col-lg-5 -->
+
+</div>
+
+<script>
+function selectAmount(amt) {
+  document.querySelectorAll('.amount-btn').forEach(b => {
+    b.classList.remove('btn-primary');
+    b.classList.add('btn-outline-secondary');
+  });
+  const btn = document.querySelector(`.amount-btn[data-amount="${amt}"]`);
+  if (btn) {
+    btn.classList.remove('btn-outline-secondary');
+    btn.classList.add('btn-primary');
+  }
+  document.getElementById('stripe-amount').value = amt;
+  document.getElementById('stripe-amount-display').textContent = amt;
+  document.getElementById('summary-amount').textContent = amt;
+  document.getElementById('summary-total').textContent = amt;
+  document.getElementById('custom-amount').value = '';
+}
+
+function applyCustom(val) {
+  const amt = parseInt(val, 10);
+  if (!amt || amt < 1) return;
+  document.querySelectorAll('.amount-btn').forEach(b => {
+    b.classList.remove('btn-primary');
+    b.classList.add('btn-outline-secondary');
+  });
+  document.getElementById('stripe-amount').value = amt;
+  document.getElementById('stripe-amount-display').textContent = amt;
+  document.getElementById('summary-amount').textContent = amt;
+  document.getElementById('summary-total').textContent = amt;
+}
+
+function copyAddress(btn) {
+  const val = document.getElementById('usdc-address').value;
+  navigator.clipboard.writeText(val).then(() => {
+    const orig = btn.textContent;
+    btn.textContent = 'Copied!';
+    btn.classList.add('btn-success');
+    btn.classList.remove('btn-outline-secondary');
+    setTimeout(() => {
+      btn.textContent = orig;
+      btn.classList.remove('btn-success');
+      btn.classList.add('btn-outline-secondary');
+    }, 2000);
+  });
+}
+</script>
+{% endblock %}

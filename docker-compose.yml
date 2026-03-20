@@ -1,0 +1,55 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: meetingbot
+      POSTGRES_USER: meetingbot
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U meetingbot"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+      - ./frontend:/frontend
+      - meetingbot_data:/app/data
+    environment:
+      # Database
+      - DATABASE_URL=${DATABASE_URL}
+      # JWT — required, must be set to a strong secret
+      - JWT_SECRET=${JWT_SECRET}
+      # AI providers — set at least one; Anthropic takes precedence when both are set
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      # Optional API key for client authentication (Bearer token)
+      - API_KEY=${API_KEY:-}
+      # CORS origins (comma-separated; "*" = allow all)
+      - CORS_ORIGINS=${CORS_ORIGINS:-*}
+      # Bot behaviour
+      - BOT_SIMULATION_DURATION=${BOT_SIMULATION_DURATION:-60}
+      - BOT_ADMISSION_TIMEOUT=${BOT_ADMISSION_TIMEOUT:-300}
+      - BOT_MAX_DURATION=${BOT_MAX_DURATION:-7200}
+      - MAX_CONCURRENT_BOTS=${MAX_CONCURRENT_BOTS:-3}
+      - PULSE_RUNTIME_PATH=/tmp/pulse
+    # Chromium requires extra shared memory
+    shm_size: "2gb"
+    command: /app/start.sh uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    restart: unless-stopped
+
+volumes:
+  meetingbot_data:
+  postgres_data:
