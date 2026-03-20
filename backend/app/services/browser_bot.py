@@ -1042,11 +1042,11 @@ async def _join_onepizza(page: Page, url: str, bot_name: str, start_muted: bool 
     from urllib.parse import quote as _quote
     sep = "&" if "?" in url else "?"
     join_url = f"{url}{sep}name={_quote(bot_name)}"
-    await page.goto(join_url, wait_until="domcontentloaded", timeout=30_000)
+    await page.goto(join_url, wait_until="networkidle", timeout=45_000)
 
-    # Wait for the lobby overlay to appear
+    # Wait for the lobby overlay to appear (SPA may need extra time to render)
     try:
-        await page.wait_for_selector(".lobby-overlay, #lobbyName", timeout=15_000)
+        await page.wait_for_selector(".lobby-overlay, #lobbyName, #lobbyJoinBtn, button:has-text('Join')", timeout=20_000)
     except Exception:
         await _screenshot(page, "onepizza_no_lobby")
 
@@ -1080,8 +1080,8 @@ async def _join_onepizza(page: Page, url: str, bot_name: str, start_muted: bool 
         except Exception:
             pass
 
-    # Click Join
-    ok = await _click(page, ["#lobbyJoinBtn", "button:has-text('Join')"])
+    # Click Join — try multiple selectors with longer timeout for SPA rendering
+    ok = await _click(page, ["#lobbyJoinBtn", "button:has-text('Join')", "button:has-text('join')", "[data-action='join']"], timeout=10_000)
     if not ok:
         await _screenshot(page, "onepizza_no_join_button")
         raise MeetingBotError("Could not find join button on onepizza.io")

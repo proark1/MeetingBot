@@ -4,7 +4,14 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.5.5 — **Last updated:** 2026-03-21
+> **Latest version:** 2.5.6 — **Last updated:** 2026-03-21
+
+---
+
+## [2.5.6] - 2026-03-21
+
+### Fixed
+- **OnePizza bot join failure** — Changed `page.goto` from `domcontentloaded` to `networkidle` to wait for SPA JavaScript to render lobby elements; increased lobby selector timeout from 15s to 20s; increased join button click timeout from 4s to 10s; added extra selectors (`button:has-text('join')`, `[data-action='join']`)
 
 ---
 
