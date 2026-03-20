@@ -4,7 +4,21 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.5.1 — **Last updated:** 2026-03-20
+> **Latest version:** 2.5.2 — **Last updated:** 2026-03-20
+
+---
+
+## [2.5.2] - 2026-03-20
+
+### Fixed
+- **Landing page**: Renamed misleading `--dark` CSS variables to semantic `--bg`, `--bg-alt`, `--bg-muted` names — all resolve to white/light gray, eliminating any confusion about theme
+- **Dashboard analytics consolidated**: Replaced bare 4-KPI section + external `/api-dashboard` links with 3 tabbed sub-sections (Overview, API Usage, Trends) that load data inline via existing REST endpoints
+- **Removed external link fragmentation**: No more links to separate `/api-dashboard` page — all analytics data is now accessible within the dashboard's own Analytics tab
+
+### Changed
+- **Dashboard Analytics → Overview tab**: Monthly bots, integrations, calendar feeds, API keys + recent bot performance table (server-rendered)
+- **Dashboard Analytics → API Usage tab**: Bots 7d/30d, tokens, cost, error rate, platform breakdown, tokens by operation (lazy-loaded from `/api/v1/analytics/api-usage`)
+- **Dashboard Analytics → Trends tab**: Monthly meetings, AI cost, action items, avg duration, sentiment trend, cost by platform (lazy-loaded from `/api/v1/analytics/me`)
 
 ---
 

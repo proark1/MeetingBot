@@ -154,6 +154,31 @@
     .sidebar-nav-item.active { border-radius: 20px; }
     .sidebar-badge { display: none; }
   }
+
+  /* ── Analytics sub-tabs ──────────────────────────────────────────────── */
+  .analytics-tabs {
+    display: flex;
+    gap: 0.15rem;
+    margin-bottom: 1.25rem;
+    border-bottom: 1px solid #e5e7eb;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .analytics-tab {
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 0.55rem 0.85rem;
+    font-size: 13px;
+    font-weight: 500;
+    color: #6b7280;
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .analytics-tab:hover { color: #111827; }
+  .analytics-tab.active { color: #4f46e5; border-bottom-color: #6366f1; font-weight: 600; }
 </style>
 
 <div class="dash-layout">
@@ -195,9 +220,6 @@
       </button>
       <a href="/webhook-playground" class="sidebar-nav-item" target="_blank" style="font-size:12px;color:#6366f1">
         <span class="nav-icon" style="font-size:12px">↗</span> Webhook Playground
-      </a>
-      <a href="/api-dashboard" class="sidebar-nav-item" target="_blank" style="font-size:12px;color:#6366f1">
-        <span class="nav-icon" style="font-size:12px">↗</span> API Dashboard
       </a>
 
       <div class="sidebar-section-label">Connections</div>
@@ -570,97 +592,143 @@
       <div class="section-hdr">
         <div>
           <h2>Analytics</h2>
-          <p>Usage statistics and meeting intelligence trends</p>
+          <p>Usage statistics, AI costs, and meeting intelligence trends</p>
         </div>
-        <a href="/api-dashboard" target="_blank" class="btn btn-outline-secondary btn-sm">Full API Dashboard ↗</a>
+        <button class="btn btn-outline-secondary btn-sm" onclick="_refreshDashAnalytics()">↺ Refresh</button>
       </div>
 
-      <div class="row g-3 mb-3">
-        <div class="col-md-3">
-          <div class="kpi-card">
-            <div class="stat-label">Bots this month</div>
-            <div class="stat-value mt-1" style="font-size:1.6rem">{{ monthly_bots_used }}</div>
-            {% if plan_limit != -1 %}
-            <div style="font-size:11.5px;color:#94a3b8;margin-top:4px">of {{ plan_limit }} limit</div>
-            {% endif %}
-          </div>
-        </div>
-        <div class="col-md-3">
-          <div class="kpi-card">
-            <div class="stat-label">Integrations</div>
-            <div class="stat-value mt-1" style="font-size:1.6rem">{{ all_integrations|length }}</div>
-            <div style="font-size:11.5px;color:#94a3b8;margin-top:4px">active connections</div>
-          </div>
-        </div>
-        <div class="col-md-3">
-          <div class="kpi-card">
-            <div class="stat-label">Calendar Feeds</div>
-            <div class="stat-value mt-1" style="font-size:1.6rem">{{ all_calendar_feeds|length }}</div>
-            <div style="font-size:11.5px;color:#94a3b8;margin-top:4px">auto-join configured</div>
-          </div>
-        </div>
-        <div class="col-md-3">
-          <div class="kpi-card">
-            <div class="stat-label">API Keys</div>
-            <div class="stat-value mt-1" style="font-size:1.6rem">{{ api_keys|length }}</div>
-            <div style="font-size:11.5px;color:#94a3b8;margin-top:4px">live &amp; test</div>
-          </div>
-        </div>
+      <!-- ── Analytics sub-tabs ──────────────────────────────────────── -->
+      <div class="analytics-tabs">
+        <button class="analytics-tab active" data-dtab="overview">Overview</button>
+        <button class="analytics-tab" data-dtab="usage">API Usage</button>
+        <button class="analytics-tab" data-dtab="trends">Trends</button>
       </div>
 
-      {% if recent_bots %}
-      <div class="card card-pad mb-3">
-        <div class="section-title mb-3">Recent Bot Performance</div>
-        <div style="overflow-x:auto">
-          <table class="table table-hover">
-            <thead>
-              <tr>
-                <th>Bot</th>
-                <th>Platform</th>
-                <th>Duration</th>
-                <th>Health Score</th>
-                <th>Participants</th>
-                <th>Cost</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for bot in recent_bots if bot.status == "done" %}
-              <tr>
-                <td><code style="font-size:11px">{{ bot.id[:10] }}…</code></td>
-                <td><span class="chip chip-gray">{{ bot.meeting_platform|title }}</span></td>
-                <td>{% if bot.duration_seconds %}{{ (bot.duration_seconds / 60)|int }}m {% if bot.duration_seconds % 60 %}{{ bot.duration_seconds % 60 }}s{% endif %}{% else %}—{% endif %}</td>
-                <td>
-                  {% if bot.health_score is defined and bot.health_score is not none %}
-                  <div style="display:inline-flex;align-items:center;gap:0.5rem">
-                    <div style="width:40px;height:6px;background:#e2e8f0;border-radius:3px;overflow:hidden">
-                      <div style="width:{{ bot.health_score }}%;height:100%;background:{% if bot.health_score >= 70 %}#10b981{% elif bot.health_score >= 40 %}#f59e0b{% else %}#ef4444{% endif %};border-radius:3px"></div>
+      <!-- ═══ TAB: Overview (server-rendered) ═══════════════════════ -->
+      <div class="dtab-panel" data-dtab="overview">
+        <div class="row g-3 mb-3">
+          <div class="col-md-3">
+            <div class="kpi-card">
+              <div class="stat-label">Bots this month</div>
+              <div class="stat-value mt-1" style="font-size:1.6rem">{{ monthly_bots_used }}</div>
+              {% if plan_limit != -1 %}
+              <div style="font-size:11.5px;color:#9ca3af;margin-top:4px">of {{ plan_limit }} limit</div>
+              {% endif %}
+            </div>
+          </div>
+          <div class="col-md-3">
+            <div class="kpi-card">
+              <div class="stat-label">Integrations</div>
+              <div class="stat-value mt-1" style="font-size:1.6rem">{{ all_integrations|length }}</div>
+              <div style="font-size:11.5px;color:#9ca3af;margin-top:4px">active connections</div>
+            </div>
+          </div>
+          <div class="col-md-3">
+            <div class="kpi-card">
+              <div class="stat-label">Calendar Feeds</div>
+              <div class="stat-value mt-1" style="font-size:1.6rem">{{ all_calendar_feeds|length }}</div>
+              <div style="font-size:11.5px;color:#9ca3af;margin-top:4px">auto-join configured</div>
+            </div>
+          </div>
+          <div class="col-md-3">
+            <div class="kpi-card">
+              <div class="stat-label">API Keys</div>
+              <div class="stat-value mt-1" style="font-size:1.6rem">{{ api_keys|length }}</div>
+              <div style="font-size:11.5px;color:#9ca3af;margin-top:4px">live &amp; test</div>
+            </div>
+          </div>
+        </div>
+
+        {% if recent_bots %}
+        <div class="card card-pad mb-3">
+          <div class="section-title mb-3">Recent Bot Performance</div>
+          <div style="overflow-x:auto">
+            <table class="table table-hover">
+              <thead>
+                <tr>
+                  <th>Bot</th>
+                  <th>Platform</th>
+                  <th>Duration</th>
+                  <th>Health Score</th>
+                  <th>Participants</th>
+                  <th>Cost</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for bot in recent_bots if bot.status == "done" %}
+                <tr>
+                  <td><code style="font-size:11px">{{ bot.id[:10] }}…</code></td>
+                  <td><span class="chip chip-gray">{{ bot.meeting_platform|title }}</span></td>
+                  <td>{% if bot.duration_seconds %}{{ (bot.duration_seconds / 60)|int }}m {% if bot.duration_seconds % 60 %}{{ bot.duration_seconds % 60 }}s{% endif %}{% else %}—{% endif %}</td>
+                  <td>
+                    {% if bot.health_score is defined and bot.health_score is not none %}
+                    <div style="display:inline-flex;align-items:center;gap:0.5rem">
+                      <div style="width:40px;height:6px;background:#e5e7eb;border-radius:3px;overflow:hidden">
+                        <div style="width:{{ bot.health_score }}%;height:100%;background:{% if bot.health_score >= 70 %}#10b981{% elif bot.health_score >= 40 %}#f59e0b{% else %}#ef4444{% endif %};border-radius:3px"></div>
+                      </div>
+                      <span style="font-size:12.5px;font-weight:600">{{ bot.health_score }}</span>
                     </div>
-                    <span style="font-size:12.5px;font-weight:600">{{ bot.health_score }}</span>
-                  </div>
-                  {% else %}—{% endif %}
-                </td>
-                <td>{{ bot.participants|length if bot.participants else "—" }}</td>
-                <td>{% if bot.meeting_cost_usd is defined and bot.meeting_cost_usd %}${{ "%.2f"|format(bot.meeting_cost_usd) }}{% else %}—{% endif %}</td>
-                <td><span class="chip chip-success">Done</span></td>
-              </tr>
-              {% else %}
-              <tr><td colspan="7" class="text-center text-muted py-3">No completed bots in the last 24 hours.</td></tr>
-              {% endfor %}
-            </tbody>
-          </table>
+                    {% else %}—{% endif %}
+                  </td>
+                  <td>{{ bot.participants|length if bot.participants else "—" }}</td>
+                  <td>{% if bot.meeting_cost_usd is defined and bot.meeting_cost_usd %}${{ "%.2f"|format(bot.meeting_cost_usd) }}{% else %}—{% endif %}</td>
+                  <td><span class="chip chip-success">Done</span></td>
+                </tr>
+                {% else %}
+                <tr><td colspan="7" class="text-center text-muted py-3">No completed bots in the last 24 hours.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
         </div>
+        {% endif %}
       </div>
-      {% endif %}
 
-      <div class="card card-pad">
-        <div class="section-title mb-2">Full Analytics API</div>
-        <div class="section-subtitle mb-3">Recurring meeting insights, org-level trends, and API usage statistics are available via the REST API.</div>
-        <div class="d-flex flex-wrap gap-2">
-          <a href="/api/docs#/Analytics" target="_blank" class="btn btn-outline-secondary btn-sm">📊 Analytics API ↗</a>
-          <a href="/api-dashboard" target="_blank" class="btn btn-outline-secondary btn-sm">📈 API Dashboard ↗</a>
+      <!-- ═══ TAB: API Usage (JS-loaded) ═══════════════════════════ -->
+      <div class="dtab-panel" data-dtab="usage" style="display:none">
+        <div id="dash-usage-loading" class="text-center text-muted py-5" style="font-size:13.5px">Loading usage data…</div>
+        <div id="dash-usage-content" style="display:none">
+          <div class="admin-kpi-grid mb-3" id="dash-usage-kpis" style="grid-template-columns:repeat(4,1fr)"></div>
+          <div class="row g-3 mb-3">
+            <div class="col-md-6">
+              <div class="card card-pad h-100">
+                <div class="section-title mb-2">Top Platforms (7d)</div>
+                <div id="dash-platform-table"></div>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="card card-pad h-100">
+                <div class="section-title mb-2">Tokens by Operation (7d)</div>
+                <div id="dash-ops-table"></div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
+
+      <!-- ═══ TAB: Trends (JS-loaded) ══════════════════════════════ -->
+      <div class="dtab-panel" data-dtab="trends" style="display:none">
+        <div id="dash-trends-loading" class="text-center text-muted py-5" style="font-size:13.5px">Loading trends…</div>
+        <div id="dash-trends-content" style="display:none">
+          <div class="admin-kpi-grid mb-3" id="dash-trends-kpis" style="grid-template-columns:repeat(4,1fr)"></div>
+          <div class="row g-3 mb-3">
+            <div class="col-md-6">
+              <div class="card card-pad h-100">
+                <div class="section-title mb-2">Sentiment Trend (4 weeks)</div>
+                <div id="dash-sentiment-table"></div>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="card card-pad h-100">
+                <div class="section-title mb-2">Cost by Platform</div>
+                <div id="dash-cost-platform"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
     </div>
 
     <!-- ────────────────────────────────────────────
@@ -1901,5 +1969,119 @@ document.addEventListener('DOMContentLoaded', function() {
     this._debounce = setTimeout(loadActionItems, 400);
   });
 });
+
+// ── Analytics sub-tab switching ──────────────────────────────────────────────
+document.querySelectorAll('.analytics-tab[data-dtab]').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.analytics-tab[data-dtab]').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    document.querySelectorAll('.dtab-panel').forEach(p => p.style.display = 'none');
+    const panel = document.querySelector('.dtab-panel[data-dtab="' + tab.dataset.dtab + '"]');
+    if (panel) panel.style.display = '';
+    if (tab.dataset.dtab === 'usage' && !_dashUsageLoaded) _loadDashUsage();
+    if (tab.dataset.dtab === 'trends' && !_dashTrendsLoaded) _loadDashTrends();
+  });
+});
+
+let _dashUsageLoaded = false;
+let _dashTrendsLoaded = false;
+
+function _refreshDashAnalytics() {
+  _dashUsageLoaded = false;
+  _dashTrendsLoaded = false;
+  const activeTab = document.querySelector('.analytics-tab[data-dtab].active');
+  if (activeTab) {
+    if (activeTab.dataset.dtab === 'usage') _loadDashUsage();
+    else if (activeTab.dataset.dtab === 'trends') _loadDashTrends();
+  }
+  showToast('Analytics refreshed', 'success');
+}
+
+function _fmtN(n) { return (n || 0).toLocaleString(); }
+function _fmtC(n) { return '$' + (+(n || 0)).toFixed(4); }
+
+async function _loadDashUsage() {
+  try {
+    const d = await apiFetch('/api/v1/analytics/api-usage');
+    const kpis = [
+      ['Bots (7d)', _fmtN(d.bots_created_7d), ''],
+      ['Bots (30d)', _fmtN(d.bots_created_30d), ''],
+      ['Tokens (7d)', _fmtN(d.total_tokens_7d), ''],
+      ['AI Cost (7d)', _fmtC(d.total_cost_usd_7d), ''],
+      ['Error Rate (7d)', ((d.error_rate_7d || 0) * 100).toFixed(1) + '%', (d.error_rate_7d || 0) > 0.1 ? 'color:#ef4444' : 'color:#10b981'],
+    ];
+    document.getElementById('dash-usage-kpis').innerHTML = kpis.map(([l, v, s]) =>
+      '<div class="stat-card"><div class="stat-label">' + l + '</div><div class="stat-value mt-1" style="font-size:1.5rem;' + s + '">' + v + '</div></div>'
+    ).join('');
+
+    // Platform table
+    const platforms = d.top_platforms_7d || [];
+    document.getElementById('dash-platform-table').innerHTML = platforms.length
+      ? '<table class="table table-sm mb-0"><thead><tr><th>Platform</th><th class="text-end">Bots</th></tr></thead><tbody>' +
+        platforms.map(p => '<tr><td style="font-size:12.5px">' + (p.platform || 'unknown') + '</td><td class="text-end small fw-bold">' + _fmtN(p.count) + '</td></tr>').join('') +
+        '</tbody></table>'
+      : '<div class="text-muted small py-3 text-center">No data yet.</div>';
+
+    // Operations table
+    const ops = d.tokens_by_operation_7d || {};
+    const costs = d.cost_by_operation_7d || {};
+    const opKeys = Object.keys(ops);
+    document.getElementById('dash-ops-table').innerHTML = opKeys.length
+      ? '<table class="table table-sm mb-0"><thead><tr><th>Operation</th><th class="text-end">Tokens</th><th class="text-end">Cost</th></tr></thead><tbody>' +
+        opKeys.sort((a, b) => (ops[b] || 0) - (ops[a] || 0)).map(k =>
+          '<tr><td style="font-size:12.5px">' + k + '</td><td class="text-end small">' + _fmtN(ops[k]) + '</td><td class="text-end small">' + _fmtC(costs[k] || 0) + '</td></tr>'
+        ).join('') + '</tbody></table>'
+      : '<div class="text-muted small py-3 text-center">No data yet.</div>';
+
+    _dashUsageLoaded = true;
+    document.getElementById('dash-usage-loading').style.display = 'none';
+    document.getElementById('dash-usage-content').style.display = '';
+  } catch (e) {
+    document.getElementById('dash-usage-loading').textContent = 'Failed to load: ' + e.message;
+  }
+}
+
+async function _loadDashTrends() {
+  try {
+    const d = await apiFetch('/api/v1/analytics/me');
+    const kpis = [
+      ['Meetings this month', _fmtN(d.meetings_this_month), ''],
+      ['AI Cost (month)', _fmtC(d.ai_cost_this_month), ''],
+      ['Open Action Items', _fmtN(d.total_action_items_open), d.total_action_items_open > 0 ? 'color:#f59e0b' : ''],
+      ['Avg Duration', (d.avg_meeting_duration_min || 0).toFixed(0) + ' min', ''],
+    ];
+    document.getElementById('dash-trends-kpis').innerHTML = kpis.map(([l, v, s]) =>
+      '<div class="stat-card"><div class="stat-label">' + l + '</div><div class="stat-value mt-1" style="font-size:1.5rem;' + s + '">' + v + '</div></div>'
+    ).join('');
+
+    // Sentiment trend
+    const sentiment = d.sentiment_trend || [];
+    document.getElementById('dash-sentiment-table').innerHTML = sentiment.length
+      ? '<table class="table table-sm mb-0"><thead><tr><th>Week</th><th>Meetings</th><th class="text-end">Sentiment</th></tr></thead><tbody>' +
+        sentiment.map(w => {
+          const score = (w.score || 0);
+          const color = score > 0.2 ? '#10b981' : score < -0.2 ? '#ef4444' : '#6b7280';
+          const label = score > 0.2 ? 'Positive' : score < -0.2 ? 'Negative' : 'Neutral';
+          return '<tr><td style="font-size:12px">' + (w.week || '—') + '</td><td class="small">' + (w.meetings || 0) + '</td><td class="text-end"><span style="color:' + color + ';font-weight:600;font-size:12.5px">' + label + ' (' + score.toFixed(2) + ')</span></td></tr>';
+        }).join('') + '</tbody></table>'
+      : '<div class="text-muted small py-3 text-center">Not enough data yet.</div>';
+
+    // Cost by platform
+    const costPlat = d.cost_by_platform || {};
+    const cpKeys = Object.keys(costPlat);
+    document.getElementById('dash-cost-platform').innerHTML = cpKeys.length
+      ? '<table class="table table-sm mb-0"><thead><tr><th>Platform</th><th class="text-end">Cost</th></tr></thead><tbody>' +
+        cpKeys.sort((a, b) => (costPlat[b] || 0) - (costPlat[a] || 0)).map(k =>
+          '<tr><td style="font-size:12.5px">' + k.replace('_', ' ') + '</td><td class="text-end small fw-bold">' + _fmtC(costPlat[k]) + '</td></tr>'
+        ).join('') + '</tbody></table>'
+      : '<div class="text-muted small py-3 text-center">No data yet.</div>';
+
+    _dashTrendsLoaded = true;
+    document.getElementById('dash-trends-loading').style.display = 'none';
+    document.getElementById('dash-trends-content').style.display = '';
+  } catch (e) {
+    document.getElementById('dash-trends-loading').textContent = 'Failed to load: ' + e.message;
+  }
+}
 </script>
 {% endblock %}
