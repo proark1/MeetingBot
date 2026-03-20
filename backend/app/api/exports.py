@@ -2,6 +2,7 @@
 
 import io
 import logging
+from html import escape as _he
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response, PlainTextResponse
@@ -338,7 +339,7 @@ def _build_pdf(bot: BotSession) -> bytes:
             ts = _fmt_ts(entry.get("timestamp", 0))
             speaker = entry.get("speaker", "?")
             text = entry.get("text", "")
-            story.append(Paragraph(f"<b>[{ts}] {speaker}:</b> {text}", body))
+            story.append(Paragraph(f"<b>[{ts}] {_he(speaker)}:</b> {_he(text)}", body))
             story.append(Spacer(1, 0.1 * cm))
 
     doc.build(story)

@@ -1039,8 +1039,9 @@ async def _join_teams(page: Page, url: str, bot_name: str, start_muted: bool = T
 async def _join_onepizza(page: Page, url: str, bot_name: str, start_muted: bool = True) -> None:
     """Join an onepizza.io meeting room."""
     # Append ?name=... so the lobby pre-fills the name field
+    from urllib.parse import quote as _quote
     sep = "&" if "?" in url else "?"
-    join_url = f"{url}{sep}name={bot_name.replace(' ', '+')}"
+    join_url = f"{url}{sep}name={_quote(bot_name)}"
     await page.goto(join_url, wait_until="domcontentloaded", timeout=30_000)
 
     # Wait for the lobby overlay to appear

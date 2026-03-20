@@ -16,6 +16,7 @@ Configure via environment variables:
 
 import asyncio
 import logging
+from html import escape as _he
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -55,7 +56,7 @@ def _render_done_email(bot_data: dict) -> tuple[str, str]:
     participants = bot_data.get("participants") or []
     duration = _format_duration(bot_data.get("duration_seconds"))
     analysis = bot_data.get("analysis") or {}
-    summary = analysis.get("summary", "No summary available.")
+    summary = _he(analysis.get("summary", "No summary available."))
     action_items = analysis.get("action_items") or []
     decisions = analysis.get("decisions") or []
 
@@ -65,17 +66,17 @@ def _render_done_email(bot_data: dict) -> tuple[str, str]:
     ai_list = ""
     if action_items:
         items_html = "".join(
-            f"<li>{ai.get('task', ai) if isinstance(ai, dict) else ai}</li>"
+            f"<li>{_he(ai.get('task', str(ai)) if isinstance(ai, dict) else str(ai))}</li>"
             for ai in action_items[:10]
         )
         ai_list = f"<h3>Action Items</h3><ul>{items_html}</ul>"
 
     dec_list = ""
     if decisions:
-        dec_html = "".join(f"<li>{d}</li>" for d in decisions[:10])
+        dec_html = "".join(f"<li>{_he(str(d))}</li>" for d in decisions[:10])
         dec_list = f"<h3>Decisions</h3><ul>{dec_html}</ul>"
 
-    participants_str = ", ".join(participants[:8]) if participants else "N/A"
+    participants_str = ", ".join(_he(p) for p in participants[:8]) if participants else "N/A"
     if len(participants) > 8:
         participants_str += f" and {len(participants) - 8} more"
 
@@ -267,7 +268,7 @@ async def send_weekly_digest() -> int:
                         BotSnapshot.account_id == account.id,
                         BotSnapshot.created_at >= week_ago,
                         BotSnapshot.status == "done",
-                    )
+                    ).limit(200)
                 )
                 snapshots = snap_result.scalars().all()
                 if not snapshots:
@@ -309,7 +310,7 @@ async def send_weekly_digest() -> int:
 
                 decisions_html = ""
                 if all_decisions:
-                    items = "".join(f"<li>{d}</li>" for d in all_decisions[:6])
+                    items = "".join(f"<li>{_he(str(d))}</li>" for d in all_decisions[:6])
                     decisions_html = (
                         "<h3 style='color:#222;font-size:15px;margin:16px 0 6px'>Key Decisions</h3>"
                         f"<ul style='margin:0 0 16px;padding-left:20px'>{items}</ul>"
@@ -318,8 +319,8 @@ async def send_weekly_digest() -> int:
                 ai_html = ""
                 if all_action_items:
                     items = "".join(
-                        f"<li>{ai.get('task', ai) if isinstance(ai, dict) else ai}"
-                        f"{(' — <em>' + ai['assignee'] + '</em>') if isinstance(ai, dict) and ai.get('assignee') else ''}</li>"
+                        f"<li>{_he(ai.get('task', str(ai)) if isinstance(ai, dict) else str(ai))}"
+                        f"{(' — <em>' + _he(ai['assignee']) + '</em>') if isinstance(ai, dict) and ai.get('assignee') else ''}</li>"
                         for ai in all_action_items[:6]
                     )
                     ai_html = (

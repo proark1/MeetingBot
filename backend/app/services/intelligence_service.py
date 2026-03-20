@@ -1251,6 +1251,9 @@ async def embed_text(text: str) -> list[float]:
     """
     if not text or not text.strip():
         return []
+    # Gemini text-embedding-004 has a ~36k token limit — truncate gracefully
+    if len(text) > 90_000:
+        text = text[:90_000]
     from app.config import settings
     if not settings.GEMINI_API_KEY:
         return []
