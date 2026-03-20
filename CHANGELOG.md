@@ -4,7 +4,15 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.5.2 — **Last updated:** 2026-03-20
+> **Latest version:** 2.5.3 — **Last updated:** 2026-03-20
+
+---
+
+## [2.5.3] - 2026-03-20
+
+### Fixed
+- **Admin analytics crash** — `func.date()` is PostgreSQL-only; replaced with `func.strftime('%Y-%m-%d', ...)` for SQLite compatibility
+- **Graceful degradation** — All new analytics queries (billing, webhooks, action items) wrapped in try/except so individual query failures don't crash the entire analytics endpoint
 
 ---
 

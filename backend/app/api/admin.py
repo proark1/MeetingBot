@@ -715,77 +715,98 @@ async def platform_analytics(
 
     # ── Billing & Revenue ─────────────────────────────────────────────────────
     from app.models.account import CreditTransaction, WebhookDelivery, ActionItem
-    credits_added_r = await db.execute(
-        select(func.coalesce(func.sum(CreditTransaction.amount_usd), 0))
-        .where(CreditTransaction.amount_usd > 0)
-    )
-    credits_added_val = float(credits_added_r.scalar_one())
-    credits_consumed_r = await db.execute(
-        select(func.coalesce(func.sum(CreditTransaction.amount_usd), 0))
-        .where(CreditTransaction.amount_usd < 0)
-    )
-    credits_consumed_val = float(credits_consumed_r.scalar_one())
 
-    credits_by_type_r = await db.execute(
-        select(CreditTransaction.type, func.sum(CreditTransaction.amount_usd), func.count())
-        .group_by(CreditTransaction.type)
-    )
-    credits_by_type = {
-        r[0]: {"amount": round(float(r[1]), 4), "count": r[2]}
-        for r in credits_by_type_r.all()
-    }
-
-    daily_rev_r = await db.execute(
-        select(
-            func.date(CreditTransaction.created_at),
-            func.sum(CreditTransaction.amount_usd),
+    credits_added_val = 0.0
+    credits_consumed_val = 0.0
+    credits_by_type: dict = {}
+    daily_revenue: list = []
+    try:
+        credits_added_r = await db.execute(
+            select(func.coalesce(func.sum(CreditTransaction.amount_usd), 0))
+            .where(CreditTransaction.amount_usd > 0)
         )
-        .where(CreditTransaction.created_at >= d30, CreditTransaction.amount_usd > 0)
-        .group_by(func.date(CreditTransaction.created_at))
-    )
-    daily_rev_map = {str(r[0]): round(float(r[1]), 4) for r in daily_rev_r.all()}
-    daily_revenue = []
-    for i in range(30):
-        day = (now - timedelta(days=29 - i)).strftime("%Y-%m-%d")
-        daily_revenue.append({"date": day, "amount": daily_rev_map.get(day, 0)})
+        credits_added_val = float(credits_added_r.scalar_one() or 0)
+        credits_consumed_r = await db.execute(
+            select(func.coalesce(func.sum(CreditTransaction.amount_usd), 0))
+            .where(CreditTransaction.amount_usd < 0)
+        )
+        credits_consumed_val = float(credits_consumed_r.scalar_one() or 0)
+
+        credits_by_type_r = await db.execute(
+            select(CreditTransaction.type, func.sum(CreditTransaction.amount_usd), func.count())
+            .group_by(CreditTransaction.type)
+        )
+        credits_by_type = {
+            r[0]: {"amount": round(float(r[1] or 0), 4), "count": r[2]}
+            for r in credits_by_type_r.all()
+        }
+
+        # Use strftime for SQLite compatibility (func.date is PostgreSQL-only)
+        _date_expr = func.strftime('%Y-%m-%d', CreditTransaction.created_at)
+        daily_rev_r = await db.execute(
+            select(_date_expr, func.sum(CreditTransaction.amount_usd))
+            .where(CreditTransaction.created_at >= d30, CreditTransaction.amount_usd > 0)
+            .group_by(_date_expr)
+        )
+        daily_rev_map = {str(r[0]): round(float(r[1] or 0), 4) for r in daily_rev_r.all()}
+        for i in range(30):
+            day = (now - timedelta(days=29 - i)).strftime("%Y-%m-%d")
+            daily_revenue.append({"date": day, "amount": daily_rev_map.get(day, 0)})
+    except Exception:
+        logger.warning("Billing analytics query failed — using defaults", exc_info=True)
+        daily_revenue = [{"date": (now - timedelta(days=29 - i)).strftime("%Y-%m-%d"), "amount": 0} for i in range(30)]
 
     # ── Webhook Health ─────────────────────────────────────────────────────────
-    delivery_stats_r = await db.execute(
-        select(WebhookDelivery.status, func.count()).group_by(WebhookDelivery.status)
-    )
-    delivery_by_status = {r[0]: r[1] for r in delivery_stats_r.all()}
-    total_deliveries = sum(delivery_by_status.values())
-    delivered_count = delivery_by_status.get("success", 0) + delivery_by_status.get("delivered", 0)
-    wh_success_rate = round(100 * delivered_count / total_deliveries, 1) if total_deliveries > 0 else 0.0
-
-    recent_fail_r = await db.execute(
-        select(
-            WebhookDelivery.event, WebhookDelivery.error_message,
-            WebhookDelivery.response_status_code, WebhookDelivery.created_at,
+    delivery_by_status: dict = {}
+    total_deliveries = 0
+    wh_success_rate = 0.0
+    recent_failures: list = []
+    try:
+        delivery_stats_r = await db.execute(
+            select(WebhookDelivery.status, func.count()).group_by(WebhookDelivery.status)
         )
-        .where(WebhookDelivery.status.in_(["failed", "retrying"]))
-        .order_by(WebhookDelivery.created_at.desc())
-        .limit(10)
-    )
-    recent_failures = [
-        {
-            "event": r.event,
-            "error": (r.error_message or "")[:100],
-            "status_code": r.response_status_code,
-            "at": r.created_at.isoformat() if r.created_at else None,
-        }
-        for r in recent_fail_r.all()
-    ]
+        delivery_by_status = {r[0]: r[1] for r in delivery_stats_r.all()}
+        total_deliveries = sum(delivery_by_status.values())
+        delivered_count = delivery_by_status.get("success", 0) + delivery_by_status.get("delivered", 0)
+        wh_success_rate = round(100 * delivered_count / total_deliveries, 1) if total_deliveries > 0 else 0.0
+
+        recent_fail_r = await db.execute(
+            select(
+                WebhookDelivery.event, WebhookDelivery.error_message,
+                WebhookDelivery.response_status_code, WebhookDelivery.created_at,
+            )
+            .where(WebhookDelivery.status.in_(["failed", "retrying"]))
+            .order_by(WebhookDelivery.created_at.desc())
+            .limit(10)
+        )
+        recent_failures = [
+            {
+                "event": r.event,
+                "error": (r.error_message or "")[:100],
+                "status_code": r.response_status_code,
+                "at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in recent_fail_r.all()
+        ]
+    except Exception:
+        logger.warning("Webhook analytics query failed — using defaults", exc_info=True)
 
     # ── Action Items Stats ─────────────────────────────────────────────────────
-    ai_total_count = (await db.execute(select(func.count(ActionItem.id)))).scalar_one()
-    ai_open_count = (await db.execute(
-        select(func.count(ActionItem.id)).where(ActionItem.status == "open")
-    )).scalar_one()
-    ai_done_count = (await db.execute(
-        select(func.count(ActionItem.id)).where(ActionItem.status == "done")
-    )).scalar_one()
-    ai_completion = round(100 * ai_done_count / ai_total_count, 1) if ai_total_count > 0 else 0.0
+    ai_total_count = 0
+    ai_open_count = 0
+    ai_done_count = 0
+    ai_completion = 0.0
+    try:
+        ai_total_count = (await db.execute(select(func.count(ActionItem.id)))).scalar_one()
+        ai_open_count = (await db.execute(
+            select(func.count(ActionItem.id)).where(ActionItem.status == "open")
+        )).scalar_one()
+        ai_done_count = (await db.execute(
+            select(func.count(ActionItem.id)).where(ActionItem.status == "done")
+        )).scalar_one()
+        ai_completion = round(100 * ai_done_count / ai_total_count, 1) if ai_total_count > 0 else 0.0
+    except Exception:
+        logger.warning("Action items analytics query failed — using defaults", exc_info=True)
 
     # ── System Status ──────────────────────────────────────────────────────────
     from app.api.bots import _running_tasks, _bot_queue
