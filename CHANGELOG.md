@@ -4,7 +4,23 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.3.1 — **Last updated:** 2026-03-20
+> **Latest version:** 2.4.0 — **Last updated:** 2026-03-20
+
+---
+
+## [2.4.0] - 2026-03-20
+
+### Added
+- **Comprehensive admin analytics** — Expanded `/admin#analytics` with 6 new visualization sections:
+  - **Status & Plan distribution** — Horizontal bar chart of bot statuses + doughnut of plan tiers
+  - **Revenue & Billing** — 30-day daily revenue line chart + credit flow breakdown (added/consumed/net by type)
+  - **Error analysis** — Errors by platform bar chart + top 10 error messages table
+  - **Webhook health** — Delivery success rate, status breakdown, recent failures list
+  - **Action items** — Total/open/done counts with completion rate progress bar
+  - **Template & transcription** — Template usage table + Gemini vs Whisper doughnut
+  - **System status** — Running tasks, queue depth, max concurrent, in-memory bots
+- **Expanded KPI grid** — 13 cards (was 8): added Bots (7d), Avg Duration, Error Rate, Revenue (30d), and more
+- **Backend analytics API extended** — `platform_analytics()` now returns billing, webhook, action item, error, and system data
 
 ---
 

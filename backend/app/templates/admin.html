@@ -874,6 +874,92 @@
           <div id="feature-bars"></div>
         </div>
 
+        <!-- Status & Plan distribution -->
+        <div class="row g-3 mb-3">
+          <div class="col-md-6">
+            <div class="card card-pad h-100">
+              <div class="section-title mb-2">Bot Status Distribution</div>
+              <canvas id="chart-status" style="max-height:220px"></canvas>
+            </div>
+          </div>
+          <div class="col-md-6">
+            <div class="card card-pad h-100">
+              <div class="section-title mb-2">Plan Distribution</div>
+              <canvas id="chart-plans" style="max-height:220px"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <!-- Billing & Revenue -->
+        <div class="row g-3 mb-3">
+          <div class="col-md-8">
+            <div class="card card-pad h-100">
+              <div class="section-title mb-2">Revenue — last 30 days</div>
+              <canvas id="chart-revenue" height="100"></canvas>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <div class="card card-pad h-100">
+              <div class="section-title mb-2">Credit Flow</div>
+              <div id="billing-stats"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Error Analysis -->
+        <div class="row g-3 mb-3">
+          <div class="col-md-6">
+            <div class="card card-pad h-100">
+              <div class="section-title mb-2">Errors by Platform</div>
+              <canvas id="chart-errors-platform" style="max-height:220px"></canvas>
+            </div>
+          </div>
+          <div class="col-md-6">
+            <div class="card card-pad h-100">
+              <div class="section-title mb-2">Top Error Messages</div>
+              <div id="error-messages-table" style="max-height:220px;overflow-y:auto"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Webhook & Action Items -->
+        <div class="row g-3 mb-3">
+          <div class="col-md-6">
+            <div class="card card-pad h-100">
+              <div class="section-title mb-2">Webhook Delivery Health</div>
+              <div id="webhook-stats"></div>
+            </div>
+          </div>
+          <div class="col-md-6">
+            <div class="card card-pad h-100">
+              <div class="section-title mb-2">Action Items</div>
+              <div id="action-items-stats"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Template & Transcription -->
+        <div class="row g-3 mb-3">
+          <div class="col-md-6">
+            <div class="card card-pad h-100">
+              <div class="section-title mb-2">Analysis Templates Used</div>
+              <div id="template-table"></div>
+            </div>
+          </div>
+          <div class="col-md-6">
+            <div class="card card-pad h-100">
+              <div class="section-title mb-2">Transcription Providers</div>
+              <canvas id="chart-transcription" style="max-height:220px"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <!-- System Status -->
+        <div class="card card-pad mb-3">
+          <div class="section-title mb-2">System Status</div>
+          <div class="admin-kpi-grid" id="system-kpi-grid" style="grid-template-columns:repeat(4,1fr)"></div>
+        </div>
+
         <!-- Per-user table -->
         <div class="card">
           <div class="px-4 pt-3 pb-2 d-flex justify-content-between align-items-center">
@@ -1065,16 +1151,22 @@ function _fmtCost(n) { return '$' + (+(n||0)).toFixed(4); }
 function _renderAnalytics(d) {
   const ov = d.overview || {};
 
-  // KPI grid
+  // KPI grid (expanded: 12 cards in 3 rows)
+  const avgDur = ov.avg_duration_seconds ? Math.floor(ov.avg_duration_seconds/60) + ':' + String(Math.round(ov.avg_duration_seconds%60)).padStart(2,'0') : '—';
+  const rev30d = ((d.billing || {}).daily_revenue || []).reduce((s,r) => s + (r.amount||0), 0);
   const kpis = [
     ['Total Bots', _fmt(ov.total_bots), ''],
     ['Bots (30d)', _fmt(ov.bots_30d), ''],
+    ['Bots (7d)', _fmt(ov.bots_7d), ''],
     ['Active Now', _fmt(ov.active_now), ov.active_now > 0 ? 'color:#4f46e5' : ''],
     ['Success Rate', (ov.success_rate_pct || 0) + '%', 'color:#16a34a'],
     ['Total Accounts', _fmt(ov.total_accounts), ''],
     ['New Accounts (30d)', _fmt(ov.new_accounts_30d), ''],
+    ['Avg Duration', avgDur, ''],
+    ['Error Rate', (100 - (ov.success_rate_pct || 0)).toFixed(1) + '%', 'color:#ef4444'],
     ['AI Tokens (all time)', _fmt(ov.total_ai_tokens), ''],
     ['AI Cost (all time)', _fmtCost(ov.total_ai_cost_usd), ''],
+    ['Revenue (30d)', _fmtCost(rev30d), 'color:#16a34a'],
   ];
   document.getElementById('analytics-kpi-grid').style.gridTemplateColumns = 'repeat(4,1fr)';
   document.getElementById('analytics-kpi-grid').innerHTML = kpis.map(([label, val, style]) => `
@@ -1169,6 +1261,161 @@ function _renderAnalytics(d) {
       </div>
     </div>`;
   }).join('');
+
+  // ── Status distribution (horizontal bar) ─────────────────────────────────
+  const statusData = d.status_breakdown || {};
+  const statusLabels = Object.keys(statusData);
+  const _statusColors = {done:'#22c55e', error:'#ef4444', cancelled:'#94a3b8', joining:'#6366f1', in_call:'#3b82f6', queued:'#f59e0b', ready:'#a3a3a3', transcribing:'#8b5cf6', call_ended:'#0ea5e9', scheduled:'#d946ef'};
+  if (statusLabels.length) {
+    const sCtx = document.getElementById('chart-status').getContext('2d');
+    _analyticsCharts.status = new Chart(sCtx, {
+      type: 'bar',
+      data: {
+        labels: statusLabels,
+        datasets: [{ data: statusLabels.map(k => statusData[k]), backgroundColor: statusLabels.map(k => _statusColors[k] || '#94a3b8') }],
+      },
+      options: { indexAxis: 'y', plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true, ticks: { precision: 0 } } } },
+    });
+  }
+
+  // ── Plan distribution (doughnut) ────────────────────────────────────────
+  const planData = d.plan_counts || {};
+  const planLabels = Object.keys(planData);
+  const _planColors = {free:'#94a3b8', starter:'#6366f1', pro:'#22c55e', business:'#f59e0b'};
+  if (planLabels.length) {
+    const pCtx = document.getElementById('chart-plans').getContext('2d');
+    _analyticsCharts.plans = new Chart(pCtx, {
+      type: 'doughnut',
+      data: {
+        labels: planLabels.map(k => k.charAt(0).toUpperCase() + k.slice(1)),
+        datasets: [{ data: planLabels.map(k => planData[k]), backgroundColor: planLabels.map(k => _planColors[k] || '#94a3b8') }],
+      },
+      options: { plugins: { legend: { position: 'bottom', labels: { font: { size: 11 } } } }, cutout: '60%' },
+    });
+  }
+
+  // ── Revenue chart (line) ────────────────────────────────────────────────
+  const billing = d.billing || {};
+  const dailyRev = billing.daily_revenue || [];
+  if (dailyRev.length) {
+    const rCtx = document.getElementById('chart-revenue').getContext('2d');
+    _analyticsCharts.revenue = new Chart(rCtx, {
+      type: 'line',
+      data: {
+        labels: dailyRev.map(r => r.date.slice(5)),
+        datasets: [{ label: 'Revenue ($)', data: dailyRev.map(r => r.amount), borderColor: '#22c55e', backgroundColor: 'rgba(34,197,94,0.1)', fill: true, tension: 0.3, pointRadius: 2 }],
+      },
+      options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true }, x: { ticks: { maxTicksLimit: 10 } } } },
+    });
+  }
+
+  // ── Credit flow stats ───────────────────────────────────────────────────
+  const bDiv = document.getElementById('billing-stats');
+  const byType = billing.by_type || {};
+  bDiv.innerHTML = `
+    <div class="mb-3" style="font-size:13px">
+      <div class="d-flex justify-content-between mb-1"><span>Credits Added</span><strong style="color:#22c55e">${_fmtCost(billing.total_credits_added_usd)}</strong></div>
+      <div class="d-flex justify-content-between mb-1"><span>Credits Consumed</span><strong style="color:#ef4444">${_fmtCost(Math.abs(billing.total_credits_consumed_usd || 0))}</strong></div>
+      <div class="d-flex justify-content-between mb-1"><span>Net Balance</span><strong>${_fmtCost(billing.net_balance_usd)}</strong></div>
+    </div>
+    ${Object.keys(byType).length ? '<table class="table table-sm mb-0"><thead><tr><th>Type</th><th class="text-end">Amount</th><th class="text-end">Count</th></tr></thead><tbody>' +
+      Object.entries(byType).map(([t,v]) => '<tr><td style="font-size:12px">' + t + '</td><td class="text-end small">' + _fmtCost(Math.abs(v.amount)) + '</td><td class="text-end small">' + _fmt(v.count) + '</td></tr>').join('') +
+      '</tbody></table>' : '<div class="text-muted small">No transactions.</div>'}`;
+
+  // ── Errors by platform (bar) ────────────────────────────────────────────
+  const errData = d.errors || {};
+  const errByPlat = errData.by_platform || {};
+  const errLabels = Object.keys(errByPlat);
+  if (errLabels.length) {
+    const eCtx = document.getElementById('chart-errors-platform').getContext('2d');
+    _analyticsCharts.errPlat = new Chart(eCtx, {
+      type: 'bar',
+      data: {
+        labels: errLabels,
+        datasets: [{ data: errLabels.map(k => errByPlat[k]), backgroundColor: '#ef4444' }],
+      },
+      options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } },
+    });
+  } else {
+    document.getElementById('chart-errors-platform').parentElement.innerHTML += '<div class="text-muted small text-center py-3">No errors recorded.</div>';
+  }
+
+  // ── Top error messages table ────────────────────────────────────────────
+  const topErrs = errData.top_messages || [];
+  document.getElementById('error-messages-table').innerHTML = topErrs.length
+    ? '<table class="table table-sm mb-0"><thead><tr><th>Error</th><th class="text-end">Count</th></tr></thead><tbody>' +
+      topErrs.map(([msg, cnt]) => '<tr><td style="font-size:12px;word-break:break-all">' + msg + '</td><td class="text-end small">' + cnt + '</td></tr>').join('') +
+      '</tbody></table>'
+    : '<div class="text-muted small text-center py-3">No errors recorded.</div>';
+
+  // ── Webhook stats ───────────────────────────────────────────────────────
+  const wh = d.webhooks || {};
+  const whDiv = document.getElementById('webhook-stats');
+  const whByStatus = wh.by_status || {};
+  whDiv.innerHTML = `
+    <div class="mb-3" style="font-size:13px">
+      <div class="d-flex justify-content-between mb-1"><span>Total Deliveries</span><strong>${_fmt(wh.total_deliveries)}</strong></div>
+      <div class="d-flex justify-content-between mb-1"><span>Success Rate</span><strong style="color:${(wh.success_rate_pct||0) >= 90 ? '#22c55e' : '#ef4444'}">${(wh.success_rate_pct||0)}%</strong></div>
+      <div class="d-flex justify-content-between mb-1"><span>Active Webhooks</span><strong>${_fmt(wh.active_webhooks)}</strong></div>
+    </div>
+    ${Object.keys(whByStatus).length ? '<div style="font-size:12px">' + Object.entries(whByStatus).map(([s,c]) =>
+      '<span class="chip chip-' + (s==='success'||s==='delivered'?'success':s==='failed'?'danger':'gray') + ' me-1">' + s + ': ' + c + '</span>'
+    ).join('') + '</div>' : ''}
+    ${(wh.recent_failures||[]).length ? '<div class="mt-2 section-subtitle">Recent Failures</div><div style="font-size:11.5px;max-height:120px;overflow-y:auto">' +
+      wh.recent_failures.map(f => '<div class="mb-1 text-muted">' + (f.at||'').slice(5,16) + ' <strong>' + f.event + '</strong> ' + (f.status_code ? '(' + f.status_code + ')' : '') + ' ' + (f.error||'').slice(0,60) + '</div>').join('') +
+      '</div>' : ''}`;
+
+  // ── Action items stats ──────────────────────────────────────────────────
+  const ai = d.action_items || {};
+  const aiDiv = document.getElementById('action-items-stats');
+  const aiPct = ai.completion_rate_pct || 0;
+  aiDiv.innerHTML = `
+    <div class="mb-3" style="font-size:13px">
+      <div class="d-flex justify-content-between mb-1"><span>Total</span><strong>${_fmt(ai.total)}</strong></div>
+      <div class="d-flex justify-content-between mb-1"><span>Open</span><strong style="color:#f59e0b">${_fmt(ai.open)}</strong></div>
+      <div class="d-flex justify-content-between mb-1"><span>Done</span><strong style="color:#22c55e">${_fmt(ai.done)}</strong></div>
+    </div>
+    <div style="font-size:12.5px" class="mb-1">Completion rate: <strong>${aiPct}%</strong></div>
+    <div style="background:#e2e8f0;border-radius:4px;height:8px">
+      <div style="background:#22c55e;border-radius:4px;height:8px;width:${aiPct}%;transition:width 0.4s"></div>
+    </div>`;
+
+  // ── Template usage table ────────────────────────────────────────────────
+  const tmpls = d.templates || {};
+  document.getElementById('template-table').innerHTML = Object.keys(tmpls).length
+    ? '<table class="table table-sm mb-0"><thead><tr><th>Template</th><th class="text-end">Uses</th></tr></thead><tbody>' +
+      Object.entries(tmpls).sort((a,b) => b[1]-a[1]).map(([t,c]) => '<tr><td style="font-size:12px">' + t + '</td><td class="text-end small">' + _fmt(c) + '</td></tr>').join('') +
+      '</tbody></table>'
+    : '<div class="text-muted small text-center py-3">No custom templates used.</div>';
+
+  // ── Transcription providers (doughnut) ──────────────────────────────────
+  const txProviders = d.transcription_providers || {};
+  const txLabels = Object.keys(txProviders);
+  if (txLabels.length) {
+    const tCtx = document.getElementById('chart-transcription').getContext('2d');
+    _analyticsCharts.transcription = new Chart(tCtx, {
+      type: 'doughnut',
+      data: {
+        labels: txLabels.map(k => k.charAt(0).toUpperCase() + k.slice(1)),
+        datasets: [{ data: txLabels.map(k => txProviders[k]), backgroundColor: ['#6366f1','#f59e0b','#22c55e','#ef4444'] }],
+      },
+      options: { plugins: { legend: { position: 'bottom', labels: { font: { size: 11 } } } }, cutout: '60%' },
+    });
+  }
+
+  // ── System status KPIs ──────────────────────────────────────────────────
+  const sys = d.system || {};
+  const sysKpis = [
+    ['Running Tasks', _fmt(sys.running_tasks), sys.running_tasks > 0 ? 'color:#4f46e5' : ''],
+    ['Queue Depth', _fmt(sys.queue_depth), sys.queue_depth > 0 ? 'color:#f59e0b' : ''],
+    ['Max Concurrent', _fmt(sys.max_concurrent), ''],
+    ['In-Memory Bots', _fmt(sys.in_memory_bots), ''],
+  ];
+  document.getElementById('system-kpi-grid').innerHTML = sysKpis.map(([label, val, style]) => `
+    <div class="stat-card">
+      <div class="stat-label">${label}</div>
+      <div class="stat-value mt-1" style="${style}">${val}</div>
+    </div>`).join('');
 
   // Per-user table
   _renderAnalyticsUsers(d.per_user || []);

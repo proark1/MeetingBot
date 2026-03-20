@@ -542,6 +542,8 @@ async def platform_analytics(
     template_counts: dict[str, int] = {}
     transcription_counts: dict[str, int] = {}
     duration_samples: list[float] = []
+    error_messages: dict[str, int] = {}
+    error_by_platform: dict[str, int] = {}
     ai_by_model: dict[str, dict] = {}
     ai_by_operation: dict[str, dict] = {}
     ai_daily: dict[str, dict] = {}
@@ -577,6 +579,12 @@ async def platform_analytics(
             data = json.loads(s.data) if s.data else {}
         except Exception:
             data = {}
+
+        # Error analysis
+        if sc == "error":
+            short_err = (data.get("error_message") or "Unknown error")[:80]
+            error_messages[short_err] = error_messages.get(short_err, 0) + 1
+            error_by_platform[p] = error_by_platform.get(p, 0) + 1
 
         am = data.get("analysis_mode", "full")
         features["analysis_full" if am == "full" else "analysis_transcript_only"] += 1
@@ -705,6 +713,83 @@ async def platform_analytics(
                 "features_used": sorted(us["features_used"]),
             })
 
+    # ── Billing & Revenue ─────────────────────────────────────────────────────
+    from app.models.account import CreditTransaction, WebhookDelivery, ActionItem
+    credits_added_r = await db.execute(
+        select(func.coalesce(func.sum(CreditTransaction.amount_usd), 0))
+        .where(CreditTransaction.amount_usd > 0)
+    )
+    credits_added_val = float(credits_added_r.scalar_one())
+    credits_consumed_r = await db.execute(
+        select(func.coalesce(func.sum(CreditTransaction.amount_usd), 0))
+        .where(CreditTransaction.amount_usd < 0)
+    )
+    credits_consumed_val = float(credits_consumed_r.scalar_one())
+
+    credits_by_type_r = await db.execute(
+        select(CreditTransaction.type, func.sum(CreditTransaction.amount_usd), func.count())
+        .group_by(CreditTransaction.type)
+    )
+    credits_by_type = {
+        r[0]: {"amount": round(float(r[1]), 4), "count": r[2]}
+        for r in credits_by_type_r.all()
+    }
+
+    daily_rev_r = await db.execute(
+        select(
+            func.date(CreditTransaction.created_at),
+            func.sum(CreditTransaction.amount_usd),
+        )
+        .where(CreditTransaction.created_at >= d30, CreditTransaction.amount_usd > 0)
+        .group_by(func.date(CreditTransaction.created_at))
+    )
+    daily_rev_map = {str(r[0]): round(float(r[1]), 4) for r in daily_rev_r.all()}
+    daily_revenue = []
+    for i in range(30):
+        day = (now - timedelta(days=29 - i)).strftime("%Y-%m-%d")
+        daily_revenue.append({"date": day, "amount": daily_rev_map.get(day, 0)})
+
+    # ── Webhook Health ─────────────────────────────────────────────────────────
+    delivery_stats_r = await db.execute(
+        select(WebhookDelivery.status, func.count()).group_by(WebhookDelivery.status)
+    )
+    delivery_by_status = {r[0]: r[1] for r in delivery_stats_r.all()}
+    total_deliveries = sum(delivery_by_status.values())
+    delivered_count = delivery_by_status.get("success", 0) + delivery_by_status.get("delivered", 0)
+    wh_success_rate = round(100 * delivered_count / total_deliveries, 1) if total_deliveries > 0 else 0.0
+
+    recent_fail_r = await db.execute(
+        select(
+            WebhookDelivery.event, WebhookDelivery.error_message,
+            WebhookDelivery.response_status_code, WebhookDelivery.created_at,
+        )
+        .where(WebhookDelivery.status.in_(["failed", "retrying"]))
+        .order_by(WebhookDelivery.created_at.desc())
+        .limit(10)
+    )
+    recent_failures = [
+        {
+            "event": r.event,
+            "error": (r.error_message or "")[:100],
+            "status_code": r.response_status_code,
+            "at": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r in recent_fail_r.all()
+    ]
+
+    # ── Action Items Stats ─────────────────────────────────────────────────────
+    ai_total_count = (await db.execute(select(func.count(ActionItem.id)))).scalar_one()
+    ai_open_count = (await db.execute(
+        select(func.count(ActionItem.id)).where(ActionItem.status == "open")
+    )).scalar_one()
+    ai_done_count = (await db.execute(
+        select(func.count(ActionItem.id)).where(ActionItem.status == "done")
+    )).scalar_one()
+    ai_completion = round(100 * ai_done_count / ai_total_count, 1) if ai_total_count > 0 else 0.0
+
+    # ── System Status ──────────────────────────────────────────────────────────
+    from app.api.bots import _running_tasks, _bot_queue
+
     result = {
         "overview": {
             "total_bots": total_bots,
@@ -737,6 +822,37 @@ async def platform_analytics(
                 for k, v in sorted(ai_by_operation.items(), key=lambda x: x[1]["tokens"], reverse=True)
             },
             "daily": ai_trend,
+        },
+        "billing": {
+            "total_credits_added_usd": round(credits_added_val, 4),
+            "total_credits_consumed_usd": round(credits_consumed_val, 4),
+            "net_balance_usd": round(credits_added_val + credits_consumed_val, 4),
+            "by_type": credits_by_type,
+            "daily_revenue": daily_revenue,
+        },
+        "webhooks": {
+            "total_deliveries": total_deliveries,
+            "by_status": delivery_by_status,
+            "success_rate_pct": wh_success_rate,
+            "active_webhooks": len(_store.list_webhooks()),
+            "recent_failures": recent_failures,
+        },
+        "action_items": {
+            "total": ai_total_count,
+            "open": ai_open_count,
+            "done": ai_done_count,
+            "completion_rate_pct": ai_completion,
+        },
+        "errors": {
+            "total": status_counts.get("error", 0),
+            "by_platform": error_by_platform,
+            "top_messages": sorted(error_messages.items(), key=lambda x: x[1], reverse=True)[:10],
+        },
+        "system": {
+            "running_tasks": sum(1 for t in _running_tasks.values() if not t.done()),
+            "queue_depth": len(_bot_queue),
+            "max_concurrent": settings.MAX_CONCURRENT_BOTS,
+            "in_memory_bots": len(active_bots),
         },
         "per_user": per_user,
         "generated_at": now.isoformat(),
