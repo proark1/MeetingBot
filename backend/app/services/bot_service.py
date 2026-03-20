@@ -358,7 +358,8 @@ async def _do_analysis_inner(bot: BotSession, audio_path: str, use_real_bot: boo
         )
 
         if isinstance(analysis_result, Exception):
-            logger.error("Analysis failed for bot %s: %s", bot.id, analysis_result)
+            _analysis_error_str = str(analysis_result)
+            logger.error("Analysis failed for bot %s: %s", bot.id, _analysis_error_str)
             analysis_result = {
                 "summary": "Analysis unavailable — an error occurred during processing.",
                 "key_points": [], "action_items": [], "decisions": [],
@@ -367,7 +368,7 @@ async def _do_analysis_inner(bot: BotSession, audio_path: str, use_real_bot: boo
             current = bot.error_message or ""
             await store.update_bot(
                 bot.id,
-                error_message=current + f" [analysis error: {analysis_result}]",
+                error_message=current + f" [analysis error: {_analysis_error_str}]",
             )
 
         chapters = [] if isinstance(chapters_result, Exception) else (chapters_result or [])
