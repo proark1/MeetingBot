@@ -4,7 +4,14 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.5.8 — **Last updated:** 2026-03-21
+> **Latest version:** 2.5.9 — **Last updated:** 2026-03-21
+
+---
+
+## [2.5.9] - 2026-03-21
+
+### Fixed
+- **OnePizza lobby-skip handling** — When the room is already active, the page skips the lobby (`#lobby` hidden) and shows the meeting room (`#meetingRoom`) directly. Bot now detects both states: if `#meetingRoom` or `#videoGrid` is visible, skip lobby flow entirely. Prevents the 30s timeout on invisible `#lobbyName` that was causing join failures on active rooms.
 
 ---
 

@@ -1047,74 +1047,86 @@ async def _join_onepizza(page: Page, url: str, bot_name: str, start_muted: bool 
     # connection open indefinitely, so "networkidle" may never resolve.
     await page.goto(join_url, wait_until="load", timeout=30_000)
 
-    # The page is a Socket.IO SPA — lobby elements render after JS executes
-    # and the socket connects. Wait for the lobby container or join button.
+    # The page is a Socket.IO SPA with two states:
+    # 1. Lobby visible (#lobby) — need to fill name + click join
+    # 2. Meeting room visible (#meetingRoom) — already admitted, skip lobby
+    # Wait for either to appear.
+    in_meeting = False
     try:
-        await page.wait_for_selector("#lobby, #lobbyJoinBtn, #lobbyName", state="visible", timeout=30_000)
+        which = await page.wait_for_selector(
+            "#lobbyJoinBtn, #meetingRoom, #videoGrid, #leaveBtn",
+            state="visible", timeout=20_000,
+        )
+        tag = await which.get_attribute("id") if which else None
+        if tag in ("meetingRoom", "videoGrid", "leaveBtn"):
+            logger.info("onepizza: lobby skipped — already in meeting room")
+            in_meeting = True
     except Exception:
         await _screenshot(page, "onepizza_no_lobby")
-        logger.warning("onepizza: lobby not visible after 30s — dumping page state")
+        logger.warning("onepizza: neither lobby nor meeting room visible after 20s")
 
-    # Fill name — the lobby typically disables the Join button until a name is entered.
-    # The ?name= URL param may not always auto-populate, so always force-fill.
-    try:
-        await page.wait_for_selector("#lobbyName", state="visible", timeout=10_000)
-        await page.fill("#lobbyName", "")  # clear first
-        await page.fill("#lobbyName", bot_name)
-        logger.info("onepizza: name set to '%s'", bot_name)
-    except Exception as exc:
-        logger.warning("onepizza: failed to fill lobby name: %s", exc)
-
-    # Small delay for the UI to react to the name input (enable join button)
-    await asyncio.sleep(0.5)
-
-    # Disable camera (hide the bot's blank video feed from participants)
-    try:
-        cam_state = await page.get_attribute("#lobbyCamBtn", "aria-pressed")
-        if cam_state != "false":
-            await page.click("#lobbyCamBtn", timeout=3000)
-            logger.info("onepizza: camera disabled in lobby")
-    except Exception:
-        pass
-
-    # Mute mic in lobby (start_muted=True by default for bot)
-    if start_muted:
+    if not in_meeting:
+        # ── Lobby flow: fill name → disable cam/mic → click join ──────
+        # Fill name — lobby disables join button until name is entered
         try:
-            mic_state = await page.get_attribute("#lobbyMicBtn", "aria-pressed")
-            if mic_state != "false":
-                await page.click("#lobbyMicBtn", timeout=3000)
-                logger.info("onepizza: mic muted in lobby")
+            name_input = page.locator("#lobbyName")
+            await name_input.wait_for(state="visible", timeout=5_000)
+            await name_input.fill("")
+            await name_input.fill(bot_name)
+            logger.info("onepizza: name set to '%s'", bot_name)
+        except Exception as exc:
+            logger.warning("onepizza: could not fill lobby name: %s", exc)
+
+        await asyncio.sleep(0.5)
+
+        # Disable camera
+        try:
+            cam_state = await page.get_attribute("#lobbyCamBtn", "aria-pressed")
+            if cam_state != "false":
+                await page.click("#lobbyCamBtn", timeout=3000)
+                logger.info("onepizza: camera disabled in lobby")
         except Exception:
             pass
 
-    # Click Join — wait for button to be visible AND enabled
-    join_clicked = False
-    for attempt in range(3):
-        try:
-            btn = page.locator("#lobbyJoinBtn")
-            await btn.wait_for(state="visible", timeout=10_000)
-            # Check if disabled
-            disabled = await btn.get_attribute("disabled")
-            if disabled is not None:
-                logger.info("onepizza: join button disabled, re-filling name (attempt %d)", attempt + 1)
-                await page.fill("#lobbyName", bot_name)
-                await asyncio.sleep(1)
-                continue
-            await btn.click()
-            join_clicked = True
-            logger.info("onepizza: join button clicked (#lobbyJoinBtn)")
-            break
-        except Exception:
-            if attempt < 2:
-                logger.info("onepizza: join button not ready, retrying (attempt %d)", attempt + 1)
-                await asyncio.sleep(1)
-    if not join_clicked:
-        # Last resort: try any button with "Join" text
-        ok = await _click(page, ["button:has-text('Join')"], timeout=5_000)
-        if not ok:
-            await _screenshot(page, "onepizza_no_join_button")
-            raise MeetingBotError("Could not find join button on onepizza.io")
-        logger.info("onepizza: join button clicked (fallback selector)")
+        # Mute mic
+        if start_muted:
+            try:
+                mic_state = await page.get_attribute("#lobbyMicBtn", "aria-pressed")
+                if mic_state != "false":
+                    await page.click("#lobbyMicBtn", timeout=3000)
+                    logger.info("onepizza: mic muted in lobby")
+            except Exception:
+                pass
+
+        # Click Join — retry up to 3x (button may be disabled until name fills)
+        join_clicked = False
+        for attempt in range(3):
+            try:
+                btn = page.locator("#lobbyJoinBtn")
+                await btn.wait_for(state="visible", timeout=8_000)
+                disabled = await btn.get_attribute("disabled")
+                if disabled is not None:
+                    logger.info("onepizza: join button disabled, re-filling name (attempt %d)", attempt + 1)
+                    try:
+                        await page.locator("#lobbyName").fill(bot_name)
+                    except Exception:
+                        pass
+                    await asyncio.sleep(1)
+                    continue
+                await btn.click()
+                join_clicked = True
+                logger.info("onepizza: join button clicked")
+                break
+            except Exception:
+                if attempt < 2:
+                    logger.info("onepizza: join button not ready (attempt %d)", attempt + 1)
+                    await asyncio.sleep(1)
+        if not join_clicked:
+            ok = await _click(page, ["button:has-text('Join')"], timeout=5_000)
+            if not ok:
+                await _screenshot(page, "onepizza_no_join_button")
+                raise MeetingBotError("Could not find join button on onepizza.io")
+            logger.info("onepizza: join button clicked (fallback)")
 
 
 # ── Admission & end detection ─────────────────────────────────────────────────
