@@ -85,7 +85,7 @@ _PLATFORM_NETLOC: dict[str, set[str]] = {
     "whereby":         {"whereby.com"},
     "bluejeans":       {"bluejeans.com"},
     "gotomeeting":     {"gotomeeting.com"},
-    "onepizza":        {"onepizza.io"},
+    "onepizza":        {"onepizza.io", "meetingservice-production.up.railway.app"},
 }
 
 _REAL_PLATFORMS = {"google_meet", "zoom", "microsoft_teams", "onepizza"}

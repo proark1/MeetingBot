@@ -4,7 +4,14 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.5.4 — **Last updated:** 2026-03-20
+> **Latest version:** 2.5.5 — **Last updated:** 2026-03-21
+
+---
+
+## [2.5.5] - 2026-03-21
+
+### Fixed
+- **OnePizza platform detection** — Added `meetingservice-production.up.railway.app` to the onepizza netloc set so bots correctly identify the platform instead of falling back to "unknown" demo mode
 
 ---
 
