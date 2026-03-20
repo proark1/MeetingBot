@@ -15,10 +15,11 @@
   .admin-sidebar {
     position: sticky;
     top: 70px;
-    background: #0f172a;
-    border: 1px solid rgba(255,255,255,0.08);
+    background: white;
+    border: 1px solid var(--border);
     border-radius: 14px;
     padding: 1rem 0.5rem;
+    box-shadow: var(--shadow-sm);
   }
 
   .admin-sidebar-label {
@@ -26,7 +27,7 @@
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.07em;
-    color: #475569;
+    color: #9ca3af;
     padding: 0.35rem 0.75rem;
     margin-top: 0.5rem;
   }
@@ -40,7 +41,7 @@
     border-radius: 8px;
     font-size: 13px;
     font-weight: 500;
-    color: #94a3b8;
+    color: #6b7280;
     cursor: pointer;
     transition: background 0.15s, color 0.15s;
     user-select: none;
@@ -50,13 +51,13 @@
     text-align: left;
     text-decoration: none;
   }
-  .admin-nav-item:hover { background: rgba(255,255,255,0.07); color: #e2e8f0; }
-  .admin-nav-item.active { background: rgba(99,102,241,0.2); color: #a5b4fc; font-weight: 600; }
+  .admin-nav-item:hover { background: #f9fafb; color: #111827; }
+  .admin-nav-item.active { background: #eef2ff; color: #4f46e5; font-weight: 600; }
 
   .admin-nav-badge {
     margin-left: auto;
-    background: rgba(239,68,68,0.25);
-    color: #fca5a5;
+    background: #fee2e2;
+    color: #dc2626;
     font-size: 10px;
     font-weight: 700;
     padding: 1px 5px;
@@ -64,8 +65,8 @@
     line-height: 1.5;
   }
   .admin-nav-badge.warn {
-    background: rgba(245,158,11,0.2);
-    color: #fcd34d;
+    background: #fef3c7;
+    color: #b45309;
   }
 
   /* ── Admin sections ────────────────────────────────────────────────────── */
@@ -115,10 +116,11 @@
   /* ── Responsive ──────────────────────────────────────────────────────── */
   @media (max-width: 768px) {
     .admin-layout { grid-template-columns: 1fr; }
-    .admin-sidebar { position: static; border-radius: 10px; }
-    .admin-nav-items { display: flex; flex-wrap: wrap; gap: 0.25rem; }
+    .admin-sidebar { position: sticky; top: 58px; border-radius: 10px; z-index: 100; overflow-x: auto; }
+    .admin-nav-items { display: flex; flex-wrap: nowrap; gap: 0.25rem; }
     .admin-sidebar-label { display: none; }
-    .admin-nav-item { flex: 0 0 auto; font-size: 12px; padding: 0.4rem 0.65rem; }
+    .admin-nav-item { flex: 0 0 auto; font-size: 12px; padding: 0.4rem 0.65rem; white-space: nowrap; border-radius: 20px; }
+    .admin-nav-item.active { border-radius: 20px; }
   }
 </style>
 

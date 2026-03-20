@@ -9,21 +9,22 @@
   <style>
     :root {
       --primary: #6366f1; --primary-dark: #4f46e5;
-      --dark: #0f172a; --dark-2: #1e293b; --gray: #64748b;
+      --dark: #111827; --dark-2: #1f2937; --gray: #6b7280;
       --success: #10b981; --warning: #f59e0b; --danger: #ef4444;
       --border: #e2e8f0;
     }
     * { box-sizing: border-box; }
-    body { font-family: 'Inter', sans-serif; background: #f1f5f9; color: #0f172a; font-size: 14px; margin: 0; }
+    body { font-family: 'Inter', sans-serif; background: #f9fafb; color: #111827; font-size: 14px; margin: 0; }
 
     .app-nav {
-      background: var(--dark); padding: 0 1.75rem; height: 58px;
+      background: rgba(255,255,255,0.82); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+      padding: 0 1.75rem; height: 58px;
       display: flex; align-items: center; justify-content: space-between;
-      border-bottom: 1px solid rgba(255,255,255,.05); position: sticky; top: 0; z-index: 1000;
+      border-bottom: 1px solid #e5e7eb; position: sticky; top: 0; z-index: 1000;
     }
-    .app-nav-brand { font-weight: 700; font-size: 1.05rem; color: white; text-decoration: none; }
-    .app-nav a { color: rgba(255,255,255,.65); font-size: .85rem; text-decoration: none; }
-    .app-nav a:hover { color: white; }
+    .app-nav-brand { font-weight: 700; font-size: 1.05rem; color: #111827; text-decoration: none; }
+    .app-nav a { color: #6b7280; font-size: .85rem; text-decoration: none; }
+    .app-nav a:hover { color: #111827; }
 
     .page-header { background: white; border-bottom: 1px solid var(--border); padding: 1.25rem 1.75rem; }
     .page-header h1 { font-size: 1.3rem; font-weight: 700; margin: 0; }

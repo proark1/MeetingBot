@@ -4,7 +4,22 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.4.0 — **Last updated:** 2026-03-20
+> **Latest version:** 2.5.0 — **Last updated:** 2026-03-20
+
+---
+
+## [2.5.0] - 2026-03-20
+
+### Changed
+- **Modern light theme UI redesign** — Complete visual overhaul across all 8 user-facing templates:
+  - **base.html** — New CSS variables, frosted glass navbar (white + backdrop blur), mobile hamburger menu, softer shadows and borders
+  - **landing.html** — Converted from full dark (#0a0f1e) to clean white/light gray with subtle indigo accents
+  - **login.html & register.html** — Dark left panels replaced with soft indigo gradient, dark text
+  - **admin.html** — Dark navy sidebar converted to white with light borders and indigo active states
+  - **dashboard.html** — Sidebar polish, horizontal scrollable pill nav on mobile, sticky positioning
+  - **webhook_playground.html & api_dashboard.html** — Light navbar and background
+- **Mobile responsiveness** — Added hamburger menu to all pages, horizontal scrollable sidebar on mobile, proper sticky positioning, tablet breakpoints
+- **Design system** — Updated color palette: softer borders (#e5e7eb), subtle shadows, 14px body text, rounded corners (14px cards)
 
 ---
 
