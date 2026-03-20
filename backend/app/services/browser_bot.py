@@ -1042,13 +1042,18 @@ async def _join_onepizza(page: Page, url: str, bot_name: str, start_muted: bool 
     from urllib.parse import quote as _quote
     sep = "&" if "?" in url else "?"
     join_url = f"{url}{sep}name={_quote(bot_name)}"
-    await page.goto(join_url, wait_until="networkidle", timeout=45_000)
 
-    # Wait for the lobby overlay to appear (SPA may need extra time to render)
+    # Use "load" instead of "networkidle" — Socket.IO WebSocket keeps the
+    # connection open indefinitely, so "networkidle" may never resolve.
+    await page.goto(join_url, wait_until="load", timeout=30_000)
+
+    # The page is a Socket.IO SPA — lobby elements render after JS executes
+    # and the socket connects. Wait for the lobby container or join button.
     try:
-        await page.wait_for_selector(".lobby-overlay, #lobbyName, #lobbyJoinBtn, button:has-text('Join')", timeout=20_000)
+        await page.wait_for_selector("#lobby, #lobbyJoinBtn, #lobbyName", state="visible", timeout=30_000)
     except Exception:
         await _screenshot(page, "onepizza_no_lobby")
+        logger.warning("onepizza: lobby not visible after 30s — dumping page state")
 
     # Fill name if the ?name= param didn't auto-populate
     try:
@@ -1080,12 +1085,18 @@ async def _join_onepizza(page: Page, url: str, bot_name: str, start_muted: bool 
         except Exception:
             pass
 
-    # Click Join — try multiple selectors with longer timeout for SPA rendering
-    ok = await _click(page, ["#lobbyJoinBtn", "button:has-text('Join')", "button:has-text('join')", "[data-action='join']"], timeout=10_000)
-    if not ok:
-        await _screenshot(page, "onepizza_no_join_button")
-        raise MeetingBotError("Could not find join button on onepizza.io")
-    logger.info("onepizza join button clicked")
+    # Wait explicitly for the join button to be visible, then click
+    try:
+        await page.wait_for_selector("#lobbyJoinBtn", state="visible", timeout=15_000)
+        await page.click("#lobbyJoinBtn")
+        logger.info("onepizza: join button clicked (#lobbyJoinBtn)")
+    except Exception:
+        # Fallback: try broader selectors
+        ok = await _click(page, ["button:has-text('Join')", "button:has-text('join')"], timeout=5_000)
+        if not ok:
+            await _screenshot(page, "onepizza_no_join_button")
+            raise MeetingBotError("Could not find join button on onepizza.io")
+        logger.info("onepizza: join button clicked (fallback selector)")
 
 
 # ── Admission & end detection ─────────────────────────────────────────────────

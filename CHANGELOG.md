@@ -4,7 +4,14 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.5.6 — **Last updated:** 2026-03-21
+> **Latest version:** 2.5.7 — **Last updated:** 2026-03-21
+
+---
+
+## [2.5.7] - 2026-03-21
+
+### Fixed
+- **OnePizza bot join — Socket.IO compatibility** — `networkidle` never resolves on Socket.IO pages (WebSocket keeps connection open); switched to `load` + explicit `wait_for_selector("#lobby, #lobbyJoinBtn, #lobbyName", state="visible")` with 30s timeout; join button now waits for visibility before clicking
 
 ---
 
