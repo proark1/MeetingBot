@@ -4,7 +4,28 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.3.0 — **Last updated:** 2026-03-19
+> **Latest version:** 2.3.1 — **Last updated:** 2026-03-20
+
+---
+
+## [2.3.1] - 2026-03-20
+
+### Fixed
+- **RBAC fails closed** — Workspace role check now returns 500 on DB errors instead of silently allowing access
+- **Exception details no longer leaked** — Webhook delivery list endpoints return generic error, log details server-side
+- **Calendar feed SSRF protection** — iCal URLs validated against private/reserved IPs (reuses webhook `_block_ssrf`)
+- **Webhook state race condition** — Per-webhook locking prevents concurrent `dispatch_event` calls from corrupting `consecutive_failures` / `is_active`
+- **Action item sub-user isolation** — New `sub_user_id` column + filtering so sub-users only see their own action items
+- **Live transcript flush resilience** — Failed flush retries on next entry instead of losing the timestamp
+- **SSE push error handling** — Fire-and-forget tasks wrapped in safe handler to prevent silent "Task exception never retrieved" warnings
+
+### Changed
+- **Bot queue** — Uses `collections.deque` (O(1) popleft) instead of `list.pop(0)` (O(n))
+- **URL parsing** — Recurring meeting intelligence parses meeting URL once instead of 4 times
+- **Screenshot pruning** — Runs at session start in addition to session end
+- **VERSION file** — Fixed sync (was `2.2.0`, now matches actual version)
+- **Pre-commit hook** — `.githooks/pre-commit` warns if VERSION/README/CHANGELOG are stale
+- **CLAUDE.md** — Added mandatory pre-commit checklist for version and date updates
 
 ---
 

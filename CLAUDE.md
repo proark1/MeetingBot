@@ -225,3 +225,28 @@ No `tests/` directory. Verify changes via:
 | `sk_live_` / `sk_test_` API key prefixes | Sandbox detection logic depends on these |
 | Bot status strings (`ready`, `joining`, `in_call`, `transcribing`, `done`, etc.) | Stored in DB, returned in API, matched in frontend |
 | `bot_snapshots`, `accounts`, `webhooks` table names | Migrations and existing DB depend on them |
+
+---
+
+## Pre-Commit Checklist (MANDATORY)
+
+Before EVERY `git commit` or `git push`, update these files:
+
+1. **`VERSION`** — Must contain the current version number (single line, e.g. `2.3.1`)
+2. **`README.md`** line 3 — Update `**Version X.Y.Z**` to match VERSION
+3. **`README.md`** line 5 — Update `**Last updated:** YYYY-MM-DD` to today's date
+4. **`CHANGELOG.md`** line 7 — Update `**Latest version:** X.Y.Z — **Last updated:** YYYY-MM-DD`
+5. **`CHANGELOG.md`** — If this commit introduces notable changes, add or update the topmost `## [X.Y.Z]` entry
+
+**Version bump rules:**
+- Bug fixes / minor improvements → patch bump (e.g. 2.3.0 → 2.3.1)
+- New features / new endpoints → minor bump (e.g. 2.3.0 → 2.4.0)
+- Breaking API changes → major bump (e.g. 2.3.0 → 3.0.0)
+- Multiple commits within the same logical change → keep the same version, just update dates
+
+Never commit without verifying VERSION, README.md, and CHANGELOG.md are current.
+
+**Git hook:** A pre-commit hook in `.githooks/` warns if docs are stale. Enable it with:
+```bash
+git config core.hooksPath .githooks
+```

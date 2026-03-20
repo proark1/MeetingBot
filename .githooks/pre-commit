@@ -1,16 +1,14 @@
 #!/usr/bin/env bash
-# Pre-commit hook: require README.md to be updated whenever API-related
-# files change (routes, schemas, config, main app description).
+# Pre-commit hook: ensure documentation stays in sync.
 #
-# Files that count as "API surface":
-#   backend/app/api/*.py
-#   backend/app/schemas/*.py
-#   backend/app/config.py
-#   backend/app/main.py
+# 1. Require README.md to be staged when API-surface files change.
+# 2. Warn if VERSION / README.md / CHANGELOG.md have stale version or date.
 
 set -euo pipefail
 
 STAGED=$(git diff --cached --name-only)
+
+# ── Check 1: API files require README update ──────────────────────────────────
 
 api_changed=0
 doc_changed=0
@@ -41,6 +39,36 @@ if [ "$api_changed" -eq 1 ] && [ "$doc_changed" -eq 0 ]; then
     echo "╚══════════════════════════════════════════════════════════╝"
     echo ""
     exit 1
+fi
+
+# ── Check 2: Version & date consistency (warnings only) ──────────────────────
+
+VERSION=$(cat VERSION 2>/dev/null | tr -d '[:space:]')
+TODAY=$(date +%Y-%m-%d)
+WARN=0
+
+if [ -n "$VERSION" ]; then
+    if ! grep -q "Version $VERSION" README.md 2>/dev/null; then
+        echo "⚠  README.md version does not match VERSION file ($VERSION)"
+        WARN=1
+    fi
+
+    if ! grep -q "Latest version.*$VERSION" CHANGELOG.md 2>/dev/null; then
+        echo "⚠  CHANGELOG.md latest version does not match VERSION file ($VERSION)"
+        WARN=1
+    fi
+fi
+
+if ! grep -q "Last updated.*$TODAY" README.md 2>/dev/null; then
+    echo "⚠  README.md 'Last updated' date is not today ($TODAY)"
+    WARN=1
+fi
+
+if [ "$WARN" -eq 1 ]; then
+    echo ""
+    echo "   Tip: update VERSION, README.md, and CHANGELOG.md before committing."
+    echo "   See CLAUDE.md → 'Pre-Commit Checklist' for details."
+    echo ""
 fi
 
 exit 0
