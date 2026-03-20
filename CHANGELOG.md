@@ -4,7 +4,14 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.5.3 — **Last updated:** 2026-03-20
+> **Latest version:** 2.5.4 — **Last updated:** 2026-03-20
+
+---
+
+## [2.5.4] - 2026-03-20
+
+### Fixed
+- **Admin analytics error visibility** — Proxy endpoint now returns the actual exception type and message instead of generic "Internal Server Error", enabling debugging
 
 ---
 

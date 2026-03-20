@@ -1575,8 +1575,15 @@ async def admin_analytics_data_ui(request: Request, db: AsyncSession = Depends(g
     account = await _get_account_from_request(request, db)
     if not _is_admin(account):
         return JSONResponse({"detail": "Forbidden"}, status_code=403)
-    from app.api.admin import platform_analytics
-    return await platform_analytics(db=db, _admin=account.id)
+    try:
+        from app.api.admin import platform_analytics
+        return await platform_analytics(db=db, _admin=account.id)
+    except Exception as exc:
+        logger.exception("Admin analytics proxy failed")
+        return JSONResponse(
+            {"detail": f"Analytics error: {type(exc).__name__}: {exc}"},
+            status_code=500,
+        )
 
 
 @router.get("/admin/support-lookup-data", include_in_schema=False)
