@@ -741,8 +741,9 @@ async def platform_analytics(
             for r in credits_by_type_r.all()
         }
 
-        # Use strftime for SQLite compatibility (func.date is PostgreSQL-only)
-        _date_expr = func.strftime('%Y-%m-%d', CreditTransaction.created_at)
+        # Use cast(... as Date) for cross-DB compatibility (works on both SQLite and PostgreSQL)
+        from sqlalchemy import Date, cast
+        _date_expr = cast(CreditTransaction.created_at, Date)
         daily_rev_r = await db.execute(
             select(_date_expr, func.sum(CreditTransaction.amount_usd))
             .where(CreditTransaction.created_at >= d30, CreditTransaction.amount_usd > 0)
@@ -754,6 +755,7 @@ async def platform_analytics(
             daily_revenue.append({"date": day, "amount": daily_rev_map.get(day, 0)})
     except Exception:
         logger.warning("Billing analytics query failed — using defaults", exc_info=True)
+        await db.rollback()  # reset aborted transaction so subsequent queries work
         daily_revenue = [{"date": (now - timedelta(days=29 - i)).strftime("%Y-%m-%d"), "amount": 0} for i in range(30)]
 
     # ── Webhook Health ─────────────────────────────────────────────────────────
@@ -790,6 +792,7 @@ async def platform_analytics(
         ]
     except Exception:
         logger.warning("Webhook analytics query failed — using defaults", exc_info=True)
+        await db.rollback()
 
     # ── Action Items Stats ─────────────────────────────────────────────────────
     ai_total_count = 0
@@ -807,8 +810,10 @@ async def platform_analytics(
         ai_completion = round(100 * ai_done_count / ai_total_count, 1) if ai_total_count > 0 else 0.0
     except Exception:
         logger.warning("Action items analytics query failed — using defaults", exc_info=True)
+        await db.rollback()
 
     # ── System Status ──────────────────────────────────────────────────────────
+    from app.config import settings as _settings
     from app.api.bots import _running_tasks, _bot_queue
 
     result = {
@@ -872,7 +877,7 @@ async def platform_analytics(
         "system": {
             "running_tasks": sum(1 for t in _running_tasks.values() if not t.done()),
             "queue_depth": len(_bot_queue),
-            "max_concurrent": settings.MAX_CONCURRENT_BOTS,
+            "max_concurrent": _settings.MAX_CONCURRENT_BOTS,
             "in_memory_bots": len(active_bots),
         },
         "per_user": per_user,

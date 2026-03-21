@@ -4,7 +4,17 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.5.9 — **Last updated:** 2026-03-21
+> **Latest version:** 2.6.0 — **Last updated:** 2026-03-21
+
+---
+
+## [2.6.0] - 2026-03-21
+
+### Fixed
+- **Admin analytics: 3 critical bugs** —
+  1. `func.strftime` → `cast(col, Date)` — strftime is SQLite-only, doesn't exist in PostgreSQL (Railway production DB). Now uses SQLAlchemy `cast(col, Date)` which works on both.
+  2. `NameError: settings` → `from app.config import settings as _settings` — settings wasn't imported in the analytics function scope
+  3. `InFailedSQLTransactionError` cascade — Added `await db.rollback()` in each except block so a failed billing query doesn't corrupt the DB transaction for subsequent webhook/action-item queries
 
 ---
 
