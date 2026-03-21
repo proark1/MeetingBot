@@ -4,7 +4,22 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.6.0 — **Last updated:** 2026-03-21
+> **Latest version:** 2.7.0 — **Last updated:** 2026-03-21
+
+---
+
+## [2.7.0] - 2026-03-21
+
+### Fixed
+- **OnePizza bot: complete rewrite of join + admission + alone detection** —
+  - `_join_onepizza()`: Simplified from 100+ lines to 40. Uses meetingservice's auto-join (`?name=` URL param triggers automatic `joinMeeting()` call). Falls back to manual lobby flow only if auto-join doesn't fire.
+  - `_wait_for_admission()`: Now checks `#meetingRoom` visible + `#lobby` hidden (the definitive meetingservice signals), instead of checking `#leaveBtn` + `#waitingRoomOverlay` which didn't match the actual DOM.
+  - `_is_bot_alone()`: Now counts `#videoGrid > div` children instead of `.video-tile:not(.is-local)` which didn't match meetingservice's actual CSS classes.
+  - `_END_TEXTS["onepizza"]`: Added "the meeting has ended" for completeness.
+  - Mic/camera controls: Now uses in-call controls (`#micBtn`, `#camBtn`) instead of lobby controls, since auto-join skips the lobby.
+
+### Added
+- **INTEGRATION_GUIDE.md** — Complete guide for 1tab and other consumers: bot creation, webhook-driven status tracking (not polling), supported platforms, error handling, lifecycle documentation. Highlights that polling with 404 loops forever after server restarts.
 
 ---
 
