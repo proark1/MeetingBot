@@ -18,29 +18,78 @@ import {
   ValidationError,
 } from "./errors.js";
 import type {
+  AccountInfo,
+  ActionItemListResponse,
+  ActionItemResponse,
+  AddWorkspaceMemberParams,
+  AnalysisResponse,
+  AnalyticsResponse,
+  AnalyzeBotParams,
   ApiKeyCreateResponse,
   ApiKeyListResponse,
+  ApiUsageResponse,
+  AskBotParams,
+  AskResponse,
+  AuditLogResponse,
   BalanceResponse,
   BotListResponse,
   BotResponse,
   BotStats,
+  CalendarFeedListResponse,
+  CalendarFeedResponse,
+  CallMcpToolParams,
   CheckoutResponse,
   CreateBotParams,
+  CreateCalendarFeedParams,
   CreateCheckoutParams,
+  CreateIntegrationParams,
+  CreateKeywordAlertParams,
   CreateWebhookParams,
+  DefaultPromptResponse,
   ExportJsonResponse,
+  FollowupEmailParams,
+  FollowupEmailResponse,
+  GetAuditLogParams,
+  HighlightsResponse,
+  IntegrationListResponse,
+  IntegrationResponse,
+  KeywordAlertListResponse,
+  KeywordAlertResponse,
+  ListActionItemsParams,
+  ListAllDeliveriesParams,
   ListBotsParams,
   ListWebhookDeliveriesParams,
   LoginResponse,
+  McpCallResponse,
+  McpSchemaResponse,
   MeetingBotClientConfig,
+  MyAnalyticsResponse,
   NotificationPrefs,
   PlanInfo,
+  RecurringAnalyticsResponse,
   RegisterParams,
+  RenameSpeakersParams,
+  RetentionPolicyResponse,
+  SearchMeetingsParams,
+  SearchResponse,
+  ShareResponse,
+  TemplateListResponse,
+  TranscriptResponse,
+  UpdateAccountTypeParams,
+  UpdateActionItemParams,
+  UpdateIntegrationParams,
+  UpdateKeywordAlertParams,
   UpdateNotificationPrefsParams,
+  UpdateRetentionPolicyParams,
   UpdateWebhookParams,
+  UpdateWorkspaceParams,
   WebhookDeliveryListResponse,
+  WebhookEventsResponse,
   WebhookListResponse,
   WebhookResponse,
+  WorkspaceListResponse,
+  WorkspaceMemberListResponse,
+  WorkspaceResponse,
 } from "./types.js";
 
 const SDK_VERSION = "js/1.0.0";
@@ -455,5 +504,429 @@ export class MeetingBotClient {
    */
   async exportSrt(id: string): Promise<ArrayBuffer> {
     return this.request("GET", `/api/v1/bot/${id}/export/srt`, { binary: true });
+  }
+
+  /**
+   * Export a bot session as Markdown. Returns an ArrayBuffer.
+   */
+  async exportMarkdown(id: string): Promise<ArrayBuffer> {
+    return this.request("GET", `/api/v1/bot/${id}/export/markdown`, { binary: true });
+  }
+
+  // -------------------------------------------------------------------------
+  // Bots — Advanced
+  // -------------------------------------------------------------------------
+
+  /**
+   * Get the raw transcript for a bot session.
+   */
+  async getTranscript(id: string): Promise<TranscriptResponse> {
+    return this.request<TranscriptResponse>("GET", `/api/v1/bot/${id}/transcript`, {});
+  }
+
+  /**
+   * Re-run AI analysis on a bot's transcript.
+   */
+  async analyzeBot(id: string, params: AnalyzeBotParams = {}): Promise<AnalysisResponse> {
+    return this.request<AnalysisResponse>("POST", `/api/v1/bot/${id}/analyze`, { body: params });
+  }
+
+  /**
+   * Get curated highlights from a meeting.
+   */
+  async getHighlights(id: string): Promise<HighlightsResponse> {
+    return this.request<HighlightsResponse>("GET", `/api/v1/bot/${id}/highlight`, {});
+  }
+
+  /**
+   * Ask a freeform question about a completed bot's transcript.
+   */
+  async askBot(id: string, params: AskBotParams): Promise<AskResponse> {
+    return this.request<AskResponse>("POST", `/api/v1/bot/${id}/ask`, { body: params });
+  }
+
+  /**
+   * Ask a question about a live in-progress bot's transcript.
+   */
+  async askLiveBot(id: string, params: AskBotParams): Promise<AskResponse> {
+    return this.request<AskResponse>("POST", `/api/v1/bot/${id}/ask-live`, { body: params });
+  }
+
+  /**
+   * Generate a follow-up email for a meeting.
+   */
+  async generateFollowupEmail(id: string, params: FollowupEmailParams = {}): Promise<FollowupEmailResponse> {
+    return this.request<FollowupEmailResponse>("POST", `/api/v1/bot/${id}/followup-email`, { body: params });
+  }
+
+  /**
+   * Rename speaker labels in a bot's transcript.
+   */
+  async renameSpeakers(id: string, params: RenameSpeakersParams): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>("PATCH", `/api/v1/bot/${id}/speakers`, { body: params });
+  }
+
+  /**
+   * Generate a shareable link for a meeting.
+   */
+  async shareBot(id: string): Promise<ShareResponse> {
+    return this.request<ShareResponse>("POST", `/api/v1/bot/${id}/share`, { body: {} });
+  }
+
+  // -------------------------------------------------------------------------
+  // Webhooks — Extended
+  // -------------------------------------------------------------------------
+
+  /**
+   * List all supported webhook event types.
+   */
+  async listWebhookEvents(): Promise<WebhookEventsResponse> {
+    return this.request<WebhookEventsResponse>("GET", "/api/v1/webhook/events", {});
+  }
+
+  /**
+   * Send a test event to a webhook.
+   */
+  async testWebhook(id: string): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>("POST", `/api/v1/webhook/${id}/test`, { body: {} });
+  }
+
+  /**
+   * List all webhook deliveries across all webhooks.
+   */
+  async listAllDeliveries(params: ListAllDeliveriesParams = {}): Promise<WebhookDeliveryListResponse> {
+    return this.request<WebhookDeliveryListResponse>("GET", "/api/v1/webhook/deliveries", {
+      params: params as Record<string, number | undefined>,
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // Auth — Extended
+  // -------------------------------------------------------------------------
+
+  /**
+   * Get current account information.
+   */
+  async getMe(): Promise<AccountInfo> {
+    return this.request<AccountInfo>("GET", "/api/v1/auth/me", {});
+  }
+
+  /**
+   * List all test (sandbox) API keys.
+   */
+  async listTestKeys(): Promise<ApiKeyListResponse> {
+    return this.request<ApiKeyListResponse>("GET", "/api/v1/auth/test-keys", {});
+  }
+
+  /**
+   * Create a new test (sandbox) API key.
+   */
+  async createTestKey(name: string): Promise<ApiKeyCreateResponse> {
+    return this.request<ApiKeyCreateResponse>("POST", "/api/v1/auth/test-keys", { body: { name } });
+  }
+
+  /**
+   * Delete the current account.
+   */
+  async deleteAccount(): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>("DELETE", "/api/v1/auth/account", {});
+  }
+
+  /**
+   * Change the account type.
+   */
+  async updateAccountType(params: UpdateAccountTypeParams): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>("PUT", "/api/v1/auth/account-type", { body: params });
+  }
+
+  // -------------------------------------------------------------------------
+  // Templates
+  // -------------------------------------------------------------------------
+
+  /**
+   * List all available analysis templates.
+   */
+  async listTemplates(): Promise<TemplateListResponse> {
+    return this.request<TemplateListResponse>("GET", "/api/v1/templates", {});
+  }
+
+  /**
+   * Get the default analysis prompt.
+   */
+  async getDefaultPrompt(): Promise<DefaultPromptResponse> {
+    return this.request<DefaultPromptResponse>("GET", "/api/v1/templates/default-prompt", {});
+  }
+
+  // -------------------------------------------------------------------------
+  // Analytics
+  // -------------------------------------------------------------------------
+
+  /**
+   * Get account analytics dashboard.
+   */
+  async getAnalytics(): Promise<AnalyticsResponse> {
+    return this.request<AnalyticsResponse>("GET", "/api/v1/analytics", {});
+  }
+
+  /**
+   * Get recurring meeting insights.
+   */
+  async getRecurringAnalytics(attendees?: string): Promise<RecurringAnalyticsResponse> {
+    const params: Record<string, string | undefined> = {};
+    if (attendees !== undefined) {
+      params.attendees = attendees;
+    }
+    return this.request<RecurringAnalyticsResponse>("GET", "/api/v1/analytics/recurring", { params });
+  }
+
+  /**
+   * Get API usage statistics.
+   */
+  async getApiUsage(): Promise<ApiUsageResponse> {
+    return this.request<ApiUsageResponse>("GET", "/api/v1/analytics/api-usage", {});
+  }
+
+  /**
+   * Get personal analytics.
+   */
+  async getMyAnalytics(): Promise<MyAnalyticsResponse> {
+    return this.request<MyAnalyticsResponse>("GET", "/api/v1/analytics/me", {});
+  }
+
+  /**
+   * Search meetings and transcripts.
+   */
+  async searchMeetings(params: SearchMeetingsParams): Promise<SearchResponse> {
+    return this.request<SearchResponse>("GET", "/api/v1/search", {
+      params: params as Record<string, string | number | undefined>,
+    });
+  }
+
+  /**
+   * Get account audit log.
+   */
+  async getAuditLog(params: GetAuditLogParams = {}): Promise<AuditLogResponse> {
+    return this.request<AuditLogResponse>("GET", "/api/v1/audit-log", {
+      params: params as Record<string, string | number | undefined>,
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // Action Items
+  // -------------------------------------------------------------------------
+
+  /**
+   * List action items from meetings.
+   */
+  async listActionItems(params: ListActionItemsParams = {}): Promise<ActionItemListResponse> {
+    return this.request<ActionItemListResponse>("GET", "/api/v1/action-items", {
+      params: params as Record<string, string | number | undefined>,
+    });
+  }
+
+  /**
+   * Update an action item.
+   */
+  async updateActionItem(id: string, params: UpdateActionItemParams): Promise<ActionItemResponse> {
+    return this.request<ActionItemResponse>("PATCH", `/api/v1/action-items/${id}`, { body: params });
+  }
+
+  // -------------------------------------------------------------------------
+  // Keyword Alerts
+  // -------------------------------------------------------------------------
+
+  /**
+   * List all keyword alerts.
+   */
+  async listKeywordAlerts(): Promise<KeywordAlertListResponse> {
+    return this.request<KeywordAlertListResponse>("GET", "/api/v1/keyword-alerts", {});
+  }
+
+  /**
+   * Create a new keyword alert.
+   */
+  async createKeywordAlert(params: CreateKeywordAlertParams): Promise<KeywordAlertResponse> {
+    return this.request<KeywordAlertResponse>("POST", "/api/v1/keyword-alerts", { body: params });
+  }
+
+  /**
+   * Get a keyword alert by ID.
+   */
+  async getKeywordAlert(id: string): Promise<KeywordAlertResponse> {
+    return this.request<KeywordAlertResponse>("GET", `/api/v1/keyword-alerts/${id}`, {});
+  }
+
+  /**
+   * Update a keyword alert.
+   */
+  async updateKeywordAlert(id: string, params: UpdateKeywordAlertParams): Promise<KeywordAlertResponse> {
+    return this.request<KeywordAlertResponse>("PATCH", `/api/v1/keyword-alerts/${id}`, { body: params });
+  }
+
+  /**
+   * Delete a keyword alert.
+   */
+  async deleteKeywordAlert(id: string): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>("DELETE", `/api/v1/keyword-alerts/${id}`, {});
+  }
+
+  // -------------------------------------------------------------------------
+  // Calendar Feeds
+  // -------------------------------------------------------------------------
+
+  /**
+   * List all calendar feeds.
+   */
+  async listCalendarFeeds(): Promise<CalendarFeedListResponse> {
+    return this.request<CalendarFeedListResponse>("GET", "/api/v1/calendar", {});
+  }
+
+  /**
+   * Add a calendar feed.
+   */
+  async createCalendarFeed(params: CreateCalendarFeedParams): Promise<CalendarFeedResponse> {
+    return this.request<CalendarFeedResponse>("POST", "/api/v1/calendar", { body: params });
+  }
+
+  /**
+   * Delete a calendar feed.
+   */
+  async deleteCalendarFeed(id: string): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>("DELETE", `/api/v1/calendar/${id}`, {});
+  }
+
+  /**
+   * Trigger a sync for a calendar feed.
+   */
+  async syncCalendarFeed(id: string): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>("POST", `/api/v1/calendar/${id}/sync`, { body: {} });
+  }
+
+  // -------------------------------------------------------------------------
+  // Integrations
+  // -------------------------------------------------------------------------
+
+  /**
+   * List all integrations.
+   */
+  async listIntegrations(): Promise<IntegrationListResponse> {
+    return this.request<IntegrationListResponse>("GET", "/api/v1/integrations", {});
+  }
+
+  /**
+   * Create a new integration.
+   */
+  async createIntegration(params: CreateIntegrationParams): Promise<IntegrationResponse> {
+    return this.request<IntegrationResponse>("POST", "/api/v1/integrations", { body: params });
+  }
+
+  /**
+   * Update an integration.
+   */
+  async updateIntegration(id: string, params: UpdateIntegrationParams): Promise<IntegrationResponse> {
+    return this.request<IntegrationResponse>("PATCH", `/api/v1/integrations/${id}`, { body: params });
+  }
+
+  /**
+   * Delete an integration.
+   */
+  async deleteIntegration(id: string): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>("DELETE", `/api/v1/integrations/${id}`, {});
+  }
+
+  // -------------------------------------------------------------------------
+  // Workspaces
+  // -------------------------------------------------------------------------
+
+  /**
+   * List workspaces the current account owns or is a member of.
+   */
+  async listWorkspaces(): Promise<WorkspaceListResponse> {
+    return this.request<WorkspaceListResponse>("GET", "/api/v1/workspaces", {});
+  }
+
+  /**
+   * Create a new workspace.
+   */
+  async createWorkspace(name: string): Promise<WorkspaceResponse> {
+    return this.request<WorkspaceResponse>("POST", "/api/v1/workspaces", { body: { name } });
+  }
+
+  /**
+   * Get workspace details.
+   */
+  async getWorkspace(id: string): Promise<WorkspaceResponse> {
+    return this.request<WorkspaceResponse>("GET", `/api/v1/workspaces/${id}`, {});
+  }
+
+  /**
+   * Update a workspace.
+   */
+  async updateWorkspace(id: string, params: UpdateWorkspaceParams): Promise<WorkspaceResponse> {
+    return this.request<WorkspaceResponse>("PATCH", `/api/v1/workspaces/${id}`, { body: params });
+  }
+
+  /**
+   * Delete a workspace (owner only).
+   */
+  async deleteWorkspace(id: string): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>("DELETE", `/api/v1/workspaces/${id}`, {});
+  }
+
+  /**
+   * List members of a workspace.
+   */
+  async listWorkspaceMembers(id: string): Promise<WorkspaceMemberListResponse> {
+    return this.request<WorkspaceMemberListResponse>("GET", `/api/v1/workspaces/${id}/members`, {});
+  }
+
+  /**
+   * Add a member to a workspace.
+   */
+  async addWorkspaceMember(id: string, params: AddWorkspaceMemberParams): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>("POST", `/api/v1/workspaces/${id}/members`, { body: params });
+  }
+
+  /**
+   * Remove a member from a workspace.
+   */
+  async removeWorkspaceMember(workspaceId: string, accountId: string): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>("DELETE", `/api/v1/workspaces/${workspaceId}/members/${accountId}`, {});
+  }
+
+  // -------------------------------------------------------------------------
+  // Retention
+  // -------------------------------------------------------------------------
+
+  /**
+   * Get the current retention policy.
+   */
+  async getRetentionPolicy(): Promise<RetentionPolicyResponse> {
+    return this.request<RetentionPolicyResponse>("GET", "/api/v1/retention", {});
+  }
+
+  /**
+   * Update the retention policy.
+   */
+  async updateRetentionPolicy(params: UpdateRetentionPolicyParams): Promise<RetentionPolicyResponse> {
+    return this.request<RetentionPolicyResponse>("PUT", "/api/v1/retention", { body: params });
+  }
+
+  // -------------------------------------------------------------------------
+  // MCP
+  // -------------------------------------------------------------------------
+
+  /**
+   * Get the MCP server manifest and tool list.
+   */
+  async getMcpSchema(): Promise<McpSchemaResponse> {
+    return this.request<McpSchemaResponse>("GET", "/api/v1/mcp/schema", {});
+  }
+
+  /**
+   * Execute an MCP tool.
+   */
+  async callMcpTool(params: CallMcpToolParams): Promise<McpCallResponse> {
+    return this.request<McpCallResponse>("POST", "/api/v1/mcp/call", { body: params });
   }
 }

@@ -4,7 +4,17 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.8.0 — **Last updated:** 2026-03-22
+> **Latest version:** 2.9.0 — **Last updated:** 2026-03-22
+
+---
+
+## [2.9.0] - 2026-03-22
+
+### Added
+- **Python SDK: ~50 new methods** covering all API endpoints — bots (transcript, analyze, ask, highlights, share, follow-up email, rename speakers), webhooks (events list, test delivery), auth (get_me, test keys, account management), templates, analytics (dashboard, recurring, API usage, personal, search, audit log), action items, keyword alerts, calendar feeds, integrations, workspaces (full CRUD + member management), retention policies, and MCP tools
+- **TypeScript SDK: ~50 new methods** mirroring all Python SDK additions with full type safety — new interfaces for all response types, param types, and camelCase method names
+- **Workspace management UI** in the dashboard — replaces "coming soon" placeholder with full list view, create form, member management panel with add/remove/role-change, and permission-aware actions (owner vs admin vs member vs viewer)
+- **Test infrastructure** — pytest + pytest-asyncio setup with shared fixtures (in-memory SQLite, app instance, authenticated client), 17 smoke tests across health, auth, bots, and webhooks
 
 ---
 
