@@ -4,7 +4,18 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.7.0 — **Last updated:** 2026-03-21
+> **Latest version:** 2.8.0 — **Last updated:** 2026-03-22
+
+---
+
+## [2.8.0] - 2026-03-22
+
+### Added
+- **Landing page mode switcher** — pill-style toggle in the hero section lets visitors choose between "For Teams" (calendar-first, dashboard-focused) and "For Developers" (API-first, code-focused) experiences
+- Teams mode: simplified hero messaging, calendar auto-join flow, dashboard preview widget, UI-focused "How It Works" steps, and team-oriented CTA
+- Developers mode: API-focused hero with curl quickstart widget, SDK/WebSocket/MCP platform pills, code-first "How It Works" steps, and developer-oriented CTA
+- Mode preference persists via localStorage across visits
+- Smooth fade-in transitions between modes
 
 ---
 
