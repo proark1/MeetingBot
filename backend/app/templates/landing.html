@@ -815,6 +815,95 @@
       flex-shrink: 0;
     }
 
+    /* ── Mode switcher ── */
+    .mode-switcher {
+      display: inline-flex;
+      background: var(--bg-muted);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 4px;
+      margin-bottom: 2rem;
+      position: relative;
+    }
+
+    .mode-btn {
+      position: relative;
+      z-index: 1;
+      padding: 0.55rem 1.5rem;
+      border: none;
+      background: transparent;
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: var(--text-secondary);
+      cursor: pointer;
+      border-radius: 9px;
+      transition: color 0.25s;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      white-space: nowrap;
+    }
+
+    .mode-btn:hover { color: var(--text-primary); }
+
+    .mode-btn.active {
+      color: #fff;
+      background: var(--primary);
+      box-shadow: 0 2px 8px rgba(99,102,241,0.3);
+    }
+
+    .mode-btn .mode-icon { font-size: 1rem; }
+
+    /* ── Mode content transitions ── */
+    .mode-content { display: none; }
+    .mode-content.active {
+      display: block;
+      animation: modeFadeIn 0.35s ease-out;
+    }
+
+    @keyframes modeFadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ── Mode-dependent section visibility ── */
+    .mode-section { display: none; }
+    .mode-section.active { display: block; }
+
+    /* Teams-mode "How it works" visual card */
+    .ui-step-card {
+      background: #ffffff;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 2rem;
+      text-align: center;
+      transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
+      height: 100%;
+    }
+    .ui-step-card:hover {
+      border-color: rgba(99,102,241,0.3);
+      box-shadow: 0 8px 30px rgba(99,102,241,0.08);
+      transform: translateY(-2px);
+    }
+    .ui-step-num {
+      width: 52px; height: 52px; border-radius: 14px; background: var(--grad);
+      display: inline-flex; align-items: center; justify-content: center;
+      font-weight: 800; font-size: 1.1rem; color: #fff; margin-bottom: 1rem;
+    }
+    .ui-step-card h4 { font-size: 1.05rem; font-weight: 700; margin-bottom: 0.5rem; }
+    .ui-step-card p { font-size: 0.875rem; color: var(--text-secondary); margin: 0; line-height: 1.6; }
+
+    /* Social proof trust bar */
+    .trust-bar {
+      display: flex; align-items: center; justify-content: center;
+      gap: 2rem; flex-wrap: wrap; margin-top: 2rem;
+    }
+    .trust-item {
+      display: flex; align-items: center; gap: 0.4rem;
+      font-size: 0.82rem; font-weight: 500; color: var(--text-muted);
+    }
+    .trust-item .trust-icon { font-size: 1rem; }
+
     /* ── Responsive helpers ── */
     .section-py { padding: 5.5rem 0; }
     .section-py-sm { padding: 4rem 0; }
@@ -883,87 +972,187 @@
       Live on Zoom · Google Meet · Microsoft Teams
     </div>
 
-    <h1 class="hero-title">
-      AI Meeting Intelligence<br>
-      <span class="grad-text">That Works in Real Time</span>
-    </h1>
-
-    <p class="hero-sub">
-      Drop a bot into any meeting. Get live transcripts, instant action items,
-      coaching alerts, health scores, and deep analytics — all via API or dashboard.
-    </p>
-
-    <div class="hero-cta-group">
-      <a href="/register" class="btn-hero-primary">
-        Start for free — no credit card
-        <span>→</span>
-      </a>
-      <a href="/api/docs" target="_blank" class="btn-hero-secondary">
-        <span style="font-family:monospace;font-size:0.9rem">curl</span> the API ↗
-      </a>
+    <!-- ── Mode Switcher ── -->
+    <div class="mode-switcher" id="modeSwitcher">
+      <button class="mode-btn active" data-mode="teams" onclick="switchMode('teams')">
+        <span class="mode-icon">👥</span> For Teams
+      </button>
+      <button class="mode-btn" data-mode="developers" onclick="switchMode('developers')">
+        <span class="mode-icon">⌨️</span> For Developers
+      </button>
     </div>
 
-    <div class="platform-bar">
-      <div class="platform-pill">
-        <span class="platform-icon" style="background:#2D8CFF;color:#fff">Z</span>
-        Zoom
+    <!-- ── Teams Mode Hero ── -->
+    <div class="mode-content active" data-mode="teams">
+      <h1 class="hero-title">
+        Never Miss a Meeting<br>
+        <span class="grad-text">Insight Again</span>
+      </h1>
+
+      <p class="hero-sub">
+        Connect your calendar and let AI join every meeting for you. Get summaries,
+        action items, and coaching — delivered straight to Slack, email, or your dashboard.
+      </p>
+
+      <div class="hero-cta-group">
+        <a href="/register" class="btn-hero-primary">
+          Start for free — no credit card
+          <span>→</span>
+        </a>
+        <a href="#how-it-works" class="btn-hero-secondary">
+          See how it works ↓
+        </a>
       </div>
-      <div class="platform-pill">
-        <span class="platform-icon" style="background:#00832D;color:#fff">G</span>
-        Google Meet
+
+      <div class="platform-bar">
+        <div class="platform-pill">
+          <span class="platform-icon" style="background:#2D8CFF;color:#fff">Z</span>
+          Zoom
+        </div>
+        <div class="platform-pill">
+          <span class="platform-icon" style="background:#00832D;color:#fff">G</span>
+          Google Meet
+        </div>
+        <div class="platform-pill">
+          <span class="platform-icon" style="background:#5558AF;color:#fff">T</span>
+          Microsoft Teams
+        </div>
+        <div class="platform-pill">
+          <span style="color:var(--green);font-size:0.8rem">✓</span>
+          SOC 2 ready
+        </div>
+        <div class="platform-pill">
+          <span style="color:var(--green);font-size:0.8rem">✓</span>
+          GDPR compliant
+        </div>
       </div>
-      <div class="platform-pill">
-        <span class="platform-icon" style="background:#5558AF;color:#fff">T</span>
-        Microsoft Teams
+
+      <!-- Dashboard preview widget -->
+      <div class="mt-5">
+        <div class="demo-widget float-anim">
+          <div class="demo-toolbar">
+            <div class="demo-dots">
+              <div class="demo-dot demo-dot-r"></div>
+              <div class="demo-dot demo-dot-y"></div>
+              <div class="demo-dot demo-dot-g"></div>
+            </div>
+            <div style="font-size:0.8rem;color:var(--text-muted);font-weight:600">Q4 Planning · 32:14</div>
+            <div class="live-badge"><div class="live-dot"></div>Live</div>
+          </div>
+          <div class="transcript-line">
+            <div class="speaker-name" style="color:#818cf8">Sarah (CEO)</div>
+            <div class="speaker-text">We need to finalize the go-to-market plan by end of month. Who's owning the launch deck?</div>
+          </div>
+          <div class="transcript-line">
+            <div class="speaker-name" style="color:#059669">Marcus (Marketing)</div>
+            <div class="speaker-text">I'll have a draft ready by Thursday. Also looping in design for the assets.</div>
+          </div>
+          <div class="transcript-line" style="background:rgba(99,102,241,0.03)">
+            <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.5rem">
+              <div class="ai-chip">⚡ AI — Action Items</div>
+              <span style="font-size:0.7rem;color:var(--text-muted)">just now</span>
+            </div>
+            <div class="action-item-line" style="padding:0;margin-bottom:0.3rem">
+              <span style="color:var(--green);font-size:0.8rem">→</span>
+              <span style="color:var(--text-secondary);font-size:0.82rem"><strong style="color:var(--text-primary)">Marcus</strong> — Draft launch deck by Thursday</span>
+            </div>
+            <div class="action-item-line" style="padding:0">
+              <span style="color:var(--green);font-size:0.8rem">→</span>
+              <span style="color:var(--text-secondary);font-size:0.82rem"><strong style="color:var(--text-primary)">Marcus</strong> — Loop in design team for launch assets</span>
+            </div>
+          </div>
+          <div style="padding:0.6rem 1.25rem;background:rgba(245,158,11,0.05);border-top:1px solid var(--border);display:flex;align-items:center;gap:0.6rem;">
+            <span style="font-size:0.75rem">🏆</span>
+            <span style="font-size:0.78rem;color:#d97706;font-weight:600">Coaching: Sarah speaking 72% of the time — others may need space to contribute.</span>
+          </div>
+        </div>
       </div>
-      <div class="platform-pill">
-        <span style="color:var(--green);font-size:0.8rem">✓</span>
-        SOC 2 ready
-      </div>
-      <div class="platform-pill">
-        <span style="color:var(--green);font-size:0.8rem">✓</span>
-        GDPR compliant
+
+      <div class="trust-bar">
+        <div class="trust-item"><span class="trust-icon">📅</span> Calendar auto-join</div>
+        <div class="trust-item"><span class="trust-icon">💬</span> Slack & Notion sync</div>
+        <div class="trust-item"><span class="trust-icon">📧</span> Email digests</div>
+        <div class="trust-item"><span class="trust-icon">🔒</span> Enterprise-grade security</div>
       </div>
     </div>
 
-    <!-- Live demo widget -->
-    <div class="mt-5">
-      <div class="demo-widget float-anim">
-        <div class="demo-toolbar">
-          <div class="demo-dots">
-            <div class="demo-dot demo-dot-r"></div>
-            <div class="demo-dot demo-dot-y"></div>
-            <div class="demo-dot demo-dot-g"></div>
+    <!-- ── Developers Mode Hero ── -->
+    <div class="mode-content" data-mode="developers">
+      <h1 class="hero-title">
+        Meeting Intelligence<br>
+        <span class="grad-text">API for Developers</span>
+      </h1>
+
+      <p class="hero-sub">
+        One POST to deploy a bot. WebSocket for live streams. Webhooks for events.
+        Python &amp; JS SDKs, sandbox keys, and full OpenAPI spec — ship in minutes.
+      </p>
+
+      <div class="hero-cta-group">
+        <a href="/register" class="btn-hero-primary">
+          Get your API key →
+        </a>
+        <a href="/api/docs" target="_blank" class="btn-hero-secondary">
+          <span style="font-family:monospace;font-size:0.9rem">curl</span> the API ↗
+        </a>
+      </div>
+
+      <div class="platform-bar">
+        <div class="platform-pill">
+          <span style="font-family:monospace;font-size:0.75rem;color:var(--primary);font-weight:700">REST</span>
+          Full API
+        </div>
+        <div class="platform-pill">
+          <span style="font-family:monospace;font-size:0.75rem;color:var(--cyan);font-weight:700">WS</span>
+          WebSocket
+        </div>
+        <div class="platform-pill">
+          <span style="font-family:monospace;font-size:0.75rem;color:var(--green);font-weight:700">SDK</span>
+          Python & JS
+        </div>
+        <div class="platform-pill">
+          <span style="font-family:monospace;font-size:0.75rem;color:var(--amber);font-weight:700">MCP</span>
+          AI Agent Ready
+        </div>
+        <div class="platform-pill">
+          <span style="color:var(--green);font-size:0.8rem">✓</span>
+          OpenAPI 3.1
+        </div>
+      </div>
+
+      <!-- Code demo widget -->
+      <div class="mt-5">
+        <div class="demo-widget float-anim" style="max-width:620px;text-align:left">
+          <div class="demo-toolbar">
+            <div class="demo-dots">
+              <div class="demo-dot demo-dot-r"></div>
+              <div class="demo-dot demo-dot-y"></div>
+              <div class="demo-dot demo-dot-g"></div>
+            </div>
+            <span style="font-size:0.78rem;color:var(--text-muted);font-family:monospace">quickstart.sh</span>
+            <div style="font-size:0.68rem;font-weight:700;color:var(--green);letter-spacing:0.04em;text-transform:uppercase">3 lines to live</div>
           </div>
-          <div style="font-size:0.8rem;color:var(--text-muted);font-weight:600">Q4 Planning · 32:14</div>
-          <div class="live-badge"><div class="live-dot"></div>Live</div>
-        </div>
-        <div class="transcript-line">
-          <div class="speaker-name" style="color:#818cf8">Sarah (CEO)</div>
-          <div class="speaker-text">We need to finalize the go-to-market plan by end of month. Who's owning the launch deck?</div>
-        </div>
-        <div class="transcript-line">
-          <div class="speaker-name" style="color:#059669">Marcus (Marketing)</div>
-          <div class="speaker-text">I'll have a draft ready by Thursday. Also looping in design for the assets.</div>
-        </div>
-        <div class="transcript-line" style="background:rgba(99,102,241,0.03)">
-          <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.5rem">
-            <div class="ai-chip">⚡ AI — Action Items</div>
-            <span style="font-size:0.7rem;color:var(--text-muted)">just now</span>
+          <div style="padding:1.25rem;font-family:'JetBrains Mono','Fira Code',monospace;font-size:0.8rem;line-height:2;overflow-x:auto">
+            <div><span class="tok-comment"># Create a bot — joins the meeting in &lt;3 seconds</span></div>
+            <div><span class="tok-obj">curl</span> <span class="tok-str">-X POST</span> https://api.justheretolisten.io/api/v1/bot <span class="tok-punc">\</span></div>
+            <div style="padding-left:1rem"><span class="tok-str">-H</span> <span class="tok-str">"Authorization: Bearer sk_live_..."</span> <span class="tok-punc">\</span></div>
+            <div style="padding-left:1rem"><span class="tok-str">-d</span> <span class="tok-str">'{"meeting_url": "https://zoom.us/j/123", "webhook_url": "https://you.com/hook"}'</span></div>
+            <div style="margin-top:0.75rem"><span class="tok-comment"># Response: {"id": "bot_abc123", "status": "joining", ...}</span></div>
+            <div style="margin-top:0.75rem"><span class="tok-comment"># Stream live transcript over WebSocket</span></div>
+            <div><span class="tok-obj">wscat</span> <span class="tok-str">-c</span> wss://api.justheretolisten.io/ws/bot_abc123</div>
           </div>
-          <div class="action-item-line" style="padding:0;margin-bottom:0.3rem">
-            <span style="color:var(--green);font-size:0.8rem">→</span>
-            <span style="color:var(--text-secondary);font-size:0.82rem"><strong style="color:var(--text-primary)">Marcus</strong> — Draft launch deck by Thursday</span>
-          </div>
-          <div class="action-item-line" style="padding:0">
-            <span style="color:var(--green);font-size:0.8rem">→</span>
-            <span style="color:var(--text-secondary);font-size:0.82rem"><strong style="color:var(--text-primary)">Marcus</strong> — Loop in design team for launch assets</span>
+          <div style="padding:0.6rem 1.25rem;background:rgba(16,185,129,0.05);border-top:1px solid var(--border);display:flex;align-items:center;gap:0.6rem">
+            <span style="font-size:0.75rem">⚡</span>
+            <span style="font-size:0.78rem;color:#059669;font-weight:600">13 webhook events · HMAC-SHA256 signed · Exponential backoff retry</span>
           </div>
         </div>
-        <div style="padding:0.6rem 1.25rem;background:rgba(245,158,11,0.05);border-top:1px solid var(--border);display:flex;align-items:center;gap:0.6rem;">
-          <span style="font-size:0.75rem">🏆</span>
-          <span style="font-size:0.78rem;color:#d97706;font-weight:600">Coaching: Sarah speaking 72% of the time — others may need space to contribute.</span>
-        </div>
+      </div>
+
+      <div class="trust-bar">
+        <div class="trust-item"><span class="trust-icon">🧪</span> Sandbox test keys</div>
+        <div class="trust-item"><span class="trust-icon">📦</span> Auto-gen SDKs</div>
+        <div class="trust-item"><span class="trust-icon">🪝</span> Webhook playground</div>
+        <div class="trust-item"><span class="trust-icon">🤖</span> MCP server</div>
       </div>
     </div>
   </div>
@@ -1377,37 +1566,71 @@
 <!-- ────────────────────────────────────────────────────────────────
      HOW IT WORKS
 ──────────────────────────────────────────────────────────────── -->
-<section class="section-py-sm" style="background:var(--bg-alt)">
+<section class="section-py-sm" style="background:var(--bg-alt)" id="how-it-works">
   <div class="container">
-    <div class="section-header" style="margin-bottom:2.5rem">
-      <div class="section-tag">How It Works</div>
-      <h2 class="section-title" style="font-size:1.9rem">Three steps to full intelligence</h2>
+    <!-- ── Teams mode: How It Works ── -->
+    <div class="mode-section active" data-mode="teams">
+      <div class="section-header" style="margin-bottom:2.5rem">
+        <div class="section-tag">How It Works</div>
+        <h2 class="section-title" style="font-size:1.9rem">Set it up once, never think about it again</h2>
+      </div>
+      <div class="row g-4 align-items-stretch">
+        <div class="col-md-4">
+          <div class="ui-step-card">
+            <div class="ui-step-num">1</div>
+            <h4>Connect your calendar</h4>
+            <p>Link Google Calendar or Outlook in one click. JustHereToListen.io sees your upcoming meetings automatically.</p>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="ui-step-card">
+            <div class="ui-step-num">2</div>
+            <h4>Bot joins for you</h4>
+            <p>A bot is dispatched to each meeting. It records, transcribes in real time, and captures every action item — hands-free.</p>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="ui-step-card">
+            <div class="ui-step-num">3</div>
+            <h4>Get your summary</h4>
+            <p>Within minutes of the call ending, receive a full summary, action items, health score, and coaching tips — in Slack, email, or your dashboard.</p>
+          </div>
+        </div>
+      </div>
     </div>
-    <div class="row g-4 align-items-start">
-      <div class="col-md-4">
-        <div class="step-item">
-          <div class="step-num">1</div>
-          <div class="step-content">
-            <h4>POST to create a bot</h4>
-            <p>Send the meeting URL, your webhook endpoint, and any options (PII redaction, translation language, cost rate). The bot joins within seconds.</p>
+
+    <!-- ── Developers mode: How It Works ── -->
+    <div class="mode-section" data-mode="developers">
+      <div class="section-header" style="margin-bottom:2.5rem">
+        <div class="section-tag">How It Works</div>
+        <h2 class="section-title" style="font-size:1.9rem">Three API calls to full intelligence</h2>
+      </div>
+      <div class="row g-4 align-items-start">
+        <div class="col-md-4">
+          <div class="step-item">
+            <div class="step-num">1</div>
+            <div class="step-content">
+              <h4>POST to create a bot</h4>
+              <p>Send the meeting URL, your webhook endpoint, and any options (PII redaction, translation language, cost rate). The bot joins within seconds.</p>
+            </div>
           </div>
         </div>
-      </div>
-      <div class="col-md-4">
-        <div class="step-item">
-          <div class="step-num">2</div>
-          <div class="step-content">
-            <h4>Stream live events</h4>
-            <p>Connect to the WebSocket for real-time transcript entries, action item flushes, coaching alerts, keyword matches, and translated lines.</p>
+        <div class="col-md-4">
+          <div class="step-item">
+            <div class="step-num">2</div>
+            <div class="step-content">
+              <h4>Stream live events</h4>
+              <p>Connect to the WebSocket for real-time transcript entries, action item flushes, coaching alerts, keyword matches, and translated lines.</p>
+            </div>
           </div>
         </div>
-      </div>
-      <div class="col-md-4">
-        <div class="step-item">
-          <div class="step-num">3</div>
-          <div class="step-content">
-            <h4>Receive complete analysis</h4>
-            <p>When the meeting ends, JustHereToListen.io fires your webhook with the full transcript, health score, AI summary, action items, chapters, and speaker stats.</p>
+        <div class="col-md-4">
+          <div class="step-item">
+            <div class="step-num">3</div>
+            <div class="step-content">
+              <h4>Receive complete analysis</h4>
+              <p>When the meeting ends, JustHereToListen.io fires your webhook with the full transcript, health score, AI summary, action items, chapters, and speaker stats.</p>
+            </div>
           </div>
         </div>
       </div>
@@ -1521,16 +1744,35 @@
 <section class="cta-section">
   <div class="cta-glow"></div>
   <div class="container text-center position-relative">
-    <div class="section-tag mb-4">Get started today</div>
-    <h2 class="section-title mb-4">
-      Your next meeting<br>deserves better notes
-    </h2>
-    <p class="section-sub mb-4">
-      Free tier, no credit card, live in under 60 seconds. One API call. Full intelligence.
-    </p>
-    <div class="hero-cta-group">
-      <a href="/register" class="btn-hero-primary">Create free account →</a>
-      <a href="/api/docs" target="_blank" class="btn-hero-secondary">Read the API docs</a>
+    <!-- ── Teams mode CTA ── -->
+    <div class="mode-section active" data-mode="teams">
+      <div class="section-tag mb-4">Get started today</div>
+      <h2 class="section-title mb-4">
+        Your next meeting<br>deserves better notes
+      </h2>
+      <p class="section-sub mb-4">
+        Free tier, no credit card. Connect your calendar and get AI-powered summaries,
+        action items, and coaching after every meeting.
+      </p>
+      <div class="hero-cta-group">
+        <a href="/register" class="btn-hero-primary">Create free account →</a>
+        <a href="#how-it-works" class="btn-hero-secondary">See how it works ↓</a>
+      </div>
+    </div>
+
+    <!-- ── Developers mode CTA ── -->
+    <div class="mode-section" data-mode="developers">
+      <div class="section-tag mb-4">Start building today</div>
+      <h2 class="section-title mb-4">
+        Ship meeting intelligence<br>in your app tonight
+      </h2>
+      <p class="section-sub mb-4">
+        Free tier, sandbox keys, full OpenAPI spec. One POST to deploy a bot, one WebSocket for live streams, one webhook for results.
+      </p>
+      <div class="hero-cta-group">
+        <a href="/register" class="btn-hero-primary">Get your API key →</a>
+        <a href="/api/docs" target="_blank" class="btn-hero-secondary">Read the API docs ↗</a>
+      </div>
     </div>
   </div>
 </section>
@@ -1585,5 +1827,36 @@
 </footer>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+function switchMode(mode) {
+  // Update toggle buttons
+  document.querySelectorAll('.mode-btn').forEach(function(btn) {
+    btn.classList.toggle('active', btn.getAttribute('data-mode') === mode);
+  });
+
+  // Update hero content
+  document.querySelectorAll('.mode-content').forEach(function(el) {
+    el.classList.toggle('active', el.getAttribute('data-mode') === mode);
+  });
+
+  // Update mode-dependent sections (How It Works, CTA)
+  document.querySelectorAll('.mode-section').forEach(function(el) {
+    el.classList.toggle('active', el.getAttribute('data-mode') === mode);
+  });
+
+  // Persist choice
+  try { localStorage.setItem('jhtl_mode', mode); } catch(e) {}
+}
+
+// Restore saved mode on load
+(function() {
+  try {
+    var saved = localStorage.getItem('jhtl_mode');
+    if (saved === 'developers' || saved === 'teams') {
+      switchMode(saved);
+    }
+  } catch(e) {}
+})();
+</script>
 </body>
 </html>
