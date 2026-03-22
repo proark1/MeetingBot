@@ -67,3 +67,7 @@ httpx>=0.27.0
 # USDC/ERC-20 crypto payments — installed separately (see requirements-crypto.txt)
 # web3 and eth-account are large packages; they are installed in a dedicated Docker
 # layer so a build timeout does not break the rest of the application.
+
+# ── Testing ──────────────────────────────────────────────────────────────────
+pytest>=7.4.0
+pytest-asyncio>=0.21.0

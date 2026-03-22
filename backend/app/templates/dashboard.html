@@ -1159,14 +1159,327 @@
         </div>
       </div>
 
-      <div class="card card-pad">
-        <div class="empty-state">
-          <div class="empty-state-icon">🏢</div>
-          <div class="empty-state-title">Manage workspaces via API</div>
-          <div class="empty-state-desc">Create workspaces, invite members, and assign roles through the REST API. Workspace UI is coming soon.</div>
-          <a href="/api/docs#/Workspaces" target="_blank" class="btn btn-outline-primary btn-sm">View Workspace API →</a>
+      <!-- Create workspace (collapsible) -->
+      <div class="card card-pad mb-3">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <div class="section-title mb-0">Your Workspaces</div>
+          <button class="btn btn-primary btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#ws-create-form" aria-expanded="false">+ New Workspace</button>
         </div>
+        <div class="collapse mb-3" id="ws-create-form">
+          <div style="border:1px solid #e2e8f0;border-radius:10px;padding:1rem;margin-top:0.5rem">
+            <div class="row g-2 align-items-end">
+              <div class="col">
+                <label for="ws-name-input" style="font-size:12.5px;font-weight:600;color:#475569">Workspace Name</label>
+                <input type="text" class="form-control form-control-sm mt-1" id="ws-name-input" placeholder="e.g. Engineering Team" maxlength="100" required>
+              </div>
+              <div class="col-auto">
+                <button class="btn btn-primary btn-sm" id="ws-create-btn" type="button">Create</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Workspaces table -->
+        <div id="ws-loading" style="color:#94a3b8;text-align:center;padding:1.5rem">Loading workspaces...</div>
+        <div id="ws-empty" style="display:none">
+          <div class="empty-state">
+            <div class="empty-state-icon">🏢</div>
+            <div class="empty-state-title">No workspaces yet</div>
+            <div class="empty-state-desc">Create your first workspace to organize bots and collaborate with your team.</div>
+          </div>
+        </div>
+        <table class="table table-hover mb-0" id="ws-table" style="display:none">
+          <thead>
+            <tr>
+              <th style="font-size:12px">Name</th>
+              <th style="font-size:12px">Slug</th>
+              <th style="font-size:12px">Role</th>
+              <th style="font-size:12px">Members</th>
+              <th style="font-size:12px">Created</th>
+              <th style="font-size:12px">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="ws-tbody"></tbody>
+        </table>
       </div>
+
+      <!-- Member management (shown inline when "View Members" is clicked) -->
+      <div class="card card-pad mb-3" id="ws-members-card" style="display:none">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <div class="section-title mb-0">Members — <span id="ws-members-name" style="color:#6366f1"></span></div>
+          <button class="btn btn-outline-secondary btn-sm" id="ws-members-close" type="button">Close</button>
+        </div>
+
+        <!-- Add member form -->
+        <div id="ws-add-member-form" style="border:1px solid #e2e8f0;border-radius:10px;padding:0.85rem;margin-bottom:0.75rem">
+          <div class="row g-2 align-items-end">
+            <div class="col">
+              <label style="font-size:12px;font-weight:600;color:#475569">Account ID</label>
+              <input type="text" class="form-control form-control-sm mt-1" id="ws-member-account-input" placeholder="account_id">
+            </div>
+            <div class="col-auto">
+              <label style="font-size:12px;font-weight:600;color:#475569">Role</label>
+              <select class="form-select form-select-sm mt-1" id="ws-member-role-select">
+                <option value="viewer">Viewer</option>
+                <option value="member" selected>Member</option>
+                <option value="admin">Admin</option>
+              </select>
+            </div>
+            <div class="col-auto">
+              <button class="btn btn-primary btn-sm" id="ws-add-member-btn" type="button">Add</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="ws-members-loading" style="color:#94a3b8;text-align:center;padding:1rem">Loading members...</div>
+        <div id="ws-members-empty" style="display:none;color:#94a3b8;text-align:center;padding:1rem">No members in this workspace.</div>
+        <table class="table table-hover mb-0" id="ws-members-table" style="display:none">
+          <thead>
+            <tr>
+              <th style="font-size:12px">Account ID</th>
+              <th style="font-size:12px">Role</th>
+              <th style="font-size:12px">Joined</th>
+              <th style="font-size:12px">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="ws-members-tbody"></tbody>
+        </table>
+      </div>
+
+<script>
+// ── Workspace management ────────────────────────────────────────────────────
+(function() {
+  let _workspaces = [];
+  let _activeWsId = null;
+  let _activeWsRole = null;
+
+  // ── Load workspaces ──
+  async function loadWorkspaces() {
+    const loading = document.getElementById('ws-loading');
+    const empty = document.getElementById('ws-empty');
+    const table = document.getElementById('ws-table');
+    const tbody = document.getElementById('ws-tbody');
+    loading.style.display = 'block';
+    empty.style.display = 'none';
+    table.style.display = 'none';
+    try {
+      const data = await apiFetch('/api/v1/workspaces');
+      _workspaces = Array.isArray(data) ? data : (data.workspaces || []);
+      loading.style.display = 'none';
+      if (_workspaces.length === 0) {
+        empty.style.display = 'block';
+        return;
+      }
+      table.style.display = 'table';
+      tbody.innerHTML = _workspaces.map(ws => {
+        const role = ws.role || ws.my_role || 'owner';
+        const isOwner = role === 'owner';
+        const isAdmin = isOwner || role === 'admin';
+        const created = ws.created_at ? new Date(ws.created_at).toLocaleDateString() : '—';
+        const memberCount = ws.member_count ?? ws.members_count ?? '—';
+        return `<tr data-ws-id="${ws.id}">
+          <td style="font-size:13px;font-weight:600">${_esc(ws.name)}</td>
+          <td><code style="font-size:11.5px">${_esc(ws.slug || '—')}</code></td>
+          <td><span class="chip chip-${role === 'owner' ? 'warning' : role === 'admin' ? 'primary' : 'default'}" style="text-transform:capitalize">${_esc(role)}</span></td>
+          <td style="font-size:13px">${memberCount}</td>
+          <td style="color:#94a3b8;font-size:12px">${created}</td>
+          <td>
+            <button class="btn btn-xs btn-outline-primary ws-view-members-btn" data-ws-id="${ws.id}" data-ws-name="${_esc(ws.name)}" data-ws-role="${role}">Members</button>
+            ${isOwner ? `<button class="btn btn-xs btn-outline-danger ms-1 ws-delete-btn" data-ws-id="${ws.id}" data-ws-name="${_esc(ws.name)}">Delete</button>` : ''}
+          </td>
+        </tr>`;
+      }).join('');
+      _wireWorkspaceButtons();
+    } catch(e) {
+      loading.textContent = 'Failed to load workspaces';
+      loading.style.color = '#dc2626';
+    }
+  }
+
+  function _wireWorkspaceButtons() {
+    document.querySelectorAll('.ws-view-members-btn').forEach(btn => {
+      btn.addEventListener('click', function() {
+        _activeWsId = this.dataset.wsId;
+        _activeWsRole = this.dataset.wsRole;
+        document.getElementById('ws-members-name').textContent = this.dataset.wsName;
+        document.getElementById('ws-members-card').style.display = 'block';
+        // Show/hide add-member form based on role
+        const canManage = ['owner', 'admin'].includes(_activeWsRole);
+        document.getElementById('ws-add-member-form').style.display = canManage ? 'block' : 'none';
+        loadMembers(_activeWsId);
+      });
+    });
+    document.querySelectorAll('.ws-delete-btn').forEach(btn => {
+      btn.addEventListener('click', function() {
+        deleteWorkspace(this.dataset.wsId, this.dataset.wsName);
+      });
+    });
+  }
+
+  // ── Create workspace ──
+  document.getElementById('ws-create-btn')?.addEventListener('click', async function() {
+    const input = document.getElementById('ws-name-input');
+    const name = input.value.trim();
+    if (!name) { showToast('Workspace name is required', 'warning'); return; }
+    this.disabled = true;
+    try {
+      await apiFetch('/api/v1/workspaces', {
+        method: 'POST',
+        body: JSON.stringify({ name }),
+      });
+      showToast('Workspace created', 'success');
+      input.value = '';
+      const collapse = bootstrap.Collapse.getInstance(document.getElementById('ws-create-form'));
+      if (collapse) collapse.hide();
+      loadWorkspaces();
+    } catch(e) { showToast(e.message, 'danger'); }
+    finally { this.disabled = false; }
+  });
+
+  // ── Delete workspace ──
+  async function deleteWorkspace(id, name) {
+    if (!confirm(`Delete workspace "${name}"? This action cannot be undone.`)) return;
+    try {
+      await apiFetch(`/api/v1/workspaces/${id}`, { method: 'DELETE' });
+      showToast('Workspace deleted', 'success');
+      document.getElementById('ws-members-card').style.display = 'none';
+      _activeWsId = null;
+      loadWorkspaces();
+    } catch(e) { showToast(e.message, 'danger'); }
+  }
+
+  // ── Load members ──
+  async function loadMembers(workspaceId) {
+    const loading = document.getElementById('ws-members-loading');
+    const empty = document.getElementById('ws-members-empty');
+    const table = document.getElementById('ws-members-table');
+    const tbody = document.getElementById('ws-members-tbody');
+    loading.style.display = 'block';
+    empty.style.display = 'none';
+    table.style.display = 'none';
+    try {
+      const data = await apiFetch(`/api/v1/workspaces/${workspaceId}/members`);
+      const members = Array.isArray(data) ? data : (data.members || []);
+      loading.style.display = 'none';
+      if (members.length === 0) {
+        empty.style.display = 'block';
+        return;
+      }
+      const canManage = ['owner', 'admin'].includes(_activeWsRole);
+      table.style.display = 'table';
+      tbody.innerHTML = members.map(m => {
+        const role = m.role || 'member';
+        const joined = m.joined_at || m.created_at ? new Date(m.joined_at || m.created_at).toLocaleDateString() : '—';
+        const accountId = m.account_id || m.id || '—';
+        const isOwner = role === 'owner';
+        let actionsHtml = '';
+        if (canManage && !isOwner) {
+          actionsHtml = `
+            <select class="form-select form-select-sm d-inline-block ws-role-change" data-account-id="${_esc(accountId)}" style="width:auto;font-size:12px;display:inline-block!important">
+              <option value="viewer" ${role === 'viewer' ? 'selected' : ''}>Viewer</option>
+              <option value="member" ${role === 'member' ? 'selected' : ''}>Member</option>
+              <option value="admin" ${role === 'admin' ? 'selected' : ''}>Admin</option>
+            </select>
+            <button class="btn btn-xs btn-outline-danger ms-1 ws-remove-member-btn" data-account-id="${_esc(accountId)}">Remove</button>`;
+        }
+        return `<tr>
+          <td><code style="font-size:11.5px">${_esc(accountId)}</code></td>
+          <td><span class="chip chip-${role === 'owner' ? 'warning' : role === 'admin' ? 'primary' : 'default'}" style="text-transform:capitalize">${_esc(role)}</span></td>
+          <td style="color:#94a3b8;font-size:12px">${joined}</td>
+          <td>${actionsHtml}</td>
+        </tr>`;
+      }).join('');
+      _wireMemberButtons(workspaceId);
+    } catch(e) {
+      loading.textContent = 'Failed to load members';
+      loading.style.color = '#dc2626';
+    }
+  }
+
+  function _wireMemberButtons(workspaceId) {
+    document.querySelectorAll('.ws-role-change').forEach(sel => {
+      sel.addEventListener('change', function() {
+        updateMemberRole(workspaceId, this.dataset.accountId, this.value);
+      });
+    });
+    document.querySelectorAll('.ws-remove-member-btn').forEach(btn => {
+      btn.addEventListener('click', function() {
+        removeMember(workspaceId, this.dataset.accountId);
+      });
+    });
+  }
+
+  // ── Add member ──
+  document.getElementById('ws-add-member-btn')?.addEventListener('click', async function() {
+    if (!_activeWsId) return;
+    const accountInput = document.getElementById('ws-member-account-input');
+    const roleSelect = document.getElementById('ws-member-role-select');
+    const accountId = accountInput.value.trim();
+    if (!accountId) { showToast('Account ID is required', 'warning'); return; }
+    this.disabled = true;
+    try {
+      await apiFetch(`/api/v1/workspaces/${_activeWsId}/members`, {
+        method: 'POST',
+        body: JSON.stringify({ account_id: accountId, role: roleSelect.value }),
+      });
+      showToast('Member added', 'success');
+      accountInput.value = '';
+      loadMembers(_activeWsId);
+    } catch(e) { showToast(e.message, 'danger'); }
+    finally { this.disabled = false; }
+  });
+
+  // ── Update member role ──
+  async function updateMemberRole(workspaceId, accountId, newRole) {
+    try {
+      await apiFetch(`/api/v1/workspaces/${workspaceId}/members/${accountId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ role: newRole }),
+      });
+      showToast('Role updated', 'success');
+    } catch(e) {
+      showToast(e.message, 'danger');
+      loadMembers(workspaceId);
+    }
+  }
+
+  // ── Remove member ──
+  async function removeMember(workspaceId, accountId) {
+    if (!confirm('Remove this member from the workspace?')) return;
+    try {
+      await apiFetch(`/api/v1/workspaces/${workspaceId}/members/${accountId}`, { method: 'DELETE' });
+      showToast('Member removed', 'success');
+      loadMembers(workspaceId);
+    } catch(e) { showToast(e.message, 'danger'); }
+  }
+
+  // ── Close members panel ──
+  document.getElementById('ws-members-close')?.addEventListener('click', function() {
+    document.getElementById('ws-members-card').style.display = 'none';
+    _activeWsId = null;
+    _activeWsRole = null;
+  });
+
+  // ── Load workspaces when section becomes active ──
+  document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('[data-section]').forEach(btn => {
+      btn.addEventListener('click', function() {
+        if (this.getAttribute('data-section') === 'workspaces') {
+          loadWorkspaces();
+        }
+      });
+    });
+  });
+
+  // ── HTML escaping helper ──
+  function _esc(str) {
+    if (!str) return '';
+    const d = document.createElement('div');
+    d.textContent = str;
+    return d.innerHTML;
+  }
+})();
+</script>
     </div>
 
     <!-- ────────────────────────────────────────────

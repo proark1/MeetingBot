@@ -30,32 +30,120 @@ export {
 
 // All TypeScript types/interfaces
 export type {
+  // Bot types
   AnalysisMode,
-  ApiKey,
-  ApiKeyCreateResponse,
-  ApiKeyListResponse,
-  BalanceResponse,
-  BotListResponse,
   BotResponse,
-  BotStats,
   BotSummary,
-  CheckoutResponse,
+  BotListResponse,
+  BotStats,
   CreateBotParams,
-  CreateCheckoutParams,
-  CreateWebhookParams,
-  ExportJsonResponse,
   ListBotsParams,
-  ListWebhookDeliveriesParams,
-  LoginResponse,
-  MeetingBotClientConfig,
-  NotificationPrefs,
-  PlanInfo,
-  RegisterParams,
-  Transaction,
-  UpdateNotificationPrefsParams,
+
+  // Webhook types
+  CreateWebhookParams,
   UpdateWebhookParams,
+  WebhookResponse,
+  WebhookListResponse,
   WebhookDelivery,
   WebhookDeliveryListResponse,
-  WebhookListResponse,
-  WebhookResponse,
+  ListWebhookDeliveriesParams,
+  WebhookEventsResponse,
+  ListAllDeliveriesParams,
+
+  // Auth types
+  RegisterParams,
+  LoginResponse,
+  ApiKey,
+  ApiKeyListResponse,
+  ApiKeyCreateResponse,
+  PlanInfo,
+  NotificationPrefs,
+  UpdateNotificationPrefsParams,
+
+  // Billing types
+  Transaction,
+  BalanceResponse,
+  CreateCheckoutParams,
+  CheckoutResponse,
+
+  // Export types
+  ExportJsonResponse,
+
+  // Transcript / Analysis types
+  TranscriptEntry,
+  TranscriptResponse,
+  AnalysisResponse,
+  HighlightsResponse,
+  AskResponse,
+  FollowupEmailResponse,
+  ShareResponse,
+  AnalyzeBotParams,
+  AskBotParams,
+  FollowupEmailParams,
+  RenameSpeakersParams,
+
+  // Template types
+  TemplateInfo,
+  TemplateListResponse,
+  DefaultPromptResponse,
+
+  // Analytics types
+  AnalyticsResponse,
+  RecurringAnalyticsResponse,
+  ApiUsageResponse,
+  MyAnalyticsResponse,
+  SearchResult,
+  SearchResponse,
+  AuditLogEntry,
+  AuditLogResponse,
+  SearchMeetingsParams,
+  GetAuditLogParams,
+
+  // Action Item types
+  ActionItemResponse,
+  ActionItemListResponse,
+  ActionItemStatsResponse,
+  ListActionItemsParams,
+  UpdateActionItemParams,
+
+  // Keyword Alert types
+  KeywordAlertResponse,
+  KeywordAlertListResponse,
+  CreateKeywordAlertParams,
+  UpdateKeywordAlertParams,
+
+  // Calendar Feed types
+  CalendarFeedResponse,
+  CalendarFeedListResponse,
+  CreateCalendarFeedParams,
+
+  // Integration types
+  IntegrationResponse,
+  IntegrationListResponse,
+  CreateIntegrationParams,
+  UpdateIntegrationParams,
+
+  // Workspace types
+  WorkspaceMemberResponse,
+  WorkspaceResponse,
+  WorkspaceListResponse,
+  WorkspaceMemberListResponse,
+  UpdateWorkspaceParams,
+  AddWorkspaceMemberParams,
+
+  // Retention types
+  RetentionPolicyResponse,
+  UpdateRetentionPolicyParams,
+
+  // MCP types
+  McpSchemaResponse,
+  McpCallResponse,
+  CallMcpToolParams,
+
+  // Account types
+  AccountInfo,
+  UpdateAccountTypeParams,
+
+  // Client config
+  MeetingBotClientConfig,
 } from "./types.js";

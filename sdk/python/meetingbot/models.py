@@ -245,3 +245,408 @@ class ExportJsonResponse(BaseModel):
     metadata: Optional[Dict[str, Any]] = None
 
     model_config = {"extra": "allow"}
+
+
+# ---------------------------------------------------------------------------
+# Transcript / Analysis models
+# ---------------------------------------------------------------------------
+
+
+class TranscriptEntry(BaseModel):
+    """A single transcript segment."""
+
+    speaker: Optional[str] = None
+    text: Optional[str] = None
+    start_time: Optional[float] = None
+    end_time: Optional[float] = None
+
+    model_config = {"extra": "allow"}
+
+
+class TranscriptResponse(BaseModel):
+    """Raw transcript returned by get_transcript."""
+
+    transcript: Optional[List[TranscriptEntry]] = None
+
+    model_config = {"extra": "allow"}
+
+
+class AnalysisResponse(BaseModel):
+    """AI analysis result."""
+
+    summary: Optional[str] = None
+    key_points: Optional[List[str]] = None
+    action_items: Optional[List[Dict[str, Any]]] = None
+    decisions: Optional[List[str]] = None
+    next_steps: Optional[List[str]] = None
+    sentiment: Optional[str] = None
+    topics: Optional[List[Dict[str, Any]]] = None
+
+    model_config = {"extra": "allow"}
+
+
+class HighlightsResponse(BaseModel):
+    """Curated highlights from a meeting."""
+
+    key_points: Optional[List[str]] = None
+    action_items: Optional[List[Dict[str, Any]]] = None
+    decisions: Optional[List[str]] = None
+
+    model_config = {"extra": "allow"}
+
+
+class AskResponse(BaseModel):
+    """Response from asking a question about a meeting."""
+
+    answer: Optional[str] = None
+
+    model_config = {"extra": "allow"}
+
+
+class FollowupEmailResponse(BaseModel):
+    """Generated follow-up email."""
+
+    subject: Optional[str] = None
+    body: Optional[str] = None
+
+    model_config = {"extra": "allow"}
+
+
+class ShareResponse(BaseModel):
+    """Shareable link for a meeting."""
+
+    share_url: Optional[str] = None
+    token: Optional[str] = None
+
+    model_config = {"extra": "allow"}
+
+
+# ---------------------------------------------------------------------------
+# Template models
+# ---------------------------------------------------------------------------
+
+
+class TemplateInfo(BaseModel):
+    """An analysis template."""
+
+    name: Optional[str] = None
+    description: Optional[str] = None
+
+    model_config = {"extra": "allow"}
+
+
+class TemplateListResponse(BaseModel):
+    """List of available analysis templates."""
+
+    templates: Optional[List[TemplateInfo]] = None
+
+    model_config = {"extra": "allow"}
+
+
+class DefaultPromptResponse(BaseModel):
+    """Default analysis prompt."""
+
+    prompt: Optional[str] = None
+
+    model_config = {"extra": "allow"}
+
+
+# ---------------------------------------------------------------------------
+# Analytics models
+# ---------------------------------------------------------------------------
+
+
+class AnalyticsResponse(BaseModel):
+    """Account analytics."""
+
+    model_config = {"extra": "allow"}
+
+
+class RecurringAnalyticsResponse(BaseModel):
+    """Recurring meeting insights."""
+
+    model_config = {"extra": "allow"}
+
+
+class ApiUsageResponse(BaseModel):
+    """API usage statistics."""
+
+    model_config = {"extra": "allow"}
+
+
+class MyAnalyticsResponse(BaseModel):
+    """Personal analytics."""
+
+    model_config = {"extra": "allow"}
+
+
+class SearchResult(BaseModel):
+    """A single search result."""
+
+    bot_id: Optional[str] = None
+    meeting_url: Optional[str] = None
+    bot_name: Optional[str] = None
+    snippet: Optional[str] = None
+    score: Optional[float] = None
+
+    model_config = {"extra": "allow"}
+
+
+class SearchResponse(BaseModel):
+    """Search results."""
+
+    results: Optional[List[SearchResult]] = None
+    total: Optional[int] = None
+
+    model_config = {"extra": "allow"}
+
+
+class AuditLogEntry(BaseModel):
+    """A single audit log entry."""
+
+    id: Optional[str] = None
+    action: Optional[str] = None
+    account_id: Optional[str] = None
+    detail: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+    model_config = {"extra": "allow"}
+
+
+class AuditLogResponse(BaseModel):
+    """Audit log entries."""
+
+    results: Optional[List[AuditLogEntry]] = None
+    total: Optional[int] = None
+
+    model_config = {"extra": "allow"}
+
+
+# ---------------------------------------------------------------------------
+# Action Item models
+# ---------------------------------------------------------------------------
+
+
+class ActionItemResponse(BaseModel):
+    """An action item from a meeting."""
+
+    id: Optional[str] = None
+    bot_id: Optional[str] = None
+    text: Optional[str] = None
+    assignee: Optional[str] = None
+    status: Optional[str] = None
+    due_date: Optional[str] = None
+    confidence: Optional[float] = None
+    created_at: Optional[datetime] = None
+
+    model_config = {"extra": "allow"}
+
+
+class ActionItemListResponse(BaseModel):
+    """List of action items."""
+
+    results: Optional[List[ActionItemResponse]] = None
+    total: Optional[int] = None
+
+    model_config = {"extra": "allow"}
+
+
+class ActionItemStatsResponse(BaseModel):
+    """Action item statistics."""
+
+    model_config = {"extra": "allow"}
+
+
+# ---------------------------------------------------------------------------
+# Keyword Alert models
+# ---------------------------------------------------------------------------
+
+
+class KeywordAlertResponse(BaseModel):
+    """A keyword alert configuration."""
+
+    id: Optional[str] = None
+    keywords: Optional[List[str]] = None
+    webhook_url: Optional[str] = None
+    events: Optional[List[str]] = None
+    is_active: Optional[bool] = None
+    created_at: Optional[datetime] = None
+
+    model_config = {"extra": "allow"}
+
+
+class KeywordAlertListResponse(BaseModel):
+    """List of keyword alerts."""
+
+    results: Optional[List[KeywordAlertResponse]] = None
+    total: Optional[int] = None
+
+    model_config = {"extra": "allow"}
+
+
+# ---------------------------------------------------------------------------
+# Calendar Feed models
+# ---------------------------------------------------------------------------
+
+
+class CalendarFeedResponse(BaseModel):
+    """A calendar feed configuration."""
+
+    id: Optional[str] = None
+    name: Optional[str] = None
+    url: Optional[str] = None
+    is_active: Optional[bool] = None
+    auto_record: Optional[bool] = None
+    bot_name: Optional[str] = None
+    last_synced_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+
+    model_config = {"extra": "allow"}
+
+
+class CalendarFeedListResponse(BaseModel):
+    """List of calendar feeds."""
+
+    results: Optional[List[CalendarFeedResponse]] = None
+    total: Optional[int] = None
+
+    model_config = {"extra": "allow"}
+
+
+# ---------------------------------------------------------------------------
+# Integration models
+# ---------------------------------------------------------------------------
+
+
+class IntegrationResponse(BaseModel):
+    """An integration configuration."""
+
+    id: Optional[str] = None
+    type: Optional[str] = None
+    config: Optional[Dict[str, Any]] = None
+    is_active: Optional[bool] = None
+    created_at: Optional[datetime] = None
+
+    model_config = {"extra": "allow"}
+
+
+class IntegrationListResponse(BaseModel):
+    """List of integrations."""
+
+    results: Optional[List[IntegrationResponse]] = None
+    total: Optional[int] = None
+
+    model_config = {"extra": "allow"}
+
+
+# ---------------------------------------------------------------------------
+# Workspace models
+# ---------------------------------------------------------------------------
+
+
+class WorkspaceMemberResponse(BaseModel):
+    """A workspace member."""
+
+    id: Optional[str] = None
+    workspace_id: Optional[str] = None
+    account_id: Optional[str] = None
+    role: Optional[str] = None
+    invited_by: Optional[str] = None
+    joined_at: Optional[datetime] = None
+
+    model_config = {"extra": "allow"}
+
+
+class WorkspaceResponse(BaseModel):
+    """A workspace."""
+
+    id: Optional[str] = None
+    name: Optional[str] = None
+    slug: Optional[str] = None
+    owner_account_id: Optional[str] = None
+    settings: Optional[Dict[str, Any]] = None
+    is_active: Optional[bool] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    member_role: Optional[str] = None
+
+    model_config = {"extra": "allow"}
+
+
+class WorkspaceListResponse(BaseModel):
+    """List of workspaces."""
+
+    results: Optional[List[WorkspaceResponse]] = None
+    total: Optional[int] = None
+
+    model_config = {"extra": "allow"}
+
+
+class WorkspaceMemberListResponse(BaseModel):
+    """List of workspace members."""
+
+    results: Optional[List[WorkspaceMemberResponse]] = None
+    total: Optional[int] = None
+
+    model_config = {"extra": "allow"}
+
+
+# ---------------------------------------------------------------------------
+# Retention models
+# ---------------------------------------------------------------------------
+
+
+class RetentionPolicyResponse(BaseModel):
+    """Retention policy configuration."""
+
+    retention_days: Optional[int] = None
+    anonymize_speakers: Optional[bool] = None
+
+    model_config = {"extra": "allow"}
+
+
+# ---------------------------------------------------------------------------
+# MCP models
+# ---------------------------------------------------------------------------
+
+
+class McpSchemaResponse(BaseModel):
+    """MCP server manifest."""
+
+    model_config = {"extra": "allow"}
+
+
+class McpCallResponse(BaseModel):
+    """MCP tool call result."""
+
+    model_config = {"extra": "allow"}
+
+
+# ---------------------------------------------------------------------------
+# Account models
+# ---------------------------------------------------------------------------
+
+
+class AccountInfo(BaseModel):
+    """Current account information."""
+
+    id: Optional[str] = None
+    email: Optional[str] = None
+    account_type: Optional[str] = None
+    is_admin: Optional[bool] = None
+    created_at: Optional[datetime] = None
+
+    model_config = {"extra": "allow"}
+
+
+# ---------------------------------------------------------------------------
+# Webhook event list
+# ---------------------------------------------------------------------------
+
+
+class WebhookEventsResponse(BaseModel):
+    """Supported webhook event types."""
+
+    events: Optional[List[str]] = None
+
+    model_config = {"extra": "allow"}
