@@ -102,6 +102,9 @@ async def create_feed(
     if not account_id or account_id == SUPERADMIN_ACCOUNT_ID:
         raise HTTPException(status_code=403, detail="Use per-user authentication")
 
+    from app.deps import check_feature
+    await check_feature("calendar_auto_join", account_id, db)
+
     await _block_ssrf(payload.ical_url)
 
     feed = CalendarFeed(

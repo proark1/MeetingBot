@@ -284,6 +284,36 @@ async def lifespan(app: FastAPI):
 
     retention_task = asyncio.create_task(_supervised("retention_loop", _retention_loop))
 
+    # Monthly usage counter reset (hourly check)
+    async def _monthly_reset_loop():
+        from datetime import datetime, timezone, timedelta
+        from app.db import AsyncSessionLocal
+        from app.models.account import Account
+        from sqlalchemy import select
+
+        while True:
+            await asyncio.sleep(3600)  # check every hour
+            try:
+                now = datetime.now(timezone.utc)
+                async with AsyncSessionLocal() as db:
+                    result = await db.execute(
+                        select(Account).where(
+                            Account.monthly_reset_at.isnot(None),
+                            Account.monthly_reset_at <= now,
+                        )
+                    )
+                    accounts = result.scalars().all()
+                    for acct in accounts:
+                        acct.monthly_bots_used = 0
+                        acct.monthly_reset_at = now + timedelta(days=30)
+                    if accounts:
+                        await db.commit()
+                        logger.info("Monthly reset: zeroed usage for %d account(s)", len(accounts))
+            except Exception as exc:
+                logger.error("Monthly reset error: %s", exc)
+
+    monthly_reset_task = asyncio.create_task(_supervised("monthly_reset", _monthly_reset_loop))
+
     # Weekly digest — fires every Monday at 08:00 UTC
     async def _weekly_digest_loop():
         from datetime import datetime, timezone, timedelta

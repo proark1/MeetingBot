@@ -33,6 +33,67 @@ async def check_credits(account_id: str, db: AsyncSession) -> None:
         )
 
 
+async def check_plan_limit(account_id: str) -> None:
+    """Raise HTTP 402 if account has reached its monthly bot limit.
+
+    Uses SELECT ... FOR UPDATE to prevent race conditions when two
+    concurrent create_bot calls check the same account simultaneously.
+    """
+    from app.db import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(Account).where(Account.id == account_id).with_for_update()
+        )
+        account = result.scalar_one_or_none()
+        if account is None:
+            return  # unknown account — let downstream handle it
+
+        limit = settings.plan_limits.get(account.plan or "free", settings.PLAN_FREE_BOTS_PER_MONTH)
+        if limit == -1:
+            return  # unlimited
+
+        used = account.monthly_bots_used or 0
+        if used < limit:
+            return  # within limit
+
+        plan_name = (account.plan or "free").capitalize()
+        plan_order = ["free", "starter", "pro", "business"]
+        try:
+            idx = plan_order.index(account.plan or "free")
+        except ValueError:
+            idx = 0
+        if idx < len(plan_order) - 1:
+            next_plan = plan_order[idx + 1]
+            next_limit = settings.plan_limits.get(next_plan, -1)
+            next_desc = "unlimited" if next_limit == -1 else str(next_limit)
+            upgrade_msg = f" Upgrade to {next_plan.capitalize()} for {next_desc} bots/month."
+        else:
+            upgrade_msg = ""
+
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail=(
+                f"Monthly bot limit reached ({used}/{limit}). "
+                f"Current plan: {plan_name}.{upgrade_msg}"
+            ),
+        )
+
+
+async def increment_monthly_usage(account_id: str) -> None:
+    """Atomically increment the monthly bot usage counter for an account."""
+    from app.db import AsyncSessionLocal
+    from sqlalchemy import update
+
+    async with AsyncSessionLocal() as db:
+        await db.execute(
+            update(Account)
+            .where(Account.id == account_id)
+            .values(monthly_bots_used=Account.monthly_bots_used + 1)
+        )
+        await db.commit()
+
+
 async def add_credits(
     account_id: str,
     amount_usd: Decimal,

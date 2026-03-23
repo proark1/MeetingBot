@@ -101,6 +101,21 @@ class Settings(BaseSettings):
     PLAN_PRO_BOTS_PER_MONTH: int = 500
     PLAN_BUSINESS_BOTS_PER_MONTH: int = -1
 
+    # Stripe subscription price IDs (create in Stripe Dashboard → Products)
+    STRIPE_STARTER_PRICE_ID: str = ""
+    STRIPE_PRO_PRICE_ID: str = ""
+    STRIPE_BUSINESS_PRICE_ID: str = ""
+
+    @property
+    def plan_limits(self) -> dict[str, int]:
+        """Plan name → monthly bot limit (-1 = unlimited)."""
+        return {
+            "free": self.PLAN_FREE_BOTS_PER_MONTH,
+            "starter": self.PLAN_STARTER_BOTS_PER_MONTH,
+            "pro": self.PLAN_PRO_BOTS_PER_MONTH,
+            "business": self.PLAN_BUSINESS_BOTS_PER_MONTH,
+        }
+
     # ── Google / Microsoft SSO ────────────────────────────────────────────────
     GOOGLE_CLIENT_ID: str = ""
     GOOGLE_CLIENT_SECRET: str = ""

@@ -204,6 +204,7 @@ async def register(request: Request, payload: RegisterRequest, db: AsyncSession 
         hashed_password=_hash_password(payload.password),
         credits_usd=Decimal("0"),
         account_type=acct_type,
+        monthly_reset_at=datetime.now(timezone.utc) + timedelta(days=30),
     )
     db.add(account)
 

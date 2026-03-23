@@ -276,13 +276,26 @@ async def create_bot(payload: BotCreate, request: Request):
         except Exception:
             logger.exception("Idempotency key lookup failed")
 
-    # Check credits for per-user accounts (not superadmin / unauthenticated / sandbox)
+    # Check credits and plan limits for per-user accounts (not superadmin / sandbox)
     is_sandbox = getattr(request.state, "sandbox", False)
     if account_id and account_id != SUPERADMIN_ACCOUNT_ID and not is_sandbox:
         from app.db import AsyncSessionLocal
-        from app.services.credit_service import check_credits
+        from app.services.credit_service import check_credits, check_plan_limit
         async with AsyncSessionLocal() as db:
             await check_credits(account_id, db)
+        await check_plan_limit(account_id)
+
+    # Feature gating for premium bot options
+    if account_id and account_id != SUPERADMIN_ACCOUNT_ID and not is_sandbox:
+        from app.deps import check_feature
+        from app.db import AsyncSessionLocal as _ASL
+        async with _ASL() as _fdb:
+            if getattr(payload, "translation_language", None):
+                await check_feature("translation", account_id, _fdb)
+            if getattr(payload, "pii_redaction", False):
+                await check_feature("pii_redaction", account_id, _fdb)
+            if getattr(payload, "keyword_alerts", None):
+                await check_feature("keyword_alerts", account_id, _fdb)
 
     is_scheduled = (
         payload.join_at is not None
@@ -340,6 +353,14 @@ async def create_bot(payload: BotCreate, request: Request):
         avg_hourly_rate_usd=payload.avg_hourly_rate_usd,
     )
     await store.create_bot(bot)
+
+    # Increment monthly usage counter (non-sandbox, per-user accounts only)
+    if account_id and account_id != SUPERADMIN_ACCOUNT_ID and not is_sandbox:
+        from app.services.credit_service import increment_monthly_usage
+        try:
+            await increment_monthly_usage(account_id)
+        except Exception:
+            logger.warning("Failed to increment monthly usage for %s", account_id)
 
     # ── Sandbox fast-path: return demo bot instantly, no credits deducted ─────
     if is_sandbox:

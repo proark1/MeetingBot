@@ -4,7 +4,20 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.9.5 — **Last updated:** 2026-03-22
+> **Latest version:** 2.10.0 — **Last updated:** 2026-03-22
+
+---
+
+## [2.10.0] - 2026-03-22
+
+### Added — Monetization + CI Pipeline
+- **Plan limit enforcement** — Bot creation now checks `monthly_bots_used` against plan limits (Free=5, Starter=50, Pro=500, Business=unlimited). Returns HTTP 402 with upgrade message when limit reached. Uses `SELECT ... FOR UPDATE` to prevent race conditions.
+- **Monthly usage counter** — Atomically incremented on each bot creation; hourly background task resets counters for accounts past their `monthly_reset_at` date.
+- **Feature gating** — Premium features locked by plan tier via `check_feature()` in deps.py. Calendar auto-join, integrations, translation → Starter+. PII redaction, workspaces, keyword alerts → Pro+. SAML SSO, org analytics → Business.
+- **Gated endpoints** — `POST /calendar/feeds` checks `calendar_auto_join`; `POST /bot` checks `translation`, `pii_redaction`, `keyword_alerts` when those options are used.
+- **Stripe subscription config** — Added `STRIPE_STARTER_PRICE_ID`, `STRIPE_PRO_PRICE_ID`, `STRIPE_BUSINESS_PRICE_ID` config vars (subscription endpoints coming next).
+- **CI pipeline** — GitHub Actions workflow (`.github/workflows/test.yml`) runs 17 pytest tests on every push to main and every PR. Python 3.12, pip caching, 5-minute timeout.
+- **pytest config** — `backend/pyproject.toml` with `asyncio_mode=auto` and test markers.
 
 ---
 

@@ -134,6 +134,52 @@ def _admin_emails() -> set[str]:
     return _admin_emails_cache
 
 
+# ── Feature gating by plan ────────────────────────────────────────────────────
+# Feature name → minimum plan required (ascending: free < starter < pro < business)
+PLAN_FEATURES: dict[str, str] = {
+    # Starter+
+    "calendar_auto_join": "starter",
+    "integrations": "starter",
+    "translation": "starter",
+    # Pro+
+    "pii_redaction": "pro",
+    "workspaces": "pro",
+    "keyword_alerts": "pro",
+    "custom_templates": "pro",
+    # Business only
+    "saml_sso": "business",
+    "org_analytics": "business",
+    "usdc_payments": "business",
+    "custom_retention": "business",
+}
+
+_PLAN_ORDER = {"free": 0, "starter": 1, "pro": 2, "business": 3}
+
+
+async def check_feature(feature_name: str, account_id: Optional[str], db: AsyncSession) -> None:
+    """Raise 403 if the account's plan doesn't include the named feature."""
+    if not account_id or account_id == SUPERADMIN_ACCOUNT_ID:
+        return  # superadmin / dev mode — no gating
+
+    min_plan = PLAN_FEATURES.get(feature_name)
+    if min_plan is None:
+        return  # feature not gated
+
+    from app.models.account import Account
+    result = await db.execute(select(Account.plan).where(Account.id == account_id))
+    plan = result.scalar_one_or_none() or "free"
+
+    if _PLAN_ORDER.get(plan, 0) < _PLAN_ORDER.get(min_plan, 0):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                f"The '{feature_name}' feature requires the {min_plan.capitalize()} plan or higher. "
+                f"Your current plan: {plan.capitalize()}. "
+                f"Upgrade at /dashboard or POST /api/v1/billing/subscribe"
+            ),
+        )
+
+
 async def require_admin(
     account_id: Optional[str] = Depends(get_current_account_id),
     db: AsyncSession = Depends(get_db),
