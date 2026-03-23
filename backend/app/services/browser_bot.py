@@ -2855,7 +2855,6 @@ async def _mention_monitor(
 
             if new_caption_text.strip():
                 caption_log.append(new_caption_text.strip())
-            caption_log = caption_log[-40:]  # always truncate (prevents unbounded growth in quiet periods)
 
                 if (
                     bot_name_lower in new_caption_text.lower()
@@ -2887,6 +2886,9 @@ async def _mention_monitor(
                     if reply:
                         last_response_at = time.monotonic()
                         await _dispatch_reply(reply, "caption")
+
+            # Truncate unconditionally (prevents unbounded growth in quiet periods)
+            caption_log = caption_log[-40:]
 
         # ── Chat polling (every 2 s — every other caption poll) ──────────────
         if _poll_count % 2 == 0:
