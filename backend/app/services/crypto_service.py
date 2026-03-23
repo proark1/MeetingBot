@@ -212,12 +212,15 @@ async def start_usdc_monitor() -> None:
 
 
 async def _monitor_loop() -> None:
+    backoff_s = 60
     while True:
         try:
             await _check_transfers()
+            backoff_s = 60  # reset on success
         except Exception as exc:
-            logger.error("USDC monitor error: %s", exc, exc_info=True)
-        await asyncio.sleep(60)
+            logger.error("USDC monitor error (retry in %ds): %s", backoff_s, exc, exc_info=True)
+            backoff_s = min(backoff_s * 2, 3600)  # exponential backoff, cap at 1 hour
+        await asyncio.sleep(backoff_s)
 
 
 async def _check_transfers() -> None:

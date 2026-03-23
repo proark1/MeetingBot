@@ -4,7 +4,20 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.9.1 — **Last updated:** 2026-03-22
+> **Latest version:** 2.9.2 — **Last updated:** 2026-03-22
+
+---
+
+## [2.9.2] - 2026-03-22
+
+### Fixed — Production Bugs & Performance (Round 2)
+- **Admin analytics crash** — `settings` and `func` now imported at module level (was `NameError` at runtime); initial account queries wrapped in try-except with rollback; bot snapshots query capped at 50k rows (was unlimited — OOM risk)
+- **Credit deduction race condition** — `deduct_credits_for_bot()` now uses `SELECT ... FOR UPDATE` to prevent two concurrent bot completions from reading the same balance
+- **Claude API timeout** — `messages.stream()` now has `timeout=300s`; `messages.create()` has `timeout=60s` (was indefinite — hung event loop)
+- **Integration HTTP client waste** — Linear and Jira integrations now reuse the global `_http_client` instead of creating new `httpx.AsyncClient` per request
+- **USDC monitor crash loop** — `_monitor_loop()` now uses exponential backoff (60s → 1h cap) instead of fixed 60s retry on all errors
+- **Bootstrap version mismatch** — `share.html` upgraded from 5.3.0 to 5.3.2 (matches all other templates)
+- **Render-blocking scripts** — Added `defer` to Bootstrap JS in `login.html` and `register.html`
 
 ---
 

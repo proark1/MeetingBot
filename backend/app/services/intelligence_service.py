@@ -220,6 +220,7 @@ async def _claude_complete(prompt: str, max_tokens: int = 4096, temperature: flo
         max_tokens=max_tokens,
         thinking={"type": "adaptive"},
         messages=[{"role": "user", "content": prompt}],
+        timeout=300.0,
     )
     async with stream as s:
         message = await s.get_final_message()
@@ -1117,6 +1118,7 @@ async def extract_live_action_items(transcript_slice: list[dict[str, Any]]) -> l
                 model=model_id,
                 max_tokens=512,
                 messages=[{"role": "user", "content": prompt}],
+                timeout=60.0,
             )
             duration_s = round(time.monotonic() - t0, 2)
             text = message.content[0].text if message.content else ""

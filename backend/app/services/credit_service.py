@@ -92,7 +92,11 @@ async def deduct_credits_for_bot(
 
     from app.db import AsyncSessionLocal
     async with AsyncSessionLocal() as db:
-        account = await db.get(Account, account_id)
+        # Use SELECT ... FOR UPDATE to prevent concurrent deduction race conditions
+        result = await db.execute(
+            select(Account).where(Account.id == account_id).with_for_update()
+        )
+        account = result.scalar_one_or_none()
         if account is None:
             logger.warning("deduct_credits_for_bot: account %s not found", account_id)
             return

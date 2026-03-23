@@ -14,9 +14,10 @@ from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.openapi.utils import get_openapi as _fastapi_get_openapi
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.db import get_db
 from app.deps import require_admin
 from app._limiter import limiter as _limiter
@@ -497,7 +498,6 @@ async def platform_analytics(
     if cached and (_time.monotonic() - cached[0]) < _ANALYTICS_TTL:
         return cached[1]
 
-    from sqlalchemy import func
     from app.models.account import BotSnapshot
     from app.store import store as _store
 
@@ -506,21 +506,26 @@ async def platform_analytics(
     d7 = now - timedelta(days=7)
 
     # ── Account stats ──────────────────────────────────────────────────────────
-    total_accounts = (await db.execute(select(func.count(Account.id)))).scalar_one()
-    new_30d_accts = (await db.execute(
-        select(func.count(Account.id)).where(Account.created_at >= d30)
-    )).scalar_one()
-    plan_counts_q = await db.execute(
-        select(Account.plan, func.count(Account.id)).group_by(Account.plan)
-    )
-    plan_counts = {(r[0] or "free"): r[1] for r in plan_counts_q.all()}
+    try:
+        total_accounts = (await db.execute(select(func.count(Account.id)))).scalar_one()
+        new_30d_accts = (await db.execute(
+            select(func.count(Account.id)).where(Account.created_at >= d30)
+        )).scalar_one()
+        plan_counts_q = await db.execute(
+            select(Account.plan, func.count(Account.id)).group_by(Account.plan)
+        )
+        plan_counts = {(r[0] or "free"): r[1] for r in plan_counts_q.all()}
+    except Exception:
+        logger.warning("Account stats query failed — using defaults", exc_info=True)
+        await db.rollback()
+        total_accounts, new_30d_accts, plan_counts = 0, 0, {}
 
-    # ── Load bot snapshots (terminal bots) ─────────────────────────────────────
+    # ── Load bot snapshots (terminal bots, capped at 50k for memory safety) ───
     snaps_q = await db.execute(
         select(
             BotSnapshot.status, BotSnapshot.meeting_url,
             BotSnapshot.created_at, BotSnapshot.account_id, BotSnapshot.data
-        )
+        ).order_by(BotSnapshot.created_at.desc()).limit(50000)
     )
     snaps = snaps_q.all()
 
@@ -813,7 +818,6 @@ async def platform_analytics(
         await db.rollback()
 
     # ── System Status ──────────────────────────────────────────────────────────
-    from app.config import settings as _settings
     from app.api.bots import _running_tasks, _bot_queue
 
     result = {
@@ -877,7 +881,7 @@ async def platform_analytics(
         "system": {
             "running_tasks": sum(1 for t in _running_tasks.values() if not t.done()),
             "queue_depth": len(_bot_queue),
-            "max_concurrent": _settings.MAX_CONCURRENT_BOTS,
+            "max_concurrent": settings.MAX_CONCURRENT_BOTS,
             "in_memory_bots": len(active_bots),
         },
         "per_user": per_user,

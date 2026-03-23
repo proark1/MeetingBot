@@ -303,7 +303,7 @@ async def _post_to_google_drive(access_token: str, folder_id: Optional[str], bot
         "Content-Type": f"multipart/related; boundary={boundary}",
     }
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with _httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(
                 "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
                 headers=headers,
@@ -357,13 +357,12 @@ mutation CreateIssue($teamId: String!, $title: String!, $description: String) {
   }
 }"""
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.post(url, headers=headers, json={
-                    "query": mutation,
-                    "variables": {"teamId": team_id, "title": task[:255], "description": description},
-                })
-                if resp.status_code == 200:
-                    successes += 1
+            resp = await _http_client.post(url, headers=headers, json={
+                "query": mutation,
+                "variables": {"teamId": team_id, "title": task[:255], "description": description},
+            })
+            if resp.status_code == 200:
+                successes += 1
         except Exception as exc:
             logger.warning("Linear issue creation failed: %s", exc)
 
@@ -410,10 +409,9 @@ async def _post_to_jira(base_url: str, token: str, email: str, project_key: str,
             }
         }
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.post(api_url, headers=headers, json=payload)
-                if resp.status_code in (200, 201):
-                    successes += 1
+            resp = await _http_client.post(api_url, headers=headers, json=payload)
+            if resp.status_code in (200, 201):
+                successes += 1
         except Exception as exc:
             logger.warning("Jira issue creation failed: %s", exc)
 
