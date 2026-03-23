@@ -4,7 +4,15 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.9.4 — **Last updated:** 2026-03-22
+> **Latest version:** 2.9.5 — **Last updated:** 2026-03-22
+
+---
+
+## [2.9.5] - 2026-03-22
+
+### Fixed — Final consistency pass (Round 5)
+- **Landing page speed** — Added `preconnect` hints for Google Fonts, gstatic, and jsDelivr CDN; deferred Bootstrap JS (was the only template still blocking)
+- **Standalone template consistency** — Added `preconnect` hints to all 4 standalone templates (login, register, api_dashboard, webhook_playground) that load fonts without extending base.html
 
 ---
 
