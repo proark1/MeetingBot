@@ -4,7 +4,16 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.11.0 — **Last updated:** 2026-03-22
+> **Latest version:** 2.12.0 — **Last updated:** 2026-03-22
+
+---
+
+## [2.12.0] - 2026-03-22
+
+### Added — Dashboard UI for Monetization & Trends
+- **"Usage & Billing" analytics tab** — New 4th sub-tab in analytics section. Shows: monthly bot usage progress bar (color-coded green/amber/red), plan badge, credits balance, credits spent this month, avg cost per bot, billing reset date, daily usage table. Lazy-loaded from `GET /analytics/usage`.
+- **Longitudinal trends in Trends tab** — After loading personal trends, also fetches `GET /analytics/trends?days=30` and displays: top 10 topics across meetings, meetings per day table (last 14 days).
+- **Plan upgrade button** — Billing section plan card now shows "Upgrade Plan" button (hidden for Business). Triggers `POST /billing/subscribe` and redirects to Stripe Checkout.
 
 ---
 

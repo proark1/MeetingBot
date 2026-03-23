@@ -602,6 +602,7 @@
         <button class="analytics-tab active" data-dtab="overview">Overview</button>
         <button class="analytics-tab" data-dtab="usage">API Usage</button>
         <button class="analytics-tab" data-dtab="trends">Trends</button>
+        <button class="analytics-tab" data-dtab="my-usage">Usage & Billing</button>
       </div>
 
       <!-- ═══ TAB: Overview (server-rendered) ═══════════════════════ -->
@@ -724,6 +725,54 @@
                 <div class="section-title mb-2">Cost by Platform</div>
                 <div id="dash-cost-platform"></div>
               </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ TAB: Usage & Billing ═══════════════════════════════════ -->
+      <div class="dtab-panel" data-dtab="my-usage" style="display:none">
+        <div id="dash-myusage-loading" class="text-center text-muted py-5" style="font-size:13.5px">Loading usage data…</div>
+        <div id="dash-myusage-content" style="display:none">
+          <!-- Plan + progress bar -->
+          <div class="card card-pad mb-3">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <div>
+                <span class="section-title">Monthly Bot Usage</span>
+                <span id="mu-plan-badge" class="badge ms-2" style="background:var(--primary);color:#fff;font-size:11px"></span>
+              </div>
+              <a href="#billing" onclick="switchSection('billing')" class="btn btn-sm" style="border:1px solid var(--primary);color:var(--primary);font-size:12px">Manage Plan</a>
+            </div>
+            <div style="background:#e5e7eb;border-radius:6px;height:22px;overflow:hidden;position:relative">
+              <div id="mu-bar" style="height:100%;border-radius:6px;transition:width .3s"></div>
+              <span id="mu-bar-label" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:11px;font-weight:600;color:#374151"></span>
+            </div>
+          </div>
+          <!-- Stats grid -->
+          <div class="admin-kpi-grid mb-3" style="grid-template-columns:repeat(4,1fr)" id="mu-stats"></div>
+          <!-- Daily usage table -->
+          <div class="card card-pad">
+            <div class="section-title mb-2">Daily Usage (This Month)</div>
+            <div id="mu-daily-table"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Longitudinal trends (appended after personal trends) -->
+      <div id="dash-longitudinal" style="display:none">
+        <hr class="my-3">
+        <div class="section-title mb-2">Meeting Trends (Last 30 Days)</div>
+        <div class="row g-3 mb-3">
+          <div class="col-md-6">
+            <div class="card card-pad h-100">
+              <div class="section-title mb-2">Top Topics</div>
+              <div id="long-topics"></div>
+            </div>
+          </div>
+          <div class="col-md-6">
+            <div class="card card-pad h-100">
+              <div class="section-title mb-2">Meetings per Day</div>
+              <div id="long-daily"></div>
             </div>
           </div>
         </div>
@@ -1514,6 +1563,11 @@
             <div style="font-size:11.5px;color:#94a3b8;margin-top:4px">
               {% if plan_limit == -1 %}Unlimited bots{% else %}{{ plan_limit }} bots/month{% endif %}
             </div>
+            {% if plan != 'business' %}
+            <div style="margin-top:8px">
+              <button onclick="_showUpgrade()" class="btn btn-sm" style="border:1px solid var(--primary);color:var(--primary);font-size:11px">Upgrade Plan</button>
+            </div>
+            {% endif %}
           </div>
         </div>
         <div class="col-md-4">
@@ -2293,11 +2347,13 @@ document.querySelectorAll('.analytics-tab[data-dtab]').forEach(tab => {
     if (panel) panel.style.display = '';
     if (tab.dataset.dtab === 'usage' && !_dashUsageLoaded) _loadDashUsage();
     if (tab.dataset.dtab === 'trends' && !_dashTrendsLoaded) _loadDashTrends();
+    if (tab.dataset.dtab === 'my-usage' && !_dashMyUsageLoaded) _loadDashMyUsage();
   });
 });
 
 let _dashUsageLoaded = false;
 let _dashTrendsLoaded = false;
+let _dashMyUsageLoaded = false;
 
 function _refreshDashAnalytics() {
   _dashUsageLoaded = false;
@@ -2392,8 +2448,95 @@ async function _loadDashTrends() {
     _dashTrendsLoaded = true;
     document.getElementById('dash-trends-loading').style.display = 'none';
     document.getElementById('dash-trends-content').style.display = '';
+
+    // Also load longitudinal trends
+    try {
+      const lt = await apiFetch('/api/v1/analytics/trends?days=30');
+      if (lt.total_meetings > 0) {
+        // Top topics
+        const topics = lt.top_topics || [];
+        document.getElementById('long-topics').innerHTML = topics.length
+          ? '<table class="table table-sm mb-0"><thead><tr><th>Topic</th><th class="text-end">Mentions</th></tr></thead><tbody>' +
+            topics.slice(0, 10).map(t =>
+              '<tr><td style="font-size:12.5px">' + t.topic + '</td><td class="text-end small fw-bold">' + t.count + '</td></tr>'
+            ).join('') + '</tbody></table>'
+          : '<div class="text-muted small py-3 text-center">No topics yet.</div>';
+
+        // Meetings per day
+        const mpd = lt.meetings_per_day || [];
+        document.getElementById('long-daily').innerHTML = mpd.length
+          ? '<table class="table table-sm mb-0"><thead><tr><th>Date</th><th class="text-end">Meetings</th></tr></thead><tbody>' +
+            mpd.slice(-14).map(d =>
+              '<tr><td style="font-size:12px">' + d.date + '</td><td class="text-end small fw-bold">' + d.count + '</td></tr>'
+            ).join('') + '</tbody></table>'
+          : '<div class="text-muted small py-3 text-center">No data yet.</div>';
+
+        document.getElementById('dash-longitudinal').style.display = '';
+        // Move it inside the trends panel
+        document.querySelector('.dtab-panel[data-dtab="trends"] > div:last-of-type')
+          ?.after(document.getElementById('dash-longitudinal'));
+      }
+    } catch (e) { /* longitudinal trends optional */ }
   } catch (e) {
     document.getElementById('dash-trends-loading').textContent = 'Failed to load: ' + e.message;
+  }
+}
+
+// ── Plan upgrade helper ────────────────────────────────────────────────────
+async function _showUpgrade() {
+  const plans = ['starter', 'pro', 'business'];
+  const current = '{{ plan }}';
+  const nextPlan = plans[plans.indexOf(current) + 1] || 'pro';
+  try {
+    const r = await apiFetch('/api/v1/billing/subscribe', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({plan: nextPlan}),
+    });
+    if (r.checkout_url) window.location.href = r.checkout_url;
+    else showToast('Could not create subscription session', 'danger');
+  } catch (e) {
+    showToast('Upgrade error: ' + e.message, 'danger');
+  }
+}
+
+// ── Usage & Billing tab loader ─────────────────────────────────────────────
+async function _loadDashMyUsage() {
+  try {
+    const d = await apiFetch('/api/v1/analytics/usage');
+    const pct = d.bots_limit === -1 ? 0 : Math.round((d.bots_used / d.bots_limit) * 100);
+    const barColor = pct >= 95 ? '#ef4444' : pct >= 80 ? '#f59e0b' : '#10b981';
+    const limitStr = d.bots_limit === -1 ? '∞' : d.bots_limit;
+
+    document.getElementById('mu-plan-badge').textContent = (d.plan || 'free').toUpperCase();
+    document.getElementById('mu-bar').style.width = Math.min(pct, 100) + '%';
+    document.getElementById('mu-bar').style.background = barColor;
+    document.getElementById('mu-bar-label').textContent = d.bots_used + ' / ' + limitStr + ' bots';
+
+    const stats = [
+      ['Credits Balance', '$' + (d.credits_balance || 0).toFixed(2), ''],
+      ['Spent This Month', '$' + (d.credits_spent_this_month || 0).toFixed(4), 'color:#ef4444'],
+      ['Avg Cost / Bot', '$' + (d.avg_cost_per_bot || 0).toFixed(4), ''],
+      ['Billing Resets', d.billing_cycle_reset ? new Date(d.billing_cycle_reset).toLocaleDateString() : '—', ''],
+    ];
+    document.getElementById('mu-stats').innerHTML = stats.map(([l, v, s]) =>
+      '<div class="stat-card"><div class="stat-label">' + l + '</div><div class="stat-value mt-1" style="font-size:1.4rem;' + s + '">' + v + '</div></div>'
+    ).join('');
+
+    // Daily usage table
+    const daily = d.daily_usage || [];
+    document.getElementById('mu-daily-table').innerHTML = daily.length
+      ? '<table class="table table-sm mb-0"><thead><tr><th>Date</th><th class="text-end">Bots</th></tr></thead><tbody>' +
+        daily.map(r =>
+          '<tr><td style="font-size:12.5px">' + r.date + '</td><td class="text-end small fw-bold">' + r.count + '</td></tr>'
+        ).join('') + '</tbody></table>'
+      : '<div class="text-muted small py-3 text-center">No usage this month yet.</div>';
+
+    _dashMyUsageLoaded = true;
+    document.getElementById('dash-myusage-loading').style.display = 'none';
+    document.getElementById('dash-myusage-content').style.display = '';
+  } catch (e) {
+    document.getElementById('dash-myusage-loading').textContent = 'Failed to load: ' + e.message;
   }
 }
 </script>
