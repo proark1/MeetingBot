@@ -506,7 +506,7 @@ async def _screenshot(page: Page, label: str) -> None:
         # Also dump page HTML so selectors can be diagnosed without a display
         html_path = SCREENSHOT_DIR / f"{label}_{ts}.html"
         html = await page.content()
-        html_path.write_text(html, encoding="utf-8")
+        await asyncio.to_thread(html_path.write_text, html, "utf-8")
         logger.info("HTML dump  → %s", html_path)
     except Exception:
         pass
@@ -2855,7 +2855,7 @@ async def _mention_monitor(
 
             if new_caption_text.strip():
                 caption_log.append(new_caption_text.strip())
-                caption_log = caption_log[-40:]
+            caption_log = caption_log[-40:]  # always truncate (prevents unbounded growth in quiet periods)
 
                 if (
                     bot_name_lower in new_caption_text.lower()

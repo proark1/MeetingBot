@@ -4,7 +4,18 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.9.2 — **Last updated:** 2026-03-22
+> **Latest version:** 2.9.3 — **Last updated:** 2026-03-22
+
+---
+
+## [2.9.3] - 2026-03-22
+
+### Fixed — Performance & Reliability (Round 3)
+- **browser_bot.py: async HTML writes** — `_screenshot()` HTML dump now uses `asyncio.to_thread()` instead of blocking `write_text()` (unblocks event loop during 1-5MB writes)
+- **browser_bot.py: caption_log memory leak** — Truncation to last 40 entries now runs unconditionally, not just when captions are non-empty (prevented unbounded growth during silent periods)
+- **store.py: startup OOM prevention** — `load_persisted_bots()` capped at 10k rows; `load_persisted_webhooks()` filters to `is_active=True` only (was loading entire table)
+- **store.py: lock contention** — `_persist_bot()` now builds dict inside lock but does JSON serialization outside (avoids blocking other bot operations during slow serialize of large transcripts)
+- **main.py: parallel startup** — Bot restore, webhook restore, and USDC monitor now run concurrently via `asyncio.gather()` (cuts startup time from sequential ~15s to parallel ~5s)
 
 ---
 

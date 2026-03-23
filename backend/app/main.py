@@ -121,26 +121,27 @@ async def lifespan(app: FastAPI):
     if not settings.CRYPTO_RPC_URL:
         logger.info("USDC payments disabled — set CRYPTO_RPC_URL to enable")
 
-    # ── Load persisted bots ───────────────────────────────────────────────
+    # ── Load persisted state (parallel for faster startup) ─────────────────
     from app.store import load_persisted_bots, load_persisted_webhooks
-    try:
-        restored = await asyncio.wait_for(load_persisted_bots(), timeout=15.0)
-        if restored:
-            logger.info("Restored %d bot(s) from previous run", restored)
-    except Exception as exc:
-        logger.warning("Could not restore persisted bots: %s", exc)
-
-    # ── Load persisted webhooks ───────────────────────────────────────────
-    try:
-        restored_webhooks = await asyncio.wait_for(load_persisted_webhooks(), timeout=15.0)
-        if restored_webhooks:
-            logger.info("Restored %d webhook(s) from previous run", restored_webhooks)
-    except Exception as exc:
-        logger.warning("Could not restore persisted webhooks: %s", exc)
-
-    # ── USDC monitor ──────────────────────────────────────────────────────
     from app.services.crypto_service import start_usdc_monitor
-    await start_usdc_monitor()
+
+    async def _load_bots():
+        try:
+            restored = await asyncio.wait_for(load_persisted_bots(), timeout=15.0)
+            if restored:
+                logger.info("Restored %d bot(s) from previous run", restored)
+        except Exception as exc:
+            logger.warning("Could not restore persisted bots: %s", exc)
+
+    async def _load_webhooks():
+        try:
+            restored_webhooks = await asyncio.wait_for(load_persisted_webhooks(), timeout=15.0)
+            if restored_webhooks:
+                logger.info("Restored %d webhook(s) from previous run", restored_webhooks)
+        except Exception as exc:
+            logger.warning("Could not restore persisted webhooks: %s", exc)
+
+    await asyncio.gather(_load_bots(), _load_webhooks(), start_usdc_monitor())
 
     # Clean up orphaned subprocesses on SIGTERM
     def _handle_sigterm(signum, frame):

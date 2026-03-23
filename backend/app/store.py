@@ -243,7 +243,7 @@ class Store:
                     return v.isoformat()
                 return str(v)
 
-            # Snapshot all fields while holding the lock to prevent concurrent mutation
+            # Snapshot scalar fields inside lock (fast), serialize outside (slow)
             async with self._lock:
                 bot_id = bot.id
                 bot_account_id = bot.account_id
@@ -252,7 +252,7 @@ class Store:
                 bot_meeting_url = bot.meeting_url
                 bot_created_at = bot.created_at
                 bot_expires_at = bot.expires_at
-                data = json.dumps({
+                snapshot = {
                     "id": bot.id,
                     "meeting_url": bot.meeting_url,
                     "meeting_platform": bot.meeting_platform,
@@ -306,7 +306,9 @@ class Store:
                     "started_at": _dt(bot.started_at),
                     "ended_at": _dt(bot.ended_at),
                     "expires_at": _dt(bot.expires_at),
-                })
+                }
+            # JSON serialization outside lock (can be slow for large transcripts)
+            data = json.dumps(snapshot)
 
             # DB I/O happens outside the lock
             async with AsyncSessionLocal() as db:
@@ -483,7 +485,7 @@ async def load_persisted_bots() -> int:
             result = await db.execute(
                 _select(BotSnapshot).where(
                     (BotSnapshot.expires_at > now) | (BotSnapshot.expires_at.is_(None))
-                )
+                ).limit(10000)  # cap startup load to prevent OOM on large DBs
             )
             snapshots = result.scalars().all()
 
@@ -569,7 +571,9 @@ async def load_persisted_webhooks() -> int:
         from sqlalchemy import select as _select
 
         async with AsyncSessionLocal() as db:
-            result = await db.execute(_select(WebhookModel))
+            result = await db.execute(
+                _select(WebhookModel).where(WebhookModel.is_active == True)  # noqa: E712
+            )
             rows = result.scalars().all()
 
         count = 0
