@@ -9,6 +9,11 @@ import logging
 import signal
 from contextlib import asynccontextmanager
 from pathlib import Path
+
+# Read version from VERSION file (root of repo)
+_VERSION_FILE = Path(__file__).resolve().parent.parent.parent / "VERSION"
+_APP_VERSION = _VERSION_FILE.read_text().strip() if _VERSION_FILE.exists() else "0.0.0"
+
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
@@ -664,6 +669,9 @@ app = FastAPI(
         "platform deposit address. Send USDC **from your registered wallet** — the system "
         "matches the `from` address to your account. 1 USDC = $1 credit, credited "
         "automatically within ~1 minute of on-chain confirmation.\n\n"
+        "**Subscribe to a plan:** `POST /api/v1/billing/subscribe` — create a Stripe Checkout "
+        "session for a subscription plan (`starter`, `pro`, or `business`). Returns "
+        "`{session_id, checkout_url, plan}`. Pass optional `success_url` and `cancel_url`.\n\n"
         "**Check balance:** `GET /api/v1/billing/balance` — returns current `credits_usd` and "
         "the last 50 transactions. Transaction `type` values: `stripe_topup`, `usdc_topup`, "
         "`bot_usage`.\n\n"
@@ -768,6 +776,12 @@ app = FastAPI(
         "## Analytics\n"
         "`GET /api/v1/analytics` — platform-wide bot statistics including sentiment distribution, "
         "meetings per day, top topics, top participants, and platform breakdown.\n\n"
+        "`GET /api/v1/analytics/usage` — per-account usage dashboard: `bots_used`, `bots_limit`, "
+        "`plan`, `credits_balance`, `credits_spent_this_month`, `avg_cost_per_bot`, "
+        "`billing_cycle_reset`, and `daily_usage[]` (last 30 days).\n\n"
+        "`GET /api/v1/analytics/trends?days=30` — longitudinal meeting trends: "
+        "`total_meetings`, `total_hours`, `meetings_per_day[]`, `sentiment_trend[]`, "
+        "`health_trend[]`, `top_topics[]`, `cost_trend[]`.\n\n"
 
         "## Analysis templates\n"
         "Use predefined templates to customize analysis output:\n"
@@ -853,7 +867,7 @@ app = FastAPI(
         "| `/admin` | Platform admin — plan stats, bot activity, system status, "
         "user accounts with inline plan management, unmatched USDC transfers, manual credit |\n"
     ),
-    version="2.2.0",
+    version=_APP_VERSION,
     lifespan=lifespan,
     docs_url="/api/docs",
     redoc_url="/api/redoc",
