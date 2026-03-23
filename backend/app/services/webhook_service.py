@@ -7,6 +7,7 @@ v4.x additions:
 """
 
 import asyncio
+from collections import OrderedDict
 import hashlib
 import hmac
 import json
@@ -22,14 +23,23 @@ logger = logging.getLogger(__name__)
 
 _http_client: httpx.AsyncClient | None = None
 
-# Per-webhook locks to prevent concurrent state mutation race conditions
-_webhook_locks: dict[str, asyncio.Lock] = {}
+# Per-webhook locks to prevent concurrent state mutation race conditions.
+# Uses an LRU-bounded dict to prevent unbounded memory growth.
+_WEBHOOK_LOCK_MAX = 500
+_webhook_locks: OrderedDict[str, asyncio.Lock] = OrderedDict()
 
 
 def _get_webhook_lock(wh_id: str) -> asyncio.Lock:
-    if wh_id not in _webhook_locks:
-        _webhook_locks[wh_id] = asyncio.Lock()
-    return _webhook_locks[wh_id]
+    if wh_id in _webhook_locks:
+        # Move to end (most recently used)
+        _webhook_locks.move_to_end(wh_id)
+        return _webhook_locks[wh_id]
+    lock = asyncio.Lock()
+    _webhook_locks[wh_id] = lock
+    # Evict oldest if over limit
+    while len(_webhook_locks) > _WEBHOOK_LOCK_MAX:
+        _webhook_locks.pop(next(iter(_webhook_locks)))
+    return lock
 
 
 def _get_client() -> httpx.AsyncClient:

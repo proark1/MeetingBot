@@ -120,9 +120,18 @@ async def require_auth(
     return account_id
 
 
+_admin_emails_cache: set[str] | None = None
+_admin_emails_raw: str | None = None
+
+
 def _admin_emails() -> set[str]:
-    """Return the set of admin emails from config (evaluated at call time, not import time)."""
-    return {e.strip().lower() for e in settings.ADMIN_EMAILS.split(",") if e.strip()}
+    """Return the set of admin emails from config (cached until config changes)."""
+    global _admin_emails_cache, _admin_emails_raw
+    raw = settings.ADMIN_EMAILS
+    if _admin_emails_cache is None or raw != _admin_emails_raw:
+        _admin_emails_raw = raw
+        _admin_emails_cache = {e.strip().lower() for e in raw.split(",") if e.strip()}
+    return _admin_emails_cache
 
 
 async def require_admin(

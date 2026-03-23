@@ -166,7 +166,7 @@ async def _send_smtp(to_address: str, subject: str, html_body: str) -> None:
                     server.login(username, password)
                 server.sendmail(from_addr, [to_address], msg.as_string())
 
-    await asyncio.to_thread(_send)
+    await asyncio.wait_for(asyncio.to_thread(_send), timeout=30.0)
 
 
 async def _send_sendgrid(to_address: str, subject: str, html_body: str) -> None:

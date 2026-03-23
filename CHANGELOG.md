@@ -4,7 +4,23 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.9.0 — **Last updated:** 2026-03-22
+> **Latest version:** 2.9.1 — **Last updated:** 2026-03-22
+
+---
+
+## [2.9.1] - 2026-03-22
+
+### Fixed — Performance & Reliability
+- **Memory leak: webhook locks** — `_webhook_locks` dict now uses LRU-bounded `OrderedDict` (max 500 entries) to prevent unbounded growth
+- **Race condition: duplicate analysis** — `_analysis_in_flight` check-and-add now protected by `asyncio.Lock` (TOCTOU fix)
+- **N+1 query: action items upsert** — Single batch `SELECT ... WHERE hash IN (...)` replaces per-item query loop
+- **N+1 query: retention policy enforcement** — Pre-loads all per-account policies in one query; batch-deletes expired snapshots in single `DELETE ... WHERE id IN (...)`
+- **Missing DB index** — Added `index=True` on `Webhook.is_active` (queried in admin analytics aggregations)
+- **Store.list_bots() lock contention** — Filtering now happens inside the lock to avoid copying unneeded bots to a snapshot list
+- **Missing timeout: Gemini transcription** — Added 5-minute `asyncio.wait_for` safety net on `generate_content_async()`
+- **Missing timeout: SMTP email** — Added 30-second timeout on `asyncio.to_thread(_send)` to prevent indefinite hangs
+- **Page load speed: base.html** — Added `preconnect` hints for Google Fonts and jsDelivr CDN; deferred Bootstrap JS loading
+- **Admin email parsing** — Cached parsed `ADMIN_EMAILS` set instead of re-parsing on every admin request
 
 ---
 

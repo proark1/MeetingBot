@@ -238,14 +238,21 @@ async def lifespan(app: FastAPI):
                     select(BotSnapshot).where(BotSnapshot.created_at < cutoff)
                 )
                 expired_snaps = result.scalars().all()
-                for snap in expired_snaps:
-                    # Check for per-account override
-                    acc_result = await db.execute(
-                        select(RetentionPolicy).where(RetentionPolicy.account_id == snap.account_id)
+
+                # Pre-load ALL per-account retention policies in one query (avoids N+1)
+                account_ids = {snap.account_id for snap in expired_snaps if snap.account_id}
+                policies_by_account: dict = {}
+                if account_ids:
+                    pol_result = await db.execute(
+                        select(RetentionPolicy).where(RetentionPolicy.account_id.in_(account_ids))
                     )
-                    acc_policy = acc_result.scalar_one_or_none()
+                    policies_by_account = {p.account_id: p for p in pol_result.scalars().all()}
+
+                ids_to_delete = []
+                import json as _json
+                for snap in expired_snaps:
+                    acc_policy = policies_by_account.get(snap.account_id)
                     eff_days = acc_policy.bot_retention_days if acc_policy else global_bot_days
-                    eff_rec_days = acc_policy.recording_retention_days if acc_policy else global_rec_days
 
                     if eff_days == -1:
                         continue  # this account keeps data forever
@@ -256,7 +263,6 @@ async def lifespan(app: FastAPI):
 
                     # Try to delete recording files
                     try:
-                        import json as _json
                         data = _json.loads(snap.data or "{}")
                         for path_key in ("recording_path", "video_path"):
                             fpath = data.get(path_key)
@@ -266,10 +272,14 @@ async def lifespan(app: FastAPI):
                     except Exception as exc:
                         logger.warning("Retention: could not clean up files for snapshot %s: %s", snap.id, exc)
 
-                    await db.execute(_sqldelete(BotSnapshot).where(BotSnapshot.id == snap.id))
+                    ids_to_delete.append(snap.id)
+
+                # Batch delete all expired snapshots in one query
+                if ids_to_delete:
+                    await db.execute(_sqldelete(BotSnapshot).where(BotSnapshot.id.in_(ids_to_delete)))
 
                 await db.commit()
-                logger.info("Retention enforcement complete")
+                logger.info("Retention enforcement complete: deleted %d snapshots", len(ids_to_delete))
 
     retention_task = asyncio.create_task(_supervised("retention_loop", _retention_loop))
 

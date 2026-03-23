@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 # Tracks bot IDs currently undergoing analysis — prevents duplicate concurrent AI calls
 _analysis_in_flight: set[str] = set()
+_analysis_lock = asyncio.Lock()
 
 # ── Live-entry helper coroutines (fire-and-forget via create_task) ─────────────
 
@@ -269,10 +270,11 @@ async def _transcribe_audio_for_bot(bot: BotSession, audio_path: str) -> list:
 
 async def _do_analysis(bot: BotSession, audio_path: str, use_real_bot: bool, video_path: Optional[str] = None) -> None:
     """Transcribe (if needed), analyse, and update the bot in-memory."""
-    if bot.id in _analysis_in_flight:
-        logger.warning("Bot %s: analysis already in flight — skipping duplicate call", bot.id)
-        return
-    _analysis_in_flight.add(bot.id)
+    async with _analysis_lock:
+        if bot.id in _analysis_in_flight:
+            logger.warning("Bot %s: analysis already in flight — skipping duplicate call", bot.id)
+            return
+        _analysis_in_flight.add(bot.id)
     try:
         await _do_analysis_inner(bot, audio_path, use_real_bot, video_path=video_path)
     finally:

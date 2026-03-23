@@ -206,15 +206,13 @@ class Store:
         sub_user_id: Optional[str] = None,
     ) -> tuple[list[BotSession], int]:
         async with self._lock:
-            snapshot = list(self._bots.values())
-        # Filter first (O(n)), then sort only the smaller result set
-        filtered = snapshot
-        if status:
-            filtered = [b for b in filtered if b.status == status]
-        if account_id:
-            filtered = [b for b in filtered if b.account_id == account_id]
-        if sub_user_id is not None:
-            filtered = [b for b in filtered if b.sub_user_id == sub_user_id]
+            # Filter inside the lock to avoid copying unneeded bots
+            filtered = [
+                b for b in self._bots.values()
+                if (not status or b.status == status)
+                and (not account_id or b.account_id == account_id)
+                and (sub_user_id is None or b.sub_user_id == sub_user_id)
+            ]
         bots = sorted(filtered, key=lambda b: b.created_at, reverse=True)
         total = len(bots)
         return bots[offset : offset + limit], total

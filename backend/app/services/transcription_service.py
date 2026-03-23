@@ -339,9 +339,12 @@ async def transcribe_audio(
             prompt += f"\n\nKnown participants in this meeting: {names_list}. Use these exact names for speaker labels where you can match the voice."
         model = genai.GenerativeModel("gemini-2.5-flash")
         _t0 = time.time()
-        response = await model.generate_content_async(
-            [prompt, uploaded],
-            generation_config={"temperature": 0, "max_output_tokens": 65536},
+        response = await asyncio.wait_for(
+            model.generate_content_async(
+                [prompt, uploaded],
+                generation_config={"temperature": 0, "max_output_tokens": 65536},
+            ),
+            timeout=300.0,  # 5 minute safety net for large audio files
         )
         _duration = round(time.time() - _t0, 2)
 

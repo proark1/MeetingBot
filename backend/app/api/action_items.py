@@ -124,17 +124,29 @@ async def upsert_action_items(account_id: Optional[str], bot_id: str, items: lis
     """
     if not items:
         return
+    # Build all rows first, then batch-check existing hashes in one query
+    rows_to_insert = []
+    hashes = []
+    for item in items:
+        task_text = (item.get("task") or "").strip()
+        if not task_text:
+            continue
+        content_hash = hashlib.sha256(f"{bot_id}:{task_text.lower()}".encode()).hexdigest()
+        hashes.append(content_hash)
+        rows_to_insert.append((content_hash, task_text, item))
+
+    if not rows_to_insert:
+        return
+
     async with AsyncSessionLocal() as session:
-        for item in items:
-            task_text = (item.get("task") or "").strip()
-            if not task_text:
-                continue
-            content_hash = hashlib.sha256(f"{bot_id}:{task_text.lower()}".encode()).hexdigest()
-            # Check if already exists
-            existing = await session.execute(
-                select(ActionItem).where(ActionItem.content_hash == content_hash)
-            )
-            if existing.scalar_one_or_none() is not None:
+        # Single query to find all existing hashes
+        existing_result = await session.execute(
+            select(ActionItem.content_hash).where(ActionItem.content_hash.in_(hashes))
+        )
+        existing_hashes = {row[0] for row in existing_result}
+
+        for content_hash, task_text, item in rows_to_insert:
+            if content_hash in existing_hashes:
                 continue
             row = ActionItem(
                 id=hashlib.sha256(f"{bot_id}:{task_text}".encode()).hexdigest()[:36],
