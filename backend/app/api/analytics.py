@@ -648,3 +648,157 @@ async def search_meetings(
             break
 
     return {"query": q, "semantic": False, "total": len(matches), "results": matches}
+
+
+# ── Usage breakdown ────────────────────────────────────────────────────────────
+
+
+@router.get("/analytics/usage", tags=["Analytics"])
+async def get_usage(request: Request):
+    """Monthly usage breakdown for the authenticated account: bots used, limit, cost, daily chart."""
+    account_id = getattr(request.state, "account_id", None)
+    if not account_id or account_id == SUPERADMIN_ACCOUNT_ID:
+        raise HTTPException(status_code=403, detail="Requires per-user authentication")
+
+    from app.db import AsyncSessionLocal
+    from app.models.account import Account, CreditTransaction, BotSnapshot
+    from sqlalchemy import select, func, Date, cast
+    from app.config import settings
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(Account).where(Account.id == account_id))
+        account = result.scalar_one_or_none()
+        if not account:
+            raise HTTPException(status_code=404, detail="Account not found")
+
+        limit = settings.plan_limits.get(account.plan or "free", settings.PLAN_FREE_BOTS_PER_MONTH)
+        bots_used = account.monthly_bots_used or 0
+
+        # Credits spent this month (bot_usage transactions, negative amounts)
+        now = datetime.now(timezone.utc)
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+        spent_result = await db.execute(
+            select(func.coalesce(func.sum(CreditTransaction.amount_usd), 0))
+            .where(
+                CreditTransaction.account_id == account_id,
+                CreditTransaction.type == "bot_usage",
+                CreditTransaction.created_at >= month_start,
+            )
+        )
+        credits_spent = abs(float(spent_result.scalar() or 0))
+
+        # Daily usage from bot snapshots this month
+        _date_expr = cast(BotSnapshot.created_at, Date)
+        daily_result = await db.execute(
+            select(_date_expr.label("day"), func.count().label("cnt"))
+            .where(
+                BotSnapshot.account_id == account_id,
+                BotSnapshot.created_at >= month_start,
+            )
+            .group_by(_date_expr)
+            .order_by(_date_expr)
+        )
+        daily_usage = [{"date": str(r.day), "count": r.cnt} for r in daily_result]
+
+    avg_cost = round(credits_spent / bots_used, 4) if bots_used > 0 else 0.0
+
+    return {
+        "bots_used": bots_used,
+        "bots_limit": limit,
+        "plan": account.plan or "free",
+        "credits_balance": float(account.credits_usd or 0),
+        "credits_spent_this_month": round(credits_spent, 4),
+        "avg_cost_per_bot": avg_cost,
+        "billing_cycle_reset": account.monthly_reset_at.isoformat() if account.monthly_reset_at else None,
+        "daily_usage": daily_usage,
+    }
+
+
+# ── Longitudinal Trends ───────────────────────────────────────────────────────
+
+
+@router.get("/analytics/trends", tags=["Analytics"])
+async def get_trends(
+    request: Request,
+    days: int = Query(30, ge=7, le=365, description="Number of days to look back"),
+):
+    """Longitudinal analytics: meetings/day, sentiment trend, topic frequency, cost trend."""
+    account_id = getattr(request.state, "account_id", None)
+    if not account_id or account_id == SUPERADMIN_ACCOUNT_ID:
+        raise HTTPException(status_code=403, detail="Requires per-user authentication")
+
+    from app.db import AsyncSessionLocal
+    from app.models.account import MeetingSummary
+    from sqlalchemy import select, func, Date, cast
+
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(days=days)
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(MeetingSummary)
+            .where(MeetingSummary.account_id == account_id, MeetingSummary.created_at >= cutoff)
+            .order_by(MeetingSummary.created_at.desc())
+            .limit(5000)
+        )
+        summaries = result.scalars().all()
+
+    if not summaries:
+        return {
+            "range_days": days, "total_meetings": 0, "total_hours": 0,
+            "meetings_per_day": [], "sentiment_trend": [], "health_trend": [],
+            "top_topics": [], "cost_trend": [],
+        }
+
+    # Aggregate by day
+    from collections import Counter, defaultdict
+    daily_meetings: dict[str, int] = defaultdict(int)
+    daily_sentiment: dict[str, list] = defaultdict(list)
+    daily_health: dict[str, list] = defaultdict(list)
+    daily_cost: dict[str, float] = defaultdict(float)
+    topic_counter: Counter = Counter()
+    total_seconds = 0
+
+    for s in summaries:
+        day = s.created_at.strftime("%Y-%m-%d") if s.created_at else "unknown"
+        daily_meetings[day] += 1
+        if s.sentiment is not None:
+            daily_sentiment[day].append(float(s.sentiment))
+        if s.health_score is not None:
+            daily_health[day].append(s.health_score)
+        if s.ai_cost_usd is not None:
+            daily_cost[day] += float(s.ai_cost_usd)
+        total_seconds += s.duration_seconds or 0
+        if s.topics:
+            try:
+                for t in json.loads(s.topics):
+                    if t:
+                        topic_counter[t] += 1
+            except Exception:
+                pass
+
+    # Build sorted time series
+    all_days = sorted(set(daily_meetings.keys()))
+    meetings_per_day = [{"date": d, "count": daily_meetings[d]} for d in all_days]
+    sentiment_trend = [
+        {"date": d, "avg": round(sum(daily_sentiment[d]) / len(daily_sentiment[d]), 2)}
+        for d in all_days if daily_sentiment[d]
+    ]
+    health_trend = [
+        {"date": d, "avg": round(sum(daily_health[d]) / len(daily_health[d]), 1)}
+        for d in all_days if daily_health[d]
+    ]
+    cost_trend = [{"date": d, "cost_usd": round(daily_cost[d], 4)} for d in all_days if daily_cost[d]]
+    top_topics = [{"topic": t, "count": c} for t, c in topic_counter.most_common(20)]
+
+    return {
+        "range_days": days,
+        "total_meetings": len(summaries),
+        "total_hours": round(total_seconds / 3600, 1),
+        "meetings_per_day": meetings_per_day,
+        "sentiment_trend": sentiment_trend,
+        "health_trend": health_trend,
+        "top_topics": top_topics,
+        "cost_trend": cost_trend,
+    }

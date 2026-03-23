@@ -422,6 +422,35 @@ async def _do_analysis_inner(bot: BotSession, audio_path: str, use_real_bot: boo
         except Exception as exc:
             logger.warning("Bot %s: action item upsert failed: %s", bot.id, exc)
 
+        # ── Persist lightweight meeting summary for longitudinal analytics ─
+        try:
+            import json as _json
+            from app.db import AsyncSessionLocal
+            from app.models.account import MeetingSummary
+            topics_list = [
+                t.get("name", "") if isinstance(t, dict) else str(t)
+                for t in analysis_result.get("topics", [])
+            ]
+            word_count = sum(len(e.get("text", "").split()) for e in (bot.transcript or []))
+            async with AsyncSessionLocal() as _sdb:
+                _sdb.add(MeetingSummary(
+                    account_id=bot.account_id,
+                    bot_id=bot.id,
+                    meeting_url=bot.meeting_url,
+                    platform=bot.meeting_platform,
+                    duration_seconds=getattr(bot, "duration_seconds", 0) or 0,
+                    participant_count=len(bot.participants or []),
+                    sentiment=analysis_result.get("sentiment"),
+                    health_score=health_score,
+                    topics=_json.dumps(topics_list) if topics_list else None,
+                    template=bot.template,
+                    ai_cost_usd=getattr(bot, "ai_total_cost_usd", None),
+                    transcript_word_count=word_count,
+                ))
+                await _sdb.commit()
+        except Exception as exc:
+            logger.warning("Bot %s: meeting summary persist failed: %s", bot.id, exc)
+
         # ── Generate semantic embedding ───────────────────────────────────
         try:
             summary = analysis_result.get("summary", "")

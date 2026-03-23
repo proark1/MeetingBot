@@ -36,6 +36,9 @@ class Account(Base):
     # Monthly usage counters (reset on billing cycle)
     monthly_bots_used: Mapped[int] = mapped_column(Integer, default=0)
     monthly_reset_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Stripe subscription fields
+    stripe_customer_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
+    stripe_subscription_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     # Email notification preferences
     notify_on_done: Mapped[bool] = mapped_column(Boolean, default=True)
     notify_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
@@ -439,3 +442,26 @@ class ActionItem(Base):
     status: Mapped[str] = mapped_column(String(20), default="open")  # open | done
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class MeetingSummary(Base):
+    """Lightweight permanent record of each meeting — survives beyond BotSnapshot TTL.
+    Used for longitudinal analytics: trends, topic frequency, sentiment over time.
+    """
+
+    __tablename__ = "meeting_summaries"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    account_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
+    bot_id: Mapped[str] = mapped_column(String(36), nullable=False, unique=True, index=True)
+    meeting_url: Mapped[Optional[str]] = mapped_column(String(2048), nullable=True)
+    platform: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    duration_seconds: Mapped[int] = mapped_column(Integer, default=0)
+    participant_count: Mapped[int] = mapped_column(Integer, default=0)
+    sentiment: Mapped[Optional[float]] = mapped_column(Numeric(3, 2), nullable=True)
+    health_score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    topics: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON list of topic strings
+    template: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    ai_cost_usd: Mapped[Optional[float]] = mapped_column(Numeric(10, 6), nullable=True)
+    transcript_word_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, index=True)

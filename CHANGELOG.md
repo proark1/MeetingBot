@@ -4,7 +4,18 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.10.0 — **Last updated:** 2026-03-22
+> **Latest version:** 2.11.0 — **Last updated:** 2026-03-22
+
+---
+
+## [2.11.0] - 2026-03-22
+
+### Added — Subscriptions, Usage Analytics, Longitudinal Trends
+- **Stripe subscription billing** — New `POST /api/v1/billing/subscribe` endpoint creates Stripe Checkout in subscription mode for Starter/Pro/Business plans. Expanded webhook handler processes `invoice.paid` (renew), `checkout.session.completed` mode=subscription (activate plan), `customer.subscription.deleted` (downgrade to free).
+- **Account model: Stripe fields** — `stripe_customer_id` and `stripe_subscription_id` columns for linking accounts to Stripe customers.
+- **Usage analytics endpoint** — `GET /api/v1/analytics/usage` returns: bots_used, bots_limit, plan, credits_balance, credits_spent_this_month, avg_cost_per_bot, daily_usage chart data.
+- **MeetingSummary model** — Permanent lightweight record of each meeting (bot_id, platform, duration, participant_count, sentiment, health_score, topics, ai_cost, word_count). Persisted in `bot_service._do_analysis_inner()` after analysis completes. Survives beyond BotSnapshot's 24h TTL.
+- **Longitudinal trends API** — `GET /api/v1/analytics/trends?days=30` returns: meetings_per_day, sentiment_trend, health_trend, top_topics (frequency across all meetings), cost_trend. Powered by the MeetingSummary table.
 
 ---
 

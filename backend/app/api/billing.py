@@ -60,6 +60,18 @@ class CheckoutResponse(BaseModel):
     amount_usd: int = Field(description="Amount that will be credited after successful payment.")
 
 
+class SubscribeRequest(BaseModel):
+    plan: str = Field(description="Target plan: 'starter', 'pro', or 'business'.")
+    success_url: Optional[str] = Field(None, description="Redirect URL after successful subscription.")
+    cancel_url: Optional[str] = Field(None, description="Redirect URL if user cancels.")
+
+
+class SubscribeResponse(BaseModel):
+    session_id: str = Field(description="Stripe Checkout session ID.")
+    checkout_url: str = Field(description="Redirect the user to this URL.")
+    plan: str = Field(description="Plan being subscribed to.")
+
+
 class UsdcAddressResponse(BaseModel):
     deposit_address: str = Field(
         description="The Ethereum address to send USDC to (platform collection wallet or per-user HD address)."
@@ -209,6 +221,69 @@ async def create_stripe_checkout(
     )
 
 
+@router.post("/subscribe", response_model=SubscribeResponse)
+async def create_subscription(
+    payload: SubscribeRequest,
+    request: Request,
+    account_id: Optional[str] = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a Stripe subscription checkout for a plan upgrade."""
+    if not account_id or account_id == SUPERADMIN_ACCOUNT_ID:
+        raise HTTPException(status_code=403, detail="Requires per-user authentication")
+    if payload.plan not in ("starter", "pro", "business"):
+        raise HTTPException(status_code=422, detail="Plan must be starter, pro, or business")
+    if not settings.STRIPE_SECRET_KEY:
+        raise HTTPException(status_code=503, detail="Stripe payments not configured")
+
+    result = await db.execute(select(Account).where(Account.id == account_id))
+    account = result.scalar_one_or_none()
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    price_map = {
+        "starter": settings.STRIPE_STARTER_PRICE_ID,
+        "pro": settings.STRIPE_PRO_PRICE_ID,
+        "business": settings.STRIPE_BUSINESS_PRICE_ID,
+    }
+    price_id = price_map.get(payload.plan)
+    if not price_id:
+        raise HTTPException(status_code=503, detail=f"Stripe Price ID not configured for plan '{payload.plan}'")
+
+    import stripe as _stripe
+    _stripe.api_key = settings.STRIPE_SECRET_KEY
+
+    base_url = str(request.base_url).rstrip("/")
+    success_url = payload.success_url or f"{base_url}/dashboard?subscription=success"
+    cancel_url = payload.cancel_url or f"{base_url}/dashboard?subscription=cancelled"
+
+    params: dict = {
+        "payment_method_types": ["card"],
+        "line_items": [{"price": price_id, "quantity": 1}],
+        "mode": "subscription",
+        "success_url": success_url,
+        "cancel_url": cancel_url,
+        "metadata": {"account_id": account_id, "plan": payload.plan},
+    }
+    if account.stripe_customer_id:
+        params["customer"] = account.stripe_customer_id
+    else:
+        params["customer_email"] = account.email
+
+    session = _stripe.checkout.Session.create(**params)
+
+    # Persist Stripe customer ID if newly created
+    if session.get("customer") and not account.stripe_customer_id:
+        account.stripe_customer_id = session["customer"]
+        await db.commit()
+
+    return SubscribeResponse(
+        session_id=session.id,
+        checkout_url=session.url,
+        plan=payload.plan,
+    )
+
+
 @router.post("/stripe/webhook", include_in_schema=False)
 async def stripe_webhook(request: Request):
     """
@@ -231,7 +306,53 @@ async def stripe_webhook(request: Request):
 
     if event["type"] == "checkout.session.completed":
         session = event["data"]["object"]
-        await handle_checkout_completed(session)
+        if session.get("mode") == "subscription":
+            # Subscription checkout — link Stripe customer and activate plan
+            acct_id = session.get("metadata", {}).get("account_id")
+            plan = session.get("metadata", {}).get("plan", "free")
+            customer_id = session.get("customer")
+            if acct_id and customer_id:
+                from app.db import AsyncSessionLocal
+                from datetime import datetime, timezone, timedelta
+                async with AsyncSessionLocal() as db:
+                    result = await db.execute(select(Account).where(Account.id == acct_id))
+                    account = result.scalar_one_or_none()
+                    if account:
+                        account.stripe_customer_id = customer_id
+                        account.plan = plan
+                        account.monthly_bots_used = 0
+                        account.monthly_reset_at = datetime.now(timezone.utc) + timedelta(days=30)
+                        await db.commit()
+                        logger.info("Subscription activated: account %s → plan %s", acct_id, plan)
+        else:
+            await handle_checkout_completed(session)
+
+    elif event["type"] == "invoice.paid":
+        # Recurring subscription payment — keep plan active
+        invoice = event["data"]["object"]
+        customer_id = invoice.get("customer")
+        if customer_id:
+            from app.db import AsyncSessionLocal
+            async with AsyncSessionLocal() as db:
+                result = await db.execute(select(Account).where(Account.stripe_customer_id == customer_id))
+                account = result.scalar_one_or_none()
+                if account:
+                    logger.info("Subscription renewed: account %s, plan %s", account.id, account.plan)
+
+    elif event["type"] == "customer.subscription.deleted":
+        # Subscription cancelled — downgrade to free
+        sub = event["data"]["object"]
+        sub_id = sub.get("id")
+        if sub_id:
+            from app.db import AsyncSessionLocal
+            async with AsyncSessionLocal() as db:
+                result = await db.execute(select(Account).where(Account.stripe_subscription_id == sub_id))
+                account = result.scalar_one_or_none()
+                if account:
+                    account.plan = "free"
+                    account.stripe_subscription_id = None
+                    await db.commit()
+                    logger.info("Subscription cancelled: account %s downgraded to free", account.id)
 
     return {"received": True}
 
