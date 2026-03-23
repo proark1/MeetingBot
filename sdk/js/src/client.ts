@@ -481,6 +481,15 @@ export class MeetingBotClient {
     });
   }
 
+  /**
+   * Create a Stripe subscription checkout for a plan upgrade.
+   */
+  async subscribe(params: SubscribeParams): Promise<SubscribeResponse> {
+    return this.request<SubscribeResponse>("POST", "/api/v1/billing/subscribe", {
+      body: params,
+    });
+  }
+
   // -------------------------------------------------------------------------
   // Exports
   // -------------------------------------------------------------------------
@@ -691,6 +700,22 @@ export class MeetingBotClient {
    */
   async getMyAnalytics(): Promise<MyAnalyticsResponse> {
     return this.request<MyAnalyticsResponse>("GET", "/api/v1/analytics/me", {});
+  }
+
+  /**
+   * Get monthly usage breakdown: bots used, limit, credits spent, daily usage.
+   */
+  async getUsage(): Promise<UsageResponse> {
+    return this.request<UsageResponse>("GET", "/api/v1/analytics/usage", {});
+  }
+
+  /**
+   * Get longitudinal analytics: meetings/day, sentiment, topics, cost trends.
+   */
+  async getTrends(days: number = 30): Promise<TrendsResponse> {
+    return this.request<TrendsResponse>("GET", "/api/v1/analytics/trends", {
+      params: { days },
+    });
   }
 
   /**

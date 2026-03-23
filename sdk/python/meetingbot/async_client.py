@@ -592,6 +592,29 @@ class AsyncMeetingBotClient:
         response = await self._post("/api/v1/billing/stripe/checkout", json=body)
         return CheckoutResponse.model_validate(response.json())
 
+    async def subscribe(
+        self,
+        plan: str,
+        success_url: Optional[str] = None,
+        cancel_url: Optional[str] = None,
+    ) -> "SubscribeResponse":
+        """
+        Create a Stripe subscription checkout for a plan upgrade.
+
+        :param plan: Target plan: 'starter', 'pro', or 'business'.
+        :param success_url: Redirect URL after successful subscription.
+        :param cancel_url: Redirect URL if user cancels.
+        :returns: SubscribeResponse with checkout URL.
+        """
+        body: Dict[str, Any] = {"plan": plan}
+        if success_url is not None:
+            body["success_url"] = success_url
+        if cancel_url is not None:
+            body["cancel_url"] = cancel_url
+        response = await self._post("/api/v1/billing/subscribe", json=body)
+        from .models import SubscribeResponse
+        return SubscribeResponse.model_validate(response.json())
+
     # ------------------------------------------------------------------
     # Exports
     # ------------------------------------------------------------------
@@ -908,6 +931,27 @@ class AsyncMeetingBotClient:
         """
         response = await self._get("/api/v1/analytics/me")
         return MyAnalyticsResponse.model_validate(response.json())
+
+    async def get_usage(self) -> "UsageResponse":
+        """
+        Get monthly usage breakdown: bots used, limit, credits spent, daily usage.
+
+        :returns: UsageResponse
+        """
+        response = await self._get("/api/v1/analytics/usage")
+        from .models import UsageResponse
+        return UsageResponse.model_validate(response.json())
+
+    async def get_trends(self, days: int = 30) -> "TrendsResponse":
+        """
+        Get longitudinal analytics: meetings/day, sentiment, topics, cost trends.
+
+        :param days: Number of days to look back (7–365, default 30).
+        :returns: TrendsResponse
+        """
+        response = await self._get("/api/v1/analytics/trends", params={"days": days})
+        from .models import TrendsResponse
+        return TrendsResponse.model_validate(response.json())
 
     async def search_meetings(
         self,

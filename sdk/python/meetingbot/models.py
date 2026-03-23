@@ -231,6 +231,46 @@ class CheckoutResponse(BaseModel):
     model_config = {"extra": "allow"}
 
 
+class SubscribeResponse(BaseModel):
+    """Stripe subscription checkout response."""
+
+    session_id: str
+    checkout_url: str
+    plan: str
+
+    model_config = {"extra": "allow"}
+
+
+class UsageResponse(BaseModel):
+    """Monthly usage breakdown."""
+
+    bots_used: int = 0
+    bots_limit: int = 0
+    plan: str = "free"
+    credits_balance: float = 0.0
+    credits_spent_this_month: float = 0.0
+    avg_cost_per_bot: float = 0.0
+    billing_cycle_reset: Optional[str] = None
+    daily_usage: List[Dict[str, Any]] = []
+
+    model_config = {"extra": "allow"}
+
+
+class TrendsResponse(BaseModel):
+    """Longitudinal analytics trends."""
+
+    range_days: int = 30
+    total_meetings: int = 0
+    total_hours: float = 0.0
+    meetings_per_day: List[Dict[str, Any]] = []
+    sentiment_trend: List[Dict[str, Any]] = []
+    health_trend: List[Dict[str, Any]] = []
+    top_topics: List[Dict[str, Any]] = []
+    cost_trend: List[Dict[str, Any]] = []
+
+    model_config = {"extra": "allow"}
+
+
 # ---------------------------------------------------------------------------
 # Export models
 # ---------------------------------------------------------------------------

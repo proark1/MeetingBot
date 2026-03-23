@@ -4,7 +4,15 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.12.0 — **Last updated:** 2026-03-22
+> **Latest version:** 2.12.1 — **Last updated:** 2026-03-22
+
+---
+
+## [2.12.1] - 2026-03-22
+
+### Added — SDK coverage for new endpoints
+- **Python SDK** (sync + async): 3 new methods — `subscribe(plan, success_url?, cancel_url?)`, `get_usage()`, `get_trends(days=30)` with `SubscribeResponse`, `UsageResponse`, `TrendsResponse` models
+- **TypeScript SDK**: 3 new methods — `subscribe(params)`, `getUsage()`, `getTrends(days?)` with full type interfaces (`SubscribeParams`, `SubscribeResponse`, `UsageResponse`, `TrendsResponse`)
 
 ---
 

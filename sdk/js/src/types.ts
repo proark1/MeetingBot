@@ -256,6 +256,43 @@ export interface CheckoutResponse {
   [key: string]: unknown;
 }
 
+export interface SubscribeParams {
+  plan: "starter" | "pro" | "business";
+  success_url?: string;
+  cancel_url?: string;
+}
+
+export interface SubscribeResponse {
+  session_id: string;
+  checkout_url: string;
+  plan: string;
+  [key: string]: unknown;
+}
+
+export interface UsageResponse {
+  bots_used: number;
+  bots_limit: number;
+  plan: string;
+  credits_balance: number;
+  credits_spent_this_month: number;
+  avg_cost_per_bot: number;
+  billing_cycle_reset: string | null;
+  daily_usage: Array<{ date: string; count: number }>;
+  [key: string]: unknown;
+}
+
+export interface TrendsResponse {
+  range_days: number;
+  total_meetings: number;
+  total_hours: number;
+  meetings_per_day: Array<{ date: string; count: number }>;
+  sentiment_trend: Array<{ date: string; avg: number }>;
+  health_trend: Array<{ date: string; avg: number }>;
+  top_topics: Array<{ topic: string; count: number }>;
+  cost_trend: Array<{ date: string; cost_usd: number }>;
+  [key: string]: unknown;
+}
+
 // ---------------------------------------------------------------------------
 // Export types
 // ---------------------------------------------------------------------------
