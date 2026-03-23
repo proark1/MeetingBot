@@ -4,7 +4,18 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.12.1 — **Last updated:** 2026-03-22
+> **Latest version:** 2.12.2 — **Last updated:** 2026-03-22
+
+---
+
+## [2.12.2] - 2026-03-22
+
+### Fixed — Performance (Round 6)
+- **Dashboard: 7 queries → 5** — Integration and calendar feed queries consolidated (was querying each table twice: once for active, once for all). Derives active subset in Python from single query.
+- **Dashboard: OAuth query bounded** — Added `.limit(20)` to OAuthAccount query (was unbounded)
+- **Admin: PlatformConfig query bounded** — Added `.limit(500)` (was unbounded)
+- **Admin: Chart.js deferred** — Added `defer` to Chart.js CDN script tag in admin.html
+- **Background loops: imports hoisted** — Moved `import json`, `from app.services.email_service` out of `while True` loops in main.py retention/digest tasks
 
 ---
 

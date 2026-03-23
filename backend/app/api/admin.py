@@ -154,7 +154,7 @@ async def get_all_platform_config(
     _admin: str = Depends(require_admin),
 ):
     """Get all platform configuration values."""
-    result = await db.execute(select(PlatformConfig))
+    result = await db.execute(select(PlatformConfig).limit(500))
     configs = result.scalars().all()
     return PlatformConfigResponse(
         configs=[

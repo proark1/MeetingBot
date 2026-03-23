@@ -214,6 +214,7 @@ async def lifespan(app: FastAPI):
 
     async def _enforce_retention_policies():
         """Delete recordings and bot snapshots beyond their retention period."""
+        import json as _json
         import os
         from datetime import datetime, timezone, timedelta
         from app.db import AsyncSessionLocal
@@ -250,7 +251,6 @@ async def lifespan(app: FastAPI):
                     policies_by_account = {p.account_id: p for p in pol_result.scalars().all()}
 
                 ids_to_delete = []
-                import json as _json
                 for snap in expired_snaps:
                     acc_policy = policies_by_account.get(snap.account_id)
                     eff_days = acc_policy.bot_retention_days if acc_policy else global_bot_days
@@ -317,6 +317,7 @@ async def lifespan(app: FastAPI):
     # Weekly digest — fires every Monday at 08:00 UTC
     async def _weekly_digest_loop():
         from datetime import datetime, timezone, timedelta
+        from app.services.email_service import send_weekly_digest
         while True:
             now = datetime.now(timezone.utc)
             days_until_monday = (7 - now.weekday()) % 7
@@ -326,7 +327,6 @@ async def lifespan(app: FastAPI):
             sleep_s = (next_run - now).total_seconds()
             logger.info("Weekly digest: next run in %.0f s (%s UTC)", sleep_s, next_run.strftime("%Y-%m-%d %H:%M"))
             await asyncio.sleep(sleep_s)
-            from app.services.email_service import send_weekly_digest
             try:
                 await send_weekly_digest()
             except Exception as exc:

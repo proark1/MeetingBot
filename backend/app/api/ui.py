@@ -234,66 +234,51 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
 
     # Linked SSO accounts
     oauth_result = await db.execute(
-        select(OAuthAccount).where(OAuthAccount.account_id == account.id)
+        select(OAuthAccount).where(OAuthAccount.account_id == account.id).limit(20)
     )
     oauth_accounts = [
         {"provider": o.provider, "email": o.email}
         for o in oauth_result.scalars().all()
     ]
 
-    # Active integrations
-    integ_result = await db.execute(
-        select(Integration).where(
-            Integration.account_id == account.id, Integration.is_active == True  # noqa: E712
-        )
-    )
-    active_integrations = [
-        {"id": i.id, "type": i.type, "name": i.name}
-        for i in integ_result.scalars().all()
-    ]
-
-    # Calendar feeds
-    cal_result = await db.execute(
-        select(CalendarFeed).where(CalendarFeed.account_id == account.id)
-    )
-    calendar_feeds = [
-        {"id": f.id, "name": f.name, "is_active": f.is_active,
-         "last_synced_at": f.last_synced_at.strftime("%Y-%m-%d %H:%M") if f.last_synced_at else None}
-        for f in cal_result.scalars().all()
-    ]
-
-    # All integrations (not just active, for full management UI)
+    # Integrations — single query, derive active subset in Python (was 2 separate queries)
     all_integ_result = await db.execute(
         select(Integration).where(Integration.account_id == account.id)
         .order_by(Integration.created_at.desc())
     )
+    _all_integrations_raw = all_integ_result.scalars().all()
+    active_integrations = [
+        {"id": i.id, "type": i.type, "name": i.name}
+        for i in _all_integrations_raw if i.is_active
+    ]
     all_integrations = [
         {
-            "id": i.id,
-            "type": i.type,
-            "name": i.name,
+            "id": i.id, "type": i.type, "name": i.name,
             "is_active": i.is_active,
             "created_at": i.created_at.strftime("%Y-%m-%d"),
         }
-        for i in all_integ_result.scalars().all()
+        for i in _all_integrations_raw
     ]
 
-    # All calendar feeds
+    # Calendar feeds — single query, derive active subset in Python (was 2 separate queries)
     all_cal_result = await db.execute(
         select(CalendarFeed).where(CalendarFeed.account_id == account.id)
         .order_by(CalendarFeed.created_at.desc())
     )
+    _all_feeds_raw = all_cal_result.scalars().all()
+    calendar_feeds = [
+        {"id": f.id, "name": f.name, "is_active": f.is_active,
+         "last_synced_at": f.last_synced_at.strftime("%Y-%m-%d %H:%M") if f.last_synced_at else None}
+        for f in _all_feeds_raw
+    ]
     all_calendar_feeds = [
         {
-            "id": f.id,
-            "name": f.name,
-            "is_active": f.is_active,
-            "auto_record": f.auto_record,
-            "bot_name": f.bot_name,
+            "id": f.id, "name": f.name, "is_active": f.is_active,
+            "auto_record": f.auto_record, "bot_name": f.bot_name,
             "last_synced_at": f.last_synced_at.strftime("%Y-%m-%d %H:%M") if f.last_synced_at else None,
             "created_at": f.created_at.strftime("%Y-%m-%d"),
         }
-        for f in all_cal_result.scalars().all()
+        for f in _all_feeds_raw
     ]
 
     # Recent bots (from in-memory store)
