@@ -558,7 +558,7 @@ async def get_my_analytics(request: Request):
             )
             open_action_items = result.scalar_one() or 0
     except Exception:
-        pass
+        logger.warning("Action items count query failed — defaulting to 0", exc_info=True)
 
     avg_duration_min = round(sum(durations) / len(durations) / 60, 1) if durations else 0
 

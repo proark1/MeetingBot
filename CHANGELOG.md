@@ -4,7 +4,17 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.9.3 — **Last updated:** 2026-03-22
+> **Latest version:** 2.9.4 — **Last updated:** 2026-03-22
+
+---
+
+## [2.9.4] - 2026-03-22
+
+### Fixed — Final cleanup (Round 4)
+- **crypto_service: blocking `requests.post()`** — Fallback RPC test now wrapped in `asyncio.to_thread()` to avoid blocking event loop when httpx is unavailable
+- **bot_service: silent SSE exception** — `except Exception: pass` replaced with `logger.debug()` for SSE push setup failures (was invisible in logs)
+- **analytics: silent action items query failure** — Now logs a warning instead of silently defaulting to 0 (misleading analytics data)
+- **webhook_service: lock eviction race condition** — LRU eviction now skips locks that are currently held (`lock.locked()` check), preventing in-flight delivery corruption
 
 ---
 

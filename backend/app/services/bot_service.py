@@ -688,7 +688,7 @@ async def run_bot_lifecycle(bot_id: str) -> None:
 
                     asyncio.create_task(_safe_sse_push())
                 except Exception:
-                    pass
+                    logger.debug("SSE push setup failed for bot %s", bot_id, exc_info=True)
 
                 if should_flush:
                     async with _live_lock:

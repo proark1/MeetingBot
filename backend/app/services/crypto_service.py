@@ -164,14 +164,17 @@ async def test_rpc_url(url: str) -> tuple[bool, str]:
             import requests as _requests  # type: ignore
 
             try:
-                resp = _requests.post(
-                    url,
-                    json={"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1},
-                    timeout=10,
-                    headers={"Content-Type": "application/json"},
-                )
-                resp.raise_for_status()
-                data = resp.json()
+                def _sync_rpc_test():
+                    resp = _requests.post(
+                        url,
+                        json={"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1},
+                        timeout=10,
+                        headers={"Content-Type": "application/json"},
+                    )
+                    resp.raise_for_status()
+                    return resp.json()
+
+                data = await asyncio.to_thread(_sync_rpc_test)
                 if "result" in data:
                     return True, ""
                 if "error" in data:

@@ -36,9 +36,13 @@ def _get_webhook_lock(wh_id: str) -> asyncio.Lock:
         return _webhook_locks[wh_id]
     lock = asyncio.Lock()
     _webhook_locks[wh_id] = lock
-    # Evict oldest if over limit
+    # Evict oldest if over limit — skip locks that are currently held
     while len(_webhook_locks) > _WEBHOOK_LOCK_MAX:
-        _webhook_locks.pop(next(iter(_webhook_locks)))
+        oldest_key = next(iter(_webhook_locks))
+        oldest_lock = _webhook_locks[oldest_key]
+        if oldest_lock.locked():
+            break  # don't evict a lock that's in use
+        _webhook_locks.pop(oldest_key)
     return lock
 
 
