@@ -20,7 +20,6 @@ callback endpoint (set ``?redirect=1`` to enable the cookie flow).
 """
 
 import logging
-from datetime import timedelta
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
@@ -155,11 +154,8 @@ async def callback(
     is_new = bool(api_key)  # non-empty only on first login
 
     # Issue a web-UI JWT
-    from app.api.auth import _create_access_token
-    jwt_token = _create_access_token(
-        {"sub": account_id},
-        expires_delta=timedelta(hours=settings.JWT_EXPIRE_HOURS),
-    )
+    from app.api.auth import _create_jwt
+    jwt_token = _create_jwt(account_id)
 
     response_body = {
         "account_id":    account_id,
