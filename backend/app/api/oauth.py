@@ -171,7 +171,7 @@ async def callback(
     if extra == "1":
         resp = RedirectResponse(url="/", status_code=302)
         resp.set_cookie(
-            key="access_token",
+            key="mb_token",
             value=jwt_token,
             httponly=True,
             samesite="lax",

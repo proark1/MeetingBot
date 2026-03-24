@@ -80,6 +80,8 @@ def _migrate_schema(conn) -> None:
             f"ALTER TABLE accounts ADD COLUMN IF NOT EXISTS notify_email VARCHAR(255)",
             f"ALTER TABLE accounts ADD COLUMN IF NOT EXISTS failed_login_attempts INTEGER NOT NULL DEFAULT 0",
             f"ALTER TABLE accounts ADD COLUMN IF NOT EXISTS last_failed_login_at TIMESTAMP WITH TIME ZONE",
+            f"ALTER TABLE accounts ADD COLUMN IF NOT EXISTS stripe_customer_id VARCHAR(255)",
+            f"ALTER TABLE accounts ADD COLUMN IF NOT EXISTS stripe_subscription_id VARCHAR(255)",
             f"ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS last_used_at TIMESTAMP WITH TIME ZONE",
             f"ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS mode VARCHAR(10) NOT NULL DEFAULT 'live'",
             f"ALTER TABLE bot_snapshots ADD COLUMN IF NOT EXISTS sub_user_id VARCHAR(255)",
@@ -161,6 +163,9 @@ def _migrate_schema(conn) -> None:
             # v7.x: brute-force lockout tracking
             ("failed_login_attempts",    "INTEGER NOT NULL DEFAULT 0"),
             ("last_failed_login_at",     f"{_dt_type}"),
+            # v11.x: Stripe subscription fields
+            ("stripe_customer_id",       "VARCHAR(255)"),
+            ("stripe_subscription_id",   "VARCHAR(255)"),
         ]
         for col_name, col_def in v3_migrations:
             if col_name not in existing:
