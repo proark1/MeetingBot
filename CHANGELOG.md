@@ -4,7 +4,14 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.13.0 — **Last updated:** 2026-03-24
+> **Latest version:** 2.14.0 — **Last updated:** 2026-03-24
+
+---
+
+## [2.14.0] - 2026-03-24
+
+### Changed
+- **UI color palette overhaul** — Replaced indigo/cyan theme with warm coral palette across all templates (landing, login, register, dashboard, admin, API dashboard, webhook playground, share, bot, topup). Primary color is now Warm Coral (#E05A33), with warm neutral backgrounds, borders, and text colors. Gradients, buttons, badges, form focus states, and chart colors all updated to match.
 
 ---
 
