@@ -4,7 +4,14 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.12.2 — **Last updated:** 2026-03-23
+> **Latest version:** 2.12.3 — **Last updated:** 2026-03-24
+
+---
+
+## [2.12.3] - 2026-03-24
+
+### Fixed
+- **OAuth login 500 error** — OAuth callback (Google/Microsoft SSO) imported non-existent `_create_access_token` function instead of `_create_jwt`, causing an `ImportError` and returning `{"detail":"Internal Server Error"}` on every OAuth login attempt
 
 ---
 
