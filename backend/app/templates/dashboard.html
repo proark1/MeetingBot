@@ -270,7 +270,16 @@
             {% if account.account_type == "business" %}<span class="chip chip-info ms-1">Business</span>{% endif %}
           </p>
         </div>
-        <a href="/topup" class="btn btn-primary btn-sm">+ Add Credits</a>
+        <a href="/topup" class="btn btn-primary btn-sm" style="position:relative">+ Add Credits
+          <span class="click-hint" style="bottom:-20px;right:-8px">
+            <span class="click-hint-glow"></span>
+            <span class="click-hint-ripple"></span>
+            <span class="click-hint-ripple"></span>
+            <svg class="click-hint-cursor" width="30" height="34" viewBox="0 0 24 28" fill="none">
+              <path d="M5.5 2l.5 14 3.5-3.5L13 20l3-1.5L12.5 11l4.5-1L5.5 2z" fill="white" stroke="#1a1a2e" stroke-width="1.5" stroke-linejoin="round"/>
+            </svg>
+          </span>
+        </a>
       </div>
 
       <!-- KPI row -->
@@ -423,7 +432,16 @@
           <div class="empty-state-icon">🤖</div>
           <div class="empty-state-title">No bots yet</div>
           <div class="empty-state-desc">Send your first bot into a meeting using the API.</div>
-          <button class="btn btn-outline-primary btn-sm" onclick="switchSection('api-keys')">Get API Key →</button>
+          <button class="btn btn-outline-primary btn-sm" onclick="switchSection('api-keys')" style="position:relative">Get API Key →
+            <span class="click-hint" style="bottom:-18px;right:-10px">
+              <span class="click-hint-glow"></span>
+              <span class="click-hint-ripple"></span>
+              <span class="click-hint-ripple"></span>
+              <svg class="click-hint-cursor" width="30" height="34" viewBox="0 0 24 28" fill="none">
+                <path d="M5.5 2l.5 14 3.5-3.5L13 20l3-1.5L12.5 11l4.5-1L5.5 2z" fill="white" stroke="#1a1a2e" stroke-width="1.5" stroke-linejoin="round"/>
+              </svg>
+            </span>
+          </button>
         </div>
         {% endif %}
       </div>
@@ -442,7 +460,16 @@
           <button class="btn btn-outline-secondary btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#scheduleBotPanel" aria-expanded="false">
             📅 Schedule a Bot
           </button>
-          <a href="/api/docs#/Bots/create_bot_api_v1_bot_post" target="_blank" class="btn btn-primary btn-sm">Create Bot via API ↗</a>
+          <a href="/api/docs#/Bots/create_bot_api_v1_bot_post" target="_blank" class="btn btn-primary btn-sm" style="position:relative">Create Bot via API ↗
+            <span class="click-hint" style="bottom:-20px;right:-8px">
+              <span class="click-hint-glow"></span>
+              <span class="click-hint-ripple"></span>
+              <span class="click-hint-ripple"></span>
+              <svg class="click-hint-cursor" width="30" height="34" viewBox="0 0 24 28" fill="none">
+                <path d="M5.5 2l.5 14 3.5-3.5L13 20l3-1.5L12.5 11l4.5-1L5.5 2z" fill="white" stroke="#1a1a2e" stroke-width="1.5" stroke-linejoin="round"/>
+              </svg>
+            </span>
+          </a>
         </div>
       </div>
 
@@ -842,7 +869,16 @@
           </div>
           <div class="d-flex gap-2">
             <input type="text" id="live-key-name" class="form-control form-control-sm" placeholder="Key name" style="width:120px">
-            <button type="button" class="btn btn-primary btn-sm" data-create-key="live">+ New Key</button>
+            <button type="button" class="btn btn-primary btn-sm" data-create-key="live" style="position:relative">+ New Key
+              <span class="click-hint" style="bottom:-20px;right:-8px">
+                <span class="click-hint-glow"></span>
+                <span class="click-hint-ripple"></span>
+                <span class="click-hint-ripple"></span>
+                <svg class="click-hint-cursor" width="30" height="34" viewBox="0 0 24 28" fill="none">
+                  <path d="M5.5 2l.5 14 3.5-3.5L13 20l3-1.5L12.5 11l4.5-1L5.5 2z" fill="white" stroke="#1a1a2e" stroke-width="1.5" stroke-linejoin="round"/>
+                </svg>
+              </span>
+            </button>
           </div>
         </div>
         {% set live_keys = api_keys | selectattr("key_preview", "string") | list %}

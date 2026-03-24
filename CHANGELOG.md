@@ -4,7 +4,14 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.12.3 — **Last updated:** 2026-03-24
+> **Latest version:** 2.13.0 — **Last updated:** 2026-03-24
+
+---
+
+## [2.13.0] - 2026-03-24
+
+### Added
+- **ClickHint cursor animations** — Animated cursor click hints on primary CTA buttons across all pages (landing, login, register, dashboard, topup) to guide new users toward key actions. Includes cursor movement, ripple, and glow effects with a 4.5s lifecycle. Hidden on mobile via media query.
 
 ---
 
