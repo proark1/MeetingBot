@@ -72,8 +72,16 @@
           </div>
           <form id="stripe-form" method="post" action="/topup/stripe">
             <input type="hidden" name="amount_usd" id="stripe-amount" value="25">
-            <button type="submit" class="btn btn-primary" style="padding:.6rem 1.5rem">
+            <button type="submit" class="btn btn-primary" style="padding:.6rem 1.5rem;position:relative">
               Pay $<span id="stripe-amount-display">25</span> with Card →
+              <span class="click-hint" style="bottom:-20px;right:-8px">
+                <span class="click-hint-glow"></span>
+                <span class="click-hint-ripple"></span>
+                <span class="click-hint-ripple"></span>
+                <svg class="click-hint-cursor" width="30" height="34" viewBox="0 0 24 28" fill="none">
+                  <path d="M5.5 2l.5 14 3.5-3.5L13 20l3-1.5L12.5 11l4.5-1L5.5 2z" fill="white" stroke="#1a1a2e" stroke-width="1.5" stroke-linejoin="round"/>
+                </svg>
+              </span>
             </button>
           </form>
           {% else %}
