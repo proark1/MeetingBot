@@ -16,7 +16,7 @@
     position: sticky;
     top: 70px;
     background: white;
-    border: 1px solid var(--border, #E9E4DD);
+    border: 1px solid var(--border, #D8CFC8);
     border-radius: 14px;
     padding: 1rem 0.5rem;
     box-shadow: 0 1px 3px rgba(0,0,0,0.04);
@@ -51,8 +51,8 @@
     text-align: left;
     text-decoration: none;
   }
-  .sidebar-nav-item:hover { background: #FCFAF8; color: #2B2318; }
-  .sidebar-nav-item.active { background: #FDF2EE; color: #C44A2A; font-weight: 600; }
+  .sidebar-nav-item:hover { background: #EDE4DF; color: #1B2033; }
+  .sidebar-nav-item.active { background: #EEEAE7; color: #111827; font-weight: 600; }
   .sidebar-nav-item.active .nav-icon { opacity: 1; }
 
   .nav-icon { font-size: 15px; flex-shrink: 0; opacity: 0.7; }
@@ -68,7 +68,7 @@
     line-height: 1.5;
   }
   .sidebar-badge.blue {
-    background: #FAEEE5;
+    background: #E5DDD7;
     color: #1d4ed8;
   }
 
@@ -107,7 +107,7 @@
 
   .kpi-card {
     background: white;
-    border: 1px solid #E9E4DD;
+    border: 1px solid #D8CFC8;
     border-radius: 12px;
     padding: 1.1rem;
   }
@@ -160,7 +160,7 @@
     display: flex;
     gap: 0.15rem;
     margin-bottom: 1.25rem;
-    border-bottom: 1px solid #E9E4DD;
+    border-bottom: 1px solid #D8CFC8;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
   }
@@ -171,14 +171,14 @@
     padding: 0.55rem 0.85rem;
     font-size: 13px;
     font-weight: 500;
-    color: #8C8073;
+    color: #6B7280;
     cursor: pointer;
     transition: all 0.15s;
     white-space: nowrap;
     flex-shrink: 0;
   }
-  .analytics-tab:hover { color: #2B2318; }
-  .analytics-tab.active { color: #C44A2A; border-bottom-color: #E05A33; font-weight: 600; }
+  .analytics-tab:hover { color: #1B2033; }
+  .analytics-tab.active { color: #111827; border-bottom-color: #1B2033; font-weight: 600; }
 </style>
 
 <div class="dash-layout">
@@ -218,7 +218,7 @@
       <button class="sidebar-nav-item" data-section="webhooks">
         <span class="nav-icon">🪝</span> Webhooks
       </button>
-      <a href="/webhook-playground" class="sidebar-nav-item" target="_blank" style="font-size:12px;color:#E05A33">
+      <a href="/webhook-playground" class="sidebar-nav-item" target="_blank" style="font-size:12px;color:#1B2033">
         <span class="nav-icon" style="font-size:12px">↗</span> Webhook Playground
       </a>
 
@@ -298,7 +298,7 @@
 
         <div class="kpi-card">
           <div class="stat-label">Plan</div>
-          <div class="stat-value mt-1" style="font-size:1.35rem;color:{% if plan == 'pro' %}#E05A33{% elif plan == 'business' %}#f59e0b{% elif plan == 'starter' %}#0ea5e9{% else %}#64748b{% endif %}">
+          <div class="stat-value mt-1" style="font-size:1.35rem;color:{% if plan == 'pro' %}#1B2033{% elif plan == 'business' %}#f59e0b{% elif plan == 'starter' %}#0ea5e9{% else %}#64748b{% endif %}">
             {{ plan|title }}
           </div>
           {% if plan_limit == -1 %}
@@ -413,7 +413,7 @@
                 </td>
                 <td>
                   {% if bot.health_score is defined and bot.health_score is not none %}
-                  <div class="health-ring" style="background:{% if bot.health_score >= 70 %}#dcfce7;color:#15803d{% elif bot.health_score >= 40 %}#fef3c7;color:#C44A2A{% else %}#fee2e2;color:#b91c1c{% endif %}">
+                  <div class="health-ring" style="background:{% if bot.health_score >= 70 %}#dcfce7;color:#15803d{% elif bot.health_score >= 40 %}#fef3c7;color:#111827{% else %}#fee2e2;color:#b91c1c{% endif %}">
                     {{ bot.health_score }}
                   </div>
                   {% else %}
@@ -541,7 +541,7 @@
       {% endif %}
 
       {% if account.account_type == "business" %}
-      <div class="card card-pad mb-3" style="border-left:3px solid #E05A33">
+      <div class="card card-pad mb-3" style="border-left:3px solid #1B2033">
         <div class="section-title mb-1">🏢 Business Account — Multi-User Isolation</div>
         <div class="section-subtitle mb-2">Pass the <code>X-Sub-User</code> header to scope bot data per end-user.</div>
         <pre style="margin:0;font-size:12px"><code>curl ... -H "X-Sub-User: user-123" ...</code></pre>
@@ -582,7 +582,7 @@
                 </td>
                 <td>
                   {% if bot.health_score is defined and bot.health_score is not none %}
-                  <div class="health-ring" style="background:{% if bot.health_score >= 70 %}#dcfce7;color:#15803d{% elif bot.health_score >= 40 %}#fef3c7;color:#C44A2A{% else %}#fee2e2;color:#b91c1c{% endif %}">
+                  <div class="health-ring" style="background:{% if bot.health_score >= 70 %}#dcfce7;color:#15803d{% elif bot.health_score >= 40 %}#fef3c7;color:#111827{% else %}#fee2e2;color:#b91c1c{% endif %}">
                     {{ bot.health_score }}
                   </div>
                   {% else %}<span style="color:#94a3b8">—</span>{% endif %}
@@ -692,7 +692,7 @@
                   <td>
                     {% if bot.health_score is defined and bot.health_score is not none %}
                     <div style="display:inline-flex;align-items:center;gap:0.5rem">
-                      <div style="width:40px;height:6px;background:#E9E4DD;border-radius:3px;overflow:hidden">
+                      <div style="width:40px;height:6px;background:#D8CFC8;border-radius:3px;overflow:hidden">
                         <div style="width:{{ bot.health_score }}%;height:100%;background:{% if bot.health_score >= 70 %}#10b981{% elif bot.health_score >= 40 %}#f59e0b{% else %}#ef4444{% endif %};border-radius:3px"></div>
                       </div>
                       <span style="font-size:12.5px;font-weight:600">{{ bot.health_score }}</span>
@@ -766,11 +766,11 @@
             <div class="d-flex justify-content-between align-items-center mb-2">
               <div>
                 <span class="section-title">Monthly Bot Usage</span>
-                <span id="mu-plan-badge" class="badge ms-2" style="background:var(--primary);color:#fff;font-size:11px"></span>
+                <span id="mu-plan-badge" class="badge ms-2" style="background:#1B2033;color:#fff;font-size:11px"></span>
               </div>
-              <a href="#billing" onclick="switchSection('billing')" class="btn btn-sm" style="border:1px solid var(--primary);color:var(--primary);font-size:12px">Manage Plan</a>
+              <a href="#billing" onclick="switchSection('billing')" class="btn btn-sm" style="border:1px solid #1B2033;color:#1B2033;font-size:12px">Manage Plan</a>
             </div>
-            <div style="background:#E9E4DD;border-radius:6px;height:22px;overflow:hidden;position:relative">
+            <div style="background:#D8CFC8;border-radius:6px;height:22px;overflow:hidden;position:relative">
               <div id="mu-bar" style="height:100%;border-radius:6px;transition:width .3s"></div>
               <span id="mu-bar-label" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:11px;font-weight:600;color:#4A3F33"></span>
             </div>
@@ -985,7 +985,7 @@
           </div>
           <div class="mt-3">
             <label class="form-label">Events <span style="color:#94a3b8;font-weight:400">(leave all unchecked to receive every event)</span></label>
-            <div id="wh-events-group" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:0.25rem 1.5rem;padding:0.5rem;border:1px solid #E9E4DD;border-radius:6px;background:#f8fafc">
+            <div id="wh-events-group" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:0.25rem 1.5rem;padding:0.5rem;border:1px solid #D8CFC8;border-radius:6px;background:#f8fafc">
               {% for ev in ["bot.joining","bot.in_call","bot.call_ended","bot.transcript_ready","bot.analysis_ready","bot.done","bot.error","bot.cancelled","bot.keyword_alert","bot.live_transcript","bot.live_transcript_translated","bot.recurring_intel_ready","bot.test"] %}
               <label class="form-check-label" style="display:flex;align-items:center;gap:0.4rem;font-size:12px;cursor:pointer">
                 <input type="checkbox" class="form-check-input wh-event-cb" value="{{ ev }}" style="margin-top:0">
@@ -1062,7 +1062,7 @@
               <div class="col-md-6" id="slack-fields">
                 <label class="form-label">Slack Webhook URL</label>
                 <input type="url" id="integ-slack-url" class="form-control form-control-sm" placeholder="https://hooks.slack.com/services/...">
-                <div class="form-text"><a href="https://api.slack.com/messaging/webhooks" target="_blank" style="color:#E05A33">How to get a Slack webhook ↗</a></div>
+                <div class="form-text"><a href="https://api.slack.com/messaging/webhooks" target="_blank" style="color:#1B2033">How to get a Slack webhook ↗</a></div>
               </div>
               <div class="col-md-3 d-none" id="notion-token-field">
                 <label class="form-label">Notion API Token</label>
@@ -1235,7 +1235,7 @@
             ("admin", "Full access: view, download, re-analyze, and delete bots"),
           ] %}
           <div class="col-md-4">
-            <div style="border:1px solid #E9E4DD;border-radius:10px;padding:0.85rem">
+            <div style="border:1px solid #D8CFC8;border-radius:10px;padding:0.85rem">
               <div style="font-weight:700;font-size:13px;text-transform:capitalize;margin-bottom:0.3rem;color:#0f172a">{{ role }}</div>
               <div style="font-size:12.5px;color:#64748b">{{ perms }}</div>
             </div>
@@ -1251,7 +1251,7 @@
           <button class="btn btn-primary btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#ws-create-form" aria-expanded="false">+ New Workspace</button>
         </div>
         <div class="collapse mb-3" id="ws-create-form">
-          <div style="border:1px solid #E9E4DD;border-radius:10px;padding:1rem;margin-top:0.5rem">
+          <div style="border:1px solid #D8CFC8;border-radius:10px;padding:1rem;margin-top:0.5rem">
             <div class="row g-2 align-items-end">
               <div class="col">
                 <label for="ws-name-input" style="font-size:12.5px;font-weight:600;color:#475569">Workspace Name</label>
@@ -1291,12 +1291,12 @@
       <!-- Member management (shown inline when "View Members" is clicked) -->
       <div class="card card-pad mb-3" id="ws-members-card" style="display:none">
         <div class="d-flex justify-content-between align-items-center mb-2">
-          <div class="section-title mb-0">Members — <span id="ws-members-name" style="color:#E05A33"></span></div>
+          <div class="section-title mb-0">Members — <span id="ws-members-name" style="color:#1B2033"></span></div>
           <button class="btn btn-outline-secondary btn-sm" id="ws-members-close" type="button">Close</button>
         </div>
 
         <!-- Add member form -->
-        <div id="ws-add-member-form" style="border:1px solid #E9E4DD;border-radius:10px;padding:0.85rem;margin-bottom:0.75rem">
+        <div id="ws-add-member-form" style="border:1px solid #D8CFC8;border-radius:10px;padding:0.85rem;margin-bottom:0.75rem">
           <div class="row g-2 align-items-end">
             <div class="col">
               <label style="font-size:12px;font-weight:600;color:#475569">Account ID</label>
@@ -1601,7 +1601,7 @@
             </div>
             {% if plan != 'business' %}
             <div style="margin-top:8px">
-              <button onclick="_showUpgrade()" class="btn btn-sm" style="border:1px solid var(--primary);color:var(--primary);font-size:11px">Upgrade Plan</button>
+              <button onclick="_showUpgrade()" class="btn btn-sm" style="border:1px solid #1B2033;color:#1B2033;font-size:11px">Upgrade Plan</button>
             </div>
             {% endif %}
           </div>
@@ -1673,7 +1673,7 @@
         </div>
         {% else %}
         <div class="empty-state" style="padding:1.5rem">
-          <div class="empty-state-desc">No transactions yet. <a href="/topup" style="color:#E05A33">Add credits</a> to get started.</div>
+          <div class="empty-state-desc">No transactions yet. <a href="/topup" style="color:#1B2033">Add credits</a> to get started.</div>
         </div>
         {% endif %}
       </div>
@@ -1712,14 +1712,14 @@
           <div class="d-flex gap-2 flex-wrap">
             <label style="flex:1;min-width:200px">
               <input type="radio" name="account_type" value="personal" {% if account.account_type != 'business' %}checked{% endif %} onchange="this.form.submit()" style="display:none">
-              <div class="p-3" style="border:2px solid {% if account.account_type != 'business' %}#E05A33{% else %}#E9E4DD{% endif %};border-radius:10px;cursor:pointer">
+              <div class="p-3" style="border:2px solid {% if account.account_type != 'business' %}#1B2033{% else %}#D8CFC8{% endif %};border-radius:10px;cursor:pointer">
                 <div style="font-weight:600;font-size:13.5px;margin-bottom:3px">Personal</div>
                 <div style="font-size:12.5px;color:#64748b">Standard single-user account.</div>
               </div>
             </label>
             <label style="flex:1;min-width:200px">
               <input type="radio" name="account_type" value="business" {% if account.account_type == 'business' %}checked{% endif %} onchange="this.form.submit()" style="display:none">
-              <div class="p-3" style="border:2px solid {% if account.account_type == 'business' %}#E05A33{% else %}#E9E4DD{% endif %};border-radius:10px;cursor:pointer">
+              <div class="p-3" style="border:2px solid {% if account.account_type == 'business' %}#1B2033{% else %}#D8CFC8{% endif %};border-radius:10px;cursor:pointer">
                 <div style="font-weight:600;font-size:13.5px;margin-bottom:3px">Business <span class="chip chip-info ms-1" style="font-size:10px;padding:1px 7px">Multi-tenant</span></div>
                 <div style="font-size:12.5px;color:#64748b">Use <code>X-Sub-User</code> to isolate data per end-user.</div>
               </div>
@@ -2465,7 +2465,7 @@ async function _loadDashTrends() {
       ? '<table class="table table-sm mb-0"><thead><tr><th>Week</th><th>Meetings</th><th class="text-end">Sentiment</th></tr></thead><tbody>' +
         sentiment.map(w => {
           const score = (w.score || 0);
-          const color = score > 0.2 ? '#10b981' : score < -0.2 ? '#ef4444' : '#8C8073';
+          const color = score > 0.2 ? '#10b981' : score < -0.2 ? '#ef4444' : '#6B7280';
           const label = score > 0.2 ? 'Positive' : score < -0.2 ? 'Negative' : 'Neutral';
           return '<tr><td style="font-size:12px">' + (w.week || '—') + '</td><td class="small">' + (w.meetings || 0) + '</td><td class="text-end"><span style="color:' + color + ';font-weight:600;font-size:12.5px">' + label + ' (' + score.toFixed(2) + ')</span></td></tr>';
         }).join('') + '</tbody></table>'
