@@ -11,7 +11,9 @@ Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 ## [2.12.3] - 2026-03-24
 
 ### Fixed
-- **OAuth login 500 error** — OAuth callback (Google/Microsoft SSO) imported non-existent `_create_access_token` function instead of `_create_jwt`, causing an `ImportError` and returning `{"detail":"Internal Server Error"}` on every OAuth login attempt
+- **Login 500 error — missing DB columns** — `stripe_customer_id` and `stripe_subscription_id` were defined in the Account model but missing from the database migration script, causing every `SELECT` on the accounts table to fail with an `OperationalError` on databases created before v2.11.0
+- **OAuth login 500 error** — OAuth callback (Google/Microsoft SSO) imported non-existent `_create_access_token` function instead of `_create_jwt`, causing an `ImportError` on every OAuth login attempt
+- **OAuth cookie name mismatch** — OAuth callback set cookie as `access_token` but the dashboard reads from `mb_token`, so OAuth users appeared logged out after redirect
 
 ---
 
