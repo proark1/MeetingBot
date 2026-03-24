@@ -11,9 +11,9 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
     :root {
-      --primary: #6366f1;
-      --primary-dark: #4f46e5;
-      --dark: #111827;
+      --primary: #E05A33;
+      --primary-dark: #C44A2A;
+      --dark: #2B2318;
     }
     * { box-sizing: border-box; }
     html, body { height: 100%; margin: 0; }
@@ -26,7 +26,7 @@
     /* ── Left panel ─────────────────────────────────────────────────────── */
     .auth-left {
       flex: 0 0 420px;
-      background: linear-gradient(150deg, #eef2ff 0%, #e0e7ff 50%, #dbeafe 100%);
+      background: linear-gradient(150deg, #FDF2EE 0%, #F5E6DC 50%, #FAEEE5 100%);
       display: flex;
       flex-direction: column;
       padding: 2.5rem 2.5rem;
@@ -39,7 +39,7 @@
       position: absolute;
       top: -100px; left: -100px;
       width: 400px; height: 400px;
-      background: radial-gradient(circle, rgba(99,102,241,0.1) 0%, transparent 70%);
+      background: radial-gradient(circle, rgba(224,90,51,0.1) 0%, transparent 70%);
       pointer-events: none;
     }
 
@@ -48,7 +48,7 @@
       position: absolute;
       bottom: -80px; right: -80px;
       width: 300px; height: 300px;
-      background: radial-gradient(circle, rgba(6,182,212,0.08) 0%, transparent 70%);
+      background: radial-gradient(circle, rgba(204,128,51,0.08) 0%, transparent 70%);
       pointer-events: none;
     }
 
@@ -69,7 +69,7 @@
     .brand-icon {
       width: 32px;
       height: 32px;
-      background: linear-gradient(135deg, #6366f1 0%, #06b6d4 100%);
+      background: linear-gradient(135deg, #E05A33 0%, #CC8033 100%);
       border-radius: 8px;
       display: flex;
       align-items: center;
@@ -117,7 +117,7 @@
     .feature-icon {
       width: 20px;
       height: 20px;
-      background: rgba(99,102,241,0.15);
+      background: rgba(224,90,51,0.15);
       color: var(--primary);
       border-radius: 5px;
       display: flex;
@@ -139,7 +139,7 @@
     /* ── Right panel ────────────────────────────────────────────────────── */
     .auth-right {
       flex: 1;
-      background: #f9fafb;
+      background: #FCFAF8;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -149,7 +149,7 @@
     .auth-form-card {
       background: white;
       border-radius: 16px;
-      border: 1px solid #e2e8f0;
+      border: 1px solid #E9E4DD;
       box-shadow: 0 4px 6px -1px rgba(0,0,0,.04), 0 2px 4px -2px rgba(0,0,0,.03);
       padding: 2.5rem;
       width: 100%;
@@ -179,21 +179,21 @@
 
     .form-control {
       border-radius: 8px;
-      border: 1px solid #cbd5e1;
+      border: 1px solid #DDD7CF;
       font-size: 14px;
       padding: 0.55rem 0.8rem;
       font-family: 'Inter', sans-serif;
       transition: border-color 0.15s, box-shadow 0.15s;
     }
     .form-control:focus {
-      border-color: #6366f1;
-      box-shadow: 0 0 0 3px rgba(99,102,241,0.12);
+      border-color: #E05A33;
+      box-shadow: 0 0 0 3px rgba(224,90,51,0.12);
       outline: none;
     }
 
     .btn-primary-auth {
       width: 100%;
-      background: #6366f1;
+      background: #E05A33;
       border: none;
       border-radius: 8px;
       color: white;
@@ -204,7 +204,7 @@
       transition: background 0.15s;
       font-family: 'Inter', sans-serif;
     }
-    .btn-primary-auth:hover { background: #4f46e5; }
+    .btn-primary-auth:hover { background: #C44A2A; }
 
     .divider {
       display: flex;
@@ -218,7 +218,7 @@
       content: '';
       flex: 1;
       height: 1px;
-      background: #e2e8f0;
+      background: #E9E4DD;
     }
 
     .btn-sso {
@@ -228,7 +228,7 @@
       gap: 0.6rem;
       width: 100%;
       background: white;
-      border: 1px solid #e2e8f0;
+      border: 1px solid #E9E4DD;
       border-radius: 8px;
       color: #374151;
       font-size: 13.5px;
@@ -240,7 +240,7 @@
       font-family: 'Inter', sans-serif;
       margin-bottom: 0.6rem;
     }
-    .btn-sso:hover { background: #f8fafc; border-color: #cbd5e1; color: #0f172a; }
+    .btn-sso:hover { background: #FCFAF8; border-color: #DDD7CF; color: #0f172a; }
 
     .auth-footer-link {
       text-align: center;
@@ -248,8 +248,8 @@
       color: #64748b;
       margin: 0;
     }
-    .auth-footer-link a { color: #6366f1; text-decoration: none; font-weight: 500; }
-    .auth-footer-link a:hover { color: #4f46e5; text-decoration: underline; }
+    .auth-footer-link a { color: #E05A33; text-decoration: none; font-weight: 500; }
+    .auth-footer-link a:hover { color: #C44A2A; text-decoration: underline; }
 
     .alert {
       border-radius: 8px;

@@ -11,20 +11,20 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <style>
     :root {
-      --primary: #6366f1;
-      --primary-dark: #4f46e5;
-      --primary-light: #eef2ff;
-      --primary-subtle: rgba(99,102,241,0.08);
-      --dark: #111827;
-      --dark-2: #1f2937;
-      --gray: #6b7280;
-      --light: #f9fafb;
+      --primary: #E05A33;
+      --primary-dark: #C44A2A;
+      --primary-light: #FDF2EE;
+      --primary-subtle: rgba(224,90,51,0.08);
+      --dark: #2B2318;
+      --dark-2: #362E24;
+      --gray: #8C8073;
+      --light: #FCFAF8;
       --white: #ffffff;
       --success: #10b981;
       --warning: #f59e0b;
       --danger: #ef4444;
-      --border: #e5e7eb;
-      --border-light: #f3f4f6;
+      --border: #E9E4DD;
+      --border-light: #F4F1EC;
       --shadow: 0 1px 2px rgba(0,0,0,0.04);
       --shadow-sm: 0 1px 3px rgba(0,0,0,0.05), 0 1px 2px rgba(0,0,0,0.03);
       --shadow-md: 0 4px 12px rgba(0,0,0,0.05);
@@ -35,8 +35,8 @@
 
     body {
       font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: #f9fafb;
-      color: #111827;
+      background: #FCFAF8;
+      color: #2B2318;
       min-height: 100vh;
       margin: 0;
       font-size: 14px;
@@ -75,7 +75,7 @@
     .brand-icon {
       width: 28px;
       height: 28px;
-      background: linear-gradient(135deg, #6366f1 0%, #06b6d4 100%);
+      background: linear-gradient(135deg, #E05A33 0%, #CC8033 100%);
       border-radius: 7px;
       display: flex;
       align-items: center;
@@ -105,8 +105,8 @@
     }
     .nav-links a:hover { color: var(--dark); background: var(--border-light); }
     .nav-links a.nav-active { color: var(--primary); background: var(--primary-light); }
-    .nav-links a.admin-link { color: #b45309; font-weight: 600; }
-    .nav-links a.admin-link:hover { color: #92400e; background: #fffbeb; }
+    .nav-links a.admin-link { color: #C44A2A; font-weight: 600; }
+    .nav-links a.admin-link:hover { color: #A03D22; background: #FDF2EE; }
 
     .nav-right {
       display: flex;
@@ -144,7 +144,7 @@
     .user-avatar {
       width: 28px;
       height: 28px;
-      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      background: linear-gradient(135deg, #E05A33, #CC8033);
       border-radius: 50%;
       display: flex;
       align-items: center;
@@ -176,7 +176,7 @@
       transition: all 0.15s;
       white-space: nowrap;
     }
-    .btn-nav-logout:hover { border-color: #9ca3af; color: var(--dark); background: var(--light); }
+    .btn-nav-logout:hover { border-color: #968E84; color: var(--dark); background: var(--light); }
 
     .btn-nav-cta {
       background: var(--primary);
@@ -231,7 +231,7 @@
     }
     .mobile-nav a:hover { background: var(--light); color: var(--dark); }
     .mobile-nav a.nav-active { background: var(--primary-light); color: var(--primary); }
-    .mobile-nav a.admin-link { color: #b45309; }
+    .mobile-nav a.admin-link { color: #C44A2A; }
 
     /* ── Layout ──────────────────────────────────────────────────────────── */
     .app-container {
@@ -327,19 +327,19 @@
     .form-label {
       font-size: 13px;
       font-weight: 500;
-      color: #374151;
+      color: #4A3F33;
       margin-bottom: 5px;
     }
     .form-control, .form-select {
       border-radius: 8px;
-      border: 1px solid #d1d5db;
+      border: 1px solid #DDD7CF;
       font-size: 13.5px;
       padding: 0.45rem 0.75rem;
       transition: border-color 0.15s, box-shadow 0.15s;
     }
     .form-control:focus, .form-select:focus {
-      border-color: #6366f1;
-      box-shadow: 0 0 0 3px rgba(99,102,241,0.1);
+      border-color: #E05A33;
+      box-shadow: 0 0 0 3px rgba(224,90,51,0.1);
       outline: none;
     }
     .form-control-sm, .form-select-sm { font-size: 13px; padding: 0.35rem 0.65rem; }
@@ -359,16 +359,16 @@
       background: var(--primary);
       border-color: var(--primary);
       color: white;
-      box-shadow: 0 1px 2px rgba(99,102,241,0.15);
+      box-shadow: 0 1px 2px rgba(224,90,51,0.15);
     }
     .btn-primary:hover {
       background: var(--primary-dark);
       border-color: var(--primary-dark);
       color: white;
-      box-shadow: 0 2px 8px rgba(99,102,241,0.2);
+      box-shadow: 0 2px 8px rgba(224,90,51,0.2);
     }
-    .btn-outline-primary { border-color: #c7d2fe; color: var(--primary); }
-    .btn-outline-primary:hover { background: var(--primary-light); border-color: #a5b4fc; color: var(--primary-dark); }
+    .btn-outline-primary { border-color: #F0C9B8; color: var(--primary); }
+    .btn-outline-primary:hover { background: var(--primary-light); border-color: #E5A58E; color: var(--primary-dark); }
     .btn-danger { background: #ef4444; border-color: #ef4444; color: white; }
     .btn-danger:hover { background: #dc2626; border-color: #dc2626; color: white; }
     .btn-outline-danger { border-color: #fca5a5; color: #dc2626; }
@@ -376,7 +376,7 @@
     .btn-success { background: #10b981; border-color: #10b981; color: white; }
     .btn-success:hover { background: #059669; border-color: #059669; color: white; }
     .btn-outline-secondary { border-color: var(--border); color: var(--gray); background: white; }
-    .btn-outline-secondary:hover { background: var(--light); border-color: #9ca3af; color: #374151; }
+    .btn-outline-secondary:hover { background: var(--light); border-color: #9ca3af; color: #4A3F33; }
 
     /* ── Tables ──────────────────────────────────────────────────────────── */
     .table { font-size: 13.5px; margin-bottom: 0; }
@@ -390,12 +390,12 @@
       padding: 0.6rem 0.75rem;
       background: var(--light);
     }
-    .table tbody td { padding: 0.65rem 0.75rem; border-color: #f3f4f6; vertical-align: middle; }
+    .table tbody td { padding: 0.65rem 0.75rem; border-color: #F4F1EC; vertical-align: middle; }
     .table-hover tbody tr:hover { background: var(--light); }
 
     /* ── Code ────────────────────────────────────────────────────────────── */
     code {
-      background: #f3f4f6;
+      background: #F4F1EC;
       color: var(--primary);
       padding: 2px 6px;
       border-radius: 4px;
@@ -417,7 +417,7 @@
     .tx-debit  { color: #dc2626; font-weight: 600; }
 
     /* ── Progress ────────────────────────────────────────────────────────── */
-    .progress { height: 6px; border-radius: 3px; background: #e5e7eb; }
+    .progress { height: 6px; border-radius: 3px; background: #E9E4DD; }
     .progress-bar { border-radius: 3px; }
 
     /* ── Dividers ────────────────────────────────────────────────────────── */

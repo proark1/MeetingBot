@@ -12,25 +12,25 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
   <style>
     :root {
-      --primary: #6366f1;
-      --primary-dark: #4f46e5;
-      --primary-light: #818cf8;
-      --cyan: #06b6d4;
-      --cyan-dark: #0891b2;
+      --primary: #E05A33;
+      --primary-dark: #C44A2A;
+      --primary-light: #E8694A;
+      --cyan: #CC8033;
+      --cyan-dark: #B36E2D;
       --green: #10b981;
       --amber: #f59e0b;
       --red: #ef4444;
       --bg: #ffffff;
-      --bg-alt: #f9fafb;
-      --bg-muted: #f3f4f6;
-      --bg-border: #e5e7eb;
-      --border: #e5e7eb;
-      --border-glow: rgba(99,102,241,0.35);
-      --text-primary: #111827;
-      --text-secondary: #6b7280;
-      --text-muted: #9ca3af;
-      --grad: linear-gradient(135deg, #6366f1 0%, #06b6d4 100%);
-      --grad-subtle: linear-gradient(135deg, rgba(99,102,241,0.06) 0%, rgba(6,182,212,0.04) 100%);
+      --bg-alt: #FCFAF8;
+      --bg-muted: #F4F1EC;
+      --bg-border: #E9E4DD;
+      --border: #E9E4DD;
+      --border-glow: rgba(224,90,51,0.35);
+      --text-primary: #2B2318;
+      --text-secondary: #8C8073;
+      --text-muted: #968E84;
+      --grad: linear-gradient(135deg, #E05A33 0%, #CC8033 100%);
+      --grad-subtle: linear-gradient(135deg, rgba(224,90,51,0.06) 0%, rgba(204,128,51,0.04) 100%);
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -120,7 +120,7 @@
       transform: translateX(-50%);
       width: 900px;
       height: 600px;
-      background: radial-gradient(ellipse at center, rgba(99,102,241,0.08) 0%, rgba(6,182,212,0.04) 40%, transparent 70%);
+      background: radial-gradient(ellipse at center, rgba(224,90,51,0.08) 0%, rgba(204,128,51,0.04) 40%, transparent 70%);
       pointer-events: none;
     }
 
@@ -128,8 +128,8 @@
       display: inline-flex;
       align-items: center;
       gap: 0.5rem;
-      background: #eef2ff;
-      border: 1px solid rgba(99,102,241,0.2);
+      background: #FDF2EE;
+      border: 1px solid rgba(224,90,51,0.2);
       color: var(--primary);
       padding: 0.35rem 0.9rem;
       border-radius: 50px;
@@ -201,9 +201,9 @@
       align-items: center;
       gap: 0.5rem;
       transition: transform 0.2s, box-shadow 0.2s;
-      box-shadow: 0 4px 20px rgba(99,102,241,0.25);
+      box-shadow: 0 4px 20px rgba(224,90,51,0.25);
     }
-    .btn-hero-primary:hover { transform: translateY(-2px); box-shadow: 0 8px 30px rgba(99,102,241,0.35); color: #fff; }
+    .btn-hero-primary:hover { transform: translateY(-2px); box-shadow: 0 8px 30px rgba(224,90,51,0.35); color: #fff; }
 
     .btn-hero-secondary {
       background: #ffffff;
@@ -219,7 +219,7 @@
       gap: 0.5rem;
       transition: all 0.2s;
     }
-    .btn-hero-secondary:hover { background: var(--bg-alt); border-color: #d1d5db; color: var(--text-primary); }
+    .btn-hero-secondary:hover { background: var(--bg-alt); border-color: #DDD7CF; color: var(--text-primary); }
 
     /* ── Platform pills ── */
     .platform-bar {
@@ -291,8 +291,8 @@
 
     .section-tag {
       display: inline-block;
-      background: #eef2ff;
-      border: 1px solid rgba(99,102,241,0.2);
+      background: #FDF2EE;
+      border: 1px solid rgba(224,90,51,0.2);
       color: var(--primary);
       padding: 0.3rem 0.85rem;
       border-radius: 50px;
@@ -343,8 +343,8 @@
     }
 
     .feature-card:hover {
-      border-color: rgba(99,102,241,0.3);
-      box-shadow: 0 8px 30px rgba(99,102,241,0.08);
+      border-color: rgba(224,90,51,0.3);
+      box-shadow: 0 8px 30px rgba(224,90,51,0.08);
       transform: translateY(-2px);
     }
 
@@ -361,8 +361,8 @@
       margin-bottom: 1.2rem;
     }
 
-    .icon-indigo { background: rgba(99,102,241,0.1); }
-    .icon-cyan { background: rgba(6,182,212,0.08); }
+    .icon-indigo { background: rgba(224,90,51,0.1); }
+    .icon-cyan { background: rgba(204,128,51,0.08); }
     .icon-green { background: rgba(16,185,129,0.08); }
     .icon-amber { background: rgba(245,158,11,0.08); }
     .icon-red { background: rgba(239,68,68,0.08); }
@@ -398,12 +398,12 @@
 
     .feature-tag.live { background: rgba(239,68,68,0.06); border-color: rgba(239,68,68,0.15); color: #dc2626; }
     .feature-tag.enterprise { background: rgba(245,158,11,0.08); border-color: rgba(245,158,11,0.2); color: #d97706; }
-    .feature-tag.dev { background: rgba(99,102,241,0.06); border-color: rgba(99,102,241,0.2); color: var(--primary); }
+    .feature-tag.dev { background: rgba(224,90,51,0.06); border-color: rgba(224,90,51,0.2); color: var(--primary); }
 
     /* ── Big feature highlight ── */
     .feature-highlight {
       background: var(--grad-subtle);
-      border: 1px solid rgba(99,102,241,0.15);
+      border: 1px solid rgba(224,90,51,0.15);
       border-radius: 20px;
       padding: 3rem;
       position: relative;
@@ -417,7 +417,7 @@
       right: -10%;
       width: 500px;
       height: 500px;
-      background: radial-gradient(circle, rgba(6,182,212,0.04) 0%, transparent 60%);
+      background: radial-gradient(circle, rgba(204,128,51,0.04) 0%, transparent 60%);
       pointer-events: none;
     }
 
@@ -437,7 +437,7 @@
       margin-bottom: 1rem;
       transition: border-color 0.2s;
     }
-    .step-item:hover { border-color: rgba(99,102,241,0.3); }
+    .step-item:hover { border-color: rgba(224,90,51,0.3); }
 
     .step-num {
       flex-shrink: 0;
@@ -468,14 +468,14 @@
 
     /* ── Code block ── */
     .code-card {
-      background: #f9fafb;
+      background: #FCFAF8;
       border: 1px solid var(--border);
       border-radius: 14px;
       overflow: hidden;
     }
 
     .code-header {
-      background: #f3f4f6;
+      background: #F4F1EC;
       border-bottom: 1px solid var(--border);
       padding: 0.75rem 1.25rem;
       display: flex;
@@ -495,7 +495,7 @@
       font-size: 0.82rem;
       line-height: 1.7;
       overflow-x: auto;
-      color: #1f2937;
+      color: #362E24;
     }
 
     .tok-comment { color: #6b7280; }
@@ -519,15 +519,15 @@
 
     .pricing-card:hover {
       transform: translateY(-3px);
-      border-color: #d1d5db;
+      border-color: #DDD7CF;
       box-shadow: 0 8px 30px rgba(0,0,0,0.06);
     }
 
     .pricing-card.featured {
       border-color: var(--primary);
-      background: linear-gradient(180deg, rgba(99,102,241,0.04) 0%, #ffffff 100%);
+      background: linear-gradient(180deg, rgba(224,90,51,0.04) 0%, #ffffff 100%);
       position: relative;
-      box-shadow: 0 8px 30px rgba(99,102,241,0.1);
+      box-shadow: 0 8px 30px rgba(224,90,51,0.1);
     }
 
     .pricing-badge {
@@ -622,7 +622,7 @@
       background: var(--grad);
       border: none;
       color: #fff;
-      box-shadow: 0 4px 16px rgba(99,102,241,0.2);
+      box-shadow: 0 4px 16px rgba(224,90,51,0.2);
     }
     .btn-pricing-grad:hover { opacity: 0.9; color: #fff; transform: translateY(-1px); }
 
@@ -641,7 +641,7 @@
       text-align: center;
       transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
     }
-    .integration-item:hover { border-color: rgba(99,102,241,0.3); transform: translateY(-2px); box-shadow: 0 4px 16px rgba(0,0,0,0.04); }
+    .integration-item:hover { border-color: rgba(224,90,51,0.3); transform: translateY(-2px); box-shadow: 0 4px 16px rgba(0,0,0,0.04); }
 
     .integration-item .int-icon { font-size: 2rem; margin-bottom: 0.5rem; }
     .integration-item .int-name { font-size: 0.78rem; font-weight: 600; color: var(--text-secondary); }
@@ -675,7 +675,7 @@
       transform: translateX(-50%);
       width: 700px;
       height: 400px;
-      background: radial-gradient(ellipse at center, rgba(99,102,241,0.06) 0%, transparent 65%);
+      background: radial-gradient(ellipse at center, rgba(224,90,51,0.06) 0%, transparent 65%);
       pointer-events: none;
     }
 
@@ -808,8 +808,8 @@
       display: inline-flex;
       align-items: center;
       gap: 0.35rem;
-      background: rgba(99,102,241,0.06);
-      border: 1px solid rgba(99,102,241,0.15);
+      background: rgba(224,90,51,0.06);
+      border: 1px solid rgba(224,90,51,0.15);
       color: var(--primary);
       padding: 0.15rem 0.5rem;
       border-radius: 4px;
@@ -852,7 +852,7 @@
     .mode-btn.active {
       color: #fff;
       background: var(--primary);
-      box-shadow: 0 2px 8px rgba(99,102,241,0.3);
+      box-shadow: 0 2px 8px rgba(224,90,51,0.3);
     }
 
     .mode-btn .mode-icon { font-size: 1rem; }
@@ -884,8 +884,8 @@
       height: 100%;
     }
     .ui-step-card:hover {
-      border-color: rgba(99,102,241,0.3);
-      box-shadow: 0 8px 30px rgba(99,102,241,0.08);
+      border-color: rgba(224,90,51,0.3);
+      box-shadow: 0 8px 30px rgba(224,90,51,0.08);
       transform: translateY(-2px);
     }
     .ui-step-num {
@@ -1132,7 +1132,7 @@
             <div class="speaker-name" style="color:#059669">Marcus (Marketing)</div>
             <div class="speaker-text">I'll have a draft ready by Thursday. Also looping in design for the assets.</div>
           </div>
-          <div class="transcript-line" style="background:rgba(99,102,241,0.03)">
+          <div class="transcript-line" style="background:rgba(224,90,51,0.03)">
             <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.5rem">
               <div class="ai-chip">⚡ AI — Action Items</div>
               <span style="font-size:0.7rem;color:var(--text-muted)">just now</span>
@@ -1373,10 +1373,10 @@
                 A 0–100 composite score computed after every call. Weighs speaker participation balance, number of decisions made, action items captured, and whether the meeting ran over time.
               </p>
               <div style="display:flex;flex-wrap:wrap;gap:0.5rem">
-                <span style="background:rgba(99,102,241,0.06);border:1px solid var(--border);border-radius:6px;padding:0.25rem 0.65rem;font-size:0.75rem;font-weight:600;color:var(--text-secondary)">Participation 30%</span>
-                <span style="background:rgba(99,102,241,0.06);border:1px solid var(--border);border-radius:6px;padding:0.25rem 0.65rem;font-size:0.75rem;font-weight:600;color:var(--text-secondary)">Decisions 25%</span>
-                <span style="background:rgba(99,102,241,0.06);border:1px solid var(--border);border-radius:6px;padding:0.25rem 0.65rem;font-size:0.75rem;font-weight:600;color:var(--text-secondary)">Action Items 25%</span>
-                <span style="background:rgba(99,102,241,0.06);border:1px solid var(--border);border-radius:6px;padding:0.25rem 0.65rem;font-size:0.75rem;font-weight:600;color:var(--text-secondary)">Duration 20%</span>
+                <span style="background:rgba(224,90,51,0.06);border:1px solid var(--border);border-radius:6px;padding:0.25rem 0.65rem;font-size:0.75rem;font-weight:600;color:var(--text-secondary)">Participation 30%</span>
+                <span style="background:rgba(224,90,51,0.06);border:1px solid var(--border);border-radius:6px;padding:0.25rem 0.65rem;font-size:0.75rem;font-weight:600;color:var(--text-secondary)">Decisions 25%</span>
+                <span style="background:rgba(224,90,51,0.06);border:1px solid var(--border);border-radius:6px;padding:0.25rem 0.65rem;font-size:0.75rem;font-weight:600;color:var(--text-secondary)">Action Items 25%</span>
+                <span style="background:rgba(224,90,51,0.06);border:1px solid var(--border);border-radius:6px;padding:0.25rem 0.65rem;font-size:0.75rem;font-weight:600;color:var(--text-secondary)">Duration 20%</span>
               </div>
             </div>
             <div class="col-md-6 text-center mt-3 mt-md-0">

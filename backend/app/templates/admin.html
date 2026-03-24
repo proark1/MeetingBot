@@ -27,7 +27,7 @@
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.07em;
-    color: #9ca3af;
+    color: #968E84;
     padding: 0.35rem 0.75rem;
     margin-top: 0.5rem;
   }
@@ -41,7 +41,7 @@
     border-radius: 8px;
     font-size: 13px;
     font-weight: 500;
-    color: #6b7280;
+    color: #8C8073;
     cursor: pointer;
     transition: background 0.15s, color 0.15s;
     user-select: none;
@@ -51,8 +51,8 @@
     text-align: left;
     text-decoration: none;
   }
-  .admin-nav-item:hover { background: #f9fafb; color: #111827; }
-  .admin-nav-item.active { background: #eef2ff; color: #4f46e5; font-weight: 600; }
+  .admin-nav-item:hover { background: #FCFAF8; color: #2B2318; }
+  .admin-nav-item.active { background: #FDF2EE; color: #C44A2A; font-weight: 600; }
 
   .admin-nav-badge {
     margin-left: auto;
@@ -66,7 +66,7 @@
   }
   .admin-nav-badge.warn {
     background: #fef3c7;
-    color: #b45309;
+    color: #C44A2A;
   }
 
   /* ── Admin sections ────────────────────────────────────────────────────── */
@@ -78,7 +78,7 @@
     display: flex;
     gap: 0.15rem;
     margin-bottom: 1.25rem;
-    border-bottom: 1px solid #e5e7eb;
+    border-bottom: 1px solid #E9E4DD;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
   }
@@ -89,14 +89,14 @@
     padding: 0.55rem 0.85rem;
     font-size: 13px;
     font-weight: 500;
-    color: #6b7280;
+    color: #8C8073;
     cursor: pointer;
     transition: all 0.15s;
     white-space: nowrap;
     flex-shrink: 0;
   }
-  .analytics-tab:hover { color: #111827; }
-  .analytics-tab.active { color: #4f46e5; border-bottom-color: #6366f1; font-weight: 600; }
+  .analytics-tab:hover { color: #2B2318; }
+  .analytics-tab.active { color: #C44A2A; border-bottom-color: #E05A33; font-weight: 600; }
 
   .admin-section-hdr {
     display: flex;
@@ -211,13 +211,13 @@
 
       <div class="admin-sidebar-label">Links</div>
 
-      <a href="/api/v1/admin/docs" target="_blank" class="admin-nav-item" style="font-size:12px;color:#6366f1">
+      <a href="/api/v1/admin/docs" target="_blank" class="admin-nav-item" style="font-size:12px;color:#E05A33">
         <span>↗</span> Admin API Docs
       </a>
-      <a href="/api/docs" target="_blank" class="admin-nav-item" style="font-size:12px;color:#6366f1">
+      <a href="/api/docs" target="_blank" class="admin-nav-item" style="font-size:12px;color:#E05A33">
         <span>↗</span> Public API Docs
       </a>
-      <a href="/webhook-playground" target="_blank" class="admin-nav-item" style="font-size:12px;color:#6366f1">
+      <a href="/webhook-playground" target="_blank" class="admin-nav-item" style="font-size:12px;color:#E05A33">
         <span>↗</span> Webhook Playground
       </a>
     </div>
@@ -291,7 +291,7 @@
 
         <div class="col-md-6">
           <div class="card card-pad h-100">
-            <div class="section-title mb-3">Bot Activity <span style="font-weight:400;color:#9ca3af;font-size:11px">(24h)</span></div>
+            <div class="section-title mb-3">Bot Activity <span style="font-weight:400;color:#968E84;font-size:11px">(24h)</span></div>
             <div class="d-flex justify-content-between align-items-center py-2 border-bottom">
               <span style="font-size:13px;color:#64748b">Total</span>
               <span class="fw-bold">{{ bot_stats.total }}</span>
@@ -553,7 +553,7 @@
           <div class="row g-2 align-items-end">
             <div class="col-md-3">
               <label class="form-label text-muted" style="font-size:11px;font-weight:600;text-transform:uppercase">Action filter</label>
-              <select id="auditActionFilter" class="form-select form-select-sm" style="background:#0f172a;border-color:rgba(255,255,255,0.12);color:#e2e8f0;">
+              <select id="auditActionFilter" class="form-select form-select-sm" style="background:#0f172a;border-color:rgba(255,255,255,0.12);color:#E9E4DD;">
                 <option value="">All actions</option>
                 <option value="bot.created">bot.created</option>
                 <option value="bot.deleted">bot.deleted</option>
@@ -568,7 +568,7 @@
             </div>
             <div class="col-md-3">
               <label class="form-label text-muted" style="font-size:11px;font-weight:600;text-transform:uppercase">Account ID</label>
-              <input type="text" id="auditAccountFilter" class="form-control form-control-sm" placeholder="(any)" style="background:#0f172a;border-color:rgba(255,255,255,0.12);color:#e2e8f0;">
+              <input type="text" id="auditAccountFilter" class="form-control form-control-sm" placeholder="(any)" style="background:#0f172a;border-color:rgba(255,255,255,0.12);color:#E9E4DD;">
             </div>
             <div class="col-md-2">
               <button class="btn btn-sm btn-primary w-100" onclick="loadAuditLog()">Search</button>
@@ -581,7 +581,7 @@
       <div class="card" style="background:#1e293b;border:1px solid rgba(255,255,255,0.08);">
         <div class="card-body p-0">
           <div id="auditTableWrap" style="overflow-x:auto;">
-            <table class="table table-sm mb-0" style="font-size:12.5px;color:#cbd5e1;">
+            <table class="table table-sm mb-0" style="font-size:12.5px;color:#DDD7CF;">
               <thead>
                 <tr style="border-bottom:1px solid rgba(255,255,255,0.08);">
                   <th class="px-3 py-2" style="color:#64748b;font-weight:600;">Time (UTC)</th>
@@ -974,7 +974,7 @@
         <div class="atab-panel" data-atab="users" style="display:none">
           <div class="card">
             <div class="px-4 pt-3 pb-2 d-flex justify-content-between align-items-center">
-              <div class="section-title mb-0">Per-User Activity <span style="font-size:11px;font-weight:400;color:#9ca3af">(no private data — top 100 by bots)</span></div>
+              <div class="section-title mb-0">Per-User Activity <span style="font-size:11px;font-weight:400;color:#968E84">(no private data — top 100 by bots)</span></div>
               <input type="text" id="analytics-user-search" class="form-control form-control-sm" placeholder="Search email…"
                 oninput="_filterAnalyticsUsers(this.value)" style="width:180px">
             </div>
@@ -1118,7 +1118,7 @@ async function loadAuditLog() {
         try {
           const d = JSON.parse(r.details);
           details = d.actor_email
-            ? `<span style="color:#a5b4fc">${d.actor_email}</span>`
+            ? `<span style="color:#E5A58E">${d.actor_email}</span>`
             : Object.entries(d).map(([k,v])=>`<span class="text-muted">${k}:</span> ${v}`).join(' · ');
         } catch { details = r.details; }
       }
@@ -1184,7 +1184,7 @@ function _renderAnalytics(d) {
     ['Total Bots', _fmt(ov.total_bots), ''],
     ['Bots (30d)', _fmt(ov.bots_30d), ''],
     ['Bots (7d)', _fmt(ov.bots_7d), ''],
-    ['Active Now', _fmt(ov.active_now), ov.active_now > 0 ? 'color:#4f46e5' : ''],
+    ['Active Now', _fmt(ov.active_now), ov.active_now > 0 ? 'color:#C44A2A' : ''],
     ['Success Rate', (ov.success_rate_pct || 0) + '%', 'color:#16a34a'],
     ['Total Accounts', _fmt(ov.total_accounts), ''],
     ['New Accounts (30d)', _fmt(ov.new_accounts_30d), ''],
@@ -1213,7 +1213,7 @@ function _renderAnalytics(d) {
     data: {
       labels: trends.map(t => t.date.slice(5)),
       datasets: [
-        { label: 'Bots', data: trends.map(t => t.bots), borderColor: '#6366f1', backgroundColor: 'rgba(99,102,241,0.1)', fill: true, tension: 0.3, pointRadius: 2 },
+        { label: 'Bots', data: trends.map(t => t.bots), borderColor: '#E05A33', backgroundColor: 'rgba(224,90,51,0.1)', fill: true, tension: 0.3, pointRadius: 2 },
         { label: 'Errors', data: trends.map(t => t.errors), borderColor: '#ef4444', backgroundColor: 'rgba(239,68,68,0.08)', fill: true, tension: 0.3, pointRadius: 2 },
       ],
     },
@@ -1223,7 +1223,7 @@ function _renderAnalytics(d) {
   // Platform doughnut
   const platforms = d.platforms || {};
   const platLabels = Object.keys(platforms);
-  const platColors = ['#6366f1','#22c55e','#3b82f6','#f59e0b','#ef4444','#94a3b8'];
+  const platColors = ['#E05A33','#22c55e','#3b82f6','#f59e0b','#ef4444','#968E84'];
   const platCtx = document.getElementById('chart-platforms').getContext('2d');
   _analyticsCharts.platforms = new Chart(platCtx, {
     type: 'doughnut',
@@ -1241,7 +1241,7 @@ function _renderAnalytics(d) {
     type: 'bar',
     data: {
       labels: aiTrend.map(t => t.date.slice(5)),
-      datasets: [{ label: 'Tokens', data: aiTrend.map(t => t.tokens), backgroundColor: 'rgba(99,102,241,0.7)' }],
+      datasets: [{ label: 'Tokens', data: aiTrend.map(t => t.tokens), backgroundColor: 'rgba(224,90,51,0.7)' }],
     },
     options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } }, x: { ticks: { maxTicksLimit: 10 } } } },
   });
@@ -1282,8 +1282,8 @@ function _renderAnalytics(d) {
       <div class="d-flex justify-content-between" style="font-size:12.5px">
         <span>${label}</span><span class="text-muted">${_fmt(count)} bots (${pct}%)</span>
       </div>
-      <div style="background:#e2e8f0;border-radius:4px;height:6px">
-        <div style="background:#6366f1;border-radius:4px;height:6px;width:${pct}%;transition:width 0.4s"></div>
+      <div style="background:#E9E4DD;border-radius:4px;height:6px">
+        <div style="background:#E05A33;border-radius:4px;height:6px;width:${pct}%;transition:width 0.4s"></div>
       </div>
     </div>`;
   }).join('');
@@ -1291,7 +1291,7 @@ function _renderAnalytics(d) {
   // ── Status distribution (horizontal bar) ─────────────────────────────────
   const statusData = d.status_breakdown || {};
   const statusLabels = Object.keys(statusData);
-  const _statusColors = {done:'#22c55e', error:'#ef4444', cancelled:'#94a3b8', joining:'#6366f1', in_call:'#3b82f6', queued:'#f59e0b', ready:'#a3a3a3', transcribing:'#8b5cf6', call_ended:'#0ea5e9', scheduled:'#d946ef'};
+  const _statusColors = {done:'#22c55e', error:'#ef4444', cancelled:'#94a3b8', joining:'#E05A33', in_call:'#3b82f6', queued:'#f59e0b', ready:'#a3a3a3', transcribing:'#CC8033', call_ended:'#0ea5e9', scheduled:'#d946ef'};
   if (statusLabels.length) {
     const sCtx = document.getElementById('chart-status').getContext('2d');
     _analyticsCharts.status = new Chart(sCtx, {
@@ -1307,7 +1307,7 @@ function _renderAnalytics(d) {
   // ── Plan distribution (doughnut) ────────────────────────────────────────
   const planData = d.plan_counts || {};
   const planLabels = Object.keys(planData);
-  const _planColors = {free:'#94a3b8', starter:'#6366f1', pro:'#22c55e', business:'#f59e0b'};
+  const _planColors = {free:'#968E84', starter:'#E05A33', pro:'#22c55e', business:'#f59e0b'};
   if (planLabels.length) {
     const pCtx = document.getElementById('chart-plans').getContext('2d');
     _analyticsCharts.plans = new Chart(pCtx, {
@@ -1402,7 +1402,7 @@ function _renderAnalytics(d) {
       <div class="d-flex justify-content-between mb-1"><span>Done</span><strong style="color:#22c55e">${_fmt(ai.done)}</strong></div>
     </div>
     <div style="font-size:12.5px" class="mb-1">Completion rate: <strong>${aiPct}%</strong></div>
-    <div style="background:#e2e8f0;border-radius:4px;height:8px">
+    <div style="background:#E9E4DD;border-radius:4px;height:8px">
       <div style="background:#22c55e;border-radius:4px;height:8px;width:${aiPct}%;transition:width 0.4s"></div>
     </div>`;
 
@@ -1423,7 +1423,7 @@ function _renderAnalytics(d) {
       type: 'doughnut',
       data: {
         labels: txLabels.map(k => k.charAt(0).toUpperCase() + k.slice(1)),
-        datasets: [{ data: txLabels.map(k => txProviders[k]), backgroundColor: ['#6366f1','#f59e0b','#22c55e','#ef4444'] }],
+        datasets: [{ data: txLabels.map(k => txProviders[k]), backgroundColor: ['#E05A33','#f59e0b','#22c55e','#ef4444'] }],
       },
       options: { plugins: { legend: { position: 'bottom', labels: { font: { size: 11 } } } }, cutout: '60%' },
     });
@@ -1432,7 +1432,7 @@ function _renderAnalytics(d) {
   // ── System status KPIs ──────────────────────────────────────────────────
   const sys = d.system || {};
   const sysKpis = [
-    ['Running Tasks', _fmt(sys.running_tasks), sys.running_tasks > 0 ? 'color:#4f46e5' : ''],
+    ['Running Tasks', _fmt(sys.running_tasks), sys.running_tasks > 0 ? 'color:#C44A2A' : ''],
     ['Queue Depth', _fmt(sys.queue_depth), sys.queue_depth > 0 ? 'color:#f59e0b' : ''],
     ['Max Concurrent', _fmt(sys.max_concurrent), ''],
     ['In-Memory Bots', _fmt(sys.in_memory_bots), ''],

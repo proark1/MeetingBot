@@ -7,12 +7,12 @@
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
   <style>
     body { background:#f8fafc; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; color:#0f172a; }
-    .header { background:#fff; border-bottom:1px solid #e2e8f0; padding:1rem 0; }
-    .brand { font-weight:700; font-size:1.1rem; color:#6366f1; text-decoration:none; }
-    .card { background:#fff; border:1px solid #e2e8f0; border-radius:10px; padding:1.25rem 1.5rem; margin-bottom:1.25rem; }
+    .header { background:#fff; border-bottom:1px solid #E9E4DD; padding:1rem 0; }
+    .brand { font-weight:700; font-size:1.1rem; color:#E05A33; text-decoration:none; }
+    .card { background:#fff; border:1px solid #E9E4DD; border-radius:10px; padding:1.25rem 1.5rem; margin-bottom:1.25rem; }
     .section-title { font-size:14px; font-weight:600; color:#475569; text-transform:uppercase; letter-spacing:.05em; margin-bottom:.75rem; }
     .chip { display:inline-block; padding:.2rem .6rem; border-radius:20px; font-size:12px; background:#f1f5f9; color:#475569; }
-    .sentiment-positive { color:#059669; } .sentiment-negative { color:#dc2626; } .sentiment-neutral { color:#6366f1; }
+    .sentiment-positive { color:#059669; } .sentiment-negative { color:#dc2626; } .sentiment-neutral { color:#E05A33; }
     .transcript-entry { padding:.4rem 0; border-bottom:1px solid #f1f5f9; display:flex; gap:.75rem; }
     .speaker { font-weight:600; font-size:12px; color:#475569; min-width:110px; flex-shrink:0; }
     .entry-text { font-size:13.5px; line-height:1.6; }
@@ -142,7 +142,7 @@
   {% if unresolved_items %}
   <div class="card">
     <div class="section-title">Unresolved Items</div>
-    <ul style="margin:0;padding-left:1.25rem;color:#92400e">
+    <ul style="margin:0;padding-left:1.25rem;color:#A03D22">
       {% for u in unresolved_items %}<li style="font-size:13.5px;margin-bottom:.35rem">{{ u }}</li>{% endfor %}
     </ul>
   </div>
@@ -174,7 +174,7 @@
 </div>
 
 <footer>
-  Shared via <a href="/" style="color:#6366f1;text-decoration:none">JustHereToListen.io</a> · Meeting ID {{ bot_id }}
+  Shared via <a href="/" style="color:#E05A33;text-decoration:none">JustHereToListen.io</a> · Meeting ID {{ bot_id }}
 </footer>
 </body>
 </html>
