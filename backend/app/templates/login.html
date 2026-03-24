@@ -11,9 +11,9 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
     :root {
-      --primary: #E05A33;
-      --primary-dark: #C44A2A;
-      --dark: #2B2318;
+      --primary: #1B2033;
+      --primary-dark: #111827;
+      --dark: #1B2033;
     }
     * { box-sizing: border-box; }
     html, body { height: 100%; margin: 0; }
@@ -26,7 +26,7 @@
     /* ── Left panel ─────────────────────────────────────────────────────── */
     .auth-left {
       flex: 0 0 420px;
-      background: linear-gradient(150deg, #FDF2EE 0%, #F5E6DC 50%, #FAEEE5 100%);
+      background: linear-gradient(150deg, #EDE4DF 0%, #E5DDD7 50%, #EDE4DF 100%);
       display: flex;
       flex-direction: column;
       padding: 2.5rem 2.5rem;
@@ -39,7 +39,7 @@
       position: absolute;
       top: -100px; left: -100px;
       width: 400px; height: 400px;
-      background: radial-gradient(circle, rgba(224,90,51,0.1) 0%, transparent 70%);
+      background: radial-gradient(circle, rgba(27,32,51,0.06) 0%, transparent 70%);
       pointer-events: none;
     }
 
@@ -48,7 +48,7 @@
       position: absolute;
       bottom: -80px; right: -80px;
       width: 300px; height: 300px;
-      background: radial-gradient(circle, rgba(204,128,51,0.08) 0%, transparent 70%);
+      background: radial-gradient(circle, rgba(27,32,51,0.04) 0%, transparent 70%);
       pointer-events: none;
     }
 
@@ -69,7 +69,7 @@
     .brand-icon {
       width: 32px;
       height: 32px;
-      background: linear-gradient(135deg, #E05A33 0%, #CC8033 100%);
+      background: #1B2033;
       border-radius: 8px;
       display: flex;
       align-items: center;
@@ -117,8 +117,8 @@
     .feature-icon {
       width: 20px;
       height: 20px;
-      background: rgba(224,90,51,0.15);
-      color: var(--primary);
+      background: rgba(27,32,51,0.1);
+      color: #1B2033;
       border-radius: 5px;
       display: flex;
       align-items: center;
@@ -139,7 +139,7 @@
     /* ── Right panel ────────────────────────────────────────────────────── */
     .auth-right {
       flex: 1;
-      background: #FCFAF8;
+      background: #EDE4DF;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -149,7 +149,7 @@
     .auth-form-card {
       background: white;
       border-radius: 16px;
-      border: 1px solid #E9E4DD;
+      border: 1px solid #D8CFC8;
       box-shadow: 0 4px 6px -1px rgba(0,0,0,.04), 0 2px 4px -2px rgba(0,0,0,.03);
       padding: 2.5rem;
       width: 100%;
@@ -186,14 +186,14 @@
       transition: border-color 0.15s, box-shadow 0.15s;
     }
     .form-control:focus {
-      border-color: #E05A33;
-      box-shadow: 0 0 0 3px rgba(224,90,51,0.12);
+      border-color: #1B2033;
+      box-shadow: 0 0 0 3px rgba(27,32,51,0.12);
       outline: none;
     }
 
     .btn-primary-auth {
       width: 100%;
-      background: #E05A33;
+      background: #1B2033;
       border: none;
       border-radius: 8px;
       color: white;
@@ -204,7 +204,7 @@
       transition: background 0.15s;
       font-family: 'Inter', sans-serif;
     }
-    .btn-primary-auth:hover { background: #C44A2A; }
+    .btn-primary-auth:hover { background: #111827; }
 
     .divider {
       display: flex;
@@ -218,7 +218,7 @@
       content: '';
       flex: 1;
       height: 1px;
-      background: #E9E4DD;
+      background: #D8CFC8;
     }
 
     .btn-sso {
@@ -228,7 +228,7 @@
       gap: 0.6rem;
       width: 100%;
       background: white;
-      border: 1px solid #E9E4DD;
+      border: 1px solid #D8CFC8;
       border-radius: 8px;
       color: #374151;
       font-size: 13.5px;
@@ -240,7 +240,7 @@
       font-family: 'Inter', sans-serif;
       margin-bottom: 0.6rem;
     }
-    .btn-sso:hover { background: #FCFAF8; border-color: #DDD7CF; color: #0f172a; }
+    .btn-sso:hover { background: #EDE4DF; border-color: #DDD7CF; color: #0f172a; }
 
     .auth-footer-link {
       text-align: center;
@@ -248,8 +248,8 @@
       color: #64748b;
       margin: 0;
     }
-    .auth-footer-link a { color: #E05A33; text-decoration: none; font-weight: 500; }
-    .auth-footer-link a:hover { color: #C44A2A; text-decoration: underline; }
+    .auth-footer-link a { color: #1B2033; text-decoration: none; font-weight: 500; }
+    .auth-footer-link a:hover { color: #111827; text-decoration: underline; }
 
     .alert {
       border-radius: 8px;

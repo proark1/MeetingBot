@@ -190,8 +190,8 @@
           </td>
           <td>
             <div class="d-flex align-items-center gap-2">
-              <div style="background:#E9E4DD;border-radius:4px;height:6px;width:80px;overflow:hidden">
-                <div style="background:#E05A33;height:100%;width:{{ s.talk_pct }}%"></div>
+              <div style="background:#D8CFC8;border-radius:4px;height:6px;width:80px;overflow:hidden">
+                <div style="background:#1B2033;height:100%;width:{{ s.talk_pct }}%"></div>
               </div>
               {{ "%.0f"|format(s.talk_pct) }}%
             </div>
@@ -257,8 +257,8 @@
     <div class="section-subtitle mb-2" style="font-weight:600;color:#0f172a">Action Items</div>
     <div style="display:flex;flex-direction:column;gap:6px">
       {% for item in bot.analysis.action_items %}
-      <div style="background:#f8fafc;border:1px solid #E9E4DD;border-radius:8px;padding:10px 14px;display:flex;gap:10px;align-items:flex-start">
-        <span style="color:#E05A33;margin-top:1px">☐</span>
+      <div style="background:#f8fafc;border:1px solid #D8CFC8;border-radius:8px;padding:10px 14px;display:flex;gap:10px;align-items:flex-start">
+        <span style="color:#1B2033;margin-top:1px">☐</span>
         <div>
           <span style="color:#0f172a">{{ item.task if item.task else item }}</span>
           {% if item.assignee %}<span style="color:#64748b;font-size:12px;margin-left:8px">→ {{ item.assignee }}</span>{% endif %}
@@ -329,7 +329,7 @@
   <div class="section-title mb-3">Chapters</div>
   <div style="display:flex;flex-direction:column;gap:10px">
     {% for ch in bot.chapters %}
-    <div style="border-left:3px solid #E05A33;padding-left:12px">
+    <div style="border-left:3px solid #1B2033;padding-left:12px">
       <div style="font-weight:600;color:#0f172a">
         {% if ch.start_time is not none %}
         <span style="font-size:12px;color:#94a3b8;font-weight:400;margin-right:8px">

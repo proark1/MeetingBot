@@ -41,7 +41,7 @@
     border-radius: 8px;
     font-size: 13px;
     font-weight: 500;
-    color: #8C8073;
+    color: #6B7280;
     cursor: pointer;
     transition: background 0.15s, color 0.15s;
     user-select: none;
@@ -51,8 +51,8 @@
     text-align: left;
     text-decoration: none;
   }
-  .admin-nav-item:hover { background: #FCFAF8; color: #2B2318; }
-  .admin-nav-item.active { background: #FDF2EE; color: #C44A2A; font-weight: 600; }
+  .admin-nav-item:hover { background: #EDE4DF; color: #1B2033; }
+  .admin-nav-item.active { background: #EEEAE7; color: #111827; font-weight: 600; }
 
   .admin-nav-badge {
     margin-left: auto;
@@ -66,7 +66,7 @@
   }
   .admin-nav-badge.warn {
     background: #fef3c7;
-    color: #C44A2A;
+    color: #111827;
   }
 
   /* ── Admin sections ────────────────────────────────────────────────────── */
@@ -78,7 +78,7 @@
     display: flex;
     gap: 0.15rem;
     margin-bottom: 1.25rem;
-    border-bottom: 1px solid #E9E4DD;
+    border-bottom: 1px solid #D8CFC8;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
   }
@@ -89,14 +89,14 @@
     padding: 0.55rem 0.85rem;
     font-size: 13px;
     font-weight: 500;
-    color: #8C8073;
+    color: #6B7280;
     cursor: pointer;
     transition: all 0.15s;
     white-space: nowrap;
     flex-shrink: 0;
   }
-  .analytics-tab:hover { color: #2B2318; }
-  .analytics-tab.active { color: #C44A2A; border-bottom-color: #E05A33; font-weight: 600; }
+  .analytics-tab:hover { color: #1B2033; }
+  .analytics-tab.active { color: #111827; border-bottom-color: #1B2033; font-weight: 600; }
 
   .admin-section-hdr {
     display: flex;
@@ -211,13 +211,13 @@
 
       <div class="admin-sidebar-label">Links</div>
 
-      <a href="/api/v1/admin/docs" target="_blank" class="admin-nav-item" style="font-size:12px;color:#E05A33">
+      <a href="/api/v1/admin/docs" target="_blank" class="admin-nav-item" style="font-size:12px;color:#1B2033">
         <span>↗</span> Admin API Docs
       </a>
-      <a href="/api/docs" target="_blank" class="admin-nav-item" style="font-size:12px;color:#E05A33">
+      <a href="/api/docs" target="_blank" class="admin-nav-item" style="font-size:12px;color:#1B2033">
         <span>↗</span> Public API Docs
       </a>
-      <a href="/webhook-playground" target="_blank" class="admin-nav-item" style="font-size:12px;color:#E05A33">
+      <a href="/webhook-playground" target="_blank" class="admin-nav-item" style="font-size:12px;color:#1B2033">
         <span>↗</span> Webhook Playground
       </a>
     </div>
@@ -553,7 +553,7 @@
           <div class="row g-2 align-items-end">
             <div class="col-md-3">
               <label class="form-label text-muted" style="font-size:11px;font-weight:600;text-transform:uppercase">Action filter</label>
-              <select id="auditActionFilter" class="form-select form-select-sm" style="background:#0f172a;border-color:rgba(255,255,255,0.12);color:#E9E4DD;">
+              <select id="auditActionFilter" class="form-select form-select-sm" style="background:#0f172a;border-color:rgba(255,255,255,0.12);color:#D8CFC8;">
                 <option value="">All actions</option>
                 <option value="bot.created">bot.created</option>
                 <option value="bot.deleted">bot.deleted</option>
@@ -568,7 +568,7 @@
             </div>
             <div class="col-md-3">
               <label class="form-label text-muted" style="font-size:11px;font-weight:600;text-transform:uppercase">Account ID</label>
-              <input type="text" id="auditAccountFilter" class="form-control form-control-sm" placeholder="(any)" style="background:#0f172a;border-color:rgba(255,255,255,0.12);color:#E9E4DD;">
+              <input type="text" id="auditAccountFilter" class="form-control form-control-sm" placeholder="(any)" style="background:#0f172a;border-color:rgba(255,255,255,0.12);color:#D8CFC8;">
             </div>
             <div class="col-md-2">
               <button class="btn btn-sm btn-primary w-100" onclick="loadAuditLog()">Search</button>
@@ -1184,7 +1184,7 @@ function _renderAnalytics(d) {
     ['Total Bots', _fmt(ov.total_bots), ''],
     ['Bots (30d)', _fmt(ov.bots_30d), ''],
     ['Bots (7d)', _fmt(ov.bots_7d), ''],
-    ['Active Now', _fmt(ov.active_now), ov.active_now > 0 ? 'color:#C44A2A' : ''],
+    ['Active Now', _fmt(ov.active_now), ov.active_now > 0 ? 'color:#111827' : ''],
     ['Success Rate', (ov.success_rate_pct || 0) + '%', 'color:#16a34a'],
     ['Total Accounts', _fmt(ov.total_accounts), ''],
     ['New Accounts (30d)', _fmt(ov.new_accounts_30d), ''],
@@ -1213,7 +1213,7 @@ function _renderAnalytics(d) {
     data: {
       labels: trends.map(t => t.date.slice(5)),
       datasets: [
-        { label: 'Bots', data: trends.map(t => t.bots), borderColor: '#E05A33', backgroundColor: 'rgba(224,90,51,0.1)', fill: true, tension: 0.3, pointRadius: 2 },
+        { label: 'Bots', data: trends.map(t => t.bots), borderColor: '#1B2033', backgroundColor: 'rgba(27,32,51,0.1)', fill: true, tension: 0.3, pointRadius: 2 },
         { label: 'Errors', data: trends.map(t => t.errors), borderColor: '#ef4444', backgroundColor: 'rgba(239,68,68,0.08)', fill: true, tension: 0.3, pointRadius: 2 },
       ],
     },
@@ -1223,7 +1223,7 @@ function _renderAnalytics(d) {
   // Platform doughnut
   const platforms = d.platforms || {};
   const platLabels = Object.keys(platforms);
-  const platColors = ['#E05A33','#22c55e','#3b82f6','#f59e0b','#ef4444','#968E84'];
+  const platColors = ['#1B2033','#22c55e','#3b82f6','#f59e0b','#ef4444','#968E84'];
   const platCtx = document.getElementById('chart-platforms').getContext('2d');
   _analyticsCharts.platforms = new Chart(platCtx, {
     type: 'doughnut',
@@ -1241,7 +1241,7 @@ function _renderAnalytics(d) {
     type: 'bar',
     data: {
       labels: aiTrend.map(t => t.date.slice(5)),
-      datasets: [{ label: 'Tokens', data: aiTrend.map(t => t.tokens), backgroundColor: 'rgba(224,90,51,0.7)' }],
+      datasets: [{ label: 'Tokens', data: aiTrend.map(t => t.tokens), backgroundColor: 'rgba(27,32,51,0.7)' }],
     },
     options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } }, x: { ticks: { maxTicksLimit: 10 } } } },
   });
@@ -1282,8 +1282,8 @@ function _renderAnalytics(d) {
       <div class="d-flex justify-content-between" style="font-size:12.5px">
         <span>${label}</span><span class="text-muted">${_fmt(count)} bots (${pct}%)</span>
       </div>
-      <div style="background:#E9E4DD;border-radius:4px;height:6px">
-        <div style="background:#E05A33;border-radius:4px;height:6px;width:${pct}%;transition:width 0.4s"></div>
+      <div style="background:#D8CFC8;border-radius:4px;height:6px">
+        <div style="background:#1B2033;border-radius:4px;height:6px;width:${pct}%;transition:width 0.4s"></div>
       </div>
     </div>`;
   }).join('');
@@ -1291,7 +1291,7 @@ function _renderAnalytics(d) {
   // ── Status distribution (horizontal bar) ─────────────────────────────────
   const statusData = d.status_breakdown || {};
   const statusLabels = Object.keys(statusData);
-  const _statusColors = {done:'#22c55e', error:'#ef4444', cancelled:'#94a3b8', joining:'#E05A33', in_call:'#3b82f6', queued:'#f59e0b', ready:'#a3a3a3', transcribing:'#CC8033', call_ended:'#0ea5e9', scheduled:'#d946ef'};
+  const _statusColors = {done:'#22c55e', error:'#ef4444', cancelled:'#94a3b8', joining:'#1B2033', in_call:'#3b82f6', queued:'#f59e0b', ready:'#a3a3a3', transcribing:'#d97706', call_ended:'#0ea5e9', scheduled:'#d946ef'};
   if (statusLabels.length) {
     const sCtx = document.getElementById('chart-status').getContext('2d');
     _analyticsCharts.status = new Chart(sCtx, {
@@ -1307,7 +1307,7 @@ function _renderAnalytics(d) {
   // ── Plan distribution (doughnut) ────────────────────────────────────────
   const planData = d.plan_counts || {};
   const planLabels = Object.keys(planData);
-  const _planColors = {free:'#968E84', starter:'#E05A33', pro:'#22c55e', business:'#f59e0b'};
+  const _planColors = {free:'#968E84', starter:'#1B2033', pro:'#22c55e', business:'#f59e0b'};
   if (planLabels.length) {
     const pCtx = document.getElementById('chart-plans').getContext('2d');
     _analyticsCharts.plans = new Chart(pCtx, {
@@ -1402,7 +1402,7 @@ function _renderAnalytics(d) {
       <div class="d-flex justify-content-between mb-1"><span>Done</span><strong style="color:#22c55e">${_fmt(ai.done)}</strong></div>
     </div>
     <div style="font-size:12.5px" class="mb-1">Completion rate: <strong>${aiPct}%</strong></div>
-    <div style="background:#E9E4DD;border-radius:4px;height:8px">
+    <div style="background:#D8CFC8;border-radius:4px;height:8px">
       <div style="background:#22c55e;border-radius:4px;height:8px;width:${aiPct}%;transition:width 0.4s"></div>
     </div>`;
 
@@ -1423,7 +1423,7 @@ function _renderAnalytics(d) {
       type: 'doughnut',
       data: {
         labels: txLabels.map(k => k.charAt(0).toUpperCase() + k.slice(1)),
-        datasets: [{ data: txLabels.map(k => txProviders[k]), backgroundColor: ['#E05A33','#f59e0b','#22c55e','#ef4444'] }],
+        datasets: [{ data: txLabels.map(k => txProviders[k]), backgroundColor: ['#1B2033','#f59e0b','#22c55e','#ef4444'] }],
       },
       options: { plugins: { legend: { position: 'bottom', labels: { font: { size: 11 } } } }, cutout: '60%' },
     });
@@ -1432,7 +1432,7 @@ function _renderAnalytics(d) {
   // ── System status KPIs ──────────────────────────────────────────────────
   const sys = d.system || {};
   const sysKpis = [
-    ['Running Tasks', _fmt(sys.running_tasks), sys.running_tasks > 0 ? 'color:#C44A2A' : ''],
+    ['Running Tasks', _fmt(sys.running_tasks), sys.running_tasks > 0 ? 'color:#111827' : ''],
     ['Queue Depth', _fmt(sys.queue_depth), sys.queue_depth > 0 ? 'color:#f59e0b' : ''],
     ['Max Concurrent', _fmt(sys.max_concurrent), ''],
     ['In-Memory Bots', _fmt(sys.in_memory_bots), ''],

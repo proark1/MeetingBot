@@ -4,7 +4,14 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.14.0 — **Last updated:** 2026-03-24
+> **Latest version:** 2.15.0 — **Last updated:** 2026-03-24
+
+---
+
+## [2.15.0] - 2026-03-24
+
+### Changed
+- **UI redesign — dark navy + warm beige theme** — Complete visual overhaul inspired by modern SaaS design. Primary color changed from Warm Coral (#E05A33) to Dark Navy (#1B2033). Body background changed to warm pinkish beige (#EDE4DF) with white cards. All buttons, gradients, active states, focus rings, chart colors, brand icons, and avatars updated across all 11 templates.
 
 ---
 
