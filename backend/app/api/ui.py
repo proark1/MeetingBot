@@ -1485,7 +1485,7 @@ async def create_bot_ui(request: Request, db: AsyncSession = Depends(get_db)):
     client_ip = request.client.host if request.client else "127.0.0.1"
 
     try:
-        async with httpx.AsyncClient(app=_app, base_url="http://internal") as client:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=_app), base_url="http://internal") as client:
             resp = await client.post(
                 "/api/v1/bot",
                 json=body,
@@ -1537,7 +1537,7 @@ async def cancel_bot_ui(bot_id: str, request: Request, db: AsyncSession = Depend
     from app.main import app as _app
 
     try:
-        async with httpx.AsyncClient(app=_app, base_url="http://internal") as client:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=_app), base_url="http://internal") as client:
             resp = await client.delete(
                 f"/api/v1/bot/{bot_id}",
                 headers={"Authorization": f"Bearer {token}"},
@@ -1566,7 +1566,7 @@ async def ask_bot_ui(bot_id: str, request: Request, db: AsyncSession = Depends(g
     from app.main import app as _app
 
     try:
-        async with httpx.AsyncClient(app=_app, base_url="http://internal") as client:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=_app), base_url="http://internal") as client:
             resp = await client.post(
                 f"/api/v1/bot/{bot_id}/ask",
                 json=body,
@@ -1589,7 +1589,7 @@ async def followup_email_ui(bot_id: str, request: Request, db: AsyncSession = De
     from app.main import app as _app
 
     try:
-        async with httpx.AsyncClient(app=_app, base_url="http://internal") as client:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=_app), base_url="http://internal") as client:
             resp = await client.post(
                 f"/api/v1/bot/{bot_id}/followup-email",
                 headers={"Authorization": f"Bearer {token}"},
@@ -1611,7 +1611,7 @@ async def share_bot_ui(bot_id: str, request: Request, db: AsyncSession = Depends
     from app.main import app as _app
 
     try:
-        async with httpx.AsyncClient(app=_app, base_url="http://internal") as client:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=_app), base_url="http://internal") as client:
             resp = await client.post(
                 f"/api/v1/bot/{bot_id}/share",
                 headers={"Authorization": f"Bearer {token}"},
@@ -1636,7 +1636,7 @@ async def rename_speakers_ui(bot_id: str, request: Request, db: AsyncSession = D
     from app.main import app as _app
 
     try:
-        async with httpx.AsyncClient(app=_app, base_url="http://internal") as client:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=_app), base_url="http://internal") as client:
             resp = await client.patch(
                 f"/api/v1/bot/{bot_id}/speakers",
                 json=body,
