@@ -1068,32 +1068,62 @@ async def _join_onepizza(page: Page, url: str, bot_name: str, start_muted: bool 
     logger.info("onepizza: page loaded, waiting for meeting room or lobby")
 
     # Give the page JS time to initialize (WebRTC setup, socket connection, etc.)
-    await asyncio.sleep(2)
+    await asyncio.sleep(3)
 
-    # Check what state we're in: meeting room (auto-joined), lobby, or waiting room
-    for attempt in range(3):
-        try:
-            which = await page.wait_for_selector(
-                "#meetingRoom, #lobbyJoinBtn, #waitingRoomOverlay",
-                state="visible", timeout=10_000,
-            )
-            tag = await which.get_attribute("id") if which else None
+    # Log what we see on the page for debugging
+    try:
+        page_info = await page.evaluate('''() => {
+            const ids = [...document.querySelectorAll("[id]")].map(e => e.id).filter(Boolean);
+            const buttons = [...document.querySelectorAll("button, [role='button'], input[type='submit']")]
+                .map(e => ({tag: e.tagName, id: e.id, text: (e.textContent||"").trim().slice(0,50), visible: e.offsetParent !== null}));
+            const inputs = [...document.querySelectorAll("input[type='text'], input[type='email'], input:not([type])")].map(e => ({id: e.id, placeholder: e.placeholder, name: e.name}));
+            return {ids: ids.slice(0, 30), buttons, inputs, title: document.title, url: location.href};
+        }''')
+        logger.info("onepizza: page DOM — ids=%s buttons=%s inputs=%s title=%s",
+                     page_info.get("ids"), page_info.get("buttons"), page_info.get("inputs"), page_info.get("title"))
+    except Exception as e:
+        logger.debug("onepizza: DOM probe failed: %s", e)
+
+    # Check what state we're in — try specific IDs first, then broader selectors
+    tag = None
+    selectors = [
+        "#meetingRoom, #lobbyJoinBtn, #waitingRoomOverlay",  # known IDs
+        "[id*='meeting'], [id*='Meeting'], [id*='room'], [id*='Room']",  # partial ID matches
+        "button, [role='button']",  # any button at all
+    ]
+
+    for attempt in range(4):
+        for sel in selectors:
+            try:
+                which = await page.wait_for_selector(sel, state="visible", timeout=3_000)
+                if which:
+                    tag = await which.get_attribute("id") or ""
+                    logger.info("onepizza: found element with selector=%s id=%s", sel, tag)
+                    break
+            except Exception:
+                continue
+        if tag is not None:
             break
-        except Exception:
-            if attempt < 2:
-                logger.info("onepizza: no UI element found yet, retrying (attempt %d)", attempt + 1)
-                await asyncio.sleep(3)
-            else:
-                await _screenshot(page, "onepizza_join_failed")
-                raise MeetingBotError("Could not join onepizza.io meeting — neither lobby nor meeting room appeared")
+        if attempt < 3:
+            logger.info("onepizza: no UI element found yet, retrying (attempt %d)", attempt + 1)
+            await asyncio.sleep(5)
+        else:
+            await _screenshot(page, "onepizza_join_failed")
+            raise MeetingBotError("Could not join onepizza.io meeting — neither lobby nor meeting room appeared")
 
-    if tag == "meetingRoom":
-        logger.info("onepizza: auto-joined via ?name= parameter")
-    elif tag == "waitingRoomOverlay":
-        logger.info("onepizza: waiting room — waiting for host to admit")
-        # Host needs to admit; wait up to admission timeout (handled by caller)
-    elif tag == "lobbyJoinBtn":
-        logger.info("onepizza: lobby detected, filling name and joining")
+    # Determine state from detected element
+    tag_lower = (tag or "").lower()
+    is_in_meeting = "meeting" in tag_lower or "room" in tag_lower
+    is_waiting = "waiting" in tag_lower
+    is_lobby = "lobby" in tag_lower or "join" in tag_lower
+
+    if is_in_meeting:
+        logger.info("onepizza: auto-joined via ?name= parameter (id=%s)", tag)
+    elif is_waiting:
+        logger.info("onepizza: waiting room — waiting for host to admit (id=%s)", tag)
+    else:
+        # Either lobby button found, or we found some generic button — try to join
+        logger.info("onepizza: lobby/join UI detected (id=%s), attempting to join", tag)
 
         # Fill name input if it exists and is empty
         try:
