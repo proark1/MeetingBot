@@ -4,9 +4,20 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.17.0 — **Last updated:** 2026-03-26
+> **Latest version:** 2.18.0 — **Last updated:** 2026-03-26
 
 ---
+
+## [2.18.0] - 2026-03-26
+
+### Added
+- **Transcript search** on bot detail page — filter and highlight entries in real time with match counter
+- **"Ask about this meeting"** button — AI-powered Q&A on any completed meeting via modal (wires existing `POST /ask` endpoint)
+- **"Generate follow-up email"** button — one-click AI follow-up email generation with copy-to-clipboard (wires existing `POST /followup-email` endpoint)
+- **Bot search/filter** on dashboard — search by ID or URL, filter by platform (Zoom/Teams/Meet)
+
+### Fixed
+- **Auth broken on bot detail page** — Share link and speaker rename were calling `/api/v1/...` directly with cookies (API only reads Bearer tokens). Added proxy routes: `/dashboard/bot/{id}/share`, `/dashboard/bot/{id}/speakers`, `/dashboard/bot/{id}/ask`, `/dashboard/bot/{id}/followup-email`
 
 ## [2.17.0] - 2026-03-26
 
@@ -17,6 +28,7 @@ Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 - **"See it in action" demo section** on landing page — terminal-style API demo with 3-step walkthrough between How It Works and Pricing
 
 ### Fixed
+- **Mobile responsiveness** — Dashboard: section headers wrap, bot action buttons stack vertically, advanced options 2-column grid, KPI grids adapt to 2 columns, webhook events grid fits small screens. Landing: demo terminal scrollable and sized for mobile, demo widget full-width on phones
 - **Robust alone detection** — `_is_bot_alone()` now requires BOTH text pattern AND DOM tile count to agree before flagging the bot as alone, eliminating false positives from tooltips or loading text
 - **Scheduled bots no longer block concurrent slots** — Scheduled bots use deferred `call_later()` timers instead of occupying a `_running_tasks` slot while sleeping; slots are only claimed at join time
 - **CORS restricted in production** — When `API_KEY` is set and `CORS_ORIGINS` is still `*`, CORS is now restricted to same-origin only (set `CORS_ORIGINS` explicitly to allow specific origins)

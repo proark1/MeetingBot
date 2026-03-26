@@ -25,7 +25,16 @@ from app.store import store, BotSession, _now
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/bot", tags=["Bots"])
-_limiter = Limiter(key_func=get_remote_address)
+
+
+def _safe_get_remote_address(request: Request) -> str:
+    """Rate-limiter key function that handles missing client (internal ASGI calls)."""
+    if request.client:
+        return get_remote_address(request)
+    return request.headers.get("X-Forwarded-For", "127.0.0.1").split(",")[0].strip()
+
+
+_limiter = Limiter(key_func=_safe_get_remote_address)
 
 
 class BotStatsResponse(BaseModel):
@@ -58,7 +67,7 @@ def _get_sub_user_from_request(request: Request) -> Optional[str]:
 def _start_scheduled_bot(bot_id: str) -> None:
     """Timer callback: move a scheduled bot into the normal start/queue flow."""
     _scheduled_timers.pop(bot_id, None)
-    asyncio.ensure_future(_start_or_queue_bot(bot_id))
+    asyncio.create_task(_start_or_queue_bot(bot_id))
 
 
 async def _start_or_queue_bot(bot_id: str) -> None:
@@ -74,10 +83,18 @@ async def _start_or_queue_bot(bot_id: str) -> None:
         await store.update_bot(bot_id, status="queued")
         logger.info("Scheduled bot %s queued (position %d)", bot_id, len(_bot_queue))
     else:
+        await store.update_bot(bot_id, status="joining")
         task = asyncio.create_task(bot_service.run_bot_lifecycle(bot_id))
         _running_tasks[bot_id] = task
-        task.add_done_callback(lambda _t, bid=bot_id: _running_tasks.pop(bid, None))
+        task.add_done_callback(lambda _t, bid=bot_id: _on_task_done(_t, bid))
         logger.info("Scheduled bot %s starting now", bot_id)
+
+
+def _on_task_done(_t: asyncio.Task, bid: str = "") -> None:
+    """Callback when a bot lifecycle task completes: free slot and wake queue."""
+    _running_tasks.pop(bid, None)
+    if _bot_queue:
+        _queue_event.set()
 
 
 async def _queue_processor() -> None:
@@ -96,12 +113,16 @@ async def _queue_processor() -> None:
         bot_id = _bot_queue.popleft()
         if await store.get_bot(bot_id) is None:
             logger.warning("Queue: bot %s was deleted — skipping", bot_id)
+            if _bot_queue:
+                _queue_event.set()
             continue
         await store.update_bot(bot_id, status="joining")
         task = asyncio.create_task(bot_service.run_bot_lifecycle(bot_id))
         _running_tasks[bot_id] = task
-        task.add_done_callback(lambda _t, bid=bot_id: _running_tasks.pop(bid, None))
+        task.add_done_callback(lambda _t, bid=bot_id: _on_task_done(_t, bid))
         logger.info("Queue: started bot %s (%d remaining in queue)", bot_id, len(_bot_queue))
+        if _bot_queue:
+            _queue_event.set()
 
 
 # ── Helper: session → response ────────────────────────────────────────────────
@@ -447,7 +468,7 @@ async def create_bot(payload: BotCreate, request: Request):
         else:
             task = asyncio.create_task(bot_service.run_bot_lifecycle(bot.id))
             _running_tasks[bot.id] = task
-            task.add_done_callback(lambda _: _running_tasks.pop(bot.id, None))
+            task.add_done_callback(lambda _t, bid=bot.id: _on_task_done(_t, bid))
 
     logger.info("Created bot %s for %s (status=%s)", bot.id, bot.meeting_url, bot.status)
 
@@ -557,6 +578,13 @@ async def delete_bot(bot_id: str, request: Request):
         timer.cancel()
         await store.mark_terminal(bot_id, "cancelled", ended_at=_now())
         logger.info("Cancelled scheduled timer for bot %s", bot_id)
+    elif bot_id in _bot_queue:
+        # Bot is queued but not yet running — remove from queue
+        _bot_queue.remove(bot_id)
+        await store.mark_terminal(bot_id, "cancelled", ended_at=_now())
+        logger.info("Removed queued bot %s from queue", bot_id)
+        if _bot_queue:
+            _queue_event.set()
     else:
         task = _running_tasks.get(bot_id)
         if task and not task.done():

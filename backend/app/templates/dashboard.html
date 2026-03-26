@@ -153,6 +153,15 @@
     .sidebar-nav-item { padding: 0.4rem 0.65rem; flex: 0 0 auto; font-size: 12px; white-space: nowrap; border-radius: 20px; }
     .sidebar-nav-item.active { border-radius: 20px; }
     .sidebar-badge { display: none; }
+
+    /* Section headers — allow buttons to wrap */
+    .section-hdr { flex-wrap: wrap; gap: 0.5rem; }
+
+    /* Bot table — action buttons stack */
+    .bot-actions-cell { display: flex; flex-direction: column; gap: 4px; }
+
+    /* Admin analytics KPI grids — 2 columns instead of 4 */
+    .admin-kpi-grid[style] { grid-template-columns: repeat(2, 1fr) !important; }
   }
 
   /* ── Analytics sub-tabs ──────────────────────────────────────────────── */
@@ -516,25 +525,25 @@
               </div>
               <div class="collapse" id="sbAdvancedOpts">
                 <div class="row g-3 mt-0">
-                  <div class="col-md-3">
+                  <div class="col-6 col-md-3">
                     <div class="form-check">
                       <input class="form-check-input" type="checkbox" id="sbRecordVideo">
                       <label class="form-check-label" for="sbRecordVideo" style="font-size:12.5px;font-weight:600">Record video</label>
                     </div>
                   </div>
-                  <div class="col-md-3">
+                  <div class="col-6 col-md-3">
                     <div class="form-check">
                       <input class="form-check-input" type="checkbox" id="sbLiveTranscription">
                       <label class="form-check-label" for="sbLiveTranscription" style="font-size:12.5px;font-weight:600">Live transcription</label>
                     </div>
                   </div>
-                  <div class="col-md-3">
+                  <div class="col-6 col-md-3">
                     <div class="form-check">
                       <input class="form-check-input" type="checkbox" id="sbPiiRedaction">
                       <label class="form-check-label" for="sbPiiRedaction" style="font-size:12.5px;font-weight:600">PII redaction</label>
                     </div>
                   </div>
-                  <div class="col-md-3">
+                  <div class="col-6 col-md-3">
                     <label class="form-label" style="font-size:12.5px;font-weight:600">Translation language</label>
                     <input type="text" class="form-control form-control-sm" id="sbTranslationLang" placeholder="e.g. es, fr, de">
                   </div>
@@ -579,9 +588,20 @@
       {% endif %}
 
       {% if recent_bots %}
+      <!-- Bot search/filter bar -->
+      <div class="d-flex gap-2 mb-2 flex-wrap">
+        <input type="text" id="bot-search" class="form-control form-control-sm" placeholder="Search by ID or URL..." style="max-width:260px">
+        <select id="bot-platform-filter" class="form-select form-select-sm" style="width:150px">
+          <option value="">All platforms</option>
+          <option value="google_meet">Google Meet</option>
+          <option value="zoom">Zoom</option>
+          <option value="microsoft_teams">Teams</option>
+          <option value="onepizza">onepizza</option>
+        </select>
+      </div>
       <div class="card">
         <div class="table-responsive">
-          <table class="table table-hover">
+          <table class="table table-hover" id="bots-table">
             <thead>
               <tr>
                 <th>Bot ID</th>
@@ -1020,7 +1040,7 @@
           </div>
           <div class="mt-3">
             <label class="form-label">Events <span style="color:#94a3b8;font-weight:400">(leave all unchecked to receive every event)</span></label>
-            <div id="wh-events-group" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:0.25rem 1.5rem;padding:0.5rem;border:1px solid #D8CFC8;border-radius:6px;background:#f8fafc">
+            <div id="wh-events-group" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:0.25rem 1.5rem;padding:0.5rem;border:1px solid #D8CFC8;border-radius:6px;background:#f8fafc">
               {% for ev in ["bot.joining","bot.in_call","bot.call_ended","bot.transcript_ready","bot.analysis_ready","bot.done","bot.error","bot.cancelled","bot.keyword_alert","bot.live_transcript","bot.live_transcript_translated","bot.recurring_intel_ready","bot.test"] %}
               <label class="form-check-label" style="display:flex;align-items:center;gap:0.4rem;font-size:12px;cursor:pointer">
                 <input type="checkbox" class="form-check-input wh-event-cb" value="{{ ev }}" style="margin-top:0">
@@ -2259,8 +2279,9 @@ document.querySelectorAll('[data-delete-cal]').forEach(btn => btn.addEventListen
     const tbody = document.querySelector('#section-bots .table tbody, #section-overview .table tbody');
     if (!tbody) return;
     const tr = document.createElement('tr');
+    tr.setAttribute('data-bot-id', bot.id || '');
     const shortId = _escHtml((bot.id || '').slice(0, 12));
-    const botId = _escHtml(bot.id || '');
+    const rawBotId = (bot.id || '').replace(/[^a-zA-Z0-9\-]/g, '');
     const meetUrl = _escHtml(bot.meeting_url || '');
     const platform = _escHtml((bot.meeting_platform || 'unknown').replace(/^\w/, c => c.toUpperCase()));
     const joinAt = bot.join_at ? _escHtml(new Date(bot.join_at).toLocaleString()) : '';
@@ -2271,20 +2292,25 @@ document.querySelectorAll('[data-delete-cal]').forEach(btn => btn.addEventListen
       : botStatus === 'queued'
         ? '<span class="chip chip-gray">Queued</span>'
         : '<span class="chip chip-info">Ready</span>';
+    const isTerminal = ['done', 'error', 'cancelled'].includes(botStatus);
+    const cancelBtn = isTerminal ? '' : `<button class="btn btn-outline-danger btn-sm ms-1" style="font-size:11px;padding:2px 8px" onclick="cancelBot('${rawBotId}', this)">Cancel</button>`;
     tr.innerHTML = `
       <td><code style="font-size:11.5px">${shortId}…</code></td>
       <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
         <span title="${meetUrl}" style="font-size:12px;color:#64748b">${meetUrl}</span>
       </td>
       <td><span class="chip chip-gray">${platform}</span></td>
-      <td>${statusChip}</td>
+      <td class="bot-status-cell">${statusChip}</td>
       <td><span style="color:#94a3b8">—</span></td>
       <td><span style="color:#94a3b8">—</span></td>
       <td style="font-size:12.5px;color:#64748b">—</td>
       <td style="color:#94a3b8;font-size:12px;white-space:nowrap">
         ${joinAt ? `<span style="color:#f59e0b">${joinAt}</span>` : created}
       </td>
-      <td><a href="/bot/${botId}" class="btn btn-outline-secondary btn-sm" style="font-size:11px;padding:2px 8px">View</a></td>`;
+      <td class="bot-actions-cell" style="white-space:nowrap">
+        <a href="/bot/${rawBotId}" class="btn btn-outline-secondary btn-sm" style="font-size:11px;padding:2px 8px">View</a>
+        ${cancelBtn}
+      </td>`;
     tbody.prepend(tr);
   }
 })();
@@ -2719,6 +2745,33 @@ async function cancelBot(botId, btn) {
   }
 
   setInterval(_pollBotStatus, 10000);
+})();
+
+// ── Bot search/filter on dashboard ───────────────────────────────────────────
+(function() {
+  const searchInput = document.getElementById('bot-search');
+  const platformFilter = document.getElementById('bot-platform-filter');
+  const table = document.getElementById('bots-table');
+  if (!searchInput || !table) return;
+
+  function filterBots() {
+    const query = searchInput.value.trim().toLowerCase();
+    const platform = platformFilter?.value.toLowerCase() || '';
+    const rows = table.querySelectorAll('tbody tr[data-bot-id]');
+    let visible = 0;
+    rows.forEach(row => {
+      const text = row.textContent.toLowerCase();
+      const rowPlatform = (row.children[2]?.textContent || '').trim().toLowerCase().replace(/\s+/g, '_');
+      const matchesText = !query || text.includes(query);
+      const matchesPlatform = !platform || rowPlatform === platform;
+      const show = matchesText && matchesPlatform;
+      row.style.display = show ? '' : 'none';
+      if (show) visible++;
+    });
+  }
+
+  searchInput.addEventListener('input', filterBots);
+  platformFilter?.addEventListener('change', filterBots);
 })();
 </script>
 {% endblock %}
