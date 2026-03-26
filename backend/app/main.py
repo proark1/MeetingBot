@@ -10,9 +10,17 @@ import signal
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-# Read version from VERSION file (root of repo)
-_VERSION_FILE = Path(__file__).resolve().parent.parent.parent / "VERSION"
-_APP_VERSION = _VERSION_FILE.read_text().strip() if _VERSION_FILE.exists() else "0.0.0"
+# Read version from VERSION file (check multiple possible locations)
+_VERSION_FILE = None
+for _candidate in [
+    Path(__file__).resolve().parent.parent.parent / "VERSION",  # repo root (local dev)
+    Path(__file__).resolve().parent.parent / "VERSION",          # /app/VERSION (Docker)
+    Path("/app/VERSION"),                                        # absolute Docker path
+]:
+    if _candidate.exists():
+        _VERSION_FILE = _candidate
+        break
+_APP_VERSION = _VERSION_FILE.read_text().strip() if _VERSION_FILE else "2.19.0"
 
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
