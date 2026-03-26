@@ -376,7 +376,7 @@ _PUBLIC_DESCRIPTION = (
     "3. `POST /api/v1/bot` with your `meeting_url` and optional `webhook_url`\n"
     "4. A headless Chromium bot joins the meeting, records audio (and optionally video), and transcribes it\n"
     "5. Results are POSTed to your `webhook_url` when done (or poll `GET /api/v1/bot/{id}`)\n"
-    "6. **You store the data** — this service keeps results in memory for 24 h only\n\n"
+    "6. Results persist in the database — browse past meetings via the **Meeting History** tab in the dashboard\n\n"
 
     "## Authentication\n"
     "All API calls (except `/api/v1/auth/register` and `/api/v1/auth/login`) require:\n"
@@ -598,7 +598,7 @@ app = FastAPI(
     title="JustHereToListen.io API",
     description=(
         "A **multi-tenant meeting bot API** service. Send bots into **Zoom**, **Google Meet**, "
-        "and **Microsoft Teams** meetings to record, transcribe, and analyse them with "
+        "**Microsoft Teams**, and **onepizza.io** meetings to record, transcribe, and analyse them with "
         "**Claude** (Anthropic) or **Gemini** (Google) AI.\n\n"
 
         "## How it works\n"
@@ -607,7 +607,7 @@ app = FastAPI(
         "3. `POST /api/v1/bot` with your `meeting_url` and optional `webhook_url`\n"
         "4. A headless Chromium bot joins the meeting, records audio (and optionally video), and transcribes it\n"
         "5. Results are POSTed to your `webhook_url` when done (or poll `GET /api/v1/bot/{id}`)\n"
-        "6. **You store the data** — this service keeps results in memory for 24 h only\n\n"
+        "6. Results persist in the database — browse past meetings via the **Meeting History** tab in the dashboard\n\n"
 
         "## Authentication\n"
         "All API calls (except `/api/v1/auth/register` and `/api/v1/auth/login`) require:\n"
@@ -1095,7 +1095,7 @@ async def health():
     Does NOT check external dependencies (use /ready for that).
     Kubernetes: use this as the `livenessProbe`.
     """
-    return {"status": "ok", "service": "JustHereToListen.io", "version": "2.2.0"}
+    return {"status": "ok", "service": "JustHereToListen.io", "version": _APP_VERSION}
 
 
 @app.get("/ready", tags=["Health"])
