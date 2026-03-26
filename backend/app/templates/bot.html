@@ -12,9 +12,11 @@
   </div>
   <div class="d-flex gap-2 align-items-center flex-wrap">
     {% if bot.status == "done" %}
+    <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#askModal">Ask</button>
+    <button class="btn btn-outline-primary btn-sm" id="email-btn" onclick="generateEmail()">Email</button>
     <a href="/api/v1/bot/{{ bot.id }}/export/markdown" class="btn btn-outline-secondary btn-sm">↓ Markdown</a>
     <a href="/api/v1/bot/{{ bot.id }}/export/pdf" class="btn btn-outline-secondary btn-sm">↓ PDF</a>
-    <button class="btn btn-outline-primary btn-sm" id="share-btn" onclick="shareBot()">🔗 Share</button>
+    <button class="btn btn-outline-primary btn-sm" id="share-btn" onclick="shareBot()">Share</button>
     {% endif %}
     {% if bot.recording_available %}
     <a href="/api/v1/bot/{{ bot.id }}/recording" class="btn btn-outline-secondary btn-sm">↓ Audio</a>
@@ -348,14 +350,20 @@
 {% if bot.transcript %}
 <!-- ── Transcript ────────────────────────────────────────────────────────── -->
 <div class="card card-pad mb-4">
-  <div class="d-flex justify-content-between align-items-center mb-3">
+  <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
     <div class="section-title">Transcript</div>
-    <span style="color:#94a3b8;font-size:13px">{{ bot.transcript|length }} entries</span>
+    <div class="d-flex align-items-center gap-2">
+      <div style="position:relative">
+        <input type="text" id="transcript-search" class="form-control form-control-sm" placeholder="Search transcript..." style="width:220px;padding-right:60px">
+        <span id="transcript-match-count" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);font-size:11px;color:#94a3b8"></span>
+      </div>
+      <span style="color:#94a3b8;font-size:13px">{{ bot.transcript|length }} entries</span>
+    </div>
   </div>
 
   <div style="display:flex;flex-direction:column;gap:6px;max-height:600px;overflow-y:auto;padding-right:4px" id="transcript-container">
     {% for entry in bot.transcript %}
-    <div style="display:flex;gap:10px;padding:8px 0;border-bottom:1px solid #f1f5f9">
+    <div class="transcript-entry" style="display:flex;gap:10px;padding:8px 0;border-bottom:1px solid #f1f5f9">
       <div style="min-width:90px">
         {% if entry.timestamp is not none %}
         <span style="font-size:11px;color:#94a3b8;font-family:monospace">
@@ -364,7 +372,7 @@
         {% endif %}
       </div>
       <div style="min-width:110px;font-weight:500;color:#475569;font-size:13px">{{ entry.speaker or "Unknown" }}</div>
-      <div style="color:#0f172a;flex:1;font-size:13.5px;line-height:1.6">{{ entry.text }}</div>
+      <div class="transcript-text" style="color:#0f172a;flex:1;font-size:13.5px;line-height:1.6">{{ entry.text }}</div>
     </div>
     {% endfor %}
   </div>
@@ -383,38 +391,164 @@
 </div>
 {% endif %}
 
+<!-- ── Ask Modal ──────────────────────────────────────────────────────────── -->
+<div class="modal fade" id="askModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header"><h5 class="modal-title">Ask about this meeting</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <input type="text" id="ask-input" class="form-control mb-3" placeholder="e.g. Who is responsible for the Q1 budget?">
+        <button class="btn btn-primary btn-sm w-100" id="ask-submit" onclick="askMeeting()">Ask</button>
+        <div id="ask-result" class="mt-3" style="display:none">
+          <div class="section-subtitle mb-1" style="font-weight:600;font-size:12px">Answer</div>
+          <div id="ask-answer" style="font-size:13.5px;line-height:1.6;background:#f8fafc;border:1px solid #D8CFC8;border-radius:8px;padding:12px"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Email Modal ────────────────────────────────────────────────────────── -->
+<div class="modal fade" id="emailModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header"><h5 class="modal-title">Follow-up Email</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <div id="email-loading" class="text-center py-4" style="color:#94a3b8">Generating follow-up email...</div>
+        <div id="email-content" style="display:none">
+          <label class="form-label" style="font-size:12.5px;font-weight:600">Subject</label>
+          <input type="text" id="email-subject" class="form-control form-control-sm mb-3" readonly>
+          <label class="form-label" style="font-size:12.5px;font-weight:600">Body</label>
+          <textarea id="email-body" class="form-control form-control-sm" rows="12" readonly style="font-size:13px;line-height:1.6"></textarea>
+          <button class="btn btn-primary btn-sm mt-3" onclick="copyEmail()">Copy to clipboard</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
 <script>
+const _botId = '{{ bot.id }}';
+
 function openSpeakerModal() {
   const modal = new bootstrap.Modal(document.getElementById('speaker-modal'));
   modal.show();
 }
 
+// ── Share (via cookie-auth proxy) ────────────────────────────────────────────
 async function shareBot() {
   const btn = document.getElementById('share-btn');
   btn.disabled = true;
   try {
-    const botId = '{{ bot.id }}';
-    const resp = await fetch(`/api/v1/bot/${botId}/share`, {
-      method: 'POST',
-      credentials: 'include',
-    });
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({}));
-      throw new Error(err.detail || 'Failed to generate share link');
-    }
+    const resp = await fetch(`/dashboard/bot/${_botId}/share`, { method: 'POST' });
     const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || 'Failed to generate share link');
     await navigator.clipboard.writeText(data.share_url).catch(() => {});
-    alert('Share link copied to clipboard:\n' + data.share_url);
+    showToast('Share link copied to clipboard', 'success');
   } catch(e) {
-    alert(e.message);
+    showToast(e.message, 'danger');
   } finally {
     btn.disabled = false;
   }
 }
 
+// ── Ask about this meeting ───────────────────────────────────────────────────
+async function askMeeting() {
+  const input = document.getElementById('ask-input');
+  const btn = document.getElementById('ask-submit');
+  const result = document.getElementById('ask-result');
+  const answer = document.getElementById('ask-answer');
+  const q = input.value.trim();
+  if (!q) return;
+  btn.disabled = true;
+  btn.textContent = 'Thinking...';
+  result.style.display = 'none';
+  try {
+    const resp = await fetch(`/dashboard/bot/${_botId}/ask`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question: q }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || 'Failed to get answer');
+    answer.textContent = data.answer || 'No answer available.';
+    result.style.display = '';
+  } catch(e) {
+    answer.textContent = 'Error: ' + e.message;
+    result.style.display = '';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Ask';
+  }
+}
+document.getElementById('ask-input')?.addEventListener('keydown', e => { if (e.key === 'Enter') askMeeting(); });
+
+// ── Generate follow-up email ─────────────────────────────────────────────────
+async function generateEmail() {
+  const modal = new bootstrap.Modal(document.getElementById('emailModal'));
+  document.getElementById('email-loading').style.display = '';
+  document.getElementById('email-content').style.display = 'none';
+  modal.show();
+  try {
+    const resp = await fetch(`/dashboard/bot/${_botId}/followup-email`, { method: 'POST' });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || 'Failed to generate email');
+    document.getElementById('email-subject').value = data.subject || '';
+    document.getElementById('email-body').value = data.body || '';
+    document.getElementById('email-loading').style.display = 'none';
+    document.getElementById('email-content').style.display = '';
+  } catch(e) {
+    document.getElementById('email-loading').textContent = 'Error: ' + e.message;
+  }
+}
+
+function copyEmail() {
+  const subject = document.getElementById('email-subject').value;
+  const body = document.getElementById('email-body').value;
+  navigator.clipboard.writeText(`Subject: ${subject}\n\n${body}`).then(() => showToast('Email copied', 'success'));
+}
+
+// ── Transcript search ────────────────────────────────────────────────────────
+(function() {
+  const input = document.getElementById('transcript-search');
+  const counter = document.getElementById('transcript-match-count');
+  const container = document.getElementById('transcript-container');
+  if (!input || !container) return;
+
+  input.addEventListener('input', function() {
+    const query = this.value.trim().toLowerCase();
+    const entries = container.querySelectorAll('.transcript-entry');
+    let matchCount = 0;
+    let firstMatch = null;
+
+    entries.forEach(entry => {
+      const textEl = entry.querySelector('.transcript-text');
+      if (!textEl) return;
+      // Restore original text (remove old highlights)
+      textEl.innerHTML = textEl.textContent;
+      if (!query) { entry.style.display = ''; return; }
+      const text = textEl.textContent.toLowerCase();
+      if (text.includes(query)) {
+        entry.style.display = '';
+        matchCount++;
+        if (!firstMatch) firstMatch = entry;
+        // Highlight matches
+        const re = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+        textEl.innerHTML = textEl.textContent.replace(re, '<mark>$1</mark>');
+      } else {
+        entry.style.display = 'none';
+      }
+    });
+
+    counter.textContent = query ? `${matchCount} match${matchCount !== 1 ? 'es' : ''}` : '';
+    if (firstMatch) firstMatch.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  });
+})();
+
+// ── Speaker rename (via cookie-auth proxy) ───────────────────────────────────
 document.addEventListener('DOMContentLoaded', function() {
   const saveBtn = document.getElementById('speaker-rename-save');
   if (!saveBtn) return;
@@ -427,19 +561,15 @@ document.addEventListener('DOMContentLoaded', function() {
       inputs.forEach(inp => {
         const orig = inp.getAttribute('data-original');
         const newVal = inp.value.trim();
-        if (newVal && newVal !== orig) {
-          renames[orig] = newVal;
-        }
+        if (newVal && newVal !== orig) renames[orig] = newVal;
       });
       if (Object.keys(renames).length === 0) {
         bootstrap.Modal.getInstance(document.getElementById('speaker-modal')).hide();
         return;
       }
-      const botId = '{{ bot.id }}';
-      const resp = await fetch(`/api/v1/bot/${botId}/speakers`, {
-        method: 'PATCH',
+      const resp = await fetch(`/dashboard/bot/${_botId}/speakers`, {
+        method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        credentials: 'include',
         body: JSON.stringify({renames}),
       });
       if (!resp.ok) {

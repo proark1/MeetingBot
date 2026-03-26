@@ -1540,6 +1540,94 @@ async def cancel_bot_ui(bot_id: str, request: Request, db: AsyncSession = Depend
     return JSONResponse(resp.json(), status_code=resp.status_code)
 
 
+# ── Bot detail page proxies (cookie-auth wrappers) ───────────────────────────
+
+@router.post("/dashboard/bot/{bot_id}/ask", include_in_schema=False)
+async def ask_bot_ui(bot_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """Proxy Q&A on a meeting through cookie auth."""
+    token = _get_token_from_request(request)
+    if not token:
+        return JSONResponse({"detail": "Unauthenticated"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"detail": "Invalid JSON body"}, status_code=400)
+
+    import httpx
+    from app.main import app as _app
+
+    async with httpx.AsyncClient(app=_app, base_url="http://internal") as client:
+        resp = await client.post(
+            f"/api/v1/bot/{bot_id}/ask",
+            json=body,
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=60.0,
+        )
+    return JSONResponse(resp.json(), status_code=resp.status_code)
+
+
+@router.post("/dashboard/bot/{bot_id}/followup-email", include_in_schema=False)
+async def followup_email_ui(bot_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """Proxy follow-up email generation through cookie auth."""
+    token = _get_token_from_request(request)
+    if not token:
+        return JSONResponse({"detail": "Unauthenticated"}, status_code=401)
+
+    import httpx
+    from app.main import app as _app
+
+    async with httpx.AsyncClient(app=_app, base_url="http://internal") as client:
+        resp = await client.post(
+            f"/api/v1/bot/{bot_id}/followup-email",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=60.0,
+        )
+    return JSONResponse(resp.json(), status_code=resp.status_code)
+
+
+@router.post("/dashboard/bot/{bot_id}/share", include_in_schema=False)
+async def share_bot_ui(bot_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """Proxy share link creation through cookie auth."""
+    token = _get_token_from_request(request)
+    if not token:
+        return JSONResponse({"detail": "Unauthenticated"}, status_code=401)
+
+    import httpx
+    from app.main import app as _app
+
+    async with httpx.AsyncClient(app=_app, base_url="http://internal") as client:
+        resp = await client.post(
+            f"/api/v1/bot/{bot_id}/share",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    return JSONResponse(resp.json(), status_code=resp.status_code)
+
+
+@router.post("/dashboard/bot/{bot_id}/speakers", include_in_schema=False)
+async def rename_speakers_ui(bot_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """Proxy speaker rename through cookie auth."""
+    token = _get_token_from_request(request)
+    if not token:
+        return JSONResponse({"detail": "Unauthenticated"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"detail": "Invalid JSON body"}, status_code=400)
+
+    import httpx
+    from app.main import app as _app
+
+    async with httpx.AsyncClient(app=_app, base_url="http://internal") as client:
+        resp = await client.patch(
+            f"/api/v1/bot/{bot_id}/speakers",
+            json=body,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    return JSONResponse(resp.json(), status_code=resp.status_code)
+
+
+# ── Support key proxy routes (cookie-auth wrappers) ───────────────────────────
+
 @router.get("/dashboard/support-keys", include_in_schema=False)
 async def list_support_keys_ui(request: Request, db: AsyncSession = Depends(get_db)):
     """Return the current user's active support keys as JSON (no plaintext)."""

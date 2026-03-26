@@ -4,9 +4,20 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.17.0 — **Last updated:** 2026-03-26
+> **Latest version:** 2.18.0 — **Last updated:** 2026-03-26
 
 ---
+
+## [2.18.0] - 2026-03-26
+
+### Added
+- **Transcript search** on bot detail page — filter and highlight entries in real time with match counter
+- **"Ask about this meeting"** button — AI-powered Q&A on any completed meeting via modal (wires existing `POST /ask` endpoint)
+- **"Generate follow-up email"** button — one-click AI follow-up email generation with copy-to-clipboard (wires existing `POST /followup-email` endpoint)
+- **Bot search/filter** on dashboard — search by ID or URL, filter by platform (Zoom/Teams/Meet)
+
+### Fixed
+- **Auth broken on bot detail page** — Share link and speaker rename were calling `/api/v1/...` directly with cookies (API only reads Bearer tokens). Added proxy routes: `/dashboard/bot/{id}/share`, `/dashboard/bot/{id}/speakers`, `/dashboard/bot/{id}/ask`, `/dashboard/bot/{id}/followup-email`
 
 ## [2.17.0] - 2026-03-26
 

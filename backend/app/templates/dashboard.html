@@ -588,9 +588,20 @@
       {% endif %}
 
       {% if recent_bots %}
+      <!-- Bot search/filter bar -->
+      <div class="d-flex gap-2 mb-2 flex-wrap">
+        <input type="text" id="bot-search" class="form-control form-control-sm" placeholder="Search by ID or URL..." style="max-width:260px">
+        <select id="bot-platform-filter" class="form-select form-select-sm" style="width:150px">
+          <option value="">All platforms</option>
+          <option value="google_meet">Google Meet</option>
+          <option value="zoom">Zoom</option>
+          <option value="microsoft_teams">Teams</option>
+          <option value="onepizza">onepizza</option>
+        </select>
+      </div>
       <div class="card">
         <div class="table-responsive">
-          <table class="table table-hover">
+          <table class="table table-hover" id="bots-table">
             <thead>
               <tr>
                 <th>Bot ID</th>
@@ -2728,6 +2739,33 @@ async function cancelBot(botId, btn) {
   }
 
   setInterval(_pollBotStatus, 10000);
+})();
+
+// ── Bot search/filter on dashboard ───────────────────────────────────────────
+(function() {
+  const searchInput = document.getElementById('bot-search');
+  const platformFilter = document.getElementById('bot-platform-filter');
+  const table = document.getElementById('bots-table');
+  if (!searchInput || !table) return;
+
+  function filterBots() {
+    const query = searchInput.value.trim().toLowerCase();
+    const platform = platformFilter?.value.toLowerCase() || '';
+    const rows = table.querySelectorAll('tbody tr[data-bot-id]');
+    let visible = 0;
+    rows.forEach(row => {
+      const text = row.textContent.toLowerCase();
+      const rowPlatform = (row.children[2]?.textContent || '').trim().toLowerCase().replace(/\s+/g, '_');
+      const matchesText = !query || text.includes(query);
+      const matchesPlatform = !platform || rowPlatform === platform;
+      const show = matchesText && matchesPlatform;
+      row.style.display = show ? '' : 'none';
+      if (show) visible++;
+    });
+  }
+
+  searchInput.addEventListener('input', filterBots);
+  platformFilter?.addEventListener('change', filterBots);
 })();
 </script>
 {% endblock %}
