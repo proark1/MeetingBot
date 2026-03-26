@@ -4,11 +4,15 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.15.1 — **Last updated:** 2026-03-26
+> **Latest version:** 2.16.0 — **Last updated:** 2026-03-26
 
 ---
 
-## [2.15.1] - 2026-03-26
+## [2.16.0] - 2026-03-26
+
+### Added
+- **Send Bot Now** button in dashboard — logged-in users can send a bot to a meeting immediately from the UI, not just via API
+- Toggle between "Send Now" (immediate) and "Schedule for later" modes in the bot creation form
 
 ### Changed
 - Removed "Live on Zoom · Google Meet · Microsoft Teams" badge from landing page hero section

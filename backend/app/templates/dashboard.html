@@ -457,26 +457,19 @@
           <p>All meeting bots from the last 24 hours</p>
         </div>
         <div class="d-flex gap-2">
-          <button class="btn btn-outline-secondary btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#scheduleBotPanel" aria-expanded="false">
-            📅 Schedule a Bot
+          <button class="btn btn-primary btn-sm" type="button" id="sendBotNowBtn" data-bs-toggle="collapse" data-bs-target="#scheduleBotPanel" aria-expanded="false">
+            Send Bot Now
           </button>
-          <a href="/api/docs#/Bots/create_bot_api_v1_bot_post" target="_blank" class="btn btn-primary btn-sm" style="position:relative">Create Bot via API ↗
-            <span class="click-hint" style="bottom:-20px;right:-8px">
-              <span class="click-hint-glow"></span>
-              <span class="click-hint-ripple"></span>
-              <span class="click-hint-ripple"></span>
-              <svg class="click-hint-cursor" width="30" height="34" viewBox="0 0 24 28" fill="none">
-                <path d="M5.5 2l.5 14 3.5-3.5L13 20l3-1.5L12.5 11l4.5-1L5.5 2z" fill="white" stroke="#1a1a2e" stroke-width="1.5" stroke-linejoin="round"/>
-              </svg>
-            </span>
-          </a>
+          <button class="btn btn-outline-secondary btn-sm" type="button" id="scheduleBotBtn" data-bs-toggle="collapse" data-bs-target="#scheduleBotPanel" aria-expanded="false">
+            Schedule a Bot
+          </button>
         </div>
       </div>
 
-      <!-- Schedule a Bot panel -->
+      <!-- Send / Schedule Bot panel -->
       <div class="collapse mb-3" id="scheduleBotPanel">
         <div class="card card-pad">
-          <div class="section-title mb-3">📅 Schedule a Bot</div>
+          <div class="section-title mb-3" id="sbPanelTitle">Send Bot to Meeting</div>
           <form id="scheduleBotForm">
             <div class="row g-3">
               <div class="col-md-6">
@@ -484,8 +477,13 @@
                 <input type="url" class="form-control form-control-sm" id="sbMeetingUrl" placeholder="https://zoom.us/j/..." required>
               </div>
               <div class="col-md-6">
-                <label class="form-label" style="font-size:12.5px;font-weight:600">Schedule Date &amp; Time <span class="text-danger">*</span></label>
-                <input type="datetime-local" class="form-control form-control-sm" id="sbJoinAt" required>
+                <div class="form-check mb-2" style="margin-top:1.7rem">
+                  <input class="form-check-input" type="checkbox" id="sbScheduleToggle">
+                  <label class="form-check-label" for="sbScheduleToggle" style="font-size:12.5px;font-weight:600">Schedule for later</label>
+                </div>
+                <div id="sbJoinAtWrap" style="display:none">
+                  <input type="datetime-local" class="form-control form-control-sm" id="sbJoinAt">
+                </div>
               </div>
               <div class="col-md-4">
                 <label class="form-label" style="font-size:12.5px;font-weight:600">Meeting Template</label>
@@ -512,7 +510,7 @@
               </div>
             </div>
             <div class="d-flex gap-2 mt-3 align-items-center">
-              <button type="submit" class="btn btn-primary btn-sm" id="sbSubmitBtn">Schedule Bot</button>
+              <button type="submit" class="btn btn-primary btn-sm" id="sbSubmitBtn">Send Bot</button>
               <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="collapse" data-bs-target="#scheduleBotPanel">Cancel</button>
               <span id="sbStatus" class="ms-2" style="font-size:13px"></span>
             </div>
@@ -2107,7 +2105,7 @@ async function _handleCalDelete() {
 document.querySelectorAll('[data-toggle-cal]').forEach(btn => btn.addEventListener('click', _handleCalToggle));
 document.querySelectorAll('[data-delete-cal]').forEach(btn => btn.addEventListener('click', _handleCalDelete));
 
-// ── Schedule a Bot ────────────────────────────────────────────────────────
+// ── Send / Schedule a Bot ─────────────────────────────────────────────────
 (function() {
   const form = document.getElementById('scheduleBotForm');
   if (!form) return;
@@ -2118,30 +2116,63 @@ document.querySelectorAll('[data-delete-cal]').forEach(btn => btn.addEventListen
     return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
   }
   const joinAtInput = document.getElementById('sbJoinAt');
-  if (joinAtInput) joinAtInput.value = _oneHourStr();
+  const scheduleToggle = document.getElementById('sbScheduleToggle');
+  const joinAtWrap = document.getElementById('sbJoinAtWrap');
+  const panelTitle = document.getElementById('sbPanelTitle');
+  const submitBtn = document.getElementById('sbSubmitBtn');
+
+  // Toggle schedule date/time visibility
+  function _updateScheduleMode() {
+    const isScheduled = scheduleToggle.checked;
+    joinAtWrap.style.display = isScheduled ? '' : 'none';
+    submitBtn.textContent = isScheduled ? 'Schedule Bot' : 'Send Bot';
+    panelTitle.textContent = isScheduled ? 'Schedule a Bot' : 'Send Bot to Meeting';
+    if (isScheduled && joinAtInput && !joinAtInput.value) {
+      joinAtInput.value = _oneHourStr();
+    }
+  }
+  scheduleToggle.addEventListener('change', _updateScheduleMode);
+
+  // "Send Bot Now" opens in send-now mode, "Schedule a Bot" opens in schedule mode
+  document.getElementById('sendBotNowBtn')?.addEventListener('click', () => {
+    scheduleToggle.checked = false;
+    _updateScheduleMode();
+  });
+  document.getElementById('scheduleBotBtn')?.addEventListener('click', () => {
+    scheduleToggle.checked = true;
+    if (joinAtInput) joinAtInput.value = _oneHourStr();
+    _updateScheduleMode();
+  });
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const btn = document.getElementById('sbSubmitBtn');
+    const btn = submitBtn;
     const status = document.getElementById('sbStatus');
     const meetingUrl = document.getElementById('sbMeetingUrl').value.trim();
-    const joinAt = joinAtInput?.value;
+    const isScheduled = scheduleToggle.checked;
+    const joinAt = isScheduled ? joinAtInput?.value : null;
     const template = document.getElementById('sbTemplate').value;
     const botName = document.getElementById('sbBotName').value.trim();
     const webhookUrl = document.getElementById('sbWebhookUrl').value.trim();
 
-    if (!meetingUrl || !joinAt) {
-      status.textContent = 'Meeting URL and schedule time are required.';
+    if (!meetingUrl) {
+      status.textContent = 'Meeting URL is required.';
+      status.style.color = '#ef4444';
+      return;
+    }
+    if (isScheduled && !joinAt) {
+      status.textContent = 'Schedule date & time is required.';
       status.style.color = '#ef4444';
       return;
     }
 
-    const payload = { meeting_url: meetingUrl, join_at: new Date(joinAt).toISOString(), template };
+    const payload = { meeting_url: meetingUrl, template };
+    if (isScheduled) payload.join_at = new Date(joinAt).toISOString();
     if (botName) payload.bot_name = botName;
     if (webhookUrl) payload.webhook_url = webhookUrl;
 
     btn.disabled = true;
-    status.textContent = 'Scheduling…';
+    status.textContent = isScheduled ? 'Scheduling…' : 'Sending…';
     status.style.color = '#94a3b8';
 
     try {
@@ -2155,10 +2186,13 @@ document.querySelectorAll('[data-delete-cal]').forEach(btn => btn.addEventListen
         throw new Error(err.detail || resp.statusText);
       }
       const bot = await resp.json();
-      status.textContent = `✓ Bot scheduled (ID: ${bot.id.slice(0,8)}…)`;
+      status.textContent = isScheduled
+        ? `Bot scheduled (ID: ${bot.id.slice(0,8)}…)`
+        : `Bot sent (ID: ${bot.id.slice(0,8)}…)`;
       status.style.color = '#22c55e';
       form.reset();
-      if (joinAtInput) joinAtInput.value = _oneHourStr();
+      scheduleToggle.checked = false;
+      _updateScheduleMode();
       setTimeout(() => {
         const panel = document.getElementById('scheduleBotPanel');
         if (panel?.classList.contains('show')) bootstrap.Collapse.getInstance(panel)?.hide();
