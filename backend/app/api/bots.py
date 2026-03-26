@@ -574,6 +574,8 @@ async def delete_bot(bot_id: str, request: Request):
         _bot_queue.remove(bot_id)
         await store.mark_terminal(bot_id, "cancelled", ended_at=_now())
         logger.info("Removed queued bot %s from queue", bot_id)
+        if _bot_queue:
+            _queue_event.set()
     else:
         task = _running_tasks.get(bot_id)
         if task and not task.done():

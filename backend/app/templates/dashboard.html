@@ -2279,8 +2279,9 @@ document.querySelectorAll('[data-delete-cal]').forEach(btn => btn.addEventListen
     const tbody = document.querySelector('#section-bots .table tbody, #section-overview .table tbody');
     if (!tbody) return;
     const tr = document.createElement('tr');
+    tr.setAttribute('data-bot-id', bot.id || '');
     const shortId = _escHtml((bot.id || '').slice(0, 12));
-    const botId = _escHtml(bot.id || '');
+    const rawBotId = (bot.id || '').replace(/[^a-zA-Z0-9\-]/g, '');
     const meetUrl = _escHtml(bot.meeting_url || '');
     const platform = _escHtml((bot.meeting_platform || 'unknown').replace(/^\w/, c => c.toUpperCase()));
     const joinAt = bot.join_at ? _escHtml(new Date(bot.join_at).toLocaleString()) : '';
@@ -2291,20 +2292,25 @@ document.querySelectorAll('[data-delete-cal]').forEach(btn => btn.addEventListen
       : botStatus === 'queued'
         ? '<span class="chip chip-gray">Queued</span>'
         : '<span class="chip chip-info">Ready</span>';
+    const isTerminal = ['done', 'error', 'cancelled'].includes(botStatus);
+    const cancelBtn = isTerminal ? '' : `<button class="btn btn-outline-danger btn-sm ms-1" style="font-size:11px;padding:2px 8px" onclick="cancelBot('${rawBotId}', this)">Cancel</button>`;
     tr.innerHTML = `
       <td><code style="font-size:11.5px">${shortId}…</code></td>
       <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
         <span title="${meetUrl}" style="font-size:12px;color:#64748b">${meetUrl}</span>
       </td>
       <td><span class="chip chip-gray">${platform}</span></td>
-      <td>${statusChip}</td>
+      <td class="bot-status-cell">${statusChip}</td>
       <td><span style="color:#94a3b8">—</span></td>
       <td><span style="color:#94a3b8">—</span></td>
       <td style="font-size:12.5px;color:#64748b">—</td>
       <td style="color:#94a3b8;font-size:12px;white-space:nowrap">
         ${joinAt ? `<span style="color:#f59e0b">${joinAt}</span>` : created}
       </td>
-      <td><a href="/bot/${botId}" class="btn btn-outline-secondary btn-sm" style="font-size:11px;padding:2px 8px">View</a></td>`;
+      <td class="bot-actions-cell" style="white-space:nowrap">
+        <a href="/bot/${rawBotId}" class="btn btn-outline-secondary btn-sm" style="font-size:11px;padding:2px 8px">View</a>
+        ${cancelBtn}
+      </td>`;
     tbody.prepend(tr);
   }
 })();
