@@ -3031,6 +3031,7 @@ async def _wait_for_meeting_end(
     _last_participant_scrape = 0.0
     _last_audio_routing_sync = 0.0   # tracks last PulseAudio re-routing
     _last_audio_unmute = 0.0          # tracks last JS audio element unmute
+    _join_grace_until = time.monotonic() + 60  # skip alone detection for 60s after join
 
     while time.monotonic() < deadline:
         try:
@@ -3084,8 +3085,11 @@ async def _wait_for_meeting_end(
                 participants.update(found)
                 logger.debug("Participants so far: %s", participants)
 
-        # ── Alone / empty-room detection ──────────────────────────────────
-        alone = await _is_bot_alone(page, platform)
+        # ── Alone / empty-room detection (skip during post-join grace) ────
+        alone = (
+            time.monotonic() >= _join_grace_until
+            and await _is_bot_alone(page, platform)
+        )
         if alone:
             if alone_since is None:
                 alone_since = time.monotonic()

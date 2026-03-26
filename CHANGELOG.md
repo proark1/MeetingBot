@@ -4,9 +4,14 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.16.1 — **Last updated:** 2026-03-26
+> **Latest version:** 2.16.2 — **Last updated:** 2026-03-26
 
 ---
+
+## [2.16.2] - 2026-03-26
+
+### Fixed
+- **Bot leaves meeting immediately after joining** — Added 60-second grace period after join before alone-detection activates, preventing false positives from DOM not fully rendering participant tiles
 
 ## [2.16.1] - 2026-03-26
 
