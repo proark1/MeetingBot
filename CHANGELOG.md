@@ -17,6 +17,7 @@ Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 - **"See it in action" demo section** on landing page — terminal-style API demo with 3-step walkthrough between How It Works and Pricing
 
 ### Fixed
+- **Mobile responsiveness** — Dashboard: section headers wrap, bot action buttons stack vertically, advanced options 2-column grid, KPI grids adapt to 2 columns, webhook events grid fits small screens. Landing: demo terminal scrollable and sized for mobile, demo widget full-width on phones
 - **Robust alone detection** — `_is_bot_alone()` now requires BOTH text pattern AND DOM tile count to agree before flagging the bot as alone, eliminating false positives from tooltips or loading text
 - **Scheduled bots no longer block concurrent slots** — Scheduled bots use deferred `call_later()` timers instead of occupying a `_running_tasks` slot while sleeping; slots are only claimed at join time
 - **CORS restricted in production** — When `API_KEY` is set and `CORS_ORIGINS` is still `*`, CORS is now restricted to same-origin only (set `CORS_ORIGINS` explicitly to allow specific origins)
