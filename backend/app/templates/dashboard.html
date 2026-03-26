@@ -208,6 +208,9 @@
         <span class="sidebar-badge blue">{{ recent_bots|length }}</span>
         {% endif %}
       </button>
+      <button class="sidebar-nav-item" data-section="history">
+        <span class="nav-icon">📋</span> History
+      </button>
       <button class="sidebar-nav-item" data-section="analytics">
         <span class="nav-icon">📈</span> Analytics
       </button>
@@ -665,6 +668,22 @@
         </div>
       </div>
       {% endif %}
+    </div>
+
+    <!-- ────────────────────────────────────────────
+         MEETING HISTORY
+    ──────────────────────────────────────────── -->
+    <div class="dash-section" id="section-history">
+      <div class="section-hdr">
+        <div>
+          <h2>Meeting History</h2>
+          <p>All past meetings with transcripts and analysis</p>
+        </div>
+        <button class="btn btn-outline-secondary btn-sm" onclick="loadMeetingHistory()">Refresh</button>
+      </div>
+      <div class="card card-pad" id="history-container">
+        <div style="color:#94a3b8;text-align:center;padding:2rem">Loading meeting history…</div>
+      </div>
     </div>
 
     <!-- ────────────────────────────────────────────
@@ -2746,6 +2765,60 @@ async function cancelBot(botId, btn) {
 
   setInterval(_pollBotStatus, 10000);
 })();
+
+// ── Meeting History ──────────────────────────────────────────────────────────
+let _historyLoaded = false;
+async function loadMeetingHistory() {
+  const container = document.getElementById('history-container');
+  if (!container) return;
+  try {
+    const meetings = await apiFetch('/dashboard/meeting-history');
+    if (!meetings || meetings.length === 0) {
+      container.innerHTML = '<div style="color:#94a3b8;text-align:center;padding:2rem">No meeting history yet. Completed meetings will appear here.</div>';
+      return;
+    }
+    const rows = meetings.map(m => {
+      const platform = (m.meeting_platform || 'unknown').replace(/^\w/, c => c.toUpperCase()).replace(/_/g, ' ');
+      const created = m.created_at ? new Date(m.created_at).toLocaleString() : '—';
+      const dur = m.duration_seconds ? Math.round(m.duration_seconds / 60) + 'm' : '—';
+      const parts = (m.participants || []).length || '—';
+      const badges = [
+        m.has_transcript ? '<span class="chip chip-info" style="font-size:10px">Transcript</span>' : '',
+        m.has_analysis ? '<span class="chip chip-success" style="font-size:10px">Analysis</span>' : '',
+      ].filter(Boolean).join(' ') || '<span style="color:#94a3b8;font-size:11px">—</span>';
+      const statusChip = m.status === 'done'
+        ? '<span class="chip chip-success">Done</span>'
+        : m.status === 'error'
+          ? '<span class="chip chip-danger">Error</span>'
+          : '<span class="chip chip-gray">' + (m.status || 'unknown') + '</span>';
+      return `<tr>
+        <td style="font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${m.meeting_url || ''}">${m.meeting_url || '—'}</td>
+        <td><span class="chip chip-gray">${platform}</span></td>
+        <td>${statusChip}</td>
+        <td style="font-size:12.5px">${dur}</td>
+        <td style="font-size:12.5px">${parts}</td>
+        <td>${badges}</td>
+        <td style="font-size:12px;color:#64748b;white-space:nowrap">${created}</td>
+        <td><a href="/bot/${m.id}" class="btn btn-outline-secondary btn-sm" style="font-size:11px;padding:2px 8px">View</a></td>
+      </tr>`;
+    }).join('');
+    container.innerHTML = `<div class="table-responsive"><table class="table table-hover">
+      <thead><tr><th>Meeting</th><th>Platform</th><th>Status</th><th>Duration</th><th>Participants</th><th>Data</th><th>Date</th><th></th></tr></thead>
+      <tbody>${rows}</tbody></table></div>`;
+    _historyLoaded = true;
+  } catch (e) {
+    container.innerHTML = '<div style="color:#dc2626;padding:1rem">Failed to load: ' + e.message + '</div>';
+  }
+}
+
+// Load history when tab becomes active
+document.addEventListener('DOMContentLoaded', function() {
+  document.querySelectorAll('[data-section]').forEach(btn => {
+    btn.addEventListener('click', function() {
+      if (this.getAttribute('data-section') === 'history' && !_historyLoaded) loadMeetingHistory();
+    });
+  });
+});
 
 // ── Bot search/filter on dashboard ───────────────────────────────────────────
 (function() {

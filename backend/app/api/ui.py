@@ -379,8 +379,23 @@ async def bot_session_page(
     if not account:
         return RedirectResponse(f"/login?next=/bot/{bot_id}")
 
-    from app.store import store as _store
+    from app.store import store as _store, BotSession
     bot = await _store.get_bot(bot_id)
+
+    # Fall back to DB snapshot if not in RAM (expired from 24h memory window)
+    if bot is None:
+        import json as _json
+        from app.models.account import BotSnapshot
+        result = await db.execute(
+            select(BotSnapshot).where(BotSnapshot.id == bot_id)
+        )
+        snap = result.scalar_one_or_none()
+        if snap and snap.account_id == account.id:
+            try:
+                d = _json.loads(snap.data)
+                bot = BotSession(**{k: v for k, v in d.items() if k in BotSession.__dataclass_fields__})
+            except Exception:
+                bot = None
 
     if bot is None or bot.account_id != account.id:
         return templates.TemplateResponse("dashboard.html", {
@@ -1497,6 +1512,48 @@ async def create_bot_ui(request: Request, db: AsyncSession = Depends(get_db)):
         return JSONResponse(resp.json(), status_code=resp.status_code)
     except Exception as exc:
         return JSONResponse({"detail": str(exc)}, status_code=502)
+
+
+# ── Meeting history (cookie-auth, queries DB snapshots) ───────────────────────
+
+@router.get("/dashboard/meeting-history", include_in_schema=False)
+async def meeting_history(request: Request, db: AsyncSession = Depends(get_db)):
+    """Return past meeting sessions from DB snapshots (beyond 24h RAM window)."""
+    account = await _get_account_from_request(request, db)
+    if not account:
+        return JSONResponse({"detail": "Unauthenticated"}, status_code=401)
+
+    import json as _json
+    from app.models.account import BotSnapshot
+
+    result = await db.execute(
+        select(BotSnapshot)
+        .where(BotSnapshot.account_id == account.id)
+        .order_by(BotSnapshot.created_at.desc())
+        .limit(50)
+    )
+    snapshots = result.scalars().all()
+
+    meetings = []
+    for snap in snapshots:
+        try:
+            d = _json.loads(snap.data)
+            meetings.append({
+                "id": snap.id,
+                "meeting_url": d.get("meeting_url", ""),
+                "meeting_platform": d.get("meeting_platform", "unknown"),
+                "status": snap.status,
+                "created_at": snap.created_at.isoformat() if snap.created_at else None,
+                "bot_name": d.get("bot_name"),
+                "duration_seconds": d.get("duration_seconds"),
+                "participants": d.get("participants", []),
+                "has_transcript": bool(d.get("transcript")),
+                "has_analysis": bool(d.get("analysis")),
+            })
+        except Exception:
+            continue
+
+    return JSONResponse(meetings)
 
 
 # ── Bot status polling (cookie-auth) ─────────────────────────────────────────
