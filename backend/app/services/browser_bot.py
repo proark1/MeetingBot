@@ -1065,16 +1065,41 @@ async def _join_onepizza(page: Page, url: str, bot_name: str, start_muted: bool 
         # Auto-join didn't fire — use manual lobby flow
         logger.info("onepizza: auto-join didn't fire, using manual lobby flow")
         try:
-            await page.locator("#lobbyName").fill(bot_name)
+            name_input = page.locator("#lobbyName")
+            if await name_input.count() > 0:
+                await name_input.fill(bot_name)
+                await asyncio.sleep(0.3)
         except Exception:
             pass
         await asyncio.sleep(0.5)
         try:
-            await page.click("#lobbyJoinBtn", timeout=10_000)
-            logger.info("onepizza: manual join button clicked")
+            btn = page.locator("#lobbyJoinBtn")
+            # Ensure button is enabled and clickable
+            await btn.wait_for(state="visible", timeout=5_000)
+            await btn.scroll_into_view_if_needed()
+            await asyncio.sleep(0.3)
+            # Try direct click first, then JS click as fallback
+            try:
+                await btn.click(timeout=5_000)
+            except Exception:
+                logger.info("onepizza: direct click failed, trying JS click")
+                await page.evaluate('document.getElementById("lobbyJoinBtn")?.click()')
+            logger.info("onepizza: join button clicked")
         except Exception:
-            await _screenshot(page, "onepizza_no_join_button")
-            raise MeetingBotError("Could not click join button on onepizza.io")
+            # Last resort: try clicking any visible button with join-like text
+            try:
+                await page.evaluate('''
+                    const btns = document.querySelectorAll("button");
+                    for (const b of btns) {
+                        if (b.textContent.toLowerCase().includes("join") && b.offsetParent !== null) {
+                            b.click(); break;
+                        }
+                    }
+                ''')
+                logger.info("onepizza: fallback join button clicked via text match")
+            except Exception:
+                await _screenshot(page, "onepizza_no_join_button")
+                raise MeetingBotError("Could not click join button on onepizza.io")
         # Wait for meeting room to appear after clicking join
         try:
             await page.wait_for_selector("#meetingRoom", state="visible", timeout=15_000)

@@ -93,6 +93,8 @@ def _migrate_schema(conn) -> None:
             f"ALTER TABLE webhooks ADD COLUMN IF NOT EXISTS last_delivery_at TIMESTAMP WITH TIME ZONE",
             f"ALTER TABLE webhooks ADD COLUMN IF NOT EXISTS last_delivery_status INTEGER",
             f"ALTER TABLE webhooks ADD COLUMN IF NOT EXISTS consecutive_failures INTEGER NOT NULL DEFAULT 0",
+            # action_items columns added after initial deployment
+            f"ALTER TABLE action_items ADD COLUMN IF NOT EXISTS sub_user_id VARCHAR(255)",
         ]
         for sql in _pg_migrations:
             try:
