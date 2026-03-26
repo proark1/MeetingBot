@@ -18,6 +18,15 @@ Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
 ### Fixed
 - **Auth broken on bot detail page** — Share link and speaker rename were calling `/api/v1/...` directly with cookies (API only reads Bearer tokens). Added proxy routes: `/dashboard/bot/{id}/share`, `/dashboard/bot/{id}/speakers`, `/dashboard/bot/{id}/ask`, `/dashboard/bot/{id}/followup-email`
+- **Rate limiter crash on dashboard bot creation** — Internal ASGI proxy requests had `request.client=None`, crashing `slowapi.get_remote_address()`. Added safe wrapper with `X-Forwarded-For` fallback
+- **httpx 0.28+ compatibility** — Replaced removed `AsyncClient(app=...)` shortcut with `httpx.ASGITransport(app=...)` across all 6 proxy routes
+- **Bot status polling crash** — `store.list_bots()` returns `(list, total)` tuple but code iterated it as a list. Fixed tuple unpacking
+- **Alone detection broken for onepizza** — Empty `_ALONE_TEXTS` made `text_alone` always False; now falls back to tile-only detection for platforms without text patterns
+- **DELETE race condition with queued bots** — Removing a queued bot now also cleans up the `_bot_queue` and re-signals the queue processor
+- **JS-created bot rows missing attributes** — `_prependBotRow` now adds `data-bot-id`, `bot-status-cell`, `bot-actions-cell` classes, and cancel button so polling/cancel/filter work on newly created rows
+- **onepizza.io join button** — Lobby join now tries direct click, JS click fallback, then text-match fallback for robustness
+- **Missing DB migration** — Added `ALTER TABLE action_items ADD COLUMN IF NOT EXISTS sub_user_id` to PostgreSQL migration script
+- **All proxy routes error handling** — Added try-except to all 6 cookie-auth proxy routes to return 502 instead of crashing
 
 ## [2.17.0] - 2026-03-26
 

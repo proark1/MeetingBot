@@ -2,77 +2,44 @@
 
 **Version 2.18.0** — A stateless meeting bot API service with multi-tenant billing, business account support, Google/Microsoft SSO, Python & JS SDKs, webhook retry/delivery logs, bot persona customization, video recording, Prometheus metrics, idempotency keys, cloud storage, email notifications, calendar auto-join, Slack/Notion integrations, and GDPR compliance.
 
-> **Last updated:** 2026-03-26 · **API version in Swagger UI:** 2.18.0 · **Build:** 10 performance fixes + full SDK coverage + workspace UI + test infrastructure <!-- auto-updated on each release -->
+> **Last updated:** 2026-03-26 · **API version in Swagger UI:** 2.18.0 · **Build:** Transcript search + AI Q&A + live polling + deferred scheduling + mobile responsive <!-- auto-updated on each release -->
 
 
-Send bots into **Zoom**, **Google Meet**, and **Microsoft Teams** meetings to record, transcribe, and analyse them with **Claude** (Anthropic) or **Gemini** (Google) AI.
+Send bots into **Zoom**, **Google Meet**, **Microsoft Teams**, and **onepizza.io** meetings to record, transcribe, and analyse them with **Claude** (Anthropic) or **Gemini** (Google) AI.
 
 **Multi-tenant:** Each external service registers an account and gets its own API key. Pre-fund a credit balance via Stripe (card) or USDC (ERC-20) — credits are deducted automatically per bot run.
 
 ---
 
-## Recent changes (2026-03-19)
+## Recent changes (2026-03-26)
 
-### UX — Async dashboard (zero page reloads)
-- **All 10 dashboard actions go async** — API key create/revoke, webhook register, integration add/toggle/delete, calendar feed add/toggle/delete all use `fetch()` + in-place DOM updates with toast notifications. No full-page reload.
-- **Browser back button** — `pushState` + `popstate` listener: pressing Back inside the dashboard restores the correct section in the browser history stack.
-- **Schedule Bot in-place update** — New bot row appended to the table without `window.location.reload()`.
+### Dashboard — Send bots directly from the UI
+- **Send Bot Now** — Primary CTA button on the dashboard. Enter a meeting URL and the bot joins immediately. Toggle "Schedule for later" to pick a future date/time.
+- **Advanced bot options** — Collapsible section with record video, live transcription, PII redaction, and translation language toggles.
+- **Live status polling** — Bot status chips update automatically every 10 seconds without page refresh.
+- **Cancel bot from dashboard** — Cancel button on each active bot row. Works for scheduled, queued, and running bots.
+- **Bot search & filter** — Search by ID or URL, filter by platform (Zoom/Teams/Meet/onepizza).
+
+### Bot detail page — Productivity features
+- **Transcript search** — Real-time filter and highlight with match counter. Type to find any word across the transcript.
+- **"Ask about this meeting"** — AI-powered Q&A on any completed meeting. Ask free-form questions and get answers with context.
+- **"Generate follow-up email"** — One-click AI follow-up email generation with copy-to-clipboard.
+
+### Reliability
+- **Robust alone detection** — `_is_bot_alone()` now requires BOTH text pattern AND DOM tile count to agree before flagging the bot as alone, eliminating false positive exits.
+- **60-second post-join grace period** — Alone detection is skipped for the first 60 seconds after joining, preventing false exits from DOM not fully rendering.
+- **Scheduled bots don't block concurrent slots** — Scheduled bots use deferred `call_later()` timers instead of occupying a `_running_tasks` slot while sleeping.
+- **Queue processor re-signals** — When a bot finishes, the queue processor is woken immediately to start the next queued bot (no 30-second delay).
 
 ### Security
-- **Admin endpoint rate limits** — `PUT /admin/wallet`, `PUT /admin/rpc-url`, `POST /admin/credit`: 10/min per IP. `POST /admin/usdc/rescan`: 5/min per IP. Returns HTTP 429.
-- **Webhook replay protection** — All signed deliveries now include `X-MeetingBot-Timestamp`. HMAC is computed over `"{timestamp}.{body}"`. Reject deliveries where `abs(now - timestamp) > 300 s`.
-- **WebSocket DB error → explicit close** — Database failure during token lookup now closes the connection with code **4503** (`"Service temporarily unavailable"`) instead of silently passing `None` through.
+- **Cookie-auth proxy routes** — All dashboard API calls (bot creation, cancel, share, speakers, ask, email) route through `/dashboard/*` proxy endpoints that accept the JWT cookie and forward with proper Bearer token.
+- **XSS prevention** — All dynamic values in bot table rows are HTML-escaped via `_escHtml()`.
+- **CORS restricted in production** — When `API_KEY` is set and `CORS_ORIGINS` is still `*`, CORS auto-restricts to same-origin.
 
-### Performance
-- **Bot queue latency: 10 s → near-zero** — Queue processor now wakes via `asyncio.Event` the moment a bot is enqueued (was `asyncio.sleep(10)`).
-- **Analytics caching** — `GET /api/v1/analytics` cached 30 s per account; `GET /api/v1/analytics/api-usage` cached 60 s. Reduces DB load under polling.
-- **Calendar dedup memory fix** — `_dispatched` set → bounded `dict` with 48-hour TTL; pruned every 288 poll cycles.
-
-### Previous changes (2026-03-18)
-- **Consent announcement + opt-out** — Set `consent_enabled: true` on a bot to announce recording at join. Transcripts are scanned for opt-out phrases; opted-out participants' content is redacted. Configure globally via `CONSENT_ANNOUNCEMENT_ENABLED` and `CONSENT_OPT_OUT_PHRASE` env vars.
-- **Auto-delete retention policies** — `GET/PUT /api/v1/retention` to configure per-account bot/recording/transcript retention days. A background task enforces policies nightly. Defaults controlled via `DEFAULT_BOT_RETENTION_DAYS` (90), `DEFAULT_RECORDING_RETENTION_DAYS` (30).
-- **Keyword alerts** — `POST /api/v1/keyword-alerts` to register keywords. A `bot.keyword_alert` webhook event fires whenever a keyword is detected in a transcript. Per-bot alerts can also be specified at creation via `keyword_alerts: [{"keyword": "...", "webhook_url": "..."}]`.
-- **Follow-up email draft** — Set `auto_followup_email: true` on bot creation to automatically generate and send a follow-up email when the meeting ends. Also available on-demand via `POST /api/v1/bot/{id}/followup-email`.
-- **Cross-meeting search** — `GET /api/v1/search?q=...` now searches the full historical archive (DB-persisted bots), not just the 24-hour in-memory window. Filter by `platform` and `include_archived`.
-- **HubSpot / Salesforce CRM integration** — Register a `hubspot` or `salesforce` integration via `POST /api/v1/integrations`. Meeting summaries are automatically posted as HubSpot Note engagements or Salesforce Tasks after each meeting.
-- **Local Whisper transcription** — Set `transcription_provider: "whisper"` on bot creation (or `WHISPER_ENABLED=true` globally) to transcribe with `faster-whisper` / `openai-whisper` locally. Falls back to Gemini if unavailable.
-- **Team workspaces** — `POST /api/v1/workspaces` creates a shared workspace. Invite members with roles (`admin`/`member`/`viewer`). Bots tagged with a `workspace_id` are visible to all workspace members.
-- **MCP server** — `GET /api/v1/mcp/schema` returns the server manifest; `POST /api/v1/mcp/call` executes tools: `list_meetings`, `get_meeting`, `search_meetings`, `get_action_items`, `get_meeting_brief`.
-- **SAML 2.0 SSO** — Set `SAML_ENABLED=true` + `SAML_SP_BASE_URL`. Register IdP configs at `POST /api/v1/auth/saml/configs` (admin). Users authenticate at `GET /api/v1/auth/saml/{org_slug}/authorize`.
-
-### Previous changes (2026-03-17)
-- **Account type switching** — Users can switch their own account between `personal` and `business` at any time via `PUT /api/v1/auth/account-type` without affecting existing bot data or credits. Admins can change any account's type via `POST /api/v1/admin/accounts/{id}/set-account-type`. Both operations are also available through the dashboard UI (account type chip with switcher) and the admin panel (inline account type dropdown on each user row).
-- **Split API documentation** — `/api/docs` (public Swagger UI) exposes only user-facing endpoints. Admin-only routes, platform analytics, and `ai_usage` cost fields are hidden from the public schema. Admins access the full schema — including all admin endpoints and AI cost data — at `/api/v1/admin/docs` (requires admin auth).
-- **`/bot/{id}` session viewer** — new web UI page showing transcript, AI analysis (summary, key points, action items, decisions, next steps, sentiment, topics), speaker stats, chapter breakdown, meeting metadata, and download links for audio/video/markdown/PDF.
-- **`GET /api/v1/templates/default-prompt`** — returns the raw default analysis prompt for inspection or extension.
-- **`GET /api/v1/search`** — full-text search across all transcripts; query param `q`.
-- **Modern landing page** — marketing homepage at `/`; authenticated users are auto-redirected to `/dashboard`.
-- **Dashboard redesign** — full account management without leaving the page: API key copy-to-clipboard, Slack/Notion integrations, iCal calendar feeds, notification preferences, and recent bots overview.
-
-### Reliability fixes
-- **Startup hang fix** — asyncpg now uses a 10 s connection timeout so an unreachable PostgreSQL instance fails fast. The lifespan startup wraps `create_all_tables()`, `load_persisted_bots()`, and `load_persisted_webhooks()` in `asyncio.wait_for()` so the server always becomes ready (and `/health` always responds) even when the database is temporarily unavailable at boot.
-- **DB startup retry** — `create_all_tables()` is retried up to 5 times with a 5 s delay between attempts (handles Railway where the PostgreSQL container starts in parallel with the app container).
-- **`.dockerignore`** — SQLite `*.db` / `*.db-wal` / `*.db-shm` files excluded from the Docker build context so a local database is never bundled into the production image.
-
----
-
-## What's new in v2.2.0
-
-| Feature | Description |
-|---------|-------------|
-| **Business accounts** | Register with `account_type: "business"` — one API key, shared credit balance, complete data isolation between end-users |
-| **Sub-user data isolation** | Pass `X-Sub-User: <user-id>` header (or `sub_user_id` in bot body) to scope all bot data to a specific end-user; different sub-users cannot see each other's bots, transcripts, or analyses |
-| **`sub_user_id` field** | Available on bot creation, bot response, and bot summary schemas; body field takes precedence over the header |
-| **Copy-to-clipboard for API keys** | Clipboard icon beside each API key in the dashboard; newly created keys display the full key once with a prominent copy button |
-| **Account type on registration** | Account type selection (Personal / Business) on the registration page and in the admin panel user table |
-| **Account type self-service switching** | `PUT /api/v1/auth/account-type` — switch between `personal` and `business` at any time; no data loss, no credit impact. Dashboard shows a type chip with a one-click switcher. Admins can change any account's type via the admin panel dropdown or `POST /api/v1/admin/accounts/{id}/set-account-type` |
-| **Integrations management UI** | Add and manage Slack and Notion integrations directly from the dashboard — no API calls required |
-| **Calendar feed management UI** | Add, pause, and remove iCal calendar feeds directly from the dashboard with auto-join configuration |
-| **Redesigned Web UI** | Modern Inter-font design system across all pages: login, register, dashboard, top-up, and admin — responsive, accessible, and polished |
-| **Dashboard bots overview** | Recent 24-hour bots with status indicators shown directly on the dashboard |
-| **Bot session viewer** | New `/bot/{id}` page — transcript, AI analysis, speaker stats, chapters, and download links (audio/video/PDF/markdown) |
-| **Split API docs** | Public `/api/docs` hides admin routes and cost fields; full schema (including AI usage costs) at `/api/v1/admin/docs` (admin only) |
-| **Landing page** | Public marketing homepage at `/` with feature highlights and sign-up CTA; auto-redirects authenticated users to the dashboard |
+### Landing page
+- **Dark navy + warm beige theme** — Complete visual overhaul across all 11 templates.
+- **"See it in action" demo section** — Terminal-style API walkthrough with 3-step visual guide.
+- **Mobile responsive** — All new features render properly on phones and tablets.
 
 ---
 
@@ -307,7 +274,7 @@ Returned by `GET /api/v1/bot/{id}` and `POST /api/v1/bot`.
 |-------|------|-------------|
 | `id` | string | Unique bot UUID |
 | `meeting_url` | string | The meeting URL the bot joined |
-| `meeting_platform` | string | Detected platform: `google_meet`, `zoom`, `teams`, or `demo` |
+| `meeting_platform` | string | Detected platform: `google_meet`, `zoom`, `microsoft_teams`, `onepizza`, or `unknown` |
 | `bot_name` | string | Display name shown in the meeting |
 | `status` | string | Current lifecycle status (see [Bot lifecycle](#bot-lifecycle)) |
 | `error_message` | string\|null | Human-readable error if `status` is `error` |
@@ -610,7 +577,7 @@ The background poll loop checks all active feeds every `CALENDAR_POLL_INTERVAL_S
 | `GET` | `/api/v1/bot/{id}/brief` | Pre-meeting brief: AI-generated agenda and background for an upcoming meeting. HTTP 425 if no transcript yet |
 | `GET` | `/api/v1/bot/{id}/recurring` | Recurring meeting intelligence: links to previous meetings at the same URL and surfaces recurring action items |
 | `GET` | `/api/v1/bot/{id}/video` | Download screen recording as MP4. HTTP 404 if not available. Enable per-bot with `record_video: true` |
-| `GET` | `/api/v1/health` or `/health` | Health check → `{"status": "ok", "service": "MeetingBot", "version": "2.3.0"}` |
+| `GET` | `/api/v1/health` or `/health` | Health check → `{"status": "ok", "service": "MeetingBot", "version": "2.18.0"}` |
 
 ### Admin (requires admin account)
 
@@ -663,9 +630,9 @@ Or use the admin web UI at `/admin` to manage all settings through a form.
 | `/` | Landing page (marketing homepage) — redirects to `/dashboard` if already logged in |
 | `/register` | Create account (Personal or Business); Google/Microsoft SSO sign-up buttons when configured |
 | `/login` | Login with email/password or SSO (Google/Microsoft when configured) |
-| `/dashboard` | Balance, API keys, subscription plan & monthly usage, email notifications, USDC wallet, SSO accounts, **account type switcher** (Personal ↔ Business with X-Sub-User usage info), **Integrations management** (add/pause/delete Slack & Notion), **Calendar feed management** (add/pause/remove iCal feeds with auto-join config), recent bots overview, transaction history, business account multi-user isolation info |
+| `/dashboard` | **Send Bot Now** (immediate) and **Schedule a Bot** (future) with advanced options (video, live transcription, PII, translation). Live status polling, bot search/filter by ID/URL/platform, cancel active bots. Balance, API keys, subscription plan & usage, email notifications, USDC wallet, SSO, account type switcher, integrations, calendar feeds, action items, analytics, transaction history |
 | `/topup` | Add credits — Stripe card (redirect to secure checkout) or USDC (ERC-20 deposit address with amount selector) |
-| `/bot/{id}` | Session viewer — transcript, AI analysis (summary, key points, action items, decisions, next steps, sentiment, topics), speaker breakdown, chapters, meeting metadata, and download links for audio/video/markdown/PDF |
+| `/bot/{id}` | Session viewer — transcript with search, AI analysis (summary, key points, action items, decisions, next steps, sentiment, topics), speaker breakdown, chapters, meeting metadata, download links for audio/video/markdown/PDF, "Ask about this meeting" AI Q&A, "Generate follow-up email" one-click drafting, share link generation |
 | `/admin` | Platform administration — plan breakdown stats, bot activity & platform feature counters (webhooks/integrations/calendar/SSO), system status (Stripe/RPC/HD seed/email/storage/video/SSO), unmatched USDC transfers, user accounts with inline plan management, manual credit, rescan, wallet config, RPC URL (admin only) |
 
 Full interactive docs (public endpoints): `GET /api/docs`
