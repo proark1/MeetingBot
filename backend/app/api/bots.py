@@ -42,6 +42,9 @@ _running_tasks: dict[str, asyncio.Task] = {}
 # FIFO queue of bot IDs waiting for a free slot
 _bot_queue: deque[str] = deque()
 
+# Scheduled bot timers — bot_id → TimerHandle (does NOT occupy a concurrent slot)
+_scheduled_timers: dict[str, asyncio.TimerHandle] = {}
+
 _ACTIVE_STATUSES = ("ready", "scheduled", "queued", "joining", "in_call", "call_ended")
 _queue_event = asyncio.Event()
 
@@ -50,6 +53,31 @@ def _get_sub_user_from_request(request: Request) -> Optional[str]:
     """Extract sub_user_id from X-Sub-User header."""
     val = request.headers.get("X-Sub-User", "").strip()[:255]
     return val or None
+
+
+def _start_scheduled_bot(bot_id: str) -> None:
+    """Timer callback: move a scheduled bot into the normal start/queue flow."""
+    _scheduled_timers.pop(bot_id, None)
+    asyncio.ensure_future(_start_or_queue_bot(bot_id))
+
+
+async def _start_or_queue_bot(bot_id: str) -> None:
+    """Start a bot lifecycle task if a slot is free, otherwise queue it."""
+    bot = await store.get_bot(bot_id)
+    if bot is None:
+        logger.warning("Scheduled bot %s was deleted before join time", bot_id)
+        return
+    active = sum(1 for t in _running_tasks.values() if not t.done())
+    if active >= settings.MAX_CONCURRENT_BOTS:
+        _bot_queue.append(bot_id)
+        _queue_event.set()
+        await store.update_bot(bot_id, status="queued")
+        logger.info("Scheduled bot %s queued (position %d)", bot_id, len(_bot_queue))
+    else:
+        task = asyncio.create_task(bot_service.run_bot_lifecycle(bot_id))
+        _running_tasks[bot_id] = task
+        task.add_done_callback(lambda _t, bid=bot_id: _running_tasks.pop(bid, None))
+        logger.info("Scheduled bot %s starting now", bot_id)
 
 
 async def _queue_processor() -> None:
@@ -400,18 +428,26 @@ async def create_bot(payload: BotCreate, request: Request):
             await store.delete_bot(bot.id)
             raise HTTPException(status_code=500, detail="Failed to register idempotency key") from _ik_exc
 
-    active = sum(1 for t in _running_tasks.values() if not t.done())
-    if active >= settings.MAX_CONCURRENT_BOTS:
-        _bot_queue.append(bot.id)
-        _queue_event.set()
-        await store.update_bot(bot.id, status="queued")
-        bot.status = "queued"
-        queue_pos = _bot_queue.index(bot.id) + 1
-        logger.info("Bot %s queued (position %d)", bot.id, queue_pos)
+    if is_scheduled:
+        # Defer start until join time — does NOT occupy a concurrent slot while waiting.
+        delay = max(0, (payload.join_at.replace(tzinfo=timezone.utc) - _now()).total_seconds())
+        loop = asyncio.get_event_loop()
+        handle = loop.call_later(delay, _start_scheduled_bot, bot.id)
+        _scheduled_timers[bot.id] = handle
+        logger.info("Bot %s scheduled — will start in %.0f s (no slot held)", bot.id, delay)
     else:
-        task = asyncio.create_task(bot_service.run_bot_lifecycle(bot.id))
-        _running_tasks[bot.id] = task
-        task.add_done_callback(lambda _: _running_tasks.pop(bot.id, None))
+        active = sum(1 for t in _running_tasks.values() if not t.done())
+        if active >= settings.MAX_CONCURRENT_BOTS:
+            _bot_queue.append(bot.id)
+            _queue_event.set()
+            await store.update_bot(bot.id, status="queued")
+            bot.status = "queued"
+            queue_pos = _bot_queue.index(bot.id) + 1
+            logger.info("Bot %s queued (position %d)", bot.id, queue_pos)
+        else:
+            task = asyncio.create_task(bot_service.run_bot_lifecycle(bot.id))
+            _running_tasks[bot.id] = task
+            task.add_done_callback(lambda _: _running_tasks.pop(bot.id, None))
 
     logger.info("Created bot %s for %s (status=%s)", bot.id, bot.meeting_url, bot.status)
 
@@ -515,19 +551,26 @@ async def delete_bot(bot_id: str, request: Request):
     bot = await _get_or_404(bot_id, account_id, sub_user_id)
     await _check_workspace_role(bot, account_id, "admin")
 
-    task = _running_tasks.get(bot_id)
-    if task and not task.done():
-        if bot.status == "in_call":
-            await store.update_bot(bot_id, status="call_ended", ended_at=_now())
-        task.cancel()
-        try:
-            await asyncio.wait_for(asyncio.shield(task), timeout=30.0)
-        except (asyncio.TimeoutError, asyncio.CancelledError):
-            pass
-        logger.info("Cancelled lifecycle task for bot %s", bot_id)
+    # Cancel scheduled timer if waiting for join_at
+    timer = _scheduled_timers.pop(bot_id, None)
+    if timer is not None:
+        timer.cancel()
+        await store.mark_terminal(bot_id, "cancelled", ended_at=_now())
+        logger.info("Cancelled scheduled timer for bot %s", bot_id)
     else:
-        # Already finished — remove from memory immediately
-        await store.delete_bot(bot_id)
+        task = _running_tasks.get(bot_id)
+        if task and not task.done():
+            if bot.status == "in_call":
+                await store.update_bot(bot_id, status="call_ended", ended_at=_now())
+            task.cancel()
+            try:
+                await asyncio.wait_for(asyncio.shield(task), timeout=30.0)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                pass
+            logger.info("Cancelled lifecycle task for bot %s", bot_id)
+        else:
+            # Already finished — remove from memory immediately
+            await store.delete_bot(bot_id)
 
     # Audit log — fire-and-forget
     from app.services.audit_log_service import log_event as _audit

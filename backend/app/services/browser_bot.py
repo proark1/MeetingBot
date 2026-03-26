@@ -1144,35 +1144,34 @@ _ALONE_TEXTS = {
 
 
 async def _is_bot_alone(page: Page, platform: str) -> bool:
-    """Return True if the bot appears to be the only participant in the meeting."""
+    """Return True if the bot appears to be the only participant in the meeting.
+
+    Requires BOTH text pattern AND DOM tile count to agree before returning True.
+    This prevents false positives from tooltips, loading text, or unrendered tiles.
+    """
     try:
         body = (await page.inner_text("body")).lower()
+        text_alone = any(t in body for t in _ALONE_TEXTS.get(platform, []))
 
-        if any(t in body for t in _ALONE_TEXTS.get(platform, [])):
-            return True
-
-        # DOM participant tile count as secondary signal.
-        # Only trust count == 1 (just the bot's own tile); count == 0 may mean
-        # the DOM hasn't rendered yet, so we skip that to avoid false positives.
+        # DOM participant tile count — only trust count == 1 (just the bot's
+        # own tile); count == 0 may mean the DOM hasn't rendered yet.
+        tile_alone = False
         if platform == "google_meet":
             count = await page.locator("[data-participant-id]").count()
-            if count == 1:
-                return True
+            tile_alone = count == 1
         elif platform == "zoom":
             count = await page.locator(
                 ".video-avatar__avatar, .participants-list-item"
             ).count()
-            if count == 1:
-                return True
+            tile_alone = count == 1
         elif platform == "microsoft_teams":
             count = await page.locator("[data-tid='roster-participant']").count()
-            if count == 1:
-                return True
+            tile_alone = count == 1
         elif platform == "onepizza":
-            # Count video tiles in the grid — if only 1 (the bot), we're alone
             tiles = await page.locator("#videoGrid > div").count()
-            if tiles <= 1:
-                return True
+            tile_alone = tiles <= 1
+
+        return text_alone and tile_alone
     except Exception:
         pass
     return False

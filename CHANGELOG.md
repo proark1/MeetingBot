@@ -4,9 +4,22 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.16.2 — **Last updated:** 2026-03-26
+> **Latest version:** 2.17.0 — **Last updated:** 2026-03-26
 
 ---
+
+## [2.17.0] - 2026-03-26
+
+### Added
+- **Live bot status polling** — Dashboard auto-updates bot status chips every 10 seconds without page refresh (`GET /dashboard/bots/status`)
+- **Cancel bot from dashboard** — Cancel button on each active bot row, with `POST /dashboard/bot/{id}/cancel` proxy route
+- **Advanced bot options in Send Bot form** — Collapsible section with record video, live transcription, PII redaction, and translation language toggles
+- **"See it in action" demo section** on landing page — terminal-style API demo with 3-step walkthrough between How It Works and Pricing
+
+### Fixed
+- **Robust alone detection** — `_is_bot_alone()` now requires BOTH text pattern AND DOM tile count to agree before flagging the bot as alone, eliminating false positives from tooltips or loading text
+- **Scheduled bots no longer block concurrent slots** — Scheduled bots use deferred `call_later()` timers instead of occupying a `_running_tasks` slot while sleeping; slots are only claimed at join time
+- **CORS restricted in production** — When `API_KEY` is set and `CORS_ORIGINS` is still `*`, CORS is now restricted to same-origin only (set `CORS_ORIGINS` explicitly to allow specific origins)
 
 ## [2.16.2] - 2026-03-26
 
