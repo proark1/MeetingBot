@@ -4,9 +4,14 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.15.0 — **Last updated:** 2026-03-24
+> **Latest version:** 2.15.1 — **Last updated:** 2026-03-26
 
 ---
+
+## [2.15.1] - 2026-03-26
+
+### Changed
+- Removed "Live on Zoom · Google Meet · Microsoft Teams" badge from landing page hero section
 
 ## [2.15.0] - 2026-03-24
 
