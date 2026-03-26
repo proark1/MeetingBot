@@ -4,9 +4,44 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.15.0 — **Last updated:** 2026-03-24
+> **Latest version:** 2.17.0 — **Last updated:** 2026-03-26
 
 ---
+
+## [2.17.0] - 2026-03-26
+
+### Added
+- **Live bot status polling** — Dashboard auto-updates bot status chips every 10 seconds without page refresh (`GET /dashboard/bots/status`)
+- **Cancel bot from dashboard** — Cancel button on each active bot row, with `POST /dashboard/bot/{id}/cancel` proxy route
+- **Advanced bot options in Send Bot form** — Collapsible section with record video, live transcription, PII redaction, and translation language toggles
+- **"See it in action" demo section** on landing page — terminal-style API demo with 3-step walkthrough between How It Works and Pricing
+
+### Fixed
+- **Robust alone detection** — `_is_bot_alone()` now requires BOTH text pattern AND DOM tile count to agree before flagging the bot as alone, eliminating false positives from tooltips or loading text
+- **Scheduled bots no longer block concurrent slots** — Scheduled bots use deferred `call_later()` timers instead of occupying a `_running_tasks` slot while sleeping; slots are only claimed at join time
+- **CORS restricted in production** — When `API_KEY` is set and `CORS_ORIGINS` is still `*`, CORS is now restricted to same-origin only (set `CORS_ORIGINS` explicitly to allow specific origins)
+
+## [2.16.2] - 2026-03-26
+
+### Fixed
+- **Bot leaves meeting immediately after joining** — Added 60-second grace period after join before alone-detection activates, preventing false positives from DOM not fully rendering participant tiles
+
+## [2.16.1] - 2026-03-26
+
+### Fixed
+- **Critical: Dashboard bot creation auth** — "Send Bot Now" button now works for logged-in users; added `/dashboard/bot` proxy route that accepts cookie auth and forwards to the API with proper Bearer token
+- **Critical: XSS in bot table row** — HTML-escape all dynamic values (`meeting_url`, `bot.id`, etc.) in `_prependBotRow` to prevent injection
+- **Bot status badge** — Immediate bots now show "Ready" or "Queued" chip instead of always showing "Scheduled"
+- **Dead CSS cleanup** — Removed orphaned `.hero-badge` styles from landing page after badge removal
+
+## [2.16.0] - 2026-03-26
+
+### Added
+- **Send Bot Now** button in dashboard — logged-in users can send a bot to a meeting immediately from the UI, not just via API
+- Toggle between "Send Now" (immediate) and "Schedule for later" modes in the bot creation form
+
+### Changed
+- Removed "Live on Zoom · Google Meet · Microsoft Teams" badge from landing page hero section
 
 ## [2.15.0] - 2026-03-24
 

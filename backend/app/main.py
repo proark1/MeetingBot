@@ -879,9 +879,18 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 _origins = [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
 _wildcard = _origins == ["*"]
+if _wildcard and settings.API_KEY:
+    # Production (API_KEY set): restrict CORS to same-origin only.
+    # Override with an explicit CORS_ORIGINS env var to allow specific origins.
+    logger.warning(
+        "CORS_ORIGINS is '*' but API_KEY is set — restricting CORS to same-origin. "
+        "Set CORS_ORIGINS explicitly to allow cross-origin requests."
+    )
+    _origins = []
+    _wildcard = False
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_origins,
+    allow_origins=_origins if not _wildcard else ["*"],
     allow_credentials=not _wildcard,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -659,14 +659,7 @@ async def run_bot_lifecycle(bot_id: str) -> None:
     use_real_bot = bot.meeting_platform in _REAL_PLATFORMS
 
     try:
-        # ── 0. Scheduled — wait until join_at ─────────────────────────────
-        if bot.join_at:
-            delay = (bot.join_at.replace(tzinfo=timezone.utc) - _now()).total_seconds()
-            if delay > 86400:
-                logger.warning("Bot %s join_at > 24 h away — joining immediately", bot_id)
-            elif delay > 0:
-                logger.info("Bot %s scheduled — waiting %.0f s", bot_id, delay)
-                await asyncio.sleep(delay)
+        # ── 0. Scheduled bots are deferred by bots.py call_later — no sleep needed.
 
         # ── 1. Joining ────────────────────────────────────────────────────
         await _set_status(bot, "joining")

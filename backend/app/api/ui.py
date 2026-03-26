@@ -1461,7 +1461,84 @@ async def create_webhook_ui(request: Request, db: AsyncSession = Depends(get_db)
     })
 
 
-# ── Support key proxy routes (cookie-auth wrappers) ───────────────────────────
+# ── Bot creation proxy (cookie-auth wrapper) ─────────────────────────────────
+
+@router.post("/dashboard/bot", include_in_schema=False)
+async def create_bot_ui(request: Request, db: AsyncSession = Depends(get_db)):
+    """Proxy bot creation through cookie auth so the dashboard can use fetch().
+
+    The main /api/v1/bot endpoint requires Bearer auth; this route accepts the
+    JWT cookie used by the dashboard, extracts the JWT, and forwards the request
+    to /api/v1/bot with the proper Authorization header via an internal ASGI call.
+    """
+    token = _get_token_from_request(request)
+    if not token:
+        return JSONResponse({"detail": "Unauthenticated"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"detail": "Invalid JSON body"}, status_code=400)
+
+    import httpx
+    from app.main import app as _app
+
+    async with httpx.AsyncClient(app=_app, base_url="http://internal") as client:
+        resp = await client.post(
+            "/api/v1/bot",
+            json=body,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    return JSONResponse(resp.json(), status_code=resp.status_code)
+
+
+# ── Bot status polling (cookie-auth) ─────────────────────────────────────────
+
+@router.get("/dashboard/bots/status", include_in_schema=False)
+async def bot_status_poll(request: Request, db: AsyncSession = Depends(get_db)):
+    """Return current bot statuses for the logged-in user (lightweight polling)."""
+    account = await _get_account_from_request(request, db)
+    if not account:
+        return JSONResponse({"detail": "Unauthenticated"}, status_code=401)
+
+    from app.store import store as _st
+    bots = await _st.list_bots(limit=20, account_id=account.id)
+    return JSONResponse([
+        {
+            "id": b.id,
+            "status": b.status,
+            "meeting_url": b.meeting_url,
+            "meeting_platform": b.meeting_platform,
+            "created_at": b.created_at.isoformat() if b.created_at else None,
+            "started_at": b.started_at.isoformat() if getattr(b, "started_at", None) else None,
+            "ended_at": b.ended_at.isoformat() if getattr(b, "ended_at", None) else None,
+        }
+        for b in bots
+    ])
+
+
+# ── Bot cancel proxy (cookie-auth) ───────────────────────────────────────────
+
+@router.post("/dashboard/bot/{bot_id}/cancel", include_in_schema=False)
+async def cancel_bot_ui(bot_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """Proxy bot cancellation through cookie auth."""
+    token = _get_token_from_request(request)
+    if not token:
+        return JSONResponse({"detail": "Unauthenticated"}, status_code=401)
+
+    import httpx
+    from app.main import app as _app
+
+    async with httpx.AsyncClient(app=_app, base_url="http://internal") as client:
+        resp = await client.delete(
+            f"/api/v1/bot/{bot_id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    if resp.status_code == 204:
+        return JSONResponse({"ok": True})
+    return JSONResponse(resp.json(), status_code=resp.status_code)
+
 
 @router.get("/dashboard/support-keys", include_in_schema=False)
 async def list_support_keys_ui(request: Request, db: AsyncSession = Depends(get_db)):

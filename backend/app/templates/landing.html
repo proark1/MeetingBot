@@ -121,34 +121,6 @@
       pointer-events: none;
     }
 
-    .hero-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.5rem;
-      background: rgba(27,32,51,0.06);
-      border: 1px solid rgba(27,32,51,0.2);
-      color: #1B2033;
-      padding: 0.35rem 0.9rem;
-      border-radius: 50px;
-      font-size: 0.8rem;
-      font-weight: 600;
-      letter-spacing: 0.02em;
-      margin-bottom: 2rem;
-    }
-
-    .hero-badge-dot {
-      width: 7px;
-      height: 7px;
-      background: var(--green);
-      border-radius: 50%;
-      animation: pulse-dot 2s infinite;
-    }
-
-    @keyframes pulse-dot {
-      0%, 100% { opacity: 1; transform: scale(1); }
-      50% { opacity: 0.5; transform: scale(0.8); }
-    }
-
     .hero-title {
       font-size: clamp(2.5rem, 6vw, 4.5rem);
       font-weight: 900;
@@ -1032,10 +1004,6 @@
   <div class="hero-glow"></div>
   <div class="container position-relative">
 
-    <div class="hero-badge">
-      <span class="hero-badge-dot"></span>
-      Live on Zoom · Google Meet · Microsoft Teams
-    </div>
 
     <!-- ── Mode Switcher ── -->
     <div class="mode-switcher" id="modeSwitcher">
@@ -1711,6 +1679,68 @@
             <div class="step-content">
               <h4>Receive complete analysis</h4>
               <p>When the meeting ends, JustHereToListen.io fires your webhook with the full transcript, health score, AI summary, action items, chapters, and speaker stats.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<hr class="divider">
+
+<!-- ────────────────────────────────────────────────────────────────
+     SEE IT IN ACTION
+──────────────────────────────────────────────────────────────── -->
+<section class="section-py" id="demo">
+  <div class="container">
+    <div class="section-header">
+      <div class="section-tag">See It in Action</div>
+      <h2 class="section-title">From meeting link to insights in minutes</h2>
+      <p class="section-sub">Drop a meeting URL, and JustHereToListen.io handles the rest — joining, recording, transcribing, and analysing.</p>
+    </div>
+
+    <div class="row g-4 align-items-center">
+      <!-- Demo visual -->
+      <div class="col-lg-7">
+        <div style="background:var(--navy);border-radius:16px;padding:2rem;color:#e2e8f0;font-family:monospace;font-size:13px;line-height:1.8;box-shadow:0 8px 32px rgba(27,32,51,0.18)">
+          <div style="margin-bottom:1rem;display:flex;gap:6px">
+            <span style="width:12px;height:12px;border-radius:50%;background:#ef4444;display:inline-block"></span>
+            <span style="width:12px;height:12px;border-radius:50%;background:#f59e0b;display:inline-block"></span>
+            <span style="width:12px;height:12px;border-radius:50%;background:#22c55e;display:inline-block"></span>
+          </div>
+          <div><span style="color:#94a3b8">$</span> curl -X POST /api/v1/bot \</div>
+          <div style="padding-left:1.5rem">-d '{"meeting_url": "https://meet.google.com/abc-defg-hij"}'</div>
+          <div style="margin-top:0.75rem;color:#22c55e">&#10003; Bot created — joining meeting...</div>
+          <div style="color:#22c55e">&#10003; In call — recording &amp; transcribing</div>
+          <div style="color:#22c55e">&#10003; Meeting ended — 47 min recorded</div>
+          <div style="color:#22c55e">&#10003; Analysis complete — 12 action items found</div>
+          <div style="margin-top:0.75rem;color:#60a5fa">&#8594; Webhook delivered to your endpoint</div>
+        </div>
+      </div>
+
+      <!-- Demo steps -->
+      <div class="col-lg-5">
+        <div style="display:flex;flex-direction:column;gap:1.5rem">
+          <div style="display:flex;gap:1rem;align-items:flex-start">
+            <div style="min-width:36px;height:36px;border-radius:10px;background:var(--navy);color:white;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px">1</div>
+            <div>
+              <div style="font-weight:700;font-size:15px;margin-bottom:2px">Send a meeting URL</div>
+              <div style="font-size:13.5px;color:#64748b">One API call or one click from the dashboard. Zoom, Google Meet, or Teams.</div>
+            </div>
+          </div>
+          <div style="display:flex;gap:1rem;align-items:flex-start">
+            <div style="min-width:36px;height:36px;border-radius:10px;background:var(--navy);color:white;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px">2</div>
+            <div>
+              <div style="font-weight:700;font-size:15px;margin-bottom:2px">Bot records &amp; transcribes</div>
+              <div style="font-size:13.5px;color:#64748b">Real-time transcription with speaker labels. Live webhook events as the meeting progresses.</div>
+            </div>
+          </div>
+          <div style="display:flex;gap:1rem;align-items:flex-start">
+            <div style="min-width:36px;height:36px;border-radius:10px;background:var(--navy);color:white;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px">3</div>
+            <div>
+              <div style="font-weight:700;font-size:15px;margin-bottom:2px">Get AI-powered insights</div>
+              <div style="font-size:13.5px;color:#64748b">Summary, action items, decisions, risks, and next steps — delivered via webhook or viewed in the dashboard.</div>
             </div>
           </div>
         </div>
