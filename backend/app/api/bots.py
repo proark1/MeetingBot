@@ -25,7 +25,16 @@ from app.store import store, BotSession, _now
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/bot", tags=["Bots"])
-_limiter = Limiter(key_func=get_remote_address)
+
+
+def _safe_get_remote_address(request: Request) -> str:
+    """Rate-limiter key function that handles missing client (internal ASGI calls)."""
+    if request.client:
+        return get_remote_address(request)
+    return request.headers.get("X-Forwarded-For", "127.0.0.1").split(",")[0].strip()
+
+
+_limiter = Limiter(key_func=_safe_get_remote_address)
 
 
 class BotStatsResponse(BaseModel):

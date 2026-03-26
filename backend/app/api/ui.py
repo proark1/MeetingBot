@@ -1482,12 +1482,17 @@ async def create_bot_ui(request: Request, db: AsyncSession = Depends(get_db)):
     import httpx
     from app.main import app as _app
 
+    client_ip = request.client.host if request.client else "127.0.0.1"
+
     try:
         async with httpx.AsyncClient(app=_app, base_url="http://internal") as client:
             resp = await client.post(
                 "/api/v1/bot",
                 json=body,
-                headers={"Authorization": f"Bearer {token}"},
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "X-Forwarded-For": client_ip,
+                },
             )
         return JSONResponse(resp.json(), status_code=resp.status_code)
     except Exception as exc:
