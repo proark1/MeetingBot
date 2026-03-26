@@ -1461,7 +1461,35 @@ async def create_webhook_ui(request: Request, db: AsyncSession = Depends(get_db)
     })
 
 
-# ── Support key proxy routes (cookie-auth wrappers) ───────────────────────────
+# ── Bot creation proxy (cookie-auth wrapper) ─────────────────────────────────
+
+@router.post("/dashboard/bot", include_in_schema=False)
+async def create_bot_ui(request: Request, db: AsyncSession = Depends(get_db)):
+    """Proxy bot creation through cookie auth so the dashboard can use fetch().
+
+    The main /api/v1/bot endpoint requires Bearer auth; this route accepts the
+    JWT cookie used by the dashboard, extracts the JWT, and forwards the request
+    to /api/v1/bot with the proper Authorization header via an internal ASGI call.
+    """
+    token = _get_token_from_request(request)
+    if not token:
+        return JSONResponse({"detail": "Unauthenticated"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"detail": "Invalid JSON body"}, status_code=400)
+
+    import httpx
+    from app.main import app as _app
+
+    async with httpx.AsyncClient(app=_app, base_url="http://internal") as client:
+        resp = await client.post(
+            "/api/v1/bot",
+            json=body,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    return JSONResponse(resp.json(), status_code=resp.status_code)
 
 @router.get("/dashboard/support-keys", include_in_schema=False)
 async def list_support_keys_ui(request: Request, db: AsyncSession = Depends(get_db)):

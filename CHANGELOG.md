@@ -4,9 +4,17 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.16.0 — **Last updated:** 2026-03-26
+> **Latest version:** 2.16.1 — **Last updated:** 2026-03-26
 
 ---
+
+## [2.16.1] - 2026-03-26
+
+### Fixed
+- **Critical: Dashboard bot creation auth** — "Send Bot Now" button now works for logged-in users; added `/dashboard/bot` proxy route that accepts cookie auth and forwards to the API with proper Bearer token
+- **Critical: XSS in bot table row** — HTML-escape all dynamic values (`meeting_url`, `bot.id`, etc.) in `_prependBotRow` to prevent injection
+- **Bot status badge** — Immediate bots now show "Ready" or "Queued" chip instead of always showing "Scheduled"
+- **Dead CSS cleanup** — Removed orphaned `.hero-badge` styles from landing page after badge removal
 
 ## [2.16.0] - 2026-03-26
 

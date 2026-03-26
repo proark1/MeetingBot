@@ -2176,7 +2176,7 @@ document.querySelectorAll('[data-delete-cal]').forEach(btn => btn.addEventListen
     status.style.color = '#94a3b8';
 
     try {
-      const resp = await fetch('/api/v1/bot', {
+      const resp = await fetch('/dashboard/bot', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -2207,29 +2207,42 @@ document.querySelectorAll('[data-delete-cal]').forEach(btn => btn.addEventListen
     }
   });
 
+  function _escHtml(str) {
+    const d = document.createElement('div');
+    d.textContent = str;
+    return d.innerHTML;
+  }
+
   function _prependBotRow(bot) {
     const tbody = document.querySelector('#section-bots .table tbody, #section-overview .table tbody');
     if (!tbody) return;
     const tr = document.createElement('tr');
-    const shortId = (bot.id || '').slice(0, 12);
-    const meetUrl = bot.meeting_url || '';
-    const platform = (bot.meeting_platform || 'unknown').replace(/^\w/, c => c.toUpperCase());
-    const joinAt = bot.join_at ? new Date(bot.join_at).toLocaleString() : '';
-    const created = bot.created_at ? new Date(bot.created_at).toLocaleString() : new Date().toLocaleString();
+    const shortId = _escHtml((bot.id || '').slice(0, 12));
+    const botId = _escHtml(bot.id || '');
+    const meetUrl = _escHtml(bot.meeting_url || '');
+    const platform = _escHtml((bot.meeting_platform || 'unknown').replace(/^\w/, c => c.toUpperCase()));
+    const joinAt = bot.join_at ? _escHtml(new Date(bot.join_at).toLocaleString()) : '';
+    const created = _escHtml(bot.created_at ? new Date(bot.created_at).toLocaleString() : new Date().toLocaleString());
+    const botStatus = bot.status || (bot.join_at ? 'scheduled' : 'ready');
+    const statusChip = botStatus === 'scheduled'
+      ? '<span class="chip chip-warning">Scheduled</span>'
+      : botStatus === 'queued'
+        ? '<span class="chip chip-gray">Queued</span>'
+        : '<span class="chip chip-info">Ready</span>';
     tr.innerHTML = `
       <td><code style="font-size:11.5px">${shortId}…</code></td>
       <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
         <span title="${meetUrl}" style="font-size:12px;color:#64748b">${meetUrl}</span>
       </td>
       <td><span class="chip chip-gray">${platform}</span></td>
-      <td><span class="chip chip-warning">Scheduled</span></td>
+      <td>${statusChip}</td>
       <td><span style="color:#94a3b8">—</span></td>
       <td><span style="color:#94a3b8">—</span></td>
       <td style="font-size:12.5px;color:#64748b">—</td>
       <td style="color:#94a3b8;font-size:12px;white-space:nowrap">
-        ${joinAt ? `<span style="color:#f59e0b">📅 ${joinAt}</span>` : created}
+        ${joinAt ? `<span style="color:#f59e0b">${joinAt}</span>` : created}
       </td>
-      <td><a href="/bot/${bot.id}" class="btn btn-outline-secondary btn-sm" style="font-size:11px;padding:2px 8px">View</a></td>`;
+      <td><a href="/bot/${botId}" class="btn btn-outline-secondary btn-sm" style="font-size:11px;padding:2px 8px">View</a></td>`;
     tbody.prepend(tr);
   }
 })();
