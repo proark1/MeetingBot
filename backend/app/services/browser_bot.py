@@ -1037,79 +1037,147 @@ async def _join_teams(page: Page, url: str, bot_name: str, start_muted: bool = T
 
 
 async def _join_onepizza(page: Page, url: str, bot_name: str, start_muted: bool = True) -> None:
-    """Join an onepizza.io / meetingservice meeting room.
+    """Join an onepizza.io meeting room.
 
-    The meetingservice page auto-calls joinMeeting() when ?name= URL param
-    is present, so we primarily rely on that. Manual lobby flow is a fallback.
+    Flow:
+    1. Navigate to join URL with ?name= parameter (triggers auto-join if no waiting room)
+    2. If lobby appears, fill name and click join button with multiple fallback strategies
+    3. If waiting room is enabled, wait for host to admit
+    4. Once in meeting room, mute mic and disable camera
+
+    DOM selectors (from onepizza.io frontend):
+      Lobby:   #lobbyName (input), #lobbyJoinBtn (button)
+      Room:    #meetingRoom (container), #videoGrid (tiles)
+      Controls: #micBtn, #camBtn
+      Waiting: #waitingRoomOverlay
     """
     from urllib.parse import quote as _quote
+
     sep = "&" if "?" in url else "?"
     join_url = f"{url}{sep}name={_quote(bot_name)}"
 
-    await page.goto(join_url, wait_until="load", timeout=30_000)
+    # Load the page — use networkidle to ensure JS is fully initialized
+    try:
+        await page.goto(join_url, wait_until="networkidle", timeout=30_000)
+    except Exception:
+        # networkidle may timeout on WebRTC pages; fall back to load
+        try:
+            await page.goto(join_url, wait_until="load", timeout=15_000)
+        except Exception:
+            pass
     logger.info("onepizza: page loaded, waiting for meeting room or lobby")
 
-    # meetingservice auto-joins when ?name= is present.
-    # Wait for either: #meetingRoom visible (auto-joined) or #lobbyJoinBtn (manual)
-    try:
-        which = await page.wait_for_selector(
-            "#meetingRoom, #lobbyJoinBtn",
-            state="visible", timeout=20_000,
-        )
-        tag = await which.get_attribute("id") if which else None
-    except Exception:
-        await _screenshot(page, "onepizza_join_failed")
-        raise MeetingBotError("Could not join onepizza.io meeting — neither lobby nor meeting room appeared")
+    # Give the page JS time to initialize (WebRTC setup, socket connection, etc.)
+    await asyncio.sleep(2)
 
-    if tag == "lobbyJoinBtn":
-        # Auto-join didn't fire — use manual lobby flow
-        logger.info("onepizza: auto-join didn't fire, using manual lobby flow")
+    # Check what state we're in: meeting room (auto-joined), lobby, or waiting room
+    for attempt in range(3):
+        try:
+            which = await page.wait_for_selector(
+                "#meetingRoom, #lobbyJoinBtn, #waitingRoomOverlay",
+                state="visible", timeout=10_000,
+            )
+            tag = await which.get_attribute("id") if which else None
+            break
+        except Exception:
+            if attempt < 2:
+                logger.info("onepizza: no UI element found yet, retrying (attempt %d)", attempt + 1)
+                await asyncio.sleep(3)
+            else:
+                await _screenshot(page, "onepizza_join_failed")
+                raise MeetingBotError("Could not join onepizza.io meeting — neither lobby nor meeting room appeared")
+
+    if tag == "meetingRoom":
+        logger.info("onepizza: auto-joined via ?name= parameter")
+    elif tag == "waitingRoomOverlay":
+        logger.info("onepizza: waiting room — waiting for host to admit")
+        # Host needs to admit; wait up to admission timeout (handled by caller)
+    elif tag == "lobbyJoinBtn":
+        logger.info("onepizza: lobby detected, filling name and joining")
+
+        # Fill name input if it exists and is empty
         try:
             name_input = page.locator("#lobbyName")
             if await name_input.count() > 0:
-                await name_input.fill(bot_name)
-                await asyncio.sleep(0.3)
-        except Exception:
-            pass
-        await asyncio.sleep(0.5)
-        try:
-            btn = page.locator("#lobbyJoinBtn")
-            # Ensure button is enabled and clickable
-            await btn.wait_for(state="visible", timeout=5_000)
-            await btn.scroll_into_view_if_needed()
-            await asyncio.sleep(0.3)
-            # Try direct click first, then JS click as fallback
-            try:
-                await btn.click(timeout=5_000)
-            except Exception:
-                logger.info("onepizza: direct click failed, trying JS click")
-                await page.evaluate('document.getElementById("lobbyJoinBtn")?.click()')
-            logger.info("onepizza: join button clicked")
-        except Exception:
-            # Last resort: try clicking any visible button with join-like text
-            try:
-                await page.evaluate('''
-                    const btns = document.querySelectorAll("button");
+                current_val = await name_input.input_value()
+                if not current_val.strip():
+                    await name_input.fill(bot_name)
+                    logger.info("onepizza: name filled: %s", bot_name)
+                await asyncio.sleep(0.5)
+        except Exception as e:
+            logger.debug("onepizza: name input fill failed: %s", e)
+
+        # Click join button — try multiple strategies
+        joined = False
+        strategies = [
+            ("locator click", lambda: page.locator("#lobbyJoinBtn").click(timeout=5_000)),
+            ("JS click by ID", lambda: page.evaluate('document.getElementById("lobbyJoinBtn")?.click()')),
+            ("JS click + dispatchEvent", lambda: page.evaluate('''
+                (() => {
+                    const btn = document.getElementById("lobbyJoinBtn");
+                    if (btn) {
+                        btn.dispatchEvent(new MouseEvent("click", {bubbles: true, cancelable: true}));
+                        return true;
+                    }
+                    return false;
+                })()
+            ''')),
+            ("JS text match", lambda: page.evaluate('''
+                (() => {
+                    const btns = [...document.querySelectorAll("button, [role='button'], a.btn")];
                     for (const b of btns) {
-                        if (b.textContent.toLowerCase().includes("join") && b.offsetParent !== null) {
-                            b.click(); break;
+                        const txt = (b.textContent || "").toLowerCase();
+                        if ((txt.includes("join") || txt.includes("enter")) && b.offsetParent !== null) {
+                            b.click();
+                            return true;
                         }
                     }
-                ''')
-                logger.info("onepizza: fallback join button clicked via text match")
-            except Exception:
-                await _screenshot(page, "onepizza_no_join_button")
-                raise MeetingBotError("Could not click join button on onepizza.io")
-        # Wait for meeting room to appear after clicking join
-        try:
-            await page.wait_for_selector("#meetingRoom", state="visible", timeout=15_000)
-        except Exception:
-            await _screenshot(page, "onepizza_join_timeout")
-            raise MeetingBotError("Meeting room did not appear after clicking join")
-    else:
-        logger.info("onepizza: auto-joined via ?name= parameter")
+                    return false;
+                })()
+            ''')),
+            ("JS form submit", lambda: page.evaluate('''
+                (() => {
+                    const form = document.querySelector("form");
+                    if (form) { form.submit(); return true; }
+                    // Try calling joinMeeting() directly if it exists globally
+                    if (typeof joinMeeting === "function") { joinMeeting(); return true; }
+                    if (typeof window.joinMeeting === "function") { window.joinMeeting(); return true; }
+                    return false;
+                })()
+            ''')),
+        ]
 
-    # Mute mic after joining (use in-call controls, not lobby controls)
+        for name, strategy in strategies:
+            try:
+                await strategy()
+                logger.info("onepizza: join attempted via %s", name)
+                # Check if we entered the meeting room
+                try:
+                    await page.wait_for_selector(
+                        "#meetingRoom, #waitingRoomOverlay",
+                        state="visible", timeout=8_000,
+                    )
+                    joined = True
+                    logger.info("onepizza: joined meeting after %s", name)
+                    break
+                except Exception:
+                    logger.info("onepizza: %s clicked but meeting room not visible yet", name)
+            except Exception as e:
+                logger.debug("onepizza: strategy %s failed: %s", name, e)
+
+        if not joined:
+            await _screenshot(page, "onepizza_no_join_button")
+            raise MeetingBotError("Could not click join button on onepizza.io")
+
+        # Check if we landed in waiting room after clicking join
+        try:
+            wr = await page.query_selector("#waitingRoomOverlay")
+            if wr and await wr.is_visible():
+                logger.info("onepizza: in waiting room after join click — waiting for host")
+        except Exception:
+            pass
+
+    # Mute mic after joining
     if start_muted:
         try:
             await page.click("#micBtn", timeout=3000)
