@@ -1171,6 +1171,10 @@ async def _is_bot_alone(page: Page, platform: str) -> bool:
             tiles = await page.locator("#videoGrid > div").count()
             tile_alone = tiles <= 1
 
+        # Require both signals when text patterns exist; tile-only for platforms
+        # without text patterns (e.g. onepizza).
+        if not _ALONE_TEXTS.get(platform):
+            return tile_alone
         return text_alone and tile_alone
     except Exception:
         pass
