@@ -1,8 +1,8 @@
 # MeetingBot API
 
-**Version 2.18.0** — A stateless meeting bot API service with multi-tenant billing, business account support, Google/Microsoft SSO, Python & JS SDKs, webhook retry/delivery logs, bot persona customization, video recording, Prometheus metrics, idempotency keys, cloud storage, email notifications, calendar auto-join, Slack/Notion integrations, and GDPR compliance.
+**Version 2.19.0** — A stateless meeting bot API service with multi-tenant billing, business account support, Google/Microsoft SSO, Python & JS SDKs, webhook retry/delivery logs, bot persona customization, video recording, Prometheus metrics, idempotency keys, cloud storage, email notifications, calendar auto-join, Slack/Notion integrations, and GDPR compliance.
 
-> **Last updated:** 2026-03-26 · **API version in Swagger UI:** 2.18.0 · **Build:** Transcript search + AI Q&A + live polling + deferred scheduling + mobile responsive <!-- auto-updated on each release -->
+> **Last updated:** 2026-03-26 · **API version in Swagger UI:** 2.19.0 · **Build:** Meeting history + transcript search + AI Q&A + live polling + deferred scheduling <!-- auto-updated on each release -->
 
 
 Send bots into **Zoom**, **Google Meet**, **Microsoft Teams**, and **onepizza.io** meetings to record, transcribe, and analyse them with **Claude** (Anthropic) or **Gemini** (Google) AI.
@@ -19,11 +19,13 @@ Send bots into **Zoom**, **Google Meet**, **Microsoft Teams**, and **onepizza.io
 - **Live status polling** — Bot status chips update automatically every 10 seconds without page refresh.
 - **Cancel bot from dashboard** — Cancel button on each active bot row. Works for scheduled, queued, and running bots.
 - **Bot search & filter** — Search by ID or URL, filter by platform (Zoom/Teams/Meet/onepizza).
+- **Meeting History tab** — Browse all past meetings from the database (beyond the 24-hour in-memory window). Shows URL, platform, status, duration, participants, and whether transcript/analysis are available.
 
 ### Bot detail page — Productivity features
 - **Transcript search** — Real-time filter and highlight with match counter. Type to find any word across the transcript.
 - **"Ask about this meeting"** — AI-powered Q&A on any completed meeting. Ask free-form questions and get answers with context.
 - **"Generate follow-up email"** — One-click AI follow-up email generation with copy-to-clipboard.
+- **DB fallback for past meetings** — Bot detail page (`/bot/{id}`) loads from the database when the bot has expired from the 24-hour in-memory window. Users can view transcripts and analysis from any historical meeting.
 
 ### Reliability
 - **Robust alone detection** — `_is_bot_alone()` now requires BOTH text pattern AND DOM tile count to agree before flagging the bot as alone, eliminating false positive exits.
@@ -577,7 +579,7 @@ The background poll loop checks all active feeds every `CALENDAR_POLL_INTERVAL_S
 | `GET` | `/api/v1/bot/{id}/brief` | Pre-meeting brief: AI-generated agenda and background for an upcoming meeting. HTTP 425 if no transcript yet |
 | `GET` | `/api/v1/bot/{id}/recurring` | Recurring meeting intelligence: links to previous meetings at the same URL and surfaces recurring action items |
 | `GET` | `/api/v1/bot/{id}/video` | Download screen recording as MP4. HTTP 404 if not available. Enable per-bot with `record_video: true` |
-| `GET` | `/api/v1/health` or `/health` | Health check → `{"status": "ok", "service": "MeetingBot", "version": "2.18.0"}` |
+| `GET` | `/api/v1/health` or `/health` | Health check → `{"status": "ok", "service": "MeetingBot", "version": "2.19.0"}` |
 
 ### Admin (requires admin account)
 
@@ -630,7 +632,7 @@ Or use the admin web UI at `/admin` to manage all settings through a form.
 | `/` | Landing page (marketing homepage) — redirects to `/dashboard` if already logged in |
 | `/register` | Create account (Personal or Business); Google/Microsoft SSO sign-up buttons when configured |
 | `/login` | Login with email/password or SSO (Google/Microsoft when configured) |
-| `/dashboard` | **Send Bot Now** (immediate) and **Schedule a Bot** (future) with advanced options (video, live transcription, PII, translation). Live status polling, bot search/filter by ID/URL/platform, cancel active bots. Balance, API keys, subscription plan & usage, email notifications, USDC wallet, SSO, account type switcher, integrations, calendar feeds, action items, analytics, transaction history |
+| `/dashboard` | **Send Bot Now** (immediate) and **Schedule a Bot** (future) with advanced options (video, live transcription, PII, translation). Live status polling, bot search/filter by ID/URL/platform, cancel active bots. **Meeting History** tab with full DB-backed browsing of all past meetings. Balance, API keys, subscription plan & usage, email notifications, USDC wallet, SSO, account type switcher, integrations, calendar feeds, action items, analytics, transaction history |
 | `/topup` | Add credits — Stripe card (redirect to secure checkout) or USDC (ERC-20 deposit address with amount selector) |
 | `/bot/{id}` | Session viewer — transcript with search, AI analysis (summary, key points, action items, decisions, next steps, sentiment, topics), speaker breakdown, chapters, meeting metadata, download links for audio/video/markdown/PDF, "Ask about this meeting" AI Q&A, "Generate follow-up email" one-click drafting, share link generation |
 | `/admin` | Platform administration — plan breakdown stats, bot activity & platform feature counters (webhooks/integrations/calendar/SSO), system status (Stripe/RPC/HD seed/email/storage/video/SSO), unmatched USDC transfers, user accounts with inline plan management, manual credit, rescan, wallet config, RPC URL (admin only) |

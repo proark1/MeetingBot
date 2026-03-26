@@ -4,9 +4,15 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.18.0 — **Last updated:** 2026-03-26
+> **Latest version:** 2.19.0 — **Last updated:** 2026-03-26
 
 ---
+
+## [2.19.0] - 2026-03-26
+
+### Added
+- **Meeting History tab** in dashboard — browse all past meetings from the database, not just the 24-hour in-memory window. Shows URL, platform, status, duration, participant count, and transcript/analysis availability badges
+- **Bot detail page DB fallback** — `/bot/{id}` now loads from `BotSnapshot` DB when the bot has expired from RAM. Users can view transcripts, analysis, and all meeting details from any historical meeting
 
 ## [2.18.0] - 2026-03-26
 
