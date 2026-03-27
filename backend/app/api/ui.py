@@ -1724,6 +1724,135 @@ async def rename_speakers_ui(bot_id: str, request: Request, db: AsyncSession = D
         return JSONResponse({"detail": str(exc)}, status_code=502)
 
 
+# ── Re-analyze proxy (cookie-auth) ────────────────────────────────────────────
+
+@router.post("/dashboard/bot/{bot_id}/analyze", include_in_schema=False)
+async def reanalyze_bot_ui(bot_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """Proxy re-analysis through cookie auth."""
+    token = _get_token_from_request(request)
+    if not token:
+        return JSONResponse({"detail": "Unauthenticated"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    import httpx
+    from app.main import app as _app
+    client_ip = request.client.host if request.client else "127.0.0.1"
+
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=_app), base_url="http://internal") as client:
+            resp = await client.post(
+                f"/api/v1/bot/{bot_id}/analyze",
+                json=body,
+                headers={"Authorization": f"Bearer {token}", "X-Forwarded-For": client_ip},
+                timeout=60.0,
+            )
+        return JSONResponse(resp.json(), status_code=resp.status_code)
+    except Exception as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=502)
+
+
+# ── Webhook test + delivery log proxies (cookie-auth) ────────────────────────
+
+@router.post("/dashboard/webhook/{webhook_id}/test", include_in_schema=False)
+async def test_webhook_ui(webhook_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """Proxy webhook test delivery through cookie auth."""
+    token = _get_token_from_request(request)
+    if not token:
+        return JSONResponse({"detail": "Unauthenticated"}, status_code=401)
+
+    import httpx
+    from app.main import app as _app
+    client_ip = request.client.host if request.client else "127.0.0.1"
+
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=_app), base_url="http://internal") as client:
+            resp = await client.post(
+                f"/api/v1/webhook/{webhook_id}/test",
+                headers={"Authorization": f"Bearer {token}", "X-Forwarded-For": client_ip},
+            )
+        return JSONResponse(resp.json(), status_code=resp.status_code)
+    except Exception as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=502)
+
+
+@router.get("/dashboard/webhook/{webhook_id}/deliveries", include_in_schema=False)
+async def webhook_deliveries_ui(webhook_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """Proxy webhook delivery logs through cookie auth."""
+    token = _get_token_from_request(request)
+    if not token:
+        return JSONResponse({"detail": "Unauthenticated"}, status_code=401)
+
+    import httpx
+    from app.main import app as _app
+    client_ip = request.client.host if request.client else "127.0.0.1"
+
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=_app), base_url="http://internal") as client:
+            resp = await client.get(
+                f"/api/v1/webhook/{webhook_id}/deliveries",
+                headers={"Authorization": f"Bearer {token}", "X-Forwarded-For": client_ip},
+            )
+        return JSONResponse(resp.json(), status_code=resp.status_code)
+    except Exception as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=502)
+
+
+# ── Cross-meeting search proxy (cookie-auth) ─────────────────────────────────
+
+@router.get("/dashboard/search", include_in_schema=False)
+async def search_transcripts_ui(request: Request, db: AsyncSession = Depends(get_db)):
+    """Proxy full-text transcript search through cookie auth."""
+    token = _get_token_from_request(request)
+    if not token:
+        return JSONResponse({"detail": "Unauthenticated"}, status_code=401)
+
+    import httpx
+    from app.main import app as _app
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    q = request.query_params.get("q", "")
+
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=_app), base_url="http://internal") as client:
+            resp = await client.get(
+                f"/api/v1/search?q={q}",
+                headers={"Authorization": f"Bearer {token}", "X-Forwarded-For": client_ip},
+            )
+        return JSONResponse(resp.json(), status_code=resp.status_code)
+    except Exception as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=502)
+
+
+# ── GDPR account deletion proxy (cookie-auth) ────────────────────────────────
+
+@router.post("/dashboard/delete-account", include_in_schema=False)
+async def delete_account_ui(request: Request, db: AsyncSession = Depends(get_db)):
+    """Proxy GDPR account deletion through cookie auth."""
+    token = _get_token_from_request(request)
+    if not token:
+        return JSONResponse({"detail": "Unauthenticated"}, status_code=401)
+
+    import httpx
+    from app.main import app as _app
+    client_ip = request.client.host if request.client else "127.0.0.1"
+
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=_app), base_url="http://internal") as client:
+            resp = await client.delete(
+                "/api/v1/auth/account",
+                headers={"Authorization": f"Bearer {token}", "X-Forwarded-For": client_ip},
+            )
+        if resp.status_code == 204:
+            response = JSONResponse({"ok": True})
+            response.delete_cookie("mb_token")
+            return response
+        return JSONResponse(resp.json(), status_code=resp.status_code)
+    except Exception as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=502)
+
+
 # ── Support key proxy routes (cookie-auth wrappers) ───────────────────────────
 
 @router.get("/dashboard/support-keys", include_in_schema=False)
