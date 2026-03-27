@@ -14,8 +14,16 @@
     {% if bot.status == "done" %}
     <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#askModal">Ask</button>
     <button class="btn btn-outline-primary btn-sm" id="email-btn" onclick="generateEmail()">Email</button>
-    <a href="/api/v1/bot/{{ bot.id }}/export/markdown" class="btn btn-outline-secondary btn-sm">↓ Markdown</a>
-    <a href="/api/v1/bot/{{ bot.id }}/export/pdf" class="btn btn-outline-secondary btn-sm">↓ PDF</a>
+    <button class="btn btn-outline-primary btn-sm" data-bs-toggle="modal" data-bs-target="#reanalyzeModal">Re-analyze</button>
+    <div class="dropdown d-inline-block">
+      <button class="btn btn-outline-secondary btn-sm dropdown-toggle" data-bs-toggle="dropdown">↓ Export</button>
+      <ul class="dropdown-menu">
+        <li><a class="dropdown-item" href="/api/v1/bot/{{ bot.id }}/export/markdown">Markdown</a></li>
+        <li><a class="dropdown-item" href="/api/v1/bot/{{ bot.id }}/export/pdf">PDF</a></li>
+        <li><a class="dropdown-item" href="/api/v1/bot/{{ bot.id }}/export/json">JSON</a></li>
+        <li><a class="dropdown-item" href="/api/v1/bot/{{ bot.id }}/export/srt">SRT Subtitles</a></li>
+      </ul>
+    </div>
     <button class="btn btn-outline-primary btn-sm" id="share-btn" onclick="shareBot()">Share</button>
     {% endif %}
     {% if bot.recording_available %}
@@ -427,6 +435,34 @@
   </div>
 </div>
 
+<!-- ── Re-analyze Modal ────────────────────────────────────────────────── -->
+<div class="modal fade" id="reanalyzeModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header"><h5 class="modal-title">Re-analyze Meeting</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <label class="form-label" style="font-size:12.5px;font-weight:600">Analysis Template</label>
+        <select id="reanalyze-template" class="form-select form-select-sm mb-3">
+          <option value="default">Default</option>
+          <option value="sales">Sales</option>
+          <option value="standup">Standup</option>
+          <option value="1on1">1-on-1</option>
+          <option value="retro">Retro</option>
+          <option value="kickoff">Kickoff</option>
+          <option value="allhands">All Hands</option>
+          <option value="postmortem">Post-Mortem</option>
+          <option value="interview">Interview</option>
+          <option value="design-review">Design Review</option>
+        </select>
+        <label class="form-label" style="font-size:12.5px;font-weight:600">Custom Prompt (optional, overrides template)</label>
+        <textarea id="reanalyze-prompt" class="form-control form-control-sm" rows="4" placeholder="Leave empty to use the selected template..." style="font-size:13px"></textarea>
+        <button class="btn btn-primary btn-sm w-100 mt-3" id="reanalyze-btn" onclick="reanalyze()">Re-analyze</button>
+        <div id="reanalyze-status" class="mt-2" style="font-size:13px"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
@@ -598,5 +634,35 @@ document.addEventListener('DOMContentLoaded', function() {
     }
   });
 });
+
+// ── Re-analyze meeting ───────────────────────────────────────────────────────
+async function reanalyze() {
+  const btn = document.getElementById('reanalyze-btn');
+  const status = document.getElementById('reanalyze-status');
+  const template = document.getElementById('reanalyze-template').value;
+  const prompt = document.getElementById('reanalyze-prompt').value.trim();
+  btn.disabled = true;
+  status.textContent = 'Re-analyzing...';
+  status.style.color = '#94a3b8';
+  try {
+    const body = { template };
+    if (prompt) body.prompt_override = prompt;
+    const resp = await fetch(`/dashboard/bot/${_botId}/analyze`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || 'Re-analysis failed');
+    status.textContent = 'Done! Reloading...';
+    status.style.color = '#22c55e';
+    setTimeout(() => location.reload(), 1000);
+  } catch (e) {
+    status.textContent = 'Error: ' + e.message;
+    status.style.color = '#ef4444';
+  } finally {
+    btn.disabled = false;
+  }
+}
 </script>
 {% endblock %}
