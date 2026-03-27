@@ -518,6 +518,9 @@ function copyEmail() {
   const container = document.getElementById('transcript-container');
   if (!input || !container) return;
 
+  // Store original text on first use
+  const _originals = new WeakMap();
+
   input.addEventListener('input', function() {
     const query = this.value.trim().toLowerCase();
     const entries = container.querySelectorAll('.transcript-entry');
@@ -527,17 +530,29 @@ function copyEmail() {
     entries.forEach(entry => {
       const textEl = entry.querySelector('.transcript-text');
       if (!textEl) return;
-      // Restore original text (remove old highlights)
-      textEl.innerHTML = textEl.textContent;
+      // Cache original plain text on first access
+      if (!_originals.has(textEl)) _originals.set(textEl, textEl.textContent);
+      const original = _originals.get(textEl);
+      // Restore to plain text
+      textEl.textContent = original;
       if (!query) { entry.style.display = ''; return; }
-      const text = textEl.textContent.toLowerCase();
-      if (text.includes(query)) {
+      if (original.toLowerCase().includes(query)) {
         entry.style.display = '';
         matchCount++;
         if (!firstMatch) firstMatch = entry;
-        // Highlight matches
+        // Highlight matches using safe DOM nodes (no innerHTML)
         const re = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
-        textEl.innerHTML = textEl.textContent.replace(re, '<mark>$1</mark>');
+        const parts = original.split(re);
+        textEl.textContent = '';
+        parts.forEach(part => {
+          if (part.toLowerCase() === query) {
+            const mark = document.createElement('mark');
+            mark.textContent = part;
+            textEl.appendChild(mark);
+          } else {
+            textEl.appendChild(document.createTextNode(part));
+          }
+        });
       } else {
         entry.style.display = 'none';
       }

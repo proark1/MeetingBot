@@ -385,6 +385,7 @@ async def bot_session_page(
     # Fall back to DB snapshot if not in RAM (expired from 24h memory window)
     if bot is None:
         import json as _json
+        from datetime import datetime as _dt, timezone as _tz
         from app.models.account import BotSnapshot
         result = await db.execute(
             select(BotSnapshot).where(BotSnapshot.id == bot_id)
@@ -393,7 +394,21 @@ async def bot_session_page(
         if snap and snap.account_id == account.id:
             try:
                 d = _json.loads(snap.data)
-                bot = BotSession(**{k: v for k, v in d.items() if k in BotSession.__dataclass_fields__})
+                # Parse datetime strings back to datetime objects
+                _dt_fields = {"created_at", "updated_at", "started_at", "ended_at", "join_at", "expires_at"}
+                parsed = {}
+                for k, v in d.items():
+                    if k not in BotSession.__dataclass_fields__:
+                        continue
+                    if k in _dt_fields and isinstance(v, str):
+                        try:
+                            dt = _dt.fromisoformat(v)
+                            parsed[k] = dt if dt.tzinfo else dt.replace(tzinfo=_tz.utc)
+                        except Exception:
+                            parsed[k] = None
+                    else:
+                        parsed[k] = v
+                bot = BotSession(**parsed)
             except Exception:
                 bot = None
 
