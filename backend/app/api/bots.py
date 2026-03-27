@@ -452,7 +452,7 @@ async def create_bot(payload: BotCreate, request: Request):
     if is_scheduled:
         # Defer start until join time — does NOT occupy a concurrent slot while waiting.
         delay = max(0, (payload.join_at.replace(tzinfo=timezone.utc) - _now()).total_seconds())
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         handle = loop.call_later(delay, _start_scheduled_bot, bot.id)
         _scheduled_timers[bot.id] = handle
         logger.info("Bot %s scheduled — will start in %.0f s (no slot held)", bot.id, delay)
