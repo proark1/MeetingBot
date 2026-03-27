@@ -1592,12 +1592,13 @@ async def cancel_bot_ui(bot_id: str, request: Request, db: AsyncSession = Depend
 
     import httpx
     from app.main import app as _app
+    client_ip = request.client.host if request.client else "127.0.0.1"
 
     try:
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=_app), base_url="http://internal") as client:
             resp = await client.delete(
                 f"/api/v1/bot/{bot_id}",
-                headers={"Authorization": f"Bearer {token}"},
+                headers={"Authorization": f"Bearer {token}", "X-Forwarded-For": client_ip},
             )
         if resp.status_code == 204:
             return JSONResponse({"ok": True})
@@ -1621,13 +1622,14 @@ async def ask_bot_ui(bot_id: str, request: Request, db: AsyncSession = Depends(g
 
     import httpx
     from app.main import app as _app
+    client_ip = request.client.host if request.client else "127.0.0.1"
 
     try:
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=_app), base_url="http://internal") as client:
             resp = await client.post(
                 f"/api/v1/bot/{bot_id}/ask",
                 json=body,
-                headers={"Authorization": f"Bearer {token}"},
+                headers={"Authorization": f"Bearer {token}", "X-Forwarded-For": client_ip},
                 timeout=60.0,
             )
         return JSONResponse(resp.json(), status_code=resp.status_code)
@@ -1644,12 +1646,13 @@ async def followup_email_ui(bot_id: str, request: Request, db: AsyncSession = De
 
     import httpx
     from app.main import app as _app
+    client_ip = request.client.host if request.client else "127.0.0.1"
 
     try:
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=_app), base_url="http://internal") as client:
             resp = await client.post(
                 f"/api/v1/bot/{bot_id}/followup-email",
-                headers={"Authorization": f"Bearer {token}"},
+                headers={"Authorization": f"Bearer {token}", "X-Forwarded-For": client_ip},
                 timeout=60.0,
             )
         return JSONResponse(resp.json(), status_code=resp.status_code)
@@ -1666,12 +1669,13 @@ async def share_bot_ui(bot_id: str, request: Request, db: AsyncSession = Depends
 
     import httpx
     from app.main import app as _app
+    client_ip = request.client.host if request.client else "127.0.0.1"
 
     try:
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=_app), base_url="http://internal") as client:
             resp = await client.post(
                 f"/api/v1/bot/{bot_id}/share",
-                headers={"Authorization": f"Bearer {token}"},
+                headers={"Authorization": f"Bearer {token}", "X-Forwarded-For": client_ip},
             )
         return JSONResponse(resp.json(), status_code=resp.status_code)
     except Exception as exc:
@@ -1691,13 +1695,14 @@ async def rename_speakers_ui(bot_id: str, request: Request, db: AsyncSession = D
 
     import httpx
     from app.main import app as _app
+    client_ip = request.client.host if request.client else "127.0.0.1"
 
     try:
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=_app), base_url="http://internal") as client:
             resp = await client.patch(
                 f"/api/v1/bot/{bot_id}/speakers",
                 json=body,
-                headers={"Authorization": f"Bearer {token}"},
+                headers={"Authorization": f"Bearer {token}", "X-Forwarded-For": client_ip},
             )
         return JSONResponse(resp.json(), status_code=resp.status_code)
     except Exception as exc:
