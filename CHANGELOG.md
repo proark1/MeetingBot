@@ -4,7 +4,14 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.22.2 — **Last updated:** 2026-03-28
+> **Latest version:** 2.23.0 — **Last updated:** 2026-03-28
+
+---
+
+## [2.23.0] - 2026-03-28
+
+### Added
+- **Dashboard: voice/chat interaction options** — Bot creation form now includes respond-on-mention toggle, response mode (text/voice/both), TTS provider (Edge/Gemini), consent announcement, auto follow-up email, and transcription provider (Gemini/Whisper) under Advanced Options
 
 ---
 

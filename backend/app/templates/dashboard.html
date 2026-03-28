@@ -620,6 +620,46 @@
                     <label class="form-label" style="font-size:12.5px;font-weight:600">Translation language</label>
                     <input type="text" class="form-control form-control-sm" id="sbTranslationLang" placeholder="e.g. es, fr, de">
                   </div>
+                  <div class="col-6 col-md-3">
+                    <div class="form-check">
+                      <input class="form-check-input" type="checkbox" id="sbRespondOnMention" checked>
+                      <label class="form-check-label" for="sbRespondOnMention" style="font-size:12.5px;font-weight:600">Respond when mentioned</label>
+                    </div>
+                  </div>
+                  <div class="col-6 col-md-3">
+                    <label class="form-label" style="font-size:12.5px;font-weight:600">Response mode</label>
+                    <select class="form-select form-select-sm" id="sbMentionResponseMode">
+                      <option value="text">Text (chat)</option>
+                      <option value="voice">Voice (TTS)</option>
+                      <option value="both">Both</option>
+                    </select>
+                  </div>
+                  <div class="col-6 col-md-3">
+                    <label class="form-label" style="font-size:12.5px;font-weight:600">TTS provider</label>
+                    <select class="form-select form-select-sm" id="sbTtsProvider">
+                      <option value="edge">Edge (fast, free)</option>
+                      <option value="gemini">Gemini (natural)</option>
+                    </select>
+                  </div>
+                  <div class="col-6 col-md-3">
+                    <div class="form-check">
+                      <input class="form-check-input" type="checkbox" id="sbConsentEnabled">
+                      <label class="form-check-label" for="sbConsentEnabled" style="font-size:12.5px;font-weight:600">Consent announcement</label>
+                    </div>
+                  </div>
+                  <div class="col-6 col-md-3">
+                    <div class="form-check">
+                      <input class="form-check-input" type="checkbox" id="sbAutoFollowup">
+                      <label class="form-check-label" for="sbAutoFollowup" style="font-size:12.5px;font-weight:600">Auto follow-up email</label>
+                    </div>
+                  </div>
+                  <div class="col-6 col-md-3">
+                    <label class="form-label" style="font-size:12.5px;font-weight:600">Transcription provider</label>
+                    <select class="form-select form-select-sm" id="sbTranscriptionProvider">
+                      <option value="gemini">Gemini (cloud)</option>
+                      <option value="whisper">Whisper (local)</option>
+                    </select>
+                  </div>
                 </div>
               </div>
             </div>
@@ -2333,6 +2373,17 @@ document.querySelectorAll('[data-delete-cal]').forEach(btn => btn.addEventListen
     if (document.getElementById('sbPiiRedaction')?.checked) payload.pii_redaction = true;
     const transLang = document.getElementById('sbTranslationLang')?.value.trim();
     if (transLang) payload.translation_language = transLang;
+    // Voice / chat interaction options
+    const respondOnMention = document.getElementById('sbRespondOnMention')?.checked;
+    payload.respond_on_mention = respondOnMention !== false;
+    const responseMode = document.getElementById('sbMentionResponseMode')?.value;
+    if (responseMode) payload.mention_response_mode = responseMode;
+    const ttsProvider = document.getElementById('sbTtsProvider')?.value;
+    if (ttsProvider) payload.tts_provider = ttsProvider;
+    if (document.getElementById('sbConsentEnabled')?.checked) payload.consent_enabled = true;
+    if (document.getElementById('sbAutoFollowup')?.checked) payload.auto_followup_email = true;
+    const transcriptionProvider = document.getElementById('sbTranscriptionProvider')?.value;
+    if (transcriptionProvider && transcriptionProvider !== 'gemini') payload.transcription_provider = transcriptionProvider;
 
     btn.disabled = true;
     status.textContent = isScheduled ? 'Scheduling…' : 'Sending…';
