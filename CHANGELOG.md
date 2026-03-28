@@ -4,7 +4,16 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.21.0 — **Last updated:** 2026-03-28
+> **Latest version:** 2.21.1 — **Last updated:** 2026-03-28
+
+---
+
+## [2.21.1] - 2026-03-28
+
+### Fixed
+- **DoS: unbounded vocabulary/keyword_alerts arrays** — `BotCreate` schema now enforces `max_length=100` on `vocabulary` and `max_length=50` on `keyword_alerts` to prevent memory exhaustion from oversized payloads
+- **Missing rate limits on AI endpoints** — added `@_limiter.limit()` to `/analyze` (10/min), `/ask` (10/min), `/ask-live` (10/min), and `/followup-email` (5/min) to prevent API quota exhaustion
+- **Memory DoS in search endpoint** — reduced bot loading limit from 10,000 to 500 in the `/search` endpoint to prevent OOM on accounts with large transcript volumes
 
 ---
 

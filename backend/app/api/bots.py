@@ -787,6 +787,7 @@ class AnalyzeRequest(BaseModel):
 
 
 @router.post("/{bot_id}/analyze", response_model=MeetingAnalysis)
+@_limiter.limit("10/minute")
 async def analyze_bot(bot_id: str, request: Request, payload: AnalyzeRequest = AnalyzeRequest()):
     """(Re-)run AI analysis on the transcript.
 
@@ -855,6 +856,7 @@ class AskRequest(BaseModel):
 
 
 @router.post("/{bot_id}/ask")
+@_limiter.limit("10/minute")
 async def ask_bot(bot_id: str, request: Request, payload: AskRequest):
     """Ask a free-form question about the meeting transcript."""
     question = payload.question.strip()
@@ -872,6 +874,7 @@ async def ask_bot(bot_id: str, request: Request, payload: AskRequest):
 # ── POST /api/v1/bot/{id}/ask-live ───────────────────────────────────────────
 
 @router.post("/{bot_id}/ask-live")
+@_limiter.limit("10/minute")
 async def ask_live_bot(bot_id: str, request: Request, payload: AskRequest):
     """Ask a free-form question about a bot that is currently in a call.
 
@@ -910,6 +913,7 @@ async def ask_live_bot(bot_id: str, request: Request, payload: AskRequest):
 # ── POST /api/v1/bot/{id}/followup-email ─────────────────────────────────────
 
 @router.post("/{bot_id}/followup-email")
+@_limiter.limit("5/minute")
 async def generate_followup_email(bot_id: str, request: Request):
     """Generate a draft follow-up email for the meeting."""
     account_id: Optional[str] = getattr(request.state, "account_id", None)

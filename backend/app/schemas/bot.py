@@ -82,7 +82,8 @@ class BotCreate(BaseModel):
     )
     vocabulary: Optional[list[str]] = Field(
         default=None,
-        description="Domain-specific terms to improve transcription accuracy (product names, jargon, etc.).",
+        max_length=100,
+        description="Domain-specific terms to improve transcription accuracy (product names, jargon, etc.). Max 100 terms.",
     )
 
     # In-call bot behaviour
@@ -149,8 +150,9 @@ class BotCreate(BaseModel):
     # ── Keyword alerts ─────────────────────────────────────────────────────────
     keyword_alerts: list[KeywordAlertConfig] = Field(
         default=[],
+        max_length=50,
         description=(
-            "List of keyword/phrase triggers. When any keyword is detected in the transcript, "
+            "List of keyword/phrase triggers (max 50). When any keyword is detected in the transcript, "
             "a `bot.keyword_alert` webhook event is fired. Account-level KeywordAlert rules "
             "defined at /api/v1/keyword-alerts are also applied automatically."
         ),

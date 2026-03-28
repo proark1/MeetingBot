@@ -340,7 +340,7 @@ async def search_transcripts(
     """
     account_id = getattr(request.state, "account_id", None)
     filter_account = account_id if (account_id and account_id != SUPERADMIN_ACCOUNT_ID) else None
-    all_bots, _ = await store.list_bots(limit=10000, account_id=filter_account)
+    all_bots, _ = await store.list_bots(limit=500, account_id=filter_account)
 
     # ── Semantic (embedding) search ──────────────────────────────────────────
     if semantic:
