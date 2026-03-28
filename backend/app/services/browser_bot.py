@@ -3016,6 +3016,33 @@ async def _mention_monitor(
     try:
         await _open_chat(page, platform)
         logger.info("Chat panel opened for mention monitoring on %s", platform)
+        # Dump the chat panel DOM structure to understand selectors
+        if platform == "onepizza":
+            await asyncio.sleep(1)
+            try:
+                chat_dom = await page.evaluate("""() => {
+                    const chatInput = document.getElementById('chatInput');
+                    if (!chatInput) return {error: 'no #chatInput found'};
+                    // Walk up to find the panel
+                    let panel = chatInput;
+                    for (let i = 0; i < 8 && panel.parentElement; i++) panel = panel.parentElement;
+                    // Dump children structure
+                    function describe(el, depth) {
+                        if (depth > 4) return null;
+                        const kids = [...el.children].map(c => describe(c, depth+1)).filter(Boolean);
+                        const id = el.id ? '#'+el.id : '';
+                        const cls = el.className ? '.'+String(el.className).split(' ')[0] : '';
+                        const tag = el.tagName.toLowerCase();
+                        const text = el.childNodes.length === 1 && el.childNodes[0].nodeType === 3
+                            ? el.childNodes[0].textContent.trim().slice(0, 50) : '';
+                        const vis = el.offsetParent !== null || el.style.display !== 'none';
+                        return {tag: tag+id+cls, text: text || undefined, vis, kids: kids.length ? kids : undefined};
+                    }
+                    return describe(panel, 0);
+                }""")
+                logger.info("onepizza chat panel DOM: %s", chat_dom)
+            except Exception as e:
+                logger.debug("Chat DOM dump failed: %s", e)
     except Exception as exc:
         logger.warning("Could not open chat panel on %s: %s", platform, exc)
 
@@ -3202,9 +3229,9 @@ async def _mention_monitor(
                 logger.debug("Chat scrape error: %s", exc)
                 chat_raw = ""
 
-            # Log chat scraping for first few polls to aid debugging
-            if _poll_count <= 10 and _poll_count % 2 == 0:
-                logger.info("Chat scrape (poll %d): %r", _poll_count, (chat_raw or "")[:200])
+            # Log chat scraping results — first 20 polls at INFO, then every 30 polls
+            if _poll_count <= 20 or _poll_count % 30 == 0:
+                logger.info("Chat scrape (poll %d): len=%d %r", _poll_count, len(chat_raw), (chat_raw or "")[:300])
 
             if chat_raw and chat_raw != seen_chat:
                 if not seen_chat:
@@ -3212,7 +3239,7 @@ async def _mention_monitor(
                     # Without this, any old message that mentions the bot name would
                     # immediately trigger a false response on join.
                     seen_chat = chat_raw
-                    logger.debug("Chat bootstrapped (%d chars)", len(chat_raw))
+                    logger.info("Chat bootstrapped (%d chars): %r", len(chat_raw), chat_raw[:300])
                     new_chat_text = ""
                 else:
                     # Diff: extract only new content
@@ -3775,6 +3802,15 @@ async def run_browser_bot(
                 logger.info("Audio elements unmuted in page (AudioContext state: %s)", _audio_ctx_state)
             except Exception as exc:
                 logger.debug("Audio unmute injection failed: %s", exc)
+
+            # Diagnostic: check ffmpeg and PulseAudio state
+            logger.info(
+                "Audio diagnostics: ffmpeg_proc=%s (pid=%s alive=%s), pulse_sink=%s, pulse_mic=%s",
+                "present" if ffmpeg_proc else "MISSING",
+                ffmpeg_proc.pid if ffmpeg_proc else "N/A",
+                (ffmpeg_proc.poll() is None) if ffmpeg_proc else False,
+                pulse_sink, pulse_mic,
+            )
 
             # Enable live captions so the mention monitor can read them
             if respond_on_mention:
