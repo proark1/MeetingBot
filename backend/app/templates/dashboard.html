@@ -818,6 +818,9 @@
                 </td>
                 <td class="bot-actions-cell" style="white-space:nowrap">
                   <a href="/bot/{{ bot.id }}" class="btn btn-outline-secondary btn-sm" style="font-size:11px;padding:2px 8px">View</a>
+                  {% if bot.status == "in_call" %}
+                  <button class="btn btn-outline-warning btn-sm ms-1" style="font-size:11px;padding:2px 8px" onclick="leaveBot('{{ bot.id }}', this)">Leave</button>
+                  {% endif %}
                   {% if bot.status not in ["done", "error", "cancelled"] %}
                   <button class="btn btn-outline-danger btn-sm ms-1" style="font-size:11px;padding:2px 8px" onclick="cancelBot('{{ bot.id }}', this)">Cancel</button>
                   {% endif %}
@@ -2512,6 +2515,7 @@ document.querySelectorAll('[data-delete-cal]').forEach(btn => btn.addEventListen
         ? '<span class="chip chip-gray">Queued</span>'
         : '<span class="chip chip-info">Ready</span>';
     const isTerminal = ['done', 'error', 'cancelled'].includes(botStatus);
+    const leaveBtn = botStatus === 'in_call' ? `<button class="btn btn-outline-warning btn-sm ms-1" style="font-size:11px;padding:2px 8px" onclick="leaveBot('${rawBotId}', this)">Leave</button>` : '';
     const cancelBtn = isTerminal ? '' : `<button class="btn btn-outline-danger btn-sm ms-1" style="font-size:11px;padding:2px 8px" onclick="cancelBot('${rawBotId}', this)">Cancel</button>`;
     tr.innerHTML = `
       <td><code style="font-size:11.5px">${shortId}…</code></td>
@@ -2528,7 +2532,7 @@ document.querySelectorAll('[data-delete-cal]').forEach(btn => btn.addEventListen
       </td>
       <td class="bot-actions-cell" style="white-space:nowrap">
         <a href="/bot/${rawBotId}" class="btn btn-outline-secondary btn-sm" style="font-size:11px;padding:2px 8px">View</a>
-        ${cancelBtn}
+        ${leaveBtn}${cancelBtn}
       </td>`;
     tbody.prepend(tr);
   }
@@ -2907,6 +2911,20 @@ async function _loadDashMyUsage() {
     document.getElementById('dash-myusage-content').style.display = '';
   } catch (e) {
     document.getElementById('dash-myusage-loading').textContent = 'Failed to load: ' + e.message;
+  }
+}
+
+// ── Leave bot gracefully from dashboard ──────────────────────────────────────
+async function leaveBot(botId, btn) {
+  if (!confirm('Tell the bot to leave the meeting? It will still transcribe and analyse the recording.')) return;
+  btn.disabled = true;
+  try {
+    await apiFetch(`/dashboard/bot/${botId}/leave`, { method: 'POST' });
+    showToast('Bot is leaving the meeting…', 'success');
+    btn.textContent = 'Leaving…';
+  } catch (e) {
+    showToast(e.message, 'danger');
+    btn.disabled = false;
   }
 }
 

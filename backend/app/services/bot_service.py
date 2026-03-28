@@ -717,6 +717,10 @@ async def run_bot_lifecycle(bot_id: str) -> None:
         if use_real_bot:
             admitted = False
 
+            # Create a leave event so the API can trigger graceful leave
+            _leave_event = asyncio.Event()
+            await store.update_bot(bot_id, leave_event=_leave_event)
+
             async def on_admitted() -> None:
                 nonlocal admitted
                 admitted = True
@@ -864,6 +868,7 @@ async def run_bot_lifecycle(bot_id: str) -> None:
                     gemini_api_key=settings.GEMINI_API_KEY or "",
                     record_video=bot.record_video,
                     video_path=video_path,
+                    external_leave_event=_leave_event,
                 )
 
                 if bot_result["success"]:

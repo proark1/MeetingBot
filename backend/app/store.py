@@ -113,6 +113,10 @@ class BotSession:
     # AI usage tracking
     ai_usage: list = field(default_factory=list)  # list of usage entry dicts
 
+    # ── Graceful leave trigger ────────────────────────────────────────────────
+    # Set by the API leave endpoint; the browser bot's _mention_monitor checks it.
+    leave_event: Optional[asyncio.Event] = field(default=None, repr=False)
+
     # Timestamps
     created_at: datetime = field(default_factory=_now)
     updated_at: datetime = field(default_factory=_now)

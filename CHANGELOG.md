@@ -4,7 +4,17 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.25.3 — **Last updated:** 2026-03-28
+> **Latest version:** 2.26.0 — **Last updated:** 2026-03-28
+
+---
+
+## [2.26.0] - 2026-03-28
+
+### Added
+- **Graceful leave endpoint** — `POST /api/v1/bot/{id}/leave` tells an in-call bot to leave the meeting cleanly, then proceed with transcription and analysis (unlike Cancel which stops everything)
+- **Leave button in dashboard** — Yellow "Leave" button appears next to Cancel for bots with `in_call` status
+- **Leave and Cancel buttons on bot detail page** — Active bots now show "Leave Meeting" and "Cancel" buttons in the header
+- **Dashboard proxy** — `/dashboard/bot/{id}/leave` cookie-auth proxy for the leave endpoint
 
 ---
 

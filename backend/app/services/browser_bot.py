@@ -3475,6 +3475,7 @@ async def run_browser_bot(
     gemini_api_key: str = "",
     record_video: bool = False,
     video_path: Optional[str] = None,
+    external_leave_event: Optional[asyncio.Event] = None,
 ) -> dict:
     """
     Join a meeting as a named guest, record audio, wait for it to end.
@@ -3926,7 +3927,7 @@ async def run_browser_bot(
             # Run mention monitor concurrently with the meeting-end watcher.
             # When Gemini Live is active, the monitor also checks live_transcript
             # as a fallback (in case Gemini Live doesn't respond to a mention).
-            leave_event = asyncio.Event()
+            leave_event = external_leave_event or asyncio.Event()
             if respond_on_mention:
                 monitor_task = asyncio.create_task(
                     _mention_monitor(

@@ -1622,6 +1622,30 @@ async def cancel_bot_ui(bot_id: str, request: Request, db: AsyncSession = Depend
         return JSONResponse({"detail": str(exc)}, status_code=502)
 
 
+# ── Bot leave proxy (cookie-auth) ────────────────────────────────────────────
+
+@router.post("/dashboard/bot/{bot_id}/leave", include_in_schema=False)
+async def leave_bot_ui(bot_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """Proxy bot graceful leave through cookie auth."""
+    token = _get_token_from_request(request)
+    if not token:
+        return JSONResponse({"detail": "Unauthenticated"}, status_code=401)
+
+    import httpx
+    from app.main import app as _app
+    client_ip = request.client.host if request.client else "127.0.0.1"
+
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=_app), base_url="http://internal") as client:
+            resp = await client.post(
+                f"/api/v1/bot/{bot_id}/leave",
+                headers={"Authorization": f"Bearer {token}", "X-Forwarded-For": client_ip},
+            )
+        return JSONResponse(resp.json(), status_code=resp.status_code)
+    except Exception as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=502)
+
+
 # ── Bot detail page proxies (cookie-auth wrappers) ───────────────────────────
 
 @router.post("/dashboard/bot/{bot_id}/ask", include_in_schema=False)

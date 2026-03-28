@@ -640,6 +640,47 @@ async def get_bot(bot_id: str, request: Request):
     return _to_response(bot)
 
 
+# ── POST /api/v1/bot/{id}/leave ────────────────────────────────────────────────
+
+@router.post("/{bot_id}/leave", status_code=200)
+async def leave_bot(bot_id: str, request: Request):
+    """Tell a running bot to gracefully leave the meeting.
+
+    Unlike DELETE (cancel), the bot will leave the meeting cleanly and then
+    proceed with transcription and analysis as if the meeting ended naturally.
+    Only works when the bot is `in_call`.
+
+    Returns the current bot status.
+    """
+    account_id: Optional[str] = getattr(request.state, "account_id", None)
+    sub_user_id = _get_sub_user_from_request(request)
+    bot = await _get_or_404(bot_id, account_id, sub_user_id)
+
+    if bot.status != "in_call":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Bot is '{bot.status}', not 'in_call'. Leave is only available during an active call.",
+        )
+
+    leave_event = getattr(bot, "leave_event", None)
+    if leave_event is None:
+        raise HTTPException(status_code=409, detail="Leave event not available for this bot.")
+
+    leave_event.set()
+    logger.info("Graceful leave triggered for bot %s via API", bot_id)
+
+    from app.services.audit_log_service import log_event as _audit
+    asyncio.create_task(_audit(
+        account_id=account_id,
+        action="bot.leave",
+        resource_type="bot",
+        resource_id=bot_id,
+        ip_address=request.client.host if request.client else None,
+    ))
+
+    return {"id": bot_id, "status": bot.status, "message": "Bot is leaving the meeting gracefully."}
+
+
 # ── DELETE /api/v1/bot/{id} ───────────────────────────────────────────────────
 
 @router.delete("/{bot_id}", status_code=204)

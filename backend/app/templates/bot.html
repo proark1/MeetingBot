@@ -58,6 +58,12 @@
     {% if bot.video_available %}
     <a href="/api/v1/bot/{{ bot.id }}/video" class="btn btn-outline-secondary btn-sm">↓ Video</a>
     {% endif %}
+    {% if bot.status == "in_call" %}
+    <button class="btn btn-outline-warning btn-sm" id="leave-btn" onclick="leaveBot()">Leave Meeting</button>
+    {% endif %}
+    {% if bot.status not in ["done", "error", "cancelled"] %}
+    <button class="btn btn-outline-danger btn-sm" id="cancel-btn" onclick="cancelBot()">Cancel</button>
+    {% endif %}
   </div>
 </div>
 
@@ -501,6 +507,41 @@ const _botId = '{{ bot.id }}';
 function openSpeakerModal() {
   const modal = new bootstrap.Modal(document.getElementById('speaker-modal'));
   modal.show();
+}
+
+// ── Leave meeting gracefully ────────────────────────────────────────────────
+async function leaveBot() {
+  if (!confirm('Tell the bot to leave the meeting? It will still transcribe and analyse the recording.')) return;
+  const btn = document.getElementById('leave-btn');
+  btn.disabled = true;
+  btn.textContent = 'Leaving…';
+  try {
+    const resp = await fetch(`/dashboard/bot/${_botId}/leave`, { method: 'POST' });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || 'Failed to leave');
+    showToast('Bot is leaving the meeting…', 'success');
+  } catch(e) {
+    showToast(e.message, 'danger');
+    btn.disabled = false;
+    btn.textContent = 'Leave Meeting';
+  }
+}
+
+// ── Cancel bot ──────────────────────────────────────────────────────────────
+async function cancelBot() {
+  if (!confirm('Cancel this bot? This will stop it immediately without transcription.')) return;
+  const btn = document.getElementById('cancel-btn');
+  btn.disabled = true;
+  try {
+    const resp = await fetch(`/dashboard/bot/${_botId}/cancel`, { method: 'POST' });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || 'Failed to cancel');
+    showToast('Bot cancelled', 'success');
+    setTimeout(() => location.reload(), 1500);
+  } catch(e) {
+    showToast(e.message, 'danger');
+    btn.disabled = false;
+  }
 }
 
 // ── Share (via cookie-auth proxy) ────────────────────────────────────────────
