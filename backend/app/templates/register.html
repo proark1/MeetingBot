@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script>(function(){var t=localStorage.getItem('theme');if(t==='dark')document.documentElement.setAttribute('data-theme','dark');else if(!t&&window.matchMedia('(prefers-color-scheme:dark)').matches)document.documentElement.setAttribute('data-theme','dark');})();</script>
   <title>Register — JustHereToListen.io</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -387,13 +388,75 @@
     @media (max-width: 768px) { .click-hint { display: none; } }
 
     @media (max-width: 768px) {
-      .auth-left { display: none; }
-      .auth-right { background: white; }
-      .auth-form-card { box-shadow: none; border: none; padding: 2rem 1.25rem; }
+      body { flex-direction: column; }
+      .auth-left { flex: none; padding: 1.5rem 1.5rem 1rem; }
+      .auth-headline { font-size: 1.25rem; margin-bottom: 0.5rem; }
+      .auth-description { margin-bottom: 1rem; font-size: 13px; }
+      .feature-list { display: none; }
+      .auth-right { padding: 1.5rem; }
+      .auth-form-card { box-shadow: none; border: none; padding: 1.5rem 0; }
     }
+
+    /* ── Dark mode ───────────────────────────────────────────────────── */
+    [data-theme="dark"] body { background: #0f1019; }
+    [data-theme="dark"] .auth-left { background: linear-gradient(150deg, #1a1b2e 0%, #252636 50%, #1a1b2e 100%); }
+    [data-theme="dark"] .auth-left::before, [data-theme="dark"] .auth-left::after { opacity: 0.3; }
+    [data-theme="dark"] .brand-logo { color: #e5e7eb; }
+    [data-theme="dark"] .brand-icon { background: #374151; }
+    [data-theme="dark"] .auth-headline { color: #e5e7eb; }
+    [data-theme="dark"] .auth-description { color: #9ca3af; }
+    [data-theme="dark"] .auth-right { background: #13141f; }
+    [data-theme="dark"] .auth-form-card { background: #1a1b2e; border-color: #2d2e3f; }
+    [data-theme="dark"] .form-label { color: #d1d5db; }
+    [data-theme="dark"] .form-control { background: #252636; border-color: #2d2e3f; color: #e5e7eb; }
+    [data-theme="dark"] .form-control::placeholder { color: #6b7280; }
+    [data-theme="dark"] .form-control:focus { border-color: #4b5563; box-shadow: 0 0 0 3px rgba(75,85,99,0.3); }
+    [data-theme="dark"] .btn-primary { background: #374151; border-color: #4b5563; }
+    [data-theme="dark"] .btn-primary:hover { background: #4b5563; }
+    [data-theme="dark"] .sso-btn { background: #252636; border-color: #2d2e3f; color: #d1d5db; }
+    [data-theme="dark"] .sso-btn:hover { background: #2d2e3f; border-color: #3d3e52; color: #e5e7eb; }
+    [data-theme="dark"] .divider-text { background: #1a1b2e; color: #6b7280; }
+    [data-theme="dark"] .auth-footer { color: #6b7280; }
+    [data-theme="dark"] .auth-footer a { color: #9ca3af; }
+    [data-theme="dark"] .alert { background: #7f1d1d; border-color: #991b1b; color: #fca5a5; }
+
+    .theme-toggle-auth {
+      position: absolute; top: 1.25rem; right: 1.25rem; z-index: 10;
+      background: none; border: 1px solid rgba(107,114,128,0.3); border-radius: 6px;
+      padding: 4px 7px; cursor: pointer; color: #6b7280; transition: all 0.2s;
+      display: inline-flex; align-items: center;
+    }
+    .theme-toggle-auth:hover { background: rgba(107,114,128,0.1); }
+    .theme-toggle-auth .icon-sun { display: none; }
+    .theme-toggle-auth .icon-moon { display: block; }
+    [data-theme="dark"] .theme-toggle-auth { border-color: #3d3e52; color: #9ca3af; }
+    [data-theme="dark"] .theme-toggle-auth:hover { background: #252636; }
+    [data-theme="dark"] .theme-toggle-auth .icon-sun { display: block; }
+    [data-theme="dark"] .theme-toggle-auth .icon-moon { display: none; }
+
+    .password-wrapper { position: relative; }
+    .password-toggle {
+      position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+      background: none; border: none; cursor: pointer; color: #9ca3af; padding: 2px;
+    }
+    .password-toggle:hover { color: #6b7280; }
+
+    .btn-loading { position: relative; color: transparent !important; pointer-events: none; }
+    .btn-loading::after {
+      content: ''; position: absolute; top: 50%; left: 50%;
+      width: 16px; height: 16px; margin: -8px 0 0 -8px;
+      border: 2px solid rgba(255,255,255,0.4); border-top-color: #fff;
+      border-radius: 50%; animation: spin 0.6s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
+
+  <button class="theme-toggle-auth" onclick="toggleTheme()" aria-label="Toggle dark mode">
+    <svg class="icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+    <svg class="icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+  </button>
 
   <!-- Left branding panel -->
   <div class="auth-left">
@@ -455,7 +518,12 @@
         </div>
         <div class="mb-3">
           <label class="form-label" for="password">Password <span style="font-weight:400;color:#94a3b8">(min 8 characters)</span></label>
-          <input type="password" id="password" name="password" class="form-control" placeholder="••••••••" minlength="8" required>
+          <div class="password-wrapper">
+            <input type="password" id="password" name="password" class="form-control" placeholder="••••••••" minlength="8" required style="padding-right:36px">
+            <button type="button" class="password-toggle" onclick="togglePassword('password', this)" aria-label="Show password">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+          </div>
         </div>
 
         <div class="mb-4">
@@ -530,5 +598,27 @@
   </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js" defer></script>
+<script>
+function toggleTheme() {
+  const html = document.documentElement;
+  const next = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+  html.setAttribute('data-theme', next);
+  localStorage.setItem('theme', next);
+}
+function togglePassword(inputId, btn) {
+  const input = document.getElementById(inputId);
+  if (input.type === 'password') {
+    input.type = 'text';
+    btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+  } else {
+    input.type = 'password';
+    btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+  }
+}
+document.querySelector('form')?.addEventListener('submit', function(e) {
+  const btn = this.querySelector('button[type="submit"]');
+  if (btn) btn.classList.add('btn-loading');
+});
+</script>
 </body>
 </html>

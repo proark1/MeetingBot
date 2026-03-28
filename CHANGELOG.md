@@ -4,9 +4,24 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.20.6 — **Last updated:** 2026-03-28
+> **Latest version:** 2.21.0 — **Last updated:** 2026-03-28
 
 ---
+
+## [2.21.0] - 2026-03-28
+
+### Added
+- **Dark mode** — system-wide dark theme with toggle button in navbar on all pages (dashboard, landing, login, register, bot detail, share). Respects `prefers-color-scheme` OS setting, persists preference in localStorage, no flash of unstyled content on page load
+- **Mobile responsive dashboard** — sidebar collapses to a fixed bottom navigation bar on mobile (< 768px) with horizontally scrollable icons, bottom padding for content, and responsive section headers
+- **Mobile responsive login/register** — split-panel layout stacks vertically on mobile with condensed branding panel and full-width form
+- **Mobile responsive bot detail** — action buttons wrap properly, tables scroll horizontally, meta cards maintain 2-column grid on small screens
+- **Mobile responsive share page** — padding adjustments for small screens
+- **Visual polish** — page fade-in animation (0.3s), card hover lift effect, pulse animation on in-progress status chips, loading skeleton CSS utility class, focus-visible keyboard navigation outlines
+- **Loading button state** — `.btn-loading` CSS class with spinner animation, applied on form submit for login/register
+- **Password visibility toggle** — eye icon button on login and register password fields
+- **Confirmation dialog** — reusable `confirmAction(message)` JS helper using Bootstrap modal for destructive actions
+- **Progress indicator** — animated progress bar shown on bot detail page for in-progress statuses (joining, in_call, transcribing)
+- **Section transitions** — dashboard section switching now uses fade-in animation
 
 ## [2.20.6] - 2026-03-28
 

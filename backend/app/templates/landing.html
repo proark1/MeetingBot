@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script>(function(){var t=localStorage.getItem('theme');if(t==='dark')document.documentElement.setAttribute('data-theme','dark');else if(!t&&window.matchMedia('(prefers-color-scheme:dark)').matches)document.documentElement.setAttribute('data-theme','dark');})();</script>
   <title>JustHereToListen.io — AI Meeting Intelligence Platform</title>
   <meta name="description" content="Real-time transcription, live AI coaching, meeting health scores, PII redaction, and deep analytics for Zoom, Google Meet, and Microsoft Teams.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -33,6 +34,16 @@
       --grad-subtle: linear-gradient(135deg, rgba(27,32,51,0.06) 0%, rgba(42,48,72,0.04) 100%);
     }
 
+    [data-theme="dark"] {
+      --primary: #c8cad0; --primary-dark: #e5e7eb; --primary-light: #1e2030;
+      --bg: #13141f; --bg-alt: #1a1b2e; --bg-muted: #252636; --bg-border: #2d2e3f;
+      --border: #2d2e3f; --border-glow: rgba(200,202,208,0.15);
+      --text-primary: #e5e7eb; --text-secondary: #9ca3af; --text-muted: #6b7280;
+      --grad: linear-gradient(135deg, #1a1b2e 0%, #252636 100%);
+      --grad-subtle: linear-gradient(135deg, rgba(200,202,208,0.04) 0%, rgba(200,202,208,0.02) 100%);
+      color-scheme: dark;
+    }
+
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
     html { scroll-behavior: smooth; }
@@ -44,6 +55,7 @@
       overflow-x: hidden;
       line-height: 1.65;
     }
+    [data-theme="dark"] body { background: #0f1019; }
 
     /* ── Navbar ── */
     .navbar {
@@ -968,6 +980,48 @@
       60%, 100% { transform: translate(2px, 6px) scale(0); opacity: 0; }
     }
     @media (max-width: 768px) { .click-hint { display: none; } }
+
+    /* ── Dark mode overrides ────────────────────────────────────────── */
+    [data-theme="dark"] .navbar { background: rgba(15,16,25,0.88) !important; border-color: #2d2e3f; }
+    [data-theme="dark"] .navbar-brand { color: #e5e7eb; }
+    [data-theme="dark"] .btn-nav-login { border-color: #3d3e52; color: #d1d5db; }
+    [data-theme="dark"] .btn-nav-login:hover { border-color: #6b7280; color: #e5e7eb; }
+    [data-theme="dark"] .btn-nav-cta { background: #374151; }
+    [data-theme="dark"] .hero { background: linear-gradient(180deg, #0f1019 0%, #1a1b2e 100%); }
+    [data-theme="dark"] .hero-glow { opacity: 0.15; }
+    [data-theme="dark"] .hero-title { color: #e5e7eb; }
+    [data-theme="dark"] .hero-title .grad-text { background: linear-gradient(135deg, #60a5fa 0%, #a78bfa 50%, #f472b6 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+    [data-theme="dark"] .hero-sub { color: #9ca3af; }
+    [data-theme="dark"] .feature-card { background: #1a1b2e; border-color: #2d2e3f; }
+    [data-theme="dark"] .feature-card:hover { border-color: #3d3e52; box-shadow: 0 8px 32px rgba(0,0,0,0.3); }
+    [data-theme="dark"] .feature-card h3 { color: #e5e7eb; }
+    [data-theme="dark"] .feature-card p { color: #9ca3af; }
+    [data-theme="dark"] .feature-icon { background: #252636; }
+    [data-theme="dark"] .section-heading { color: #e5e7eb; }
+    [data-theme="dark"] .section-sub { color: #9ca3af; }
+    [data-theme="dark"] .stat-item strong { color: #e5e7eb; }
+    [data-theme="dark"] .stat-item span { color: #9ca3af; }
+    [data-theme="dark"] .pricing-card { background: #1a1b2e; border-color: #2d2e3f; }
+    [data-theme="dark"] .pricing-card:hover { border-color: #3d3e52; }
+    [data-theme="dark"] .pricing-card h3, [data-theme="dark"] .pricing-card .price { color: #e5e7eb; }
+    [data-theme="dark"] .pricing-card li { color: #d1d5db; }
+    [data-theme="dark"] footer { color: #6b7280; }
+    [data-theme="dark"] footer a { color: #9ca3af; }
+    [data-theme="dark"] .platform-pill { background: #1a1b2e; border-color: #2d2e3f; color: #d1d5db; }
+    [data-theme="dark"] .cta-section { background: linear-gradient(135deg, #1a1b2e 0%, #252636 100%); }
+
+    .theme-toggle-landing {
+      background: none; border: 1px solid var(--border, #D8CFC8); border-radius: 6px;
+      padding: 4px 7px; cursor: pointer; color: var(--text-secondary, #6B7280);
+      transition: all 0.2s; display: inline-flex; align-items: center;
+    }
+    .theme-toggle-landing:hover { background: var(--bg-muted, #E5DDD7); }
+    .theme-toggle-landing .icon-sun { display: none; }
+    .theme-toggle-landing .icon-moon { display: block; }
+    [data-theme="dark"] .theme-toggle-landing { border-color: #3d3e52; color: #9ca3af; }
+    [data-theme="dark"] .theme-toggle-landing:hover { background: #252636; }
+    [data-theme="dark"] .theme-toggle-landing .icon-sun { display: block; }
+    [data-theme="dark"] .theme-toggle-landing .icon-moon { display: none; }
   </style>
 </head>
 <body>
@@ -992,6 +1046,10 @@
         <li class="nav-item"><a class="nav-link" href="/api/docs" target="_blank">API Docs ↗</a></li>
       </ul>
       <div class="d-flex align-items-center gap-2">
+        <button class="theme-toggle-landing" onclick="toggleTheme()" aria-label="Toggle dark mode">
+          <svg class="icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+          <svg class="icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+        </button>
         <a href="/login" class="btn-nav-login">Sign in</a>
         <a href="/register" class="btn-nav-cta">Start free →</a>
       </div>
@@ -1988,6 +2046,13 @@ function switchMode(mode) {
     }
   } catch(e) {}
 })();
+
+function toggleTheme() {
+  const html = document.documentElement;
+  const next = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+  html.setAttribute('data-theme', next);
+  localStorage.setItem('theme', next);
+}
 </script>
 </body>
 </html>

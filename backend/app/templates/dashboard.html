@@ -188,6 +188,63 @@
   }
   .analytics-tab:hover { color: #1B2033; }
   .analytics-tab.active { color: #111827; border-bottom-color: #1B2033; font-weight: 600; }
+
+  /* ── Mobile bottom nav ─────────────────────────────────────────────────── */
+  @media (max-width: 768px) {
+    .dash-layout { grid-template-columns: 1fr; }
+    .dash-sidebar {
+      position: fixed; bottom: 0; left: 0; right: 0; top: auto;
+      border-radius: 0; z-index: 100;
+      display: flex; overflow-x: auto; gap: 0;
+      padding: 0.4rem 0.5rem;
+      border-top: 1px solid var(--border, #D8CFC8);
+      border-bottom: none; border-left: none; border-right: none;
+      box-shadow: 0 -2px 10px rgba(0,0,0,0.06);
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+    }
+    .dash-sidebar::-webkit-scrollbar { display: none; }
+    .sidebar-section-label { display: none; }
+    .sidebar-nav-item {
+      flex-direction: column; gap: 0.1rem;
+      padding: 0.35rem 0.5rem; font-size: 10px;
+      min-width: 56px; text-align: center; white-space: nowrap;
+      border-radius: 6px;
+    }
+    .nav-icon { font-size: 17px; }
+    .sidebar-badge { display: none; }
+    .app-container { padding-bottom: 4.5rem; }
+    .section-hdr { flex-direction: column; gap: 0.75rem; }
+    .section-hdr .d-flex { flex-wrap: wrap; }
+  }
+
+  /* ── Dark mode dashboard overrides ─────────────────────────────────────── */
+  [data-theme="dark"] .dash-sidebar { background: #1a1b2e; border-color: #2d2e3f; }
+  [data-theme="dark"] .kpi-card { background: #1a1b2e; border-color: #2d2e3f; }
+  [data-theme="dark"] .kpi-card:hover { border-color: #3d3e52; }
+  [data-theme="dark"] .kpi-card .kpi-label { color: #9ca3af; }
+  [data-theme="dark"] .kpi-card .kpi-value { color: #e5e7eb; }
+  [data-theme="dark"] .sidebar-nav-item { color: #9ca3af; }
+  [data-theme="dark"] .sidebar-nav-item:hover { background: #252636; color: #e5e7eb; }
+  [data-theme="dark"] .sidebar-nav-item.active { background: #252636; color: #e5e7eb; }
+  [data-theme="dark"] .analytics-tab { color: #9ca3af; border-color: transparent; }
+  [data-theme="dark"] .analytics-tab:hover { color: #e5e7eb; }
+  [data-theme="dark"] .analytics-tab.active { color: #e5e7eb; border-bottom-color: #e5e7eb; }
+
+  /* ── Empty state ───────────────────────────────────────────────────────── */
+  .empty-state {
+    text-align: center; padding: 3rem 1rem;
+    color: var(--gray, #6B7280);
+  }
+  .empty-state-icon { font-size: 3rem; margin-bottom: 1rem; opacity: 0.5; }
+  .empty-state-title { font-size: 1.1rem; font-weight: 600; color: var(--dark, #1B2033); margin-bottom: 0.5rem; }
+  .empty-state-desc { font-size: 13.5px; max-width: 400px; margin: 0 auto 1.25rem; line-height: 1.6; }
+  [data-theme="dark"] .empty-state-title { color: #e5e7eb; }
+
+  /* ── Section transitions ───────────────────────────────────────────────── */
+  .dash-section { display: none; }
+  .dash-section.active { display: block; animation: fadeIn 0.25s ease-out; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 </style>
 
 <div class="dash-layout">

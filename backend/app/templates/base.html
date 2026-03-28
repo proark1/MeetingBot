@@ -4,6 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}JustHereToListen.io{% endblock %}</title>
+  <script>
+    (function(){var t=localStorage.getItem('theme');if(t==='dark')document.documentElement.setAttribute('data-theme','dark');else if(!t&&window.matchMedia('(prefers-color-scheme:dark)').matches)document.documentElement.setAttribute('data-theme','dark');})();
+  </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -30,6 +33,127 @@
       --shadow-md: 0 4px 12px rgba(0,0,0,0.05);
       --shadow-lg: 0 8px 24px rgba(0,0,0,0.06);
     }
+
+    /* ── Dark mode ────────────────────────────────────────────────────── */
+    [data-theme="dark"] {
+      --primary: #c8cad0;
+      --primary-dark: #e5e7eb;
+      --primary-light: #1e2030;
+      --primary-subtle: rgba(200,202,208,0.08);
+      --dark: #e5e7eb;
+      --dark-2: #d1d5db;
+      --gray: #9ca3af;
+      --light: #1a1b2e;
+      --white: #13141f;
+      --success: #34d399;
+      --warning: #fbbf24;
+      --danger: #f87171;
+      --border: #2d2e3f;
+      --border-light: #252636;
+      --shadow: 0 1px 2px rgba(0,0,0,0.3);
+      --shadow-sm: 0 1px 3px rgba(0,0,0,0.4);
+      --shadow-md: 0 4px 12px rgba(0,0,0,0.3);
+      --shadow-lg: 0 8px 24px rgba(0,0,0,0.4);
+      color-scheme: dark;
+    }
+    [data-theme="dark"] body { background: #0f1019; color: #e5e7eb; }
+    [data-theme="dark"] .app-nav { background: rgba(19,20,31,0.88); border-color: var(--border); }
+    [data-theme="dark"] .card, [data-theme="dark"] .stat-card { background: #1a1b2e; border-color: var(--border); }
+    [data-theme="dark"] .mobile-nav { background: #1a1b2e; border-color: var(--border); }
+    [data-theme="dark"] .form-control, [data-theme="dark"] .form-select { background: #1a1b2e; color: #e5e7eb; border-color: var(--border); }
+    [data-theme="dark"] .form-control::placeholder { color: #6b7280; }
+    [data-theme="dark"] .table thead th { background: #1a1b2e; color: #9ca3af; border-color: var(--border); }
+    [data-theme="dark"] .table tbody td { border-color: #252636; }
+    [data-theme="dark"] .table-hover tbody tr:hover { background: #252636; }
+    [data-theme="dark"] .btn-outline-secondary { background: #1a1b2e; color: #9ca3af; border-color: var(--border); }
+    [data-theme="dark"] .btn-outline-secondary:hover { background: #252636; color: #e5e7eb; }
+    [data-theme="dark"] .btn-outline-primary { border-color: #3d3e52; color: #c8cad0; }
+    [data-theme="dark"] .btn-outline-primary:hover { background: #252636; color: #e5e7eb; }
+    [data-theme="dark"] .btn-primary { background: #374151; border-color: #4b5563; }
+    [data-theme="dark"] .btn-primary:hover { background: #4b5563; border-color: #6b7280; }
+    [data-theme="dark"] code { background: #252636; color: #c8cad0; }
+    [data-theme="dark"] pre { background: #1a1b2e; border-color: var(--border); }
+    [data-theme="dark"] .balance-pill { background: #064e3b; color: #34d399; border-color: #065f46; }
+    [data-theme="dark"] .balance-pill.low { background: #7f1d1d; color: #fca5a5; border-color: #991b1b; }
+    [data-theme="dark"] .user-avatar { background: #374151; }
+    [data-theme="dark"] .dropdown-menu { background: #1a1b2e; border-color: var(--border); }
+    [data-theme="dark"] .dropdown-item { color: #d1d5db; }
+    [data-theme="dark"] .dropdown-item:hover { background: #252636; color: #e5e7eb; }
+    [data-theme="dark"] .modal-content { background: #1a1b2e; border-color: var(--border); color: #e5e7eb; }
+    [data-theme="dark"] .btn-close { filter: invert(1); }
+    [data-theme="dark"] .alert-success { background: #064e3b; border-color: #065f46; color: #6ee7b7; }
+    [data-theme="dark"] .alert-danger { background: #7f1d1d; border-color: #991b1b; color: #fca5a5; }
+    [data-theme="dark"] .alert-warning { background: #78350f; border-color: #92400e; color: #fde68a; }
+    [data-theme="dark"] .alert-info { background: #1e3a5f; border-color: #1e40af; color: #93c5fd; }
+    [data-theme="dark"] .chip-success { background: #064e3b; color: #34d399; }
+    [data-theme="dark"] .chip-warning { background: #78350f; color: #fbbf24; }
+    [data-theme="dark"] .chip-danger { background: #7f1d1d; color: #f87171; }
+    [data-theme="dark"] .chip-info { background: #1e3a5f; color: #60a5fa; }
+    [data-theme="dark"] .chip-gray { background: #252636; color: #9ca3af; }
+    [data-theme="dark"] .chip-purple { background: #2e1065; color: #a78bfa; }
+    [data-theme="dark"] .progress { background: #252636; }
+    [data-theme="dark"] hr { border-color: var(--border); }
+    [data-theme="dark"] .nav-links a.nav-active { background: #252636; color: #e5e7eb; }
+    [data-theme="dark"] .sidebar-nav-item:hover { background: #252636; color: #e5e7eb; }
+    [data-theme="dark"] .sidebar-nav-item.active { background: #252636; color: #e5e7eb; }
+    [data-theme="dark"] .brand-icon { background: #374151; }
+
+    /* ── Theme toggle ────────────────────────────────────────────────── */
+    .theme-toggle {
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 4px 7px;
+      cursor: pointer;
+      color: var(--gray);
+      transition: all 0.2s;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .theme-toggle:hover { background: var(--light); color: var(--dark); border-color: #9ca3af; }
+    .theme-toggle .icon-sun { display: none; }
+    .theme-toggle .icon-moon { display: block; }
+    [data-theme="dark"] .theme-toggle .icon-sun { display: block; }
+    [data-theme="dark"] .theme-toggle .icon-moon { display: none; }
+
+    /* ── Animations ──────────────────────────────────────────────────── */
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+    .app-container { animation: fadeIn 0.3s ease-out; }
+
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    .chip-info { animation: pulse 2s ease-in-out infinite; }
+
+    @keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+    .skeleton {
+      background: linear-gradient(90deg, var(--border-light) 25%, var(--light) 50%, var(--border-light) 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.5s infinite;
+      border-radius: 6px;
+      color: transparent !important;
+      pointer-events: none;
+      user-select: none;
+    }
+    .skeleton * { visibility: hidden; }
+
+    .card, .stat-card { transition: box-shadow 0.2s, transform 0.2s; }
+    .card:hover, .stat-card:hover { transform: translateY(-1px); }
+
+    :focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 4px; }
+
+    .btn-loading { position: relative; color: transparent !important; pointer-events: none; }
+    .btn-loading::after {
+      content: '';
+      position: absolute;
+      top: 50%; left: 50%;
+      width: 16px; height: 16px;
+      margin: -8px 0 0 -8px;
+      border: 2px solid currentColor;
+      border-right-color: transparent;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
 
     * { box-sizing: border-box; }
 
@@ -539,6 +663,10 @@
   </div>
 
   <div class="nav-right">
+    <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle dark mode" title="Toggle dark mode">
+      <svg class="icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      <svg class="icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+    </button>
     {% if account %}
       {% if balance is defined %}
       <a href="/topup" class="balance-pill {% if balance < 1.0 %}low{% endif %}">
@@ -631,6 +759,39 @@
   function toggleMobileNav() {
     const nav = document.getElementById('mobileNav');
     if (nav) nav.classList.toggle('open');
+  }
+
+  function toggleTheme() {
+    const html = document.documentElement;
+    const next = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    html.setAttribute('data-theme', next);
+    localStorage.setItem('theme', next);
+  }
+
+  function confirmAction(message, actionLabel = 'Confirm') {
+    return new Promise(resolve => {
+      const id = 'confirm-' + Date.now();
+      const modal = document.createElement('div');
+      modal.innerHTML = `
+        <div class="modal fade" id="${id}" tabindex="-1">
+          <div class="modal-dialog modal-sm modal-dialog-centered">
+            <div class="modal-content" style="border-radius:14px">
+              <div class="modal-body p-4 text-center">
+                <p style="font-size:14px;margin:0 0 1.25rem">${message}</p>
+                <div class="d-flex gap-2 justify-content-center">
+                  <button class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+                  <button class="btn btn-danger btn-sm" id="${id}-ok">${actionLabel}</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>`;
+      document.body.appendChild(modal);
+      const bsModal = new bootstrap.Modal(document.getElementById(id));
+      document.getElementById(id + '-ok').onclick = () => { bsModal.hide(); resolve(true); };
+      document.getElementById(id).addEventListener('hidden.bs.modal', () => { modal.remove(); resolve(false); });
+      bsModal.show();
+    });
   }
 
   // Close mobile nav on outside click
