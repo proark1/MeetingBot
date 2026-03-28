@@ -660,6 +660,43 @@
                       <option value="whisper">Whisper (local)</option>
                     </select>
                   </div>
+                  <div class="col-6 col-md-3">
+                    <label class="form-label" style="font-size:12.5px;font-weight:600">Analysis mode</label>
+                    <select class="form-select form-select-sm" id="sbAnalysisMode">
+                      <option value="full">Full (AI analysis)</option>
+                      <option value="transcript_only">Transcript only</option>
+                    </select>
+                  </div>
+                  <div class="col-6 col-md-3">
+                    <div class="form-check">
+                      <input class="form-check-input" type="checkbox" id="sbStartMuted">
+                      <label class="form-check-label" for="sbStartMuted" style="font-size:12.5px;font-weight:600">Join muted</label>
+                    </div>
+                  </div>
+                  <div class="col-6 col-md-3">
+                    <label class="form-label" style="font-size:12.5px;font-weight:600">Hourly rate (USD)</label>
+                    <input type="number" class="form-control form-control-sm" id="sbHourlyRate" placeholder="e.g. 85" min="0" step="0.01">
+                  </div>
+                  <div class="col-6 col-md-3">
+                    <label class="form-label" style="font-size:12.5px;font-weight:600">Bot avatar URL</label>
+                    <input type="url" class="form-control form-control-sm" id="sbBotAvatarUrl" placeholder="https://...">
+                  </div>
+                  <div class="col-md-6">
+                    <label class="form-label" style="font-size:12.5px;font-weight:600">Custom analysis prompt</label>
+                    <textarea class="form-control form-control-sm" id="sbPromptOverride" rows="2" maxlength="8000" placeholder="Override the template with a custom prompt…" style="font-size:12px"></textarea>
+                  </div>
+                  <div class="col-md-6">
+                    <label class="form-label" style="font-size:12.5px;font-weight:600">Consent message</label>
+                    <input type="text" class="form-control form-control-sm" id="sbConsentMessage" maxlength="500" placeholder="Custom recording announcement text">
+                  </div>
+                  <div class="col-md-6">
+                    <label class="form-label" style="font-size:12.5px;font-weight:600">Domain vocabulary</label>
+                    <input type="text" class="form-control form-control-sm" id="sbVocabulary" placeholder="term1, term2, term3 (comma-separated)">
+                  </div>
+                  <div class="col-md-6">
+                    <label class="form-label" style="font-size:12.5px;font-weight:600">Keyword alerts</label>
+                    <input type="text" class="form-control form-control-sm" id="sbKeywordAlerts" placeholder="keyword1, keyword2 (comma-separated)">
+                  </div>
                 </div>
               </div>
             </div>
@@ -2384,6 +2421,22 @@ document.querySelectorAll('[data-delete-cal]').forEach(btn => btn.addEventListen
     if (document.getElementById('sbAutoFollowup')?.checked) payload.auto_followup_email = true;
     const transcriptionProvider = document.getElementById('sbTranscriptionProvider')?.value;
     if (transcriptionProvider && transcriptionProvider !== 'gemini') payload.transcription_provider = transcriptionProvider;
+    // Analysis & cost options
+    const analysisMode = document.getElementById('sbAnalysisMode')?.value;
+    if (analysisMode && analysisMode !== 'full') payload.analysis_mode = analysisMode;
+    if (document.getElementById('sbStartMuted')?.checked) payload.start_muted = true;
+    const hourlyRate = parseFloat(document.getElementById('sbHourlyRate')?.value);
+    if (hourlyRate > 0) payload.avg_hourly_rate_usd = hourlyRate;
+    const avatarUrl = document.getElementById('sbBotAvatarUrl')?.value.trim();
+    if (avatarUrl) payload.bot_avatar_url = avatarUrl;
+    const promptOverride = document.getElementById('sbPromptOverride')?.value.trim();
+    if (promptOverride) payload.prompt_override = promptOverride;
+    const consentMsg = document.getElementById('sbConsentMessage')?.value.trim();
+    if (consentMsg) payload.consent_message = consentMsg;
+    const vocabRaw = document.getElementById('sbVocabulary')?.value.trim();
+    if (vocabRaw) payload.vocabulary = vocabRaw.split(',').map(s => s.trim()).filter(Boolean);
+    const kwRaw = document.getElementById('sbKeywordAlerts')?.value.trim();
+    if (kwRaw) payload.keyword_alerts = kwRaw.split(',').map(s => s.trim()).filter(Boolean).map(k => ({keyword: k}));
 
     btn.disabled = true;
     status.textContent = isScheduled ? 'Scheduling…' : 'Sending…';

@@ -4,7 +4,14 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.23.0 — **Last updated:** 2026-03-28
+> **Latest version:** 2.24.0 — **Last updated:** 2026-03-28
+
+---
+
+## [2.24.0] - 2026-03-28
+
+### Added
+- **Dashboard: all remaining bot options** — Bot creation form now exposes every BotCreate field: analysis mode (full/transcript-only), custom analysis prompt, domain vocabulary, join muted, bot avatar URL, consent message, keyword alerts, and hourly rate for meeting cost estimation
 
 ---
 
