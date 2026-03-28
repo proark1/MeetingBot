@@ -4,7 +4,18 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.24.1 — **Last updated:** 2026-03-28
+> **Latest version:** 2.25.0 — **Last updated:** 2026-03-28
+
+---
+
+## [2.25.0] - 2026-03-28
+
+### Added
+- **onepizza.io: full chat & caption support** — The bot can now read and send chat messages, enable/scrape captions, and unmute/mute mic on onepizza.io meetings. Previously all four functions (`_enable_captions`, `_scrape_captions`, `_scrape_chat_messages`, `_send_chat_message`) silently returned empty/false for onepizza
+- **onepizza.io selectors**: `#chatBtn`, `#chatInput`, `#chatSendBtn` for chat; `#captionsBtn`, `#moreCaptionsOpt` for captions; `#micBtn` for mic control
+
+### Fixed
+- **Dashboard bot options hidden behind collapse** — All bot creation options are now visible by default in organized labeled groups
 
 ---
 

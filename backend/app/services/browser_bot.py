@@ -1689,6 +1689,18 @@ async def _enable_captions(page: Page, platform: str) -> None:
             "button[data-tid*='caption']",
             "button:has-text('Turn on live captions')",
         ], timeout=3000)
+    elif platform == "onepizza":
+        # onepizza.io: captions toggle is in the "More" menu (#moreCaptionsOpt)
+        # or the toolbar (#captionsBtn).  Click to enable if not already on.
+        clicked = await _click(page, [
+            "#captionsBtn",
+            "#moreCaptionsOpt",
+        ], timeout=2000)
+        if not clicked:
+            # Try opening "More" menu first
+            await _click(page, ["#moreBtn"], timeout=1500)
+            await asyncio.sleep(0.4)
+            await _click(page, ["#moreCaptionsOpt"], timeout=2000)
 
 
 async def _chat_input_visible(page: Page, platform: str) -> bool:
@@ -1710,6 +1722,11 @@ async def _chat_input_visible(page: Page, platform: str) -> bool:
         sels = [
             "div[data-tid='send-message-input']",
             "div[contenteditable='true'][role='textbox']",
+        ]
+    elif platform == "onepizza":
+        sels = [
+            "#chatInput",
+            "input[placeholder*='message' i]",
         ]
     else:
         return False
@@ -1750,6 +1767,12 @@ async def _open_chat(page: Page, platform: str) -> None:
             "button[aria-label*='Chat' i]",
             "button[aria-label*='Open chat' i]",
         ], timeout=1500)
+    elif platform == "onepizza":
+        await _click(page, [
+            "#chatBtn",
+            "button:has-text('Chat')",
+        ], timeout=1500)
+        await asyncio.sleep(0.3)
 
 
 async def _scrape_captions(page: Page, platform: str) -> str:
@@ -1910,6 +1933,31 @@ async def _scrape_captions(page: Page, platform: str) -> str:
                     return '';
                 }
             """)
+        elif platform == "onepizza":
+            # onepizza.io: captions appear in a container with id or class
+            text = await page.evaluate("""
+                () => {
+                    // Try known caption containers
+                    const sel = [
+                        "#captionContainer",
+                        "#captionsOverlay",
+                        "[class*='caption']",
+                        "[class*='subtitle']",
+                        "[aria-live='polite'][class*='caption']",
+                    ];
+                    for (const s of sel) {
+                        const el = document.querySelector(s);
+                        const t = el ? (el.innerText || el.textContent || '').trim() : '';
+                        if (t && t.length > 3) return t;
+                    }
+                    // Fallback: check all aria-live regions for caption-like text
+                    for (const el of document.querySelectorAll('[aria-live]')) {
+                        const t = (el.innerText || '').trim();
+                        if (t.length > 5 && !t.match(/^\\d{2}:\\d{2}/)) return t;
+                    }
+                    return '';
+                }
+            """)
         else:
             return ""
         return (text or "").strip()
@@ -2015,6 +2063,31 @@ async def _scrape_chat_messages(page: Page, platform: str) -> str:
                         const el = document.querySelector(s);
                         const t = el ? (el.innerText || el.textContent || '').trim() : '';
                         if (t && t.length > 3) return t;
+                    }
+                    return '';
+                }
+            """)
+        elif platform == "onepizza":
+            # onepizza.io: chat messages are in a panel opened by #chatBtn
+            # The chat list container uses class-based selectors
+            text = await page.evaluate("""
+                () => {
+                    const sel = [
+                        "#chatMessages",
+                        ".chat-messages",
+                        "[class*='chat-message']",
+                        "[class*='chatMessage']",
+                    ];
+                    for (const s of sel) {
+                        const el = document.querySelector(s);
+                        const t = el ? (el.innerText || el.textContent || '').trim() : '';
+                        if (t && t.length > 3) return t;
+                    }
+                    // Fallback: if chat panel is open, grab everything in the side panel
+                    const panel = document.querySelector('#sidePanel, .side-panel');
+                    if (panel && panel.offsetParent !== null) {
+                        const t = (panel.innerText || '').trim();
+                        if (t.length > 3) return t;
                     }
                     return '';
                 }
@@ -2129,6 +2202,28 @@ async def _send_chat_message(page: Page, platform: str, message: str) -> bool:
                 await page.keyboard.press("Control+Enter")
             return True
 
+        elif platform == "onepizza":
+            # onepizza.io: open chat panel if needed, type into #chatInput, send via #chatSendBtn
+            await _open_chat(page, platform)
+            await asyncio.sleep(0.5)
+            input_sels = [
+                "#chatInput",
+                "input[placeholder*='message' i]",
+                "textarea[placeholder*='message' i]",
+            ]
+            typed = await _type_into_chat(page, input_sels, message, timeout=3000)
+            logger.debug("onepizza type-into-chat: %s", typed)
+            if not typed:
+                await _screenshot(page, "onepizza_chat_input_not_found")
+                return False
+            sent = await _click(page, [
+                "#chatSendBtn",
+                "button:has-text('Send')",
+            ], timeout=2000)
+            if not sent:
+                await page.keyboard.press("Enter")
+            return True
+
     except Exception as exc:
         logger.warning("_send_chat_message failed (%s): %s", platform, exc)
     return False
@@ -2151,6 +2246,10 @@ _MIC_UNMUTE_SELS: dict[str, list[str]] = {
         "button[data-tid*='microphone'][aria-pressed='false']",
         "button[title*='unmute' i]",
     ],
+    "onepizza": [
+        "#micBtn:has-text('Unmute')",
+        "#micBtn",
+    ],
 }
 
 _MIC_MUTE_SELS: dict[str, list[str]] = {
@@ -2166,6 +2265,9 @@ _MIC_MUTE_SELS: dict[str, list[str]] = {
     "microsoft_teams": [
         "button[aria-label*='mute' i]:not([aria-label*='un' i])",
         "button[data-tid*='microphone'][aria-pressed='true']",
+    ],
+    "onepizza": [
+        "#micBtn:has-text('Mute')",
     ],
 }
 
