@@ -17,6 +17,7 @@ import functools
 import itertools
 import logging
 import os
+import re
 import struct
 import subprocess
 import time
@@ -2248,6 +2249,10 @@ async def _speak_in_meeting(
 
 
 _LEAVE_KEYWORDS = frozenset({"leave", "bye", "goodbye", "exit", "stop", "quit"})
+_LEAVE_KEYWORDS_RE = re.compile(
+    r"\b(?:" + "|".join(re.escape(k) for k in _LEAVE_KEYWORDS) + r")\b",
+    re.IGNORECASE,
+)
 
 
 def _pcm_to_wav(pcm: bytes) -> bytes:
@@ -2993,7 +2998,7 @@ async def _mention_monitor(
                     after_mention = new_caption_text[mention_pos + len(bot_name_lower):].lstrip(" ,:!?-").strip()
 
                     # Leave command detection (before AI call)
-                    if leave_event and any(kw in after_mention.lower() for kw in _LEAVE_KEYWORDS):
+                    if leave_event and _LEAVE_KEYWORDS_RE.search(after_mention):
                         logger.info("Leave command detected via captions: %r", after_mention)
                         await _dispatch_reply("Understood, leaving the meeting now. Goodbye!", "caption")
                         await asyncio.sleep(2)
@@ -3055,7 +3060,7 @@ async def _mention_monitor(
                         after_mention = new_chat_text[mention_pos + len(bot_name_lower):].lstrip(" ,:!?-").strip()
 
                         # Leave command detection (before AI call)
-                        if leave_event and any(kw in after_mention.lower() for kw in _LEAVE_KEYWORDS):
+                        if leave_event and _LEAVE_KEYWORDS_RE.search(after_mention):
                             logger.info("Leave command detected via chat: %r", after_mention)
                             await _dispatch_reply("Understood, leaving the meeting now. Goodbye!", "chat")
                             await asyncio.sleep(2)
@@ -3113,7 +3118,7 @@ async def _mention_monitor(
                         after_mention = new_audio_text[mention_pos + len(bot_name_lower):].lstrip(" ,:!?-").strip()
 
                         # Leave command check
-                        if leave_event and any(kw in after_mention.lower() for kw in _LEAVE_KEYWORDS):
+                        if leave_event and _LEAVE_KEYWORDS_RE.search(after_mention):
                             logger.info("Leave command detected via audio: %r", after_mention)
                             await _dispatch_reply("Understood, leaving the meeting now. Goodbye!", "audio")
                             await asyncio.sleep(2)
@@ -3158,13 +3163,25 @@ async def _wait_for_meeting_end(
     _last_audio_routing_sync = 0.0   # tracks last PulseAudio re-routing
     _last_audio_unmute = 0.0          # tracks last JS audio element unmute
     _join_grace_until = time.monotonic() + 60  # skip alone detection for 60s after join
+    _end_text_seen_at: Optional[float] = None  # require 2 consecutive detections
 
     while time.monotonic() < deadline:
         try:
             body = (await page.inner_text("body")).lower()
             if any(t in body for t in end_texts):
-                logger.info("Meeting end detected (%s)", platform)
-                return "ended"
+                if _end_text_seen_at is not None:
+                    # Confirmed: end text present on two consecutive polls (~10s apart)
+                    logger.info("Meeting end confirmed (%s)", platform)
+                    return "ended"
+                # First detection — mark but wait for confirmation on next poll
+                # to avoid false positives from captions/chat containing end phrases
+                _end_text_seen_at = time.monotonic()
+                logger.debug("Meeting end text detected (%s) — awaiting confirmation", platform)
+            else:
+                # End text disappeared — was a transient caption, not the real end screen
+                if _end_text_seen_at is not None:
+                    logger.debug("Meeting end text disappeared — false positive cleared")
+                _end_text_seen_at = None
         except Exception:
             logger.info("Page inaccessible — meeting likely ended")
             return "ended"

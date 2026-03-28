@@ -4,7 +4,15 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.22.0 — **Last updated:** 2026-03-28
+> **Latest version:** 2.22.1 — **Last updated:** 2026-03-28
+
+---
+
+## [2.22.1] - 2026-03-28
+
+### Fixed
+- **Bot leave/rejoin loop** — Leave-keyword detection (`_LEAVE_KEYWORDS`) used substring matching (`in` operator), causing false positives from words like "believe" (contains "leave"), "quite" (contains "quit"), "stopwatch" (contains "stop"). Now uses word-boundary regex matching
+- **False positive meeting-end detection** — `_wait_for_meeting_end` checked the entire page body (including captions and chat) for end-text patterns like "meeting ended". A single detection from a transient caption would cause the bot to leave prematurely. Now requires confirmation on two consecutive polls (~10s apart) before exiting
 
 ---
 
