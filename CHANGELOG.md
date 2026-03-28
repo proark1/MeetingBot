@@ -4,7 +4,14 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.24.0 — **Last updated:** 2026-03-28
+> **Latest version:** 2.24.1 — **Last updated:** 2026-03-28
+
+---
+
+## [2.24.1] - 2026-03-28
+
+### Fixed
+- **Dashboard bot options hidden behind collapse** — All bot creation options were buried under a collapsed "Advanced options" toggle. Removed the collapse and organized all options into visible labeled groups: Bot Behaviour, Branding & Identity, Recording & Transcription, Analysis & Output, Privacy & Compliance, and Alerts
 
 ---
 

@@ -590,114 +590,128 @@
                 <label class="form-label" style="font-size:12.5px;font-weight:600">Webhook URL (optional)</label>
                 <input type="url" class="form-control form-control-sm" id="sbWebhookUrl" placeholder="https://yourapp.com/webhook">
               </div>
-              <!-- Advanced options toggle -->
-              <div class="col-12">
-                <a href="#sbAdvancedOpts" data-bs-toggle="collapse" style="font-size:12px;font-weight:600;text-decoration:none;color:#64748b">
-                  Advanced options ▾
-                </a>
+              <!-- Bot options — visible by default, organized in groups -->
+              <div class="col-12 mt-1">
+                <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#94a3b8;margin-bottom:0.4rem">Bot Behaviour</div>
               </div>
-              <div class="collapse" id="sbAdvancedOpts">
-                <div class="row g-3 mt-0">
-                  <div class="col-6 col-md-3">
-                    <div class="form-check">
-                      <input class="form-check-input" type="checkbox" id="sbRecordVideo">
-                      <label class="form-check-label" for="sbRecordVideo" style="font-size:12.5px;font-weight:600">Record video</label>
-                    </div>
-                  </div>
-                  <div class="col-6 col-md-3">
-                    <div class="form-check">
-                      <input class="form-check-input" type="checkbox" id="sbLiveTranscription">
-                      <label class="form-check-label" for="sbLiveTranscription" style="font-size:12.5px;font-weight:600">Live transcription</label>
-                    </div>
-                  </div>
-                  <div class="col-6 col-md-3">
-                    <div class="form-check">
-                      <input class="form-check-input" type="checkbox" id="sbPiiRedaction">
-                      <label class="form-check-label" for="sbPiiRedaction" style="font-size:12.5px;font-weight:600">PII redaction</label>
-                    </div>
-                  </div>
-                  <div class="col-6 col-md-3">
-                    <label class="form-label" style="font-size:12.5px;font-weight:600">Translation language</label>
-                    <input type="text" class="form-control form-control-sm" id="sbTranslationLang" placeholder="e.g. es, fr, de">
-                  </div>
-                  <div class="col-6 col-md-3">
-                    <div class="form-check">
-                      <input class="form-check-input" type="checkbox" id="sbRespondOnMention" checked>
-                      <label class="form-check-label" for="sbRespondOnMention" style="font-size:12.5px;font-weight:600">Respond when mentioned</label>
-                    </div>
-                  </div>
-                  <div class="col-6 col-md-3">
-                    <label class="form-label" style="font-size:12.5px;font-weight:600">Response mode</label>
-                    <select class="form-select form-select-sm" id="sbMentionResponseMode">
-                      <option value="text">Text (chat)</option>
-                      <option value="voice">Voice (TTS)</option>
-                      <option value="both">Both</option>
-                    </select>
-                  </div>
-                  <div class="col-6 col-md-3">
-                    <label class="form-label" style="font-size:12.5px;font-weight:600">TTS provider</label>
-                    <select class="form-select form-select-sm" id="sbTtsProvider">
-                      <option value="edge">Edge (fast, free)</option>
-                      <option value="gemini">Gemini (natural)</option>
-                    </select>
-                  </div>
-                  <div class="col-6 col-md-3">
-                    <div class="form-check">
-                      <input class="form-check-input" type="checkbox" id="sbConsentEnabled">
-                      <label class="form-check-label" for="sbConsentEnabled" style="font-size:12.5px;font-weight:600">Consent announcement</label>
-                    </div>
-                  </div>
-                  <div class="col-6 col-md-3">
-                    <div class="form-check">
-                      <input class="form-check-input" type="checkbox" id="sbAutoFollowup">
-                      <label class="form-check-label" for="sbAutoFollowup" style="font-size:12.5px;font-weight:600">Auto follow-up email</label>
-                    </div>
-                  </div>
-                  <div class="col-6 col-md-3">
-                    <label class="form-label" style="font-size:12.5px;font-weight:600">Transcription provider</label>
-                    <select class="form-select form-select-sm" id="sbTranscriptionProvider">
-                      <option value="gemini">Gemini (cloud)</option>
-                      <option value="whisper">Whisper (local)</option>
-                    </select>
-                  </div>
-                  <div class="col-6 col-md-3">
-                    <label class="form-label" style="font-size:12.5px;font-weight:600">Analysis mode</label>
-                    <select class="form-select form-select-sm" id="sbAnalysisMode">
-                      <option value="full">Full (AI analysis)</option>
-                      <option value="transcript_only">Transcript only</option>
-                    </select>
-                  </div>
-                  <div class="col-6 col-md-3">
-                    <div class="form-check">
-                      <input class="form-check-input" type="checkbox" id="sbStartMuted">
-                      <label class="form-check-label" for="sbStartMuted" style="font-size:12.5px;font-weight:600">Join muted</label>
-                    </div>
-                  </div>
-                  <div class="col-6 col-md-3">
-                    <label class="form-label" style="font-size:12.5px;font-weight:600">Hourly rate (USD)</label>
-                    <input type="number" class="form-control form-control-sm" id="sbHourlyRate" placeholder="e.g. 85" min="0" step="0.01">
-                  </div>
-                  <div class="col-6 col-md-3">
-                    <label class="form-label" style="font-size:12.5px;font-weight:600">Bot avatar URL</label>
-                    <input type="url" class="form-control form-control-sm" id="sbBotAvatarUrl" placeholder="https://...">
-                  </div>
-                  <div class="col-md-6">
-                    <label class="form-label" style="font-size:12.5px;font-weight:600">Custom analysis prompt</label>
-                    <textarea class="form-control form-control-sm" id="sbPromptOverride" rows="2" maxlength="8000" placeholder="Override the template with a custom prompt…" style="font-size:12px"></textarea>
-                  </div>
-                  <div class="col-md-6">
-                    <label class="form-label" style="font-size:12.5px;font-weight:600">Consent message</label>
-                    <input type="text" class="form-control form-control-sm" id="sbConsentMessage" maxlength="500" placeholder="Custom recording announcement text">
-                  </div>
-                  <div class="col-md-6">
-                    <label class="form-label" style="font-size:12.5px;font-weight:600">Domain vocabulary</label>
-                    <input type="text" class="form-control form-control-sm" id="sbVocabulary" placeholder="term1, term2, term3 (comma-separated)">
-                  </div>
-                  <div class="col-md-6">
-                    <label class="form-label" style="font-size:12.5px;font-weight:600">Keyword alerts</label>
-                    <input type="text" class="form-control form-control-sm" id="sbKeywordAlerts" placeholder="keyword1, keyword2 (comma-separated)">
-                  </div>
+              <div class="col-6 col-md-3">
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" id="sbRespondOnMention" checked>
+                  <label class="form-check-label" for="sbRespondOnMention" style="font-size:12.5px;font-weight:600">Respond when mentioned</label>
                 </div>
+              </div>
+              <div class="col-6 col-md-3">
+                <label class="form-label" style="font-size:12.5px;font-weight:600">Response mode</label>
+                <select class="form-select form-select-sm" id="sbMentionResponseMode">
+                  <option value="text">Text (chat)</option>
+                  <option value="voice">Voice (TTS)</option>
+                  <option value="both">Both</option>
+                </select>
+              </div>
+              <div class="col-6 col-md-3">
+                <label class="form-label" style="font-size:12.5px;font-weight:600">TTS provider</label>
+                <select class="form-select form-select-sm" id="sbTtsProvider">
+                  <option value="edge">Edge (fast, free)</option>
+                  <option value="gemini">Gemini (natural)</option>
+                </select>
+              </div>
+              <div class="col-6 col-md-3">
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" id="sbStartMuted">
+                  <label class="form-check-label" for="sbStartMuted" style="font-size:12.5px;font-weight:600">Join muted</label>
+                </div>
+              </div>
+
+              <div class="col-12 mt-1">
+                <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#94a3b8;margin-bottom:0.4rem">Branding & Identity</div>
+              </div>
+              <div class="col-6 col-md-6">
+                <label class="form-label" style="font-size:12.5px;font-weight:600">Bot avatar URL</label>
+                <input type="url" class="form-control form-control-sm" id="sbBotAvatarUrl" placeholder="https://example.com/avatar.png">
+              </div>
+
+              <div class="col-12 mt-1">
+                <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#94a3b8;margin-bottom:0.4rem">Recording & Transcription</div>
+              </div>
+              <div class="col-6 col-md-3">
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" id="sbRecordVideo">
+                  <label class="form-check-label" for="sbRecordVideo" style="font-size:12.5px;font-weight:600">Record video</label>
+                </div>
+              </div>
+              <div class="col-6 col-md-3">
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" id="sbLiveTranscription">
+                  <label class="form-check-label" for="sbLiveTranscription" style="font-size:12.5px;font-weight:600">Live transcription</label>
+                </div>
+              </div>
+              <div class="col-6 col-md-3">
+                <label class="form-label" style="font-size:12.5px;font-weight:600">Transcription provider</label>
+                <select class="form-select form-select-sm" id="sbTranscriptionProvider">
+                  <option value="gemini">Gemini (cloud)</option>
+                  <option value="whisper">Whisper (local)</option>
+                </select>
+              </div>
+              <div class="col-6 col-md-3">
+                <label class="form-label" style="font-size:12.5px;font-weight:600">Translation language</label>
+                <input type="text" class="form-control form-control-sm" id="sbTranslationLang" placeholder="e.g. es, fr, de">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label" style="font-size:12.5px;font-weight:600">Domain vocabulary</label>
+                <input type="text" class="form-control form-control-sm" id="sbVocabulary" placeholder="term1, term2, term3 (comma-separated)">
+              </div>
+
+              <div class="col-12 mt-1">
+                <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#94a3b8;margin-bottom:0.4rem">Analysis & Output</div>
+              </div>
+              <div class="col-6 col-md-3">
+                <label class="form-label" style="font-size:12.5px;font-weight:600">Analysis mode</label>
+                <select class="form-select form-select-sm" id="sbAnalysisMode">
+                  <option value="full">Full (AI analysis)</option>
+                  <option value="transcript_only">Transcript only</option>
+                </select>
+              </div>
+              <div class="col-6 col-md-3">
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" id="sbAutoFollowup">
+                  <label class="form-check-label" for="sbAutoFollowup" style="font-size:12.5px;font-weight:600">Auto follow-up email</label>
+                </div>
+              </div>
+              <div class="col-6 col-md-3">
+                <label class="form-label" style="font-size:12.5px;font-weight:600">Hourly rate (USD)</label>
+                <input type="number" class="form-control form-control-sm" id="sbHourlyRate" placeholder="e.g. 85" min="0" step="0.01">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label" style="font-size:12.5px;font-weight:600">Custom analysis prompt</label>
+                <textarea class="form-control form-control-sm" id="sbPromptOverride" rows="2" maxlength="8000" placeholder="Override the template with a custom prompt…" style="font-size:12px"></textarea>
+              </div>
+
+              <div class="col-12 mt-1">
+                <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#94a3b8;margin-bottom:0.4rem">Privacy & Compliance</div>
+              </div>
+              <div class="col-6 col-md-3">
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" id="sbPiiRedaction">
+                  <label class="form-check-label" for="sbPiiRedaction" style="font-size:12.5px;font-weight:600">PII redaction</label>
+                </div>
+              </div>
+              <div class="col-6 col-md-3">
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" id="sbConsentEnabled">
+                  <label class="form-check-label" for="sbConsentEnabled" style="font-size:12.5px;font-weight:600">Consent announcement</label>
+                </div>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label" style="font-size:12.5px;font-weight:600">Consent message</label>
+                <input type="text" class="form-control form-control-sm" id="sbConsentMessage" maxlength="500" placeholder="Custom recording announcement text">
+              </div>
+
+              <div class="col-12 mt-1">
+                <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#94a3b8;margin-bottom:0.4rem">Alerts</div>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label" style="font-size:12.5px;font-weight:600">Keyword alerts</label>
+                <input type="text" class="form-control form-control-sm" id="sbKeywordAlerts" placeholder="keyword1, keyword2 (comma-separated)">
               </div>
             </div>
             <div class="d-flex gap-2 mt-3 align-items-center">
