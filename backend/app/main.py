@@ -1028,6 +1028,40 @@ async def admin_openapi_schema():
     )
 
 
+# ── Machine-readable error responses ─────────────────────────────────────────
+# Every error now includes {detail, error_code, retryable} for integrators.
+
+from fastapi.exceptions import HTTPException as _HTTPException
+
+_ERROR_CODE_MAP: dict[int, tuple[str, bool]] = {
+    400: ("bad_request", False),
+    401: ("unauthorized", False),
+    403: ("forbidden", False),
+    404: ("not_found", False),
+    409: ("conflict", False),
+    422: ("validation_error", False),
+    425: ("too_early", True),
+    429: ("rate_limited", True),
+    500: ("internal_error", True),
+    502: ("bad_gateway", True),
+    503: ("service_unavailable", True),
+}
+
+
+@app.exception_handler(_HTTPException)
+async def _http_exception_handler(request, exc: _HTTPException):
+    """Wrap FastAPI HTTPExceptions into a machine-readable structure."""
+    code, retryable = _ERROR_CODE_MAP.get(exc.status_code, ("unknown_error", exc.status_code >= 500))
+    return _JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "detail": exc.detail,
+            "error_code": code,
+            "retryable": retryable,
+        },
+    )
+
+
 @app.exception_handler(Exception)
 async def _unhandled_exception_handler(request, exc):
     """Log full traceback for unhandled exceptions so production errors are diagnosable."""
@@ -1041,7 +1075,11 @@ async def _unhandled_exception_handler(request, exc):
     )
     return _JSONResponse(
         status_code=500,
-        content={"detail": "Internal Server Error"},
+        content={
+            "detail": "Internal Server Error",
+            "error_code": "internal_error",
+            "retryable": True,
+        },
     )
 
 

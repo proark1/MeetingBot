@@ -4,9 +4,17 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.19.0 — **Last updated:** 2026-03-26
+> **Latest version:** 2.20.0 — **Last updated:** 2026-03-28
 
 ---
+
+## [2.20.0] - 2026-03-28
+
+### Added
+- **`POST /api/v1/bot/validate-meeting-url`** — fast-fail pre-flight endpoint that checks URL validity, detects the meeting platform, and reports whether real recording is supported
+- **Machine-readable error responses** — all HTTP error responses now include `error_code` (e.g. `not_found`, `rate_limited`) and `retryable` (boolean) fields alongside `detail`
+- **Webhook payload enrichment** — `bot.error` and `bot.cancelled` webhook events now include `error_code`, `error_message`, and `retryable` fields for programmatic error handling
+- **Meeting URL normalisation** — personalisation query params (`name`, `displayName`, `email`, `avatar`, etc.) are stripped from meeting URLs before passing to the browser, preventing unintended auto-fill behaviour
 
 ## [2.19.0] - 2026-03-26
 

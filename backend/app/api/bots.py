@@ -267,6 +267,79 @@ async def _get_or_404(
 
 # ── POST /api/v1/bot ──────────────────────────────────────────────────────────
 
+class ValidateMeetingUrlRequest(BaseModel):
+    """Request body for pre-flight meeting URL validation."""
+    meeting_url: str = Field(description="The meeting URL to validate.")
+
+
+class ValidateMeetingUrlResponse(BaseModel):
+    """Result of meeting URL validation."""
+    valid: bool = Field(description="Whether the URL is a supported meeting platform.")
+    platform: Optional[str] = Field(default=None, description="Detected platform key (e.g. 'zoom', 'google_meet').")
+    supported: bool = Field(default=False, description="Whether the platform supports real recording (not demo mode).")
+    error_code: Optional[str] = Field(default=None, description="Machine-readable error code if the URL is invalid.")
+    message: Optional[str] = Field(default=None, description="Human-readable explanation.")
+
+
+@router.post("/validate-meeting-url", response_model=ValidateMeetingUrlResponse, tags=["Bots"])
+@_limiter.limit("60/minute")
+async def validate_meeting_url(payload: ValidateMeetingUrlRequest, request: Request):
+    """Pre-flight check for a meeting URL.
+
+    Returns whether the URL targets a supported platform and whether real
+    recording (vs demo mode) is available.  Use this before ``POST /bot``
+    to fast-fail on unsupported or malformed URLs.
+    """
+    from urllib.parse import urlparse
+
+    url = str(payload.meeting_url).strip()
+
+    # Basic structure check
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https") or not parsed.hostname:
+            return ValidateMeetingUrlResponse(
+                valid=False,
+                error_code="invalid_url",
+                message="URL must start with http:// or https:// and include a hostname.",
+            )
+    except Exception:
+        return ValidateMeetingUrlResponse(
+            valid=False,
+            error_code="invalid_url",
+            message="Could not parse the provided URL.",
+        )
+
+    # Private IP / SSRF check (reuse existing validator logic)
+    try:
+        from app.schemas.bot import _reject_private_url
+        _reject_private_url(url)
+    except ValueError as exc:
+        return ValidateMeetingUrlResponse(
+            valid=False,
+            error_code="private_url",
+            message=str(exc),
+        )
+
+    platform = bot_service.detect_platform(url)
+    if platform == "unknown":
+        return ValidateMeetingUrlResponse(
+            valid=False,
+            platform=None,
+            supported=False,
+            error_code="unsupported_platform",
+            message="URL does not match any supported meeting platform.",
+        )
+
+    supported = platform in ("google_meet", "zoom", "microsoft_teams", "onepizza")
+    return ValidateMeetingUrlResponse(
+        valid=True,
+        platform=platform,
+        supported=supported,
+        message=f"Platform '{platform}' detected." + ("" if supported else " Demo mode only — real recording not available."),
+    )
+
+
 @router.post("", response_model=BotResponse, status_code=201)
 @_limiter.limit("20/minute")
 async def create_bot(payload: BotCreate, request: Request):
@@ -368,10 +441,12 @@ async def create_bot(payload: BotCreate, request: Request):
         from app.api.webhooks import _block_ssrf
         await _block_ssrf(payload.webhook_url)
 
+    _normalized_url = bot_service.normalize_meeting_url(str(payload.meeting_url))
+
     bot = BotSession(
         id=str(uuid.uuid4()),
-        meeting_url=str(payload.meeting_url),
-        meeting_platform=bot_service.detect_platform(str(payload.meeting_url)),
+        meeting_url=_normalized_url,
+        meeting_platform=bot_service.detect_platform(_normalized_url),
         bot_name=payload.bot_name,
         status="scheduled" if is_scheduled else "ready",
         webhook_url=payload.webhook_url,

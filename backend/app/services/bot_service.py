@@ -92,6 +92,30 @@ _PLATFORM_NETLOC: dict[str, set[str]] = {
 _REAL_PLATFORMS = {"google_meet", "zoom", "microsoft_teams", "onepizza"}
 
 
+# Query params stripped from meeting URLs before passing to the browser.
+# These are personalization params injected by integrators that can cause
+# unexpected behavior (e.g. auto-filling display-name fields).
+_STRIP_QUERY_PARAMS = {
+    "name", "displayname", "display_name", "email", "username", "user_name",
+    "avatar", "avatar_url", "avatarurl",
+}
+
+
+def normalize_meeting_url(url: str) -> str:
+    """Normalise a meeting URL: unwrap SafeLinks, strip personalisation query params."""
+    from urllib.parse import urlencode, urlunparse
+
+    url = _unwrap_safelinks(url)
+    try:
+        parsed = urlparse(url)
+        qs = parse_qs(parsed.query, keep_blank_values=True)
+        filtered = {k: v for k, v in qs.items() if k.lower() not in _STRIP_QUERY_PARAMS}
+        clean_query = urlencode(filtered, doseq=True) if filtered else ""
+        return urlunparse(parsed._replace(query=clean_query))
+    except Exception:
+        return url
+
+
 def detect_platform(url: str) -> str:
     """Return platform key by matching the parsed netloc."""
     try:
@@ -513,14 +537,38 @@ async def _do_analysis_inner(bot: BotSession, audio_path: str, use_real_bot: boo
             bot.video_path = video_path
 
 
+def _classify_error(error_message: str | None) -> tuple[str, bool]:
+    """Return (error_code, retryable) based on the bot's error_message text."""
+    if not error_message:
+        return ("none", False)
+    msg = error_message.lower()
+    if "timeout" in msg or "timed out" in msg:
+        return ("timeout", True)
+    if "no audio" in msg or "no usable audio" in msg:
+        return ("no_audio_captured", False)
+    if "transcription returned no content" in msg:
+        return ("transcription_empty", True)
+    if "analysis error" in msg:
+        return ("analysis_failed", True)
+    if "browser" in msg or "playwright" in msg or "chromium" in msg:
+        return ("browser_error", True)
+    if "denied" in msg or "blocked" in msg or "removed" in msg:
+        return ("meeting_access_denied", False)
+    return ("unknown_error", True)
+
+
 def _build_done_payload(bot: BotSession) -> dict:
     """Build the full webhook payload delivered to the per-bot webhook_url on completion."""
+    error_code, retryable = _classify_error(bot.error_message) if bot.status == "error" else ("none", False)
     return {
         "bot_id":           bot.id,
         "meeting_url":      bot.meeting_url,
         "meeting_platform": bot.meeting_platform,
         "bot_name":         bot.bot_name,
         "status":           bot.status,
+        "error_code":       error_code if bot.status == "error" else None,
+        "error_message":    bot.error_message if bot.status == "error" else None,
+        "retryable":        retryable if bot.status == "error" else None,
         "participants":     bot.participants,
         "transcript":       bot.transcript,
         "analysis":         bot.analysis,
