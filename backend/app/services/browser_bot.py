@@ -2068,23 +2068,57 @@ async def _scrape_chat_messages(page: Page, platform: str) -> str:
                 }
             """)
         elif platform == "onepizza":
-            # onepizza.io: chat messages are in a panel opened by #chatBtn
-            # The chat list container uses class-based selectors
+            # onepizza.io: chat messages appear in the side panel when #chatBtn is clicked.
+            # The panel structure varies — try multiple strategies to find message content.
             text = await page.evaluate("""
                 () => {
+                    // Strategy 1: Look for known chat message containers
                     const sel = [
                         "#chatMessages",
                         ".chat-messages",
+                        ".chat-message-list",
                         "[class*='chat-message']",
                         "[class*='chatMessage']",
+                        "[class*='message-list']",
                     ];
                     for (const s of sel) {
                         const el = document.querySelector(s);
                         const t = el ? (el.innerText || el.textContent || '').trim() : '';
-                        if (t && t.length > 3) return t;
+                        if (t && t.length > 1) return t;
                     }
-                    // Fallback: if chat panel is open, grab everything in the side panel
-                    const panel = document.querySelector('#sidePanel, .side-panel');
+                    // Strategy 2: Find the side panel and extract messages by looking
+                    // for the area between the panel header and the chat input
+                    const chatInput = document.getElementById('chatInput');
+                    if (chatInput) {
+                        // Walk up to find the panel container, then grab all text
+                        // between the panel start and the input
+                        let panel = chatInput.parentElement;
+                        // Go up a few levels to find the full panel
+                        for (let i = 0; i < 5 && panel; i++) {
+                            if (panel.id === 'sidePanel' || panel.classList.contains('side-panel') ||
+                                panel.querySelector('#closeSidePanel')) {
+                                break;
+                            }
+                            panel = panel.parentElement;
+                        }
+                        if (panel) {
+                            // Get all text nodes/divs in the panel except the input area
+                            const all = panel.querySelectorAll('div, p, span, li');
+                            let msgs = [];
+                            for (const el of all) {
+                                if (el.contains(chatInput)) continue;
+                                if (el.id === 'chatInput' || el.id === 'chatSendBtn' || el.id === 'closeSidePanel') continue;
+                                // Skip tiny containers that are just wrappers
+                                const t = (el.innerText || '').trim();
+                                if (t.length > 1 && el.children.length <= 2) {
+                                    msgs.push(t);
+                                }
+                            }
+                            if (msgs.length > 0) return msgs.join('\\n');
+                        }
+                    }
+                    // Strategy 3: Broad fallback — any visible panel with text
+                    const panel = document.querySelector('#sidePanel, .side-panel, [class*="side-panel"]');
                     if (panel && panel.offsetParent !== null) {
                         const t = (panel.innerText || '').trim();
                         if (t.length > 3) return t;
@@ -3102,6 +3136,13 @@ async def _mention_monitor(
         else:
             _empty_streak = 0
 
+            # Filter out platform error text that isn't real captions
+            _error_patterns = ("captions error", "caption error", "error: network", "no captions available")
+            if any(ep in raw.lower() for ep in _error_patterns):
+                if _poll_count <= 5 or _poll_count % 60 == 0:
+                    logger.info("Caption sample (poll %d): %r (filtered as error)", _poll_count, raw[:200])
+                raw = ""
+
             # Diff captions: only the text that appeared since the last poll
             overlap = min(len(seen_captions), 100)
             if seen_captions and raw.startswith(seen_captions[:overlap]):
@@ -3160,6 +3201,10 @@ async def _mention_monitor(
             except Exception as exc:
                 logger.debug("Chat scrape error: %s", exc)
                 chat_raw = ""
+
+            # Log chat scraping for first few polls to aid debugging
+            if _poll_count <= 10 and _poll_count % 2 == 0:
+                logger.info("Chat scrape (poll %d): %r", _poll_count, (chat_raw or "")[:200])
 
             if chat_raw and chat_raw != seen_chat:
                 if not seen_chat:

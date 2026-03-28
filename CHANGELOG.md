@@ -4,7 +4,16 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.25.0 — **Last updated:** 2026-03-28
+> **Latest version:** 2.25.1 — **Last updated:** 2026-03-28
+
+---
+
+## [2.25.1] - 2026-03-28
+
+### Fixed
+- **onepizza.io chat scraping** — Rewrote `_scrape_chat_messages` for onepizza with 3-tier fallback: known containers, DOM traversal from `#chatInput` up to the panel to extract message text, and broad side-panel fallback
+- **Caption error filtering** — Captions returning platform error text like "Captions error: network" are now filtered out instead of being treated as real speech, preventing the mention monitor from processing error messages
+- **Chat debug logging** — Added INFO-level chat scrape logs for first few polls to diagnose empty chat reads
 
 ---
 
