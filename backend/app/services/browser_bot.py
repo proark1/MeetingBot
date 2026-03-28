@@ -1085,10 +1085,15 @@ async def _join_onepizza(page: Page, url: str, bot_name: str, start_muted: bool 
     except Exception as e:
         logger.debug("onepizza: DOM probe failed: %s", e)
 
-    # Check what state we're in — try specific IDs first, then broader selectors
+    # Check what state we're in — try specific IDs first, then broader selectors.
+    # When ?name= auto-join works, #meetingRoom container may exist but not pass
+    # Playwright's visibility check (zero-size wrapper), while toolbar buttons
+    # like #leaveBtn and #micBtn ARE visible.  Include those as meeting-room
+    # indicators so we don't false-fail when already in the meeting.
     tag = None
     selectors = [
         "#meetingRoom, #lobbyJoinBtn, #waitingRoomOverlay",  # known IDs
+        "#leaveBtn, #micBtn, #camBtn",  # meeting toolbar — visible when in call
         "[id*='meeting'], [id*='Meeting'], [id*='room'], [id*='Room']",  # partial ID matches
         "button, [role='button']",  # any button at all
     ]
@@ -1105,6 +1110,25 @@ async def _join_onepizza(page: Page, url: str, bot_name: str, start_muted: bool 
                 continue
         if tag is not None:
             break
+        # Fallback: check if we're already in the meeting via JS (handles cases
+        # where #meetingRoom exists in DOM but Playwright doesn't see it as visible)
+        try:
+            in_meeting = await page.evaluate('''() => {
+                const mr = document.getElementById("meetingRoom");
+                const lb = document.getElementById("lobby");
+                const leave = document.getElementById("leaveBtn");
+                // In meeting if meetingRoom exists and lobby is hidden, or leave button exists
+                if (leave && leave.offsetParent !== null) return "leaveBtn";
+                if (mr && lb && (lb.style.display === "none" || !lb.offsetParent)) return "meetingRoom";
+                if (mr && !lb) return "meetingRoom";
+                return null;
+            }''')
+            if in_meeting:
+                tag = in_meeting
+                logger.info("onepizza: detected in-meeting state via JS fallback (id=%s)", tag)
+                break
+        except Exception:
+            pass
         if attempt < 3:
             logger.info("onepizza: no UI element found yet, retrying (attempt %d)", attempt + 1)
             await asyncio.sleep(5)
@@ -1114,7 +1138,9 @@ async def _join_onepizza(page: Page, url: str, bot_name: str, start_muted: bool 
 
     # Determine state from detected element
     tag_lower = (tag or "").lower()
-    is_in_meeting = "meeting" in tag_lower or "room" in tag_lower
+    # Toolbar buttons (#leaveBtn, #micBtn, #camBtn) mean we're already in the meeting
+    _meeting_toolbar_ids = {"leavebtn", "micbtn", "cambtn"}
+    is_in_meeting = "meeting" in tag_lower or "room" in tag_lower or tag_lower in _meeting_toolbar_ids
     is_waiting = "waiting" in tag_lower
     is_lobby = "lobby" in tag_lower or "join" in tag_lower
 
@@ -1344,10 +1370,14 @@ async def _wait_for_admission(
                         await on_admitted()
                     return True
             elif platform == "onepizza":
-                # #meetingRoom visible + #lobby hidden = definitively in the meeting
+                # #meetingRoom visible + #lobby hidden = definitively in the meeting.
+                # Also check toolbar buttons (#leaveBtn, #micBtn) as fallback —
+                # #meetingRoom container may not pass Playwright's visibility check
+                # even when the bot is in the call.
                 meeting_visible = await page.locator("#meetingRoom").is_visible()
                 lobby_visible = await page.locator("#lobby").is_visible()
-                if meeting_visible and not lobby_visible:
+                leave_visible = await page.locator("#leaveBtn").is_visible()
+                if (meeting_visible or leave_visible) and not lobby_visible:
                     logger.info("Bot admitted to onepizza meeting")
                     if on_admitted:
                         await on_admitted()

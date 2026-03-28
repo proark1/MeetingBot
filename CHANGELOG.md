@@ -4,7 +4,14 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.22.1 — **Last updated:** 2026-03-28
+> **Latest version:** 2.22.2 — **Last updated:** 2026-03-28
+
+---
+
+## [2.22.2] - 2026-03-28
+
+### Fixed
+- **onepizza.io bot join loop** — When `?name=` auto-join worked, the bot was already in the meeting (toolbar buttons visible, participant count showing) but `_join_onepizza` couldn't detect it because `#meetingRoom` container failed Playwright's visibility check. Added `#leaveBtn`, `#micBtn`, `#camBtn` toolbar selectors and a JS fallback that checks DOM state directly. Also fixed the same issue in `_wait_for_admission` for onepizza where `#meetingRoom.is_visible()` returned False despite the bot being in the call
 
 ---
 
