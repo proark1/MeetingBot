@@ -371,8 +371,8 @@ async def notify_meeting_error(account_email: str, notify_email: Optional[str], 
 <body style="font-family:sans-serif;color:#1a1a1a;padding:20px;">
 <div style="max-width:600px;margin:0 auto;background:white;border-radius:8px;padding:24px;">
   <h2>⚠️ Meeting bot error</h2>
-  <p>Your meeting bot (<code>{bot_id}</code>) encountered an error:</p>
-  <pre style="background:#f5f5f5;padding:12px;border-radius:4px;font-size:13px;white-space:pre-wrap;">{error[:500]}</pre>
+  <p>Your meeting bot (<code>{_he(bot_id)}</code>) encountered an error:</p>
+  <pre style="background:#f5f5f5;padding:12px;border-radius:4px;font-size:13px;white-space:pre-wrap;">{_he(error[:500])}</pre>
   <p>Any recorded audio has been salvaged if possible. Please check your bot status.</p>
 </div>
 </body>

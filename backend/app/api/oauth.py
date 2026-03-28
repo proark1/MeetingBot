@@ -115,12 +115,12 @@ async def callback(
     if not code:
         raise HTTPException(status_code=400, detail="Missing authorization code")
 
-    # Verify CSRF state
-    extra = None
-    if state:
-        extra = verify_state(state)
-        if extra is None:
-            raise HTTPException(status_code=400, detail="Invalid or expired OAuth state token")
+    # Verify CSRF state — always required (generated on authorize redirect)
+    if not state:
+        raise HTTPException(status_code=400, detail="Missing OAuth state parameter")
+    extra = verify_state(state)
+    if extra is None:
+        raise HTTPException(status_code=400, detail="Invalid or expired OAuth state token")
 
     # Exchange code for tokens
     try:

@@ -4,9 +4,16 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.20.3 — **Last updated:** 2026-03-28
+> **Latest version:** 2.20.4 — **Last updated:** 2026-03-28
 
 ---
+
+## [2.20.4] - 2026-03-28
+
+### Fixed
+- **HTML injection in error notification email** — `bot_id` and `error` were injected raw into HTML in `notify_meeting_error`. Now escaped with `html.escape()` to prevent XSS via crafted error messages
+- **OAuth callback CSRF bypass** — the `state` parameter was only validated if present, allowing attackers to omit it entirely and bypass CSRF protection. Now required on all OAuth callbacks
+- **Integration update skips config validation** — `PATCH /integrations/{id}` validated the type but not the config, allowing type changes without required fields (e.g. Slack without `webhook_url`). Extracted validation into a shared helper used by both create and update
 
 ## [2.20.3] - 2026-03-28
 

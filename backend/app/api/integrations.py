@@ -107,6 +107,17 @@ async def list_integrations(
     return [_to_response(i) for i in result.scalars().all()]
 
 
+def _validate_integration_config(type_: str, config: dict) -> None:
+    """Validate config requirements for a given integration type."""
+    if type_ == "slack" and not config.get("webhook_url"):
+        raise HTTPException(status_code=422, detail="Slack integration requires config.webhook_url")
+    if type_ == "notion":
+        if not config.get("api_token"):
+            raise HTTPException(status_code=422, detail="Notion integration requires config.api_token")
+        if not config.get("database_id"):
+            raise HTTPException(status_code=422, detail="Notion integration requires config.database_id")
+
+
 @router.post("", response_model=IntegrationResponse, status_code=201)
 async def create_integration(
     payload: IntegrationCreate,
@@ -123,14 +134,7 @@ async def create_integration(
             detail=f"Unsupported integration type '{payload.type}'. Allowed: {sorted(_ALLOWED_TYPES)}",
         )
 
-    # Basic config validation
-    if payload.type == "slack" and not payload.config.get("webhook_url"):
-        raise HTTPException(status_code=422, detail="Slack integration requires config.webhook_url")
-    if payload.type == "notion":
-        if not payload.config.get("api_token"):
-            raise HTTPException(status_code=422, detail="Notion integration requires config.api_token")
-        if not payload.config.get("database_id"):
-            raise HTTPException(status_code=422, detail="Notion integration requires config.database_id")
+    _validate_integration_config(payload.type, payload.config)
 
     integration = Integration(
         id=str(uuid.uuid4()),
@@ -171,6 +175,8 @@ async def update_integration(
 
     if payload.type not in _ALLOWED_TYPES:
         raise HTTPException(status_code=422, detail=f"Unsupported integration type '{payload.type}'")
+
+    _validate_integration_config(payload.type, payload.config)
 
     integration.type = payload.type
     integration.name = payload.name or integration.name
