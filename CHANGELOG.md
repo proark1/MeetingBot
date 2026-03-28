@@ -4,9 +4,15 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.20.5 — **Last updated:** 2026-03-28
+> **Latest version:** 2.20.6 — **Last updated:** 2026-03-28
 
 ---
+
+## [2.20.6] - 2026-03-28
+
+### Fixed
+- **Webhook `/deliveries` endpoint unreachable** — `GET /api/v1/webhook/deliveries` was defined after `GET /api/v1/webhook/{webhook_id}`, so FastAPI matched "deliveries" as a webhook ID and returned 404. Moved the literal route before the parameterized one
+- **Semantic search unreachable** — duplicate `GET /search` handler in analytics meant the second handler (with `semantic` embedding search) was shadowed by the first. Merged both into a single handler supporting `q`, `limit`, `include_archived`, `platform`, and `semantic` parameters
 
 ## [2.20.5] - 2026-03-28
 

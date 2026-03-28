@@ -315,12 +315,24 @@ async def search_transcripts(
         ),
     ),
     platform: str = Query(None, description="Filter results by meeting platform (zoom, google_meet, microsoft_teams)."),
+    semantic: bool = Query(
+        False,
+        description=(
+            "When true, embed the query and rank meetings by cosine similarity "
+            "against stored summary embeddings. Falls back to substring search if "
+            "no embeddings are available."
+        ),
+    ),
     request: Request = None,
 ):
     """Cross-meeting full-text search across transcripts.
 
     Searches both the in-memory 24-hour window AND persisted bot snapshots in the
     database when `include_archived=true` (the default).
+
+    With `semantic=false` (default): fast substring search across all transcripts.
+    With `semantic=true`: embed the query and rank meetings by cosine similarity
+    against stored `summary_embedding` vectors (falls back to substring if no embeddings).
 
     Returns up to `limit` transcript snippets whose text contains the query
     string (case-insensitive), each annotated with its source bot context.
@@ -330,6 +342,44 @@ async def search_transcripts(
     filter_account = account_id if (account_id and account_id != SUPERADMIN_ACCOUNT_ID) else None
     all_bots, _ = await store.list_bots(limit=10000, account_id=filter_account)
 
+    # ── Semantic (embedding) search ──────────────────────────────────────────
+    if semantic:
+        from app.services.intelligence_service import embed_text
+        import math
+
+        query_embedding = await embed_text(q)
+        if query_embedding:
+            def _cosine(a: list, b: list) -> float:
+                dot = sum(x * y for x, y in zip(a, b))
+                mag_a = math.sqrt(sum(x * x for x in a))
+                mag_b = math.sqrt(sum(x * x for x in b))
+                return dot / (mag_a * mag_b) if mag_a and mag_b else 0.0
+
+            scored = []
+            for bot in all_bots:
+                if platform and bot.meeting_platform != platform:
+                    continue
+                if getattr(bot, "summary_embedding", None):
+                    score = _cosine(query_embedding, bot.summary_embedding)
+                    if score >= 0.6:
+                        scored.append((score, bot))
+
+            scored.sort(key=lambda x: x[0], reverse=True)
+            results = [
+                {
+                    "bot_id": bot.id,
+                    "meeting_url": bot.meeting_url,
+                    "meeting_platform": bot.meeting_platform,
+                    "score": round(score, 3),
+                    "summary": (bot.analysis or {}).get("summary", ""),
+                    "created_at": bot.created_at.isoformat() if bot.created_at else None,
+                }
+                for score, bot in scored[:limit]
+            ]
+            return {"query": q, "semantic": True, "total": len(results), "results": results}
+        # Fall back to substring search if embedding unavailable
+
+    # ── Substring search ─────────────────────────────────────────────────────
     q_lower = q.lower()
     matches: list[dict] = []
     seen_bot_ids: set[str] = set()
@@ -408,6 +458,7 @@ async def search_transcripts(
 
     return {
         "query": q,
+        "semantic": False,
         "total": len(matches),
         "include_archived": include_archived,
         "results": matches,
@@ -570,84 +621,6 @@ async def get_my_analytics(request: Request):
         "sentiment_trend": list(reversed(sentiment_by_week)),  # oldest first
         "cost_by_platform": cost_by_platform,
     }
-
-
-# ── GET /api/v1/search — unified text + semantic search ─────────────────────
-
-@router.get("/search", tags=["Analytics"])
-async def search_meetings(
-    request: Request,
-    q: str = Query(..., description="Search query text"),
-    semantic: bool = Query(default=False, description="Use semantic (embedding) search instead of substring match"),
-    limit: int = Query(default=20, ge=1, le=50),
-):
-    """Search meeting transcripts and analysis.
-
-    With `semantic=false` (default): fast substring search across all transcripts.
-    With `semantic=true`: embed the query and rank meetings by cosine similarity
-    against stored `summary_embedding` vectors (falls back to substring if no embeddings).
-    """
-    account_id = getattr(request.state, "account_id", None)
-    filter_account = account_id if (account_id and account_id != SUPERADMIN_ACCOUNT_ID) else None
-
-    all_bots, _ = await store.list_bots(limit=10000, account_id=filter_account)
-
-    if semantic:
-        from app.services.intelligence_service import embed_text
-        query_embedding = await embed_text(q)
-        if query_embedding:
-            # Cosine similarity search
-            import math
-            def _cosine(a: list, b: list) -> float:
-                dot = sum(x * y for x, y in zip(a, b))
-                mag_a = math.sqrt(sum(x * x for x in a))
-                mag_b = math.sqrt(sum(x * x for x in b))
-                return dot / (mag_a * mag_b) if mag_a and mag_b else 0.0
-
-            scored = []
-            for bot in all_bots:
-                if bot.summary_embedding:
-                    score = _cosine(query_embedding, bot.summary_embedding)
-                    if score >= 0.6:
-                        scored.append((score, bot))
-
-            scored.sort(key=lambda x: x[0], reverse=True)
-            results = [
-                {
-                    "bot_id": bot.id,
-                    "meeting_url": bot.meeting_url,
-                    "platform": bot.meeting_platform,
-                    "score": round(score, 3),
-                    "summary": (bot.analysis or {}).get("summary", ""),
-                    "created_at": bot.created_at.isoformat() if bot.created_at else None,
-                }
-                for score, bot in scored[:limit]
-            ]
-            return {"query": q, "semantic": True, "total": len(results), "results": results}
-        # Fall back to substring if no embeddings available
-
-    # Substring search across transcripts
-    q_lower = q.lower()
-    matches = []
-    for bot in all_bots:
-        for entry in bot.transcript:
-            text = entry.get("text", "") or ""
-            if q_lower in text.lower():
-                matches.append({
-                    "bot_id": bot.id,
-                    "meeting_url": bot.meeting_url,
-                    "platform": bot.meeting_platform,
-                    "speaker": entry.get("speaker"),
-                    "text": text,
-                    "timestamp": entry.get("timestamp"),
-                    "created_at": bot.created_at.isoformat() if bot.created_at else None,
-                })
-                if len(matches) >= limit:
-                    break
-        if len(matches) >= limit:
-            break
-
-    return {"query": q, "semantic": False, "total": len(matches), "results": matches}
 
 
 # ── Usage breakdown ────────────────────────────────────────────────────────────

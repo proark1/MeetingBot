@@ -168,52 +168,6 @@ async def list_webhook_events():
     return {"events": WEBHOOK_EVENTS}
 
 
-@router.get("/{webhook_id}", response_model=WebhookResponse)
-async def get_webhook(webhook_id: str):
-    wh = await store.get_webhook(webhook_id)
-    if wh is None:
-        raise HTTPException(status_code=404, detail=f"Webhook {webhook_id!r} not found")
-    return _to_response(wh)
-
-
-@router.delete("/{webhook_id}", status_code=204)
-async def delete_webhook(webhook_id: str):
-    if not await store.delete_webhook(webhook_id):
-        raise HTTPException(status_code=404, detail=f"Webhook {webhook_id!r} not found")
-
-    import asyncio as _asyncio
-    from app.services.audit_log_service import log_event as _audit
-    _asyncio.create_task(_audit(
-        account_id=None,
-        action="webhook.deleted",
-        resource_type="webhook",
-        resource_id=webhook_id,
-    ))
-
-
-@router.post("/{webhook_id}/test")
-@_limiter.limit("5/minute")
-async def test_webhook(webhook_id: str, request: _Request):
-    """Send a test event to this webhook endpoint."""
-    wh = await store.get_webhook(webhook_id)
-    if wh is None:
-        raise HTTPException(status_code=404, detail=f"Webhook {webhook_id!r} not found")
-    await _block_ssrf(wh.url)
-
-    from app.services.webhook_service import _attempt_delivery, _build_body, _sign
-    body = _build_body("bot.test", {"message": "Test delivery from JustHereToListen.io"})
-    headers = {"Content-Type": "application/json", "User-Agent": "JustHereToListen.io/1.0"}
-    if wh.secret:
-        sig, ts = _sign(body, wh.secret)
-        headers["X-MeetingBot-Signature"] = sig
-        headers["X-MeetingBot-Timestamp"] = ts
-
-    status_code, _ = await _attempt_delivery(wh.url, body, headers)
-    if status_code is None:
-        raise HTTPException(status_code=502, detail="Test delivery failed — endpoint unreachable or returned 5xx")
-    return {"status_code": status_code, "url": wh.url}
-
-
 # ── Delivery log ───────────────────────────────────────────────────────────────
 
 from fastapi import Request as _Request
@@ -280,6 +234,52 @@ async def list_all_deliveries(
         )
         for r in rows
     ]
+
+
+@router.get("/{webhook_id}", response_model=WebhookResponse)
+async def get_webhook(webhook_id: str):
+    wh = await store.get_webhook(webhook_id)
+    if wh is None:
+        raise HTTPException(status_code=404, detail=f"Webhook {webhook_id!r} not found")
+    return _to_response(wh)
+
+
+@router.delete("/{webhook_id}", status_code=204)
+async def delete_webhook(webhook_id: str):
+    if not await store.delete_webhook(webhook_id):
+        raise HTTPException(status_code=404, detail=f"Webhook {webhook_id!r} not found")
+
+    import asyncio as _asyncio
+    from app.services.audit_log_service import log_event as _audit
+    _asyncio.create_task(_audit(
+        account_id=None,
+        action="webhook.deleted",
+        resource_type="webhook",
+        resource_id=webhook_id,
+    ))
+
+
+@router.post("/{webhook_id}/test")
+@_limiter.limit("5/minute")
+async def test_webhook(webhook_id: str, request: _Request):
+    """Send a test event to this webhook endpoint."""
+    wh = await store.get_webhook(webhook_id)
+    if wh is None:
+        raise HTTPException(status_code=404, detail=f"Webhook {webhook_id!r} not found")
+    await _block_ssrf(wh.url)
+
+    from app.services.webhook_service import _attempt_delivery, _build_body, _sign
+    body = _build_body("bot.test", {"message": "Test delivery from JustHereToListen.io"})
+    headers = {"Content-Type": "application/json", "User-Agent": "JustHereToListen.io/1.0"}
+    if wh.secret:
+        sig, ts = _sign(body, wh.secret)
+        headers["X-MeetingBot-Signature"] = sig
+        headers["X-MeetingBot-Timestamp"] = ts
+
+    status_code, _ = await _attempt_delivery(wh.url, body, headers)
+    if status_code is None:
+        raise HTTPException(status_code=502, detail="Test delivery failed — endpoint unreachable or returned 5xx")
+    return {"status_code": status_code, "url": wh.url}
 
 
 @router.get("/{webhook_id}/deliveries", response_model=list[DeliveryResponse])
