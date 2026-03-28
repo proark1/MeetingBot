@@ -11,7 +11,28 @@ Send bots into **Zoom**, **Google Meet**, **Microsoft Teams**, and **onepizza.io
 
 ---
 
-## Recent changes (2026-03-26)
+## Recent changes (2026-03-28)
+
+### Integration improvements (v2.20.x)
+- **`POST /api/v1/bot/validate-meeting-url`** — Pre-flight endpoint to check URL validity, detect platform, and report whether real recording is supported. Use before `POST /bot` to fast-fail on unsupported URLs.
+- **Machine-readable error responses** — All HTTP errors now include `error_code` and `retryable` fields alongside `detail`, making programmatic error handling easier.
+- **Webhook payload enrichment** — `bot.error` events now include `error_code`, `error_message`, and `retryable` for automated retry decisions.
+- **Meeting URL normalisation** — Personalisation query params (`name`, `displayName`, `email`) are stripped from meeting URLs before joining.
+- **Semantic search** — `GET /api/v1/search?semantic=true` uses embedding cosine similarity to rank meetings by relevance.
+
+### UI/UX (v2.21.x)
+- **Dark mode** — System-wide dark theme on all pages. Respects OS `prefers-color-scheme`, persists in localStorage, toggle in navbar.
+- **Mobile responsive** — Dashboard sidebar collapses to bottom nav, login/register stacks vertically, navbar scales on small screens, KPI cards reflow to single column on phones.
+- **Visual polish** — Page fade-in animations, card hover lift, pulse on in-progress statuses, loading skeleton CSS, focus-visible keyboard outlines.
+- **UX flows** — Password visibility toggle, loading spinner on form submit, reusable confirmation dialog, animated progress bar for in-progress bots.
+
+### Security hardening (v2.20.x–2.21.x)
+- 20 bugs fixed: OAuth CSRF bypass, double credit deduction, HTML injection in emails, `asyncio.shield` preventing bot cancellation, webhook race conditions, AI cost tracking, credit addition race condition, OAuth URL encoding, and more.
+- Rate limits on AI endpoints (`/analyze`, `/ask`, `/ask-live`, `/followup-email`).
+- Bounded `vocabulary` (max 100) and `keyword_alerts` (max 50) arrays to prevent DoS.
+- See [CHANGELOG.md](CHANGELOG.md) for the complete list.
+
+### Previous (2026-03-26)
 
 ### Dashboard — Send bots directly from the UI
 - **Send Bot Now** — Primary CTA button on the dashboard. Enter a meeting URL and the bot joins immediately. Toggle "Schedule for later" to pick a future date/time.
@@ -389,6 +410,9 @@ Full payload posted to `webhook_url` when a bot finishes.
   "data": {
     "bot_id": "550e8400-...",
     "status": "done",
+    "error_code": null,
+    "error_message": null,
+    "retryable": null,
     "participants": ["Alice", "Bob", "Carol"],
     "duration_seconds": 3612,
     "transcript": [
@@ -552,6 +576,7 @@ The background poll loop checks all active feeds every `CALENDAR_POLL_INTERVAL_S
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
+| `POST` | `/api/v1/bot/validate-meeting-url` | Pre-flight URL check. Body: `{meeting_url}`. Returns `{valid, platform, supported, error_code?, message}`. Rate limit: 60/min per IP |
 | `POST` | `/api/v1/bot` | Create a bot & join a meeting. Returns Bot response object (HTTP 201). Rate limit: 20/min per IP. Requires minimum `MIN_CREDITS_USD` balance (HTTP 402 if insufficient) |
 | `GET` | `/api/v1/bot` | List bots (lightweight summaries, no transcript/analysis). Query params: `limit` (1–100, default 20), `offset` (default 0), `status` (filter by status string). Returns Bot list response |
 | `GET` | `/api/v1/bot/stats` | Aggregate counts: `{total, active, done, error, by_status}`. `active` includes: ready/scheduled/queued/joining/in_call/call_ended |
@@ -561,8 +586,10 @@ The background poll loop checks all active feeds every `CALENDAR_POLL_INTERVAL_S
 | `GET` | `/api/v1/bot/{id}/recording` | Download WAV audio. HTTP 404 if recording not available |
 | `GET` | `/api/v1/bot/{id}/highlight` | Curated highlights derived from AI analysis. Returns `{bot_id, highlights: [{type, text, detail}]}` where `type` is one of `key_point`, `action_item`, or `decision`. HTTP 425 if analysis not yet available |
 | `POST` | `/api/v1/bot/{id}/analyze` | (Re-)run AI analysis. Body: `{template?, prompt_override?}`. Blocks up to 25 s waiting for transcript. Returns Analysis object. Use to switch templates or apply a custom prompt on an existing transcript |
-| `POST` | `/api/v1/bot/{id}/ask` | Q&A on the transcript. Body: `{question}`. Returns `{bot_id, question, answer}`. HTTP 425 if no transcript yet |
-| `POST` | `/api/v1/bot/{id}/followup-email` | Draft follow-up email. Returns `{bot_id, subject, body}`. HTTP 425 if no transcript or analysis yet |
+| `POST` | `/api/v1/bot/{id}/ask` | Q&A on the transcript. Body: `{question}`. Returns `{bot_id, question, answer}`. Rate limit: 10/min. HTTP 425 if no transcript yet |
+| `POST` | `/api/v1/bot/{id}/ask-live` | Q&A on a bot currently in a call (uses live buffer). Body: `{question}`. Rate limit: 10/min |
+| `POST` | `/api/v1/bot/{id}/share` | Generate a shareable public link. Returns `{share_url, bot_id}`. Only works for `done` bots |
+| `POST` | `/api/v1/bot/{id}/followup-email` | Draft follow-up email. Returns `{bot_id, subject, body}`. Rate limit: 5/min. HTTP 425 if no transcript or analysis yet |
 | `GET` | `/api/v1/bot/{id}/export/markdown` | Export full report as Markdown file |
 | `GET` | `/api/v1/bot/{id}/export/pdf` | Export full report as PDF file |
 | `GET` | `/api/v1/bot/{id}/export/json` | Export full session as structured JSON (transcript, analysis, chapters, speaker stats, metadata) |
@@ -570,16 +597,17 @@ The background poll loop checks all active feeds every `CALENDAR_POLL_INTERVAL_S
 | `POST` | `/api/v1/webhook` | Register global webhook. Body: `{url, events, secret?}` |
 | `GET` | `/api/v1/webhook` | List all registered webhooks |
 | `DELETE` | `/api/v1/webhook/{id}` | Remove webhook. HTTP 204 |
-| `POST` | `/api/v1/webhook/{id}/test` | Test webhook delivery — sends a sample `bot.done` payload |
+| `POST` | `/api/v1/webhook/{id}/test` | Test webhook delivery — sends a sample `bot.test` event. Signed with HMAC if secret set |
+| `GET` | `/api/v1/webhook/deliveries` | List recent delivery attempts across all webhooks. Query params: `limit` (default 50), `offset` (default 0) |
 | `GET` | `/api/v1/templates` | List analysis templates with names and descriptions |
 | `GET` | `/api/v1/templates/default-prompt` | Return the raw default analysis prompt used when no `template` or `prompt_override` is set |
 | `GET` | `/api/v1/analytics` | Aggregate stats for all bots in memory. Returns `{total_bots, active_bots, by_status, by_platform, success_rate, avg_duration_seconds, total_transcript_entries, total_ai_tokens, total_ai_cost_usd}` |
 | `GET` | `/api/v1/action-items/stats` | Cross-meeting action-item counts. Returns `{total, by_assignee, recent}` where `recent` contains up to 20 most recent action items with `bot_id` and `meeting_url` |
-| `GET` | `/api/v1/search` | Full-text search across all transcripts (DB-persisted + in-memory). Query params: `q` (required), `platform?`, `include_archived?`. Returns matching transcript snippets with bot context |
+| `GET` | `/api/v1/search` | Full-text search across all transcripts (DB-persisted + in-memory). Query params: `q` (required), `platform?`, `include_archived?`, `semantic?` (boolean — uses embedding similarity when true). Returns matching transcript snippets with bot context |
 | `GET` | `/api/v1/bot/{id}/brief` | Pre-meeting brief: AI-generated agenda and background for an upcoming meeting. HTTP 425 if no transcript yet |
 | `GET` | `/api/v1/bot/{id}/recurring` | Recurring meeting intelligence: links to previous meetings at the same URL and surfaces recurring action items |
 | `GET` | `/api/v1/bot/{id}/video` | Download screen recording as MP4. HTTP 404 if not available. Enable per-bot with `record_video: true` |
-| `GET` | `/api/v1/health` or `/health` | Health check → `{"status": "ok", "service": "MeetingBot", "version": "2.19.0"}` |
+| `GET` | `/api/v1/health` or `/health` | Health check → `{"status": "ok", "service": "JustHereToListen.io", "version": "<current>"}` |
 
 ### Admin (requires admin account)
 
@@ -661,7 +689,7 @@ Full set of fields accepted by `POST /api/v1/bot`:
   "analysis_mode": "full",                         // "full" | "transcript_only"
   "template": "default",                           // see Templates below
   "prompt_override": "Custom AI prompt...",        // overrides template (max 8000 chars)
-  "vocabulary": ["ProductName", "TechTerm"],       // transcription accuracy hints
+  "vocabulary": ["ProductName", "TechTerm"],       // transcription accuracy hints (max 100 terms)
   "respond_on_mention": true,                      // bot replies when name is mentioned
   "mention_response_mode": "text",                 // "text" | "voice" | "both"
   "tts_provider": "edge",                          // "edge" (fast, free) | "gemini" (natural)
@@ -674,7 +702,7 @@ Full set of fields accepted by `POST /api/v1/bot`:
   "workspace_id": "ws-uuid",                       // tag this bot to a workspace (visible to all members)
   "transcription_provider": "gemini",              // "gemini" | "anthropic" | "whisper" (local)
   "auto_followup_email": false,                    // auto-generate & send follow-up email on completion
-  "keyword_alerts": [                              // per-bot keyword monitoring
+  "keyword_alerts": [                              // per-bot keyword monitoring (max 50)
     { "keyword": "budget", "webhook_url": "https://your-app.com/alert" }
   ]
 }
@@ -716,13 +744,19 @@ Pass `template` in bot creation. Use `prompt_override` for a fully custom prompt
 | `409 Conflict` | Email already registered, or wallet already linked to another account |
 | `422 Unprocessable Entity` | Validation error (invalid meeting URL, bad wallet address format, etc.) |
 | `425 Too Early` | Transcript or analysis not yet available — retry after the `Retry-After` header value (seconds) |
-| `429 Too Many Requests` | Rate limit exceeded. Limits: register 3/min, login 5/min, create bot 20/min, admin write endpoints 10/min (5/min for rescan) |
+| `429 Too Many Requests` | Rate limit exceeded. Limits: register 3/min, login 5/min, create bot 20/min, validate URL 60/min, analyze/ask/ask-live 10/min, followup-email 5/min, admin write endpoints 10/min (5/min for rescan) |
 | `503 Service Unavailable` | Database unreachable or service misconfigured |
 
 **Error response body:**
 ```json
-{ "detail": "Human-readable error message" }
+{
+  "detail": "Human-readable error message",
+  "error_code": "not_found",
+  "retryable": false
+}
 ```
+
+Machine-readable `error_code` values: `bad_request`, `unauthorized`, `forbidden`, `not_found`, `conflict`, `validation_error`, `too_early`, `rate_limited`, `internal_error`, `bad_gateway`, `service_unavailable`. The `retryable` flag indicates whether the client should retry the request (typically `true` for 425, 429, 5xx; `false` for 4xx).
 
 ---
 
@@ -1097,6 +1131,8 @@ curl -X POST http://localhost:8000/api/v1/webhook \
 Verify by recomputing the HMAC over `f"{X-MeetingBot-Timestamp}.{raw_body}"` with your secret. Reject deliveries where `abs(time.time() - int(X-MeetingBot-Timestamp)) > 300` to prevent replay attacks.
 
 After **5 consecutive delivery failures** the webhook is automatically disabled. Re-enable it by deleting and re-registering.
+
+**Error event fields:** When `event` is `bot.error`, the `data` object includes `error_code` (e.g. `timeout`, `no_audio_captured`, `browser_error`, `meeting_access_denied`), `error_message` (human-readable), and `retryable` (boolean). These are `null` for non-error events.
 
 ### WebSocket
 
