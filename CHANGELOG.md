@@ -16,6 +16,11 @@ Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 - **Webhook payload enrichment** — `bot.error` and `bot.cancelled` webhook events now include `error_code`, `error_message`, and `retryable` fields for programmatic error handling
 - **Meeting URL normalisation** — personalisation query params (`name`, `displayName`, `email`, `avatar`, etc.) are stripped from meeting URLs before passing to the browser, preventing unintended auto-fill behaviour
 
+### Fixed
+- **Bot stuck in "ready" — never joins** — direct (non-scheduled) bot creation was missing the `status="joining"` update before starting the lifecycle task, so the bot appeared to never start
+- **Scheduled bots with `join_at` ≈ now never joining** — if `join_at` was less than 1 second in the future, the 0-second timer could misfire; now starts immediately via `_start_or_queue_bot`
+- **Queue processor race condition** — `_queue_event` was cleared before checking slot availability, causing up to 30-second delays for queued bots when a slot freed up
+
 ## [2.19.0] - 2026-03-26
 
 ### Added

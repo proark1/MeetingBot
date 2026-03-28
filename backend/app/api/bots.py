@@ -109,6 +109,8 @@ async def _queue_processor() -> None:
             continue
         active = sum(1 for t in _running_tasks.values() if not t.done())
         if active >= settings.MAX_CONCURRENT_BOTS:
+            # Re-arm: a task may finish while we were checking
+            _queue_event.set()
             continue
         bot_id = _bot_queue.popleft()
         if await store.get_bot(bot_id) is None:
@@ -527,10 +529,15 @@ async def create_bot(payload: BotCreate, request: Request):
     if is_scheduled:
         # Defer start until join time — does NOT occupy a concurrent slot while waiting.
         delay = max(0, (payload.join_at.replace(tzinfo=timezone.utc) - _now()).total_seconds())
-        loop = asyncio.get_running_loop()
-        handle = loop.call_later(delay, _start_scheduled_bot, bot.id)
-        _scheduled_timers[bot.id] = handle
-        logger.info("Bot %s scheduled — will start in %.0f s (no slot held)", bot.id, delay)
+        if delay < 1:
+            # join_at is essentially now — start immediately instead of scheduling a 0s timer
+            await _start_or_queue_bot(bot.id)
+            bot = await store.get_bot(bot.id)  # refresh status after start/queue
+        else:
+            loop = asyncio.get_running_loop()
+            handle = loop.call_later(delay, _start_scheduled_bot, bot.id)
+            _scheduled_timers[bot.id] = handle
+            logger.info("Bot %s scheduled — will start in %.0f s (no slot held)", bot.id, delay)
     else:
         active = sum(1 for t in _running_tasks.values() if not t.done())
         if active >= settings.MAX_CONCURRENT_BOTS:
@@ -541,6 +548,8 @@ async def create_bot(payload: BotCreate, request: Request):
             queue_pos = _bot_queue.index(bot.id) + 1
             logger.info("Bot %s queued (position %d)", bot.id, queue_pos)
         else:
+            await store.update_bot(bot.id, status="joining")
+            bot.status = "joining"
             task = asyncio.create_task(bot_service.run_bot_lifecycle(bot.id))
             _running_tasks[bot.id] = task
             task.add_done_callback(lambda _t, bid=bot.id: _on_task_done(_t, bid))
