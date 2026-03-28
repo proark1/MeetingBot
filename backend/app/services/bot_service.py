@@ -1078,7 +1078,7 @@ async def run_bot_lifecycle(bot_id: str) -> None:
             try:
                 await store.mark_terminal(
                     bot_id, "error",
-                    error_message=str(exc),
+                    error_message=str(exc)[:2000],
                     ended_at=bot.ended_at if bot else _now(),
                 )
                 bot = await store.get_bot(bot_id)

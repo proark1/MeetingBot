@@ -155,7 +155,7 @@ async def create_webhook(payload: WebhookCreate, request: _Request):
 @router.get("", response_model=list[WebhookResponse])
 async def list_webhooks():
     """List all registered global webhooks."""
-    return [_to_response(wh) for wh in store.list_webhooks()]
+    return [_to_response(wh) for wh in await store.list_webhooks()]
 
 
 @router.get("/events")
@@ -170,7 +170,7 @@ async def list_webhook_events():
 
 @router.get("/{webhook_id}", response_model=WebhookResponse)
 async def get_webhook(webhook_id: str):
-    wh = store.get_webhook(webhook_id)
+    wh = await store.get_webhook(webhook_id)
     if wh is None:
         raise HTTPException(status_code=404, detail=f"Webhook {webhook_id!r} not found")
     return _to_response(wh)
@@ -195,7 +195,7 @@ async def delete_webhook(webhook_id: str):
 @_limiter.limit("5/minute")
 async def test_webhook(webhook_id: str, request: _Request):
     """Send a test event to this webhook endpoint."""
-    wh = store.get_webhook(webhook_id)
+    wh = await store.get_webhook(webhook_id)
     if wh is None:
         raise HTTPException(status_code=404, detail=f"Webhook {webhook_id!r} not found")
     await _block_ssrf(wh.url)
@@ -293,7 +293,7 @@ async def list_deliveries(
     Entries are sorted newest-first. Each entry includes the attempt status,
     HTTP response code, any error message, and the time of next retry (if pending).
     """
-    wh = store.get_webhook(webhook_id)
+    wh = await store.get_webhook(webhook_id)
     if wh is None:
         raise HTTPException(status_code=404, detail=f"Webhook {webhook_id!r} not found")
 

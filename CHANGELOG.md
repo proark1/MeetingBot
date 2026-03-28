@@ -4,9 +4,16 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.20.1 — **Last updated:** 2026-03-28
+> **Latest version:** 2.20.2 — **Last updated:** 2026-03-28
 
 ---
+
+## [2.20.2] - 2026-03-28
+
+### Fixed
+- **Bot cancellation broken** — `asyncio.shield()` in `delete_bot` was protecting the lifecycle task from the cancellation signal, so `DELETE /bot/{id}` appeared to succeed but the bot kept running
+- **Webhook accessor race condition** — `get_webhook()`, `list_webhooks()`, and `active_webhooks()` accessed the shared webhook dict without acquiring the asyncio lock, risking `RuntimeError: dictionary changed size during iteration` when webhooks were deleted concurrently
+- **Oversized error messages** — bot error messages from uncaught exceptions were stored without truncation, potentially producing very large API responses and webhook payloads. Now capped at 2000 characters
 
 ## [2.20.1] - 2026-03-28
 

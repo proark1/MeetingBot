@@ -345,11 +345,13 @@ class Store:
         await self._persist_webhook(wh)
         return wh
 
-    def get_webhook(self, webhook_id: str) -> Optional[WebhookEntry]:
-        return self._webhooks.get(webhook_id)
+    async def get_webhook(self, webhook_id: str) -> Optional[WebhookEntry]:
+        async with self._lock:
+            return self._webhooks.get(webhook_id)
 
-    def list_webhooks(self) -> list[WebhookEntry]:
-        return sorted(self._webhooks.values(), key=lambda w: w.created_at, reverse=True)
+    async def list_webhooks(self) -> list[WebhookEntry]:
+        async with self._lock:
+            return sorted(self._webhooks.values(), key=lambda w: w.created_at, reverse=True)
 
     async def delete_webhook(self, webhook_id: str) -> bool:
         async with self._lock:
@@ -358,8 +360,9 @@ class Store:
             await self._delete_webhook_from_db(webhook_id)
         return removed
 
-    def active_webhooks(self) -> list[WebhookEntry]:
-        return [w for w in self._webhooks.values() if w.is_active]
+    async def active_webhooks(self) -> list[WebhookEntry]:
+        async with self._lock:
+            return [w for w in self._webhooks.values() if w.is_active]
 
     async def _persist_webhook(self, wh: "WebhookEntry") -> None:
         """Upsert a webhook into the database (best-effort)."""

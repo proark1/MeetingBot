@@ -676,7 +676,7 @@ async def delete_bot(bot_id: str, request: Request):
                 await store.update_bot(bot_id, status="call_ended", ended_at=_now())
             task.cancel()
             try:
-                await asyncio.wait_for(asyncio.shield(task), timeout=30.0)
+                await asyncio.wait_for(task, timeout=30.0)
             except (asyncio.TimeoutError, asyncio.CancelledError):
                 pass
             logger.info("Cancelled lifecycle task for bot %s", bot_id)

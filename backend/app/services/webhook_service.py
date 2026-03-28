@@ -171,7 +171,7 @@ async def dispatch_event(
     headers_base = {"Content-Type": "application/json", "User-Agent": "JustHereToListen.io/1.0"}
     bot_id: "str | None" = payload.get("id") or payload.get("bot_id")
 
-    for wh in store.active_webhooks():
+    for wh in await store.active_webhooks():
         subscribed = wh.events == ["*"] or "*" in wh.events or event in wh.events
         if not subscribed:
             continue
@@ -274,7 +274,7 @@ async def _process_retries() -> None:
 
     for delivery in pending:
         from app.store import store
-        wh = store.get_webhook(delivery.webhook_id)
+        wh = await store.get_webhook(delivery.webhook_id)
         if wh is None or not wh.is_active:
             await _log_delivery(
                 webhook_id=delivery.webhook_id, bot_id=delivery.bot_id,

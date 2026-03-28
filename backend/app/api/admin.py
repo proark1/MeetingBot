@@ -864,7 +864,7 @@ async def platform_analytics(
             "total_deliveries": total_deliveries,
             "by_status": delivery_by_status,
             "success_rate_pct": wh_success_rate,
-            "active_webhooks": len(_store.list_webhooks()),
+            "active_webhooks": len(await _store.list_webhooks()),
             "recent_failures": recent_failures,
         },
         "action_items": {
