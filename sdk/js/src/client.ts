@@ -188,8 +188,6 @@ export class MeetingBotClient {
   }
 
   private url(path: string, params?: Record<string, string | number | boolean | undefined>): string {
-    const url = new URL(path, this.baseUrl + "/");
-    // Re-apply the full path directly to avoid base URL manipulation
     const fullUrl = `${this.baseUrl}${path}`;
     if (!params) return fullUrl;
     const u = new URL(fullUrl);

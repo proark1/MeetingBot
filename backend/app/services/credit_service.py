@@ -103,7 +103,11 @@ async def add_credits(
     db: AsyncSession,
 ) -> Decimal:
     """Add credits to an account and record the transaction. Returns new balance."""
-    account = await db.get(Account, account_id)
+    # Use SELECT ... FOR UPDATE to prevent lost updates from concurrent additions
+    result = await db.execute(
+        select(Account).where(Account.id == account_id).with_for_update()
+    )
+    account = result.scalar_one_or_none()
     if account is None:
         raise ValueError(f"Account {account_id} not found")
 

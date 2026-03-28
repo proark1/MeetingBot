@@ -4,9 +4,16 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.20.4 — **Last updated:** 2026-03-28
+> **Latest version:** 2.20.5 — **Last updated:** 2026-03-28
 
 ---
+
+## [2.20.5] - 2026-03-28
+
+### Fixed
+- **Race condition in credit addition** — `add_credits()` read the account balance without a database lock, allowing concurrent additions to lose updates. Now uses `SELECT ... FOR UPDATE` matching the existing `deduct_credits_for_bot()` pattern
+- **OAuth authorization URL not URL-encoded** — query parameters were concatenated with raw `f"{k}={v}"` instead of `urlencode()`. The `state` parameter (base64 HMAC) can contain `+` and `=` which broke the redirect URL
+- **JS SDK dead code** — removed unused `new URL()` construction in the URL builder method
 
 ## [2.20.4] - 2026-03-28
 

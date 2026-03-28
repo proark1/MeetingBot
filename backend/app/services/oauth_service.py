@@ -98,8 +98,8 @@ def get_authorization_url(provider: str, extra_state: Optional[str] = None) -> s
         params.pop("access_type", None)
         params.pop("prompt", None)
         params["response_mode"] = "query"
-    query = "&".join(f"{k}={v}" for k, v in params.items())
-    return f"{cfg['auth_url']}?{query}"
+    from urllib.parse import urlencode
+    return f"{cfg['auth_url']}?{urlencode(params)}"
 
 
 # ── Token exchange ─────────────────────────────────────────────────────────────
