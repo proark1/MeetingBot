@@ -23,6 +23,12 @@ Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 - **Progress indicator** — animated progress bar shown on bot detail page for in-progress statuses (joining, in_call, transcribing)
 - **Section transitions** — dashboard section switching now uses fade-in animation
 
+### Fixed
+- **Mobile navbar overflow** — navbar elements (brand, dark mode toggle, balance pill, avatar, logout) now scale down properly on small screens (< 480px) with reduced padding, smaller fonts, and hidden brand text on very narrow (< 360px) screens
+- **KPI cards clipped on mobile** — overview cards now use single-column layout on phones (< 480px) and 2-column on tablets, with proper `min-width: 0` and `overflow: hidden` to prevent text clipping
+- **Section header stacking** — "Overview" header and "+ Add Credits" button now stack vertically with full-width button on mobile instead of floating awkwardly
+- **Click hint animation on mobile** — decorative cursor animation hidden on small screens where it overlaps content
+
 ## [2.20.6] - 2026-03-28
 
 ### Fixed

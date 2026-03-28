@@ -110,7 +110,10 @@
     border: 1px solid #D8CFC8;
     border-radius: 12px;
     padding: 1.1rem;
+    min-width: 0;
+    overflow: hidden;
   }
+  .kpi-card .stat-value { word-break: break-word; }
 
   /* ── Empty states ───────────────────────────────────────────────────────── */
   .empty-state {
@@ -214,8 +217,18 @@
     .nav-icon { font-size: 17px; }
     .sidebar-badge { display: none; }
     .app-container { padding-bottom: 4.5rem; }
-    .section-hdr { flex-direction: column; gap: 0.75rem; }
+    .section-hdr { flex-direction: column; gap: 0.75rem; align-items: stretch !important; }
+    .section-hdr h2 { font-size: 1.05rem; }
     .section-hdr .d-flex { flex-wrap: wrap; }
+    .section-hdr .btn { width: 100%; text-align: center; }
+    .kpi-grid { grid-template-columns: 1fr 1fr; gap: 0.6rem; }
+  }
+
+  @media (max-width: 480px) {
+    .kpi-grid { grid-template-columns: 1fr; }
+    .kpi-card { padding: 0.9rem; }
+    .kpi-card .stat-value { font-size: 1.5rem; }
+    .click-hint { display: none !important; }
   }
 
   /* ── Dark mode dashboard overrides ─────────────────────────────────────── */
