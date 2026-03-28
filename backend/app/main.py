@@ -1048,6 +1048,22 @@ _ERROR_CODE_MAP: dict[int, tuple[str, bool]] = {
 }
 
 
+from fastapi.exceptions import RequestValidationError as _RequestValidationError
+
+
+@app.exception_handler(_RequestValidationError)
+async def _validation_exception_handler(request, exc: _RequestValidationError):
+    """Wrap Pydantic validation errors into the machine-readable structure."""
+    return _JSONResponse(
+        status_code=422,
+        content={
+            "detail": exc.errors(),
+            "error_code": "validation_error",
+            "retryable": False,
+        },
+    )
+
+
 @app.exception_handler(_HTTPException)
 async def _http_exception_handler(request, exc: _HTTPException):
     """Wrap FastAPI HTTPExceptions into a machine-readable structure."""

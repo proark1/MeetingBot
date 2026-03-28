@@ -4,9 +4,16 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.20.0 — **Last updated:** 2026-03-28
+> **Latest version:** 2.20.1 — **Last updated:** 2026-03-28
 
 ---
+
+## [2.20.1] - 2026-03-28
+
+### Fixed
+- **Double credit deduction** — if webhook dispatch failed after credits were deducted on the success path, the exception handler would deduct again. Added idempotency guard to prevent duplicate charges
+- **Webhook test signature broken** — `POST /webhooks/{id}/test` assigned the raw `(sig, ts)` tuple to the `X-MeetingBot-Signature` header instead of unpacking it; also missing `X-MeetingBot-Timestamp` header entirely
+- **422 validation errors not in structured format** — Pydantic `RequestValidationError` responses now include `error_code` and `retryable` fields matching the new machine-readable error model
 
 ## [2.20.0] - 2026-03-28
 

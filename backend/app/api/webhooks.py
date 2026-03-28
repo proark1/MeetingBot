@@ -204,7 +204,9 @@ async def test_webhook(webhook_id: str, request: _Request):
     body = _build_body("bot.test", {"message": "Test delivery from JustHereToListen.io"})
     headers = {"Content-Type": "application/json", "User-Agent": "JustHereToListen.io/1.0"}
     if wh.secret:
-        headers["X-MeetingBot-Signature"] = _sign(body, wh.secret)
+        sig, ts = _sign(body, wh.secret)
+        headers["X-MeetingBot-Signature"] = sig
+        headers["X-MeetingBot-Timestamp"] = ts
 
     status_code, _ = await _attempt_delivery(wh.url, body, headers)
     if status_code is None:

@@ -705,6 +705,7 @@ async def run_bot_lifecycle(bot_id: str) -> None:
     audio_path = str(_RECORDINGS_DIR / f"{bot_id}.wav")
     video_path = str(_RECORDINGS_DIR / f"{bot_id}.mp4") if bot.record_video else None
     use_real_bot = bot.meeting_platform in _REAL_PLATFORMS
+    _credits_deducted = False
 
     try:
         # ── 0. Scheduled bots are deferred by bots.py call_later — no sleep needed.
@@ -1012,6 +1013,7 @@ async def run_bot_lifecycle(bot_id: str) -> None:
         # Deduct credits for the completed bot run
         from app.services.credit_service import deduct_credits_for_bot
         await deduct_credits_for_bot(bot.account_id, bot_id, bot.ai_total_cost_usd)
+        _credits_deducted = True
 
         # Dispatch done event — both global webhooks and per-bot webhook_url
         done_payload = _build_done_payload(bot)
@@ -1048,8 +1050,10 @@ async def run_bot_lifecycle(bot_id: str) -> None:
             try:
                 await store.mark_terminal(bot_id, "cancelled", ended_at=bot.ended_at or _now())
                 bot = await store.get_bot(bot_id)
-                from app.services.credit_service import deduct_credits_for_bot
-                await deduct_credits_for_bot(bot.account_id, bot_id, bot.ai_total_cost_usd)
+                if not _credits_deducted:
+                    from app.services.credit_service import deduct_credits_for_bot
+                    await deduct_credits_for_bot(bot.account_id, bot_id, bot.ai_total_cost_usd)
+                    _credits_deducted = True
                 done_payload = _build_done_payload(bot)
                 await webhook_service.dispatch_event(
                     "bot.cancelled",
@@ -1079,8 +1083,10 @@ async def run_bot_lifecycle(bot_id: str) -> None:
                 )
                 bot = await store.get_bot(bot_id)
                 if bot:
-                    from app.services.credit_service import deduct_credits_for_bot
-                    await deduct_credits_for_bot(bot.account_id, bot_id, bot.ai_total_cost_usd)
+                    if not _credits_deducted:
+                        from app.services.credit_service import deduct_credits_for_bot
+                        await deduct_credits_for_bot(bot.account_id, bot_id, bot.ai_total_cost_usd)
+                        _credits_deducted = True
                     done_payload = _build_done_payload(bot)
                     await webhook_service.dispatch_event(
                         "bot.error",
