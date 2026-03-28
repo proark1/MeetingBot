@@ -1362,6 +1362,71 @@
         </div>
       </div>
     </div>
+
+    <div class="row g-3 mt-3">
+      <div class="col-md-6">
+        <div class="feature-card">
+          <div class="feature-tag live">Live</div>
+          <div class="feature-icon icon-amber">🔊</div>
+          <h3>Voice Response (TTS)</h3>
+          <p>Bot speaks back when mentioned in the meeting. Choose between Edge TTS (fast, free) or Gemini TTS (natural-sounding). Configure <code>mention_response_mode</code> for text, voice, or both.</p>
+        </div>
+      </div>
+      <div class="col-md-6">
+        <div class="feature-card">
+          <div class="feature-tag live">Live</div>
+          <div class="feature-icon icon-cyan">⚙️</div>
+          <h3>Transcription Provider Choice</h3>
+          <p>Choose between Gemini (cloud, speaker-diarized) or Whisper (local, privacy-first) transcription per bot. Set <code>transcription_provider</code> to match your latency and compliance needs.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<hr class="divider">
+
+<!-- ────────────────────────────────────────────────────────────────
+     RECORDING & OUTPUT
+──────────────────────────────────────────────────────────────── -->
+<section class="section-py" id="recording" style="background:var(--bg-alt)">
+  <div class="container">
+    <div class="section-header">
+      <div class="section-tag">Recording & Output</div>
+      <h2 class="section-title">Capture everything,<br>share anywhere</h2>
+      <p class="section-sub">Record meetings in audio or video, export in any format, and let anyone ask questions about past calls.</p>
+    </div>
+
+    <div class="row g-3">
+      <div class="col-md-3">
+        <div class="feature-card">
+          <div class="feature-icon icon-red">🎥</div>
+          <h3>Audio & Video Recording</h3>
+          <p>Record audio (WAV) and optional video (MP4) of every meeting. Store locally or push to S3 automatically. Enable with <code>record_video: true</code>.</p>
+        </div>
+      </div>
+      <div class="col-md-3">
+        <div class="feature-card">
+          <div class="feature-icon icon-indigo">📤</div>
+          <h3>Export Formats</h3>
+          <p>Export transcripts and analyses as Markdown, PDF, JSON, or SRT subtitles. <code>GET /bot/{id}/export/{format}</code> — ready for your pipeline.</p>
+        </div>
+      </div>
+      <div class="col-md-3">
+        <div class="feature-card">
+          <div class="feature-icon icon-green">🔗</div>
+          <h3>Shareable Meeting Links</h3>
+          <p>Generate a public share link for any meeting's results. Share transcripts, summaries, and action items with stakeholders who weren't in the call.</p>
+        </div>
+      </div>
+      <div class="col-md-3">
+        <div class="feature-card">
+          <div class="feature-icon icon-purple">🧠</div>
+          <h3>Post-Meeting Q&A</h3>
+          <p>Ask questions about any completed meeting. <code>POST /bot/{id}/ask</code> queries the full transcript and returns AI-powered answers with source references.</p>
+        </div>
+      </div>
+    </div>
   </div>
 </section>
 
@@ -1454,6 +1519,23 @@
         </div>
       </div>
     </div>
+
+    <div class="row g-3 mt-3">
+      <div class="col-md-6">
+        <div class="feature-card">
+          <div class="feature-icon icon-purple">📋</div>
+          <h3>10 Analysis Templates</h3>
+          <p>Built-in templates for sales calls, standups, 1-on-1s, retros, kickoffs, all-hands, postmortems, interviews, and design reviews. Or pass a <code>prompt_override</code> for fully custom analysis.</p>
+        </div>
+      </div>
+      <div class="col-md-6">
+        <div class="feature-card">
+          <div class="feature-icon icon-green">✉️</div>
+          <h3>Auto Follow-up Email</h3>
+          <p>Automatically generate and send follow-up emails after every meeting. Includes summary, action items, and next steps. Enable with <code>auto_followup_email: true</code>.</p>
+        </div>
+      </div>
+    </div>
   </div>
 </section>
 
@@ -1514,6 +1596,13 @@
           <div class="feature-icon icon-purple">🗄️</div>
           <h3>Data Retention Policies</h3>
           <p>Set custom retention windows per workspace. Recordings, transcripts, and analyses are automatically purged after your configured TTL.</p>
+        </div>
+      </div>
+      <div class="col-md-4">
+        <div class="feature-card">
+          <div class="feature-icon icon-amber">🎨</div>
+          <h3>Bot Customization</h3>
+          <p>White-label the bot with a custom display name and avatar. Participants see your brand, not ours. Set <code>bot_name</code> and <code>bot_avatar_url</code> on creation.</p>
         </div>
       </div>
     </div>
@@ -1612,6 +1701,25 @@
               <p>Every release tag triggers a GitHub Action that downloads the OpenAPI schema and generates Python + JavaScript SDKs — automatically published to PyPI.</p>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="row g-3 mt-3">
+      <div class="col-md-6">
+        <div class="feature-card">
+          <div class="feature-tag dev">Developer</div>
+          <div class="feature-icon icon-amber" style="width:36px;height:36px;border-radius:8px;font-size:1rem;margin-bottom:0.8rem">⏰</div>
+          <h3>Scheduled Bot Joins</h3>
+          <p>Schedule a bot to join at a specific time via the <code>join_at</code> field. Perfect for recurring meetings or future calendar events dispatched through your API.</p>
+        </div>
+      </div>
+      <div class="col-md-6">
+        <div class="feature-card">
+          <div class="feature-tag dev">Developer</div>
+          <div class="feature-icon icon-green" style="width:36px;height:36px;border-radius:8px;font-size:1rem;margin-bottom:0.8rem">📖</div>
+          <h3>Domain Vocabulary</h3>
+          <p>Pass custom vocabulary terms to improve transcription accuracy for industry jargon, product names, and acronyms. Set the <code>vocabulary</code> array on bot creation (up to 100 terms).</p>
         </div>
       </div>
     </div>

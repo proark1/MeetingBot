@@ -4,7 +4,15 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.21.1 — **Last updated:** 2026-03-28
+> **Latest version:** 2.22.0 — **Last updated:** 2026-03-28
+
+---
+
+## [2.22.0] - 2026-03-28
+
+### Added
+- **Landing page: 11 missing feature cards** — Added Voice Response/TTS, Transcription Provider Choice, Audio & Video Recording, Export Formats, Shareable Meeting Links, Post-Meeting Q&A, Analysis Templates, Auto Follow-up Email, Bot Customization, Scheduled Bot Joins, and Domain Vocabulary to the landing page
+- **New "Recording & Output" section** on landing page showcasing recording, export, sharing, and Q&A capabilities
 
 ---
 
