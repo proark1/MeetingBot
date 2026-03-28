@@ -4,9 +4,14 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.20.2 — **Last updated:** 2026-03-28
+> **Latest version:** 2.20.3 — **Last updated:** 2026-03-28
 
 ---
+
+## [2.20.3] - 2026-03-28
+
+### Fixed
+- **AI cost tracking returning $0 for Haiku calls** — `_estimate_cost()` failed to match model IDs with date suffixes (e.g. `claude-haiku-4-5-20251001`) against the pricing table keyed by short names (`claude-haiku-4-5`). Now strips `-YYYYMMDD` suffixes before lookup
 
 ## [2.20.2] - 2026-03-28
 

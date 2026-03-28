@@ -11,6 +11,7 @@ import asyncio
 import contextvars
 import json
 import logging
+import re as _re
 import time
 from typing import Any
 
@@ -28,7 +29,9 @@ _PRICING: dict[str, dict[str, float]] = {
 
 def _estimate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
     """Return estimated USD cost for a model call."""
-    pricing = _PRICING.get(model, {"input": 0.0, "output": 0.0})
+    # Strip date-version suffix (e.g. "claude-haiku-4-5-20251001" → "claude-haiku-4-5")
+    _normalized = _re.sub(r"-\d{8}$", "", model) if model else model
+    pricing = _PRICING.get(_normalized) or _PRICING.get(model, {"input": 0.0, "output": 0.0})
     return input_tokens * pricing["input"] + output_tokens * pricing["output"]
 
 
