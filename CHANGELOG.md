@@ -4,7 +4,14 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.25.2 — **Last updated:** 2026-03-28
+> **Latest version:** 2.25.3 — **Last updated:** 2026-03-28
+
+---
+
+## [2.25.3] - 2026-03-28
+
+### Fixed
+- **onepizza chat mention detection** — Chat scraper was reading the participant list tab on first polls, then switching to actual messages. The diff logic treated the shorter content as a "re-render" and skipped it, causing all mentions to be missed. Fixed scraper to target message area near `#chatInput`, detect DOM context switches, and check for new mentions on content replacement
 
 ---
 

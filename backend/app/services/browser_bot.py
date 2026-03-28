@@ -2068,60 +2068,42 @@ async def _scrape_chat_messages(page: Page, platform: str) -> str:
                 }
             """)
         elif platform == "onepizza":
-            # onepizza.io: chat messages appear in the side panel when #chatBtn is clicked.
-            # The panel structure varies — try multiple strategies to find message content.
+            # onepizza.io: chat messages are in #sidePanel when the Chat tab is active.
+            # The panel contains tabs (People/Chat/Q&A) — we only want chat message
+            # content, not participant list text.  Chat messages follow the pattern:
+            #   SenderName\nMessageText\nTimestamp\n↩\n+
+            # We look for the chat input's sibling container that holds messages.
             text = await page.evaluate("""
                 () => {
-                    // Strategy 1: Look for known chat message containers
-                    const sel = [
-                        "#chatMessages",
-                        ".chat-messages",
-                        ".chat-message-list",
-                        "[class*='chat-message']",
-                        "[class*='chatMessage']",
-                        "[class*='message-list']",
-                    ];
-                    for (const s of sel) {
-                        const el = document.querySelector(s);
-                        const t = el ? (el.innerText || el.textContent || '').trim() : '';
-                        if (t && t.length > 1) return t;
-                    }
-                    // Strategy 2: Find the side panel and extract messages by looking
-                    // for the area between the panel header and the chat input
                     const chatInput = document.getElementById('chatInput');
-                    if (chatInput) {
-                        // Walk up to find the panel container, then grab all text
-                        // between the panel start and the input
-                        let panel = chatInput.parentElement;
-                        // Go up a few levels to find the full panel
-                        for (let i = 0; i < 5 && panel; i++) {
-                            if (panel.id === 'sidePanel' || panel.classList.contains('side-panel') ||
-                                panel.querySelector('#closeSidePanel')) {
-                                break;
-                            }
-                            panel = panel.parentElement;
-                        }
-                        if (panel) {
-                            // Get all text nodes/divs in the panel except the input area
-                            const all = panel.querySelectorAll('div, p, span, li');
-                            let msgs = [];
-                            for (const el of all) {
-                                if (el.contains(chatInput)) continue;
-                                if (el.id === 'chatInput' || el.id === 'chatSendBtn' || el.id === 'closeSidePanel') continue;
-                                // Skip tiny containers that are just wrappers
-                                const t = (el.innerText || '').trim();
-                                if (t.length > 1 && el.children.length <= 2) {
-                                    msgs.push(t);
+                    if (!chatInput) return '';
+                    // The chat messages are siblings or nearby relatives of #chatInput.
+                    // Walk up from chatInput to find the scrollable message area.
+                    let container = chatInput.parentElement;
+                    // The input is typically inside a form/div at the bottom of the chat.
+                    // The messages are in a sibling scrollable div above it.
+                    if (container) {
+                        // Look for a scrollable sibling that contains messages
+                        const parent = container.parentElement;
+                        if (parent) {
+                            for (const child of parent.children) {
+                                if (child.contains(chatInput)) continue;
+                                // Skip small elements (buttons, headers)
+                                const t = (child.innerText || '').trim();
+                                if (t.length > 3 && child.scrollHeight > 10) {
+                                    // This is likely the message area
+                                    return t;
                                 }
                             }
-                            if (msgs.length > 0) return msgs.join('\\n');
                         }
                     }
-                    // Strategy 3: Broad fallback — any visible panel with text
-                    const panel = document.querySelector('#sidePanel, .side-panel, [class*="side-panel"]');
-                    if (panel && panel.offsetParent !== null) {
+                    // Fallback: get the side panel text but exclude tab headers and
+                    // participant list content by looking for timestamp patterns
+                    const panel = document.getElementById('sidePanel');
+                    if (panel) {
                         const t = (panel.innerText || '').trim();
-                        if (t.length > 3) return t;
+                        // If content has timestamp patterns (HH:MM AM/PM), it's chat messages
+                        if (/\\d{1,2}:\\d{2}\\s*(AM|PM)/i.test(t)) return t;
                     }
                     return '';
                 }
@@ -3246,11 +3228,24 @@ async def _mention_monitor(
                     overlap = min(len(seen_chat), 200)
                     if chat_raw.startswith(seen_chat[:overlap]):
                         new_chat_text = chat_raw[len(seen_chat):]
-                    else:
-                        # Chat panel re-rendered (e.g. scroll, DOM refresh).
-                        # Don't re-process the entire history — skip this cycle.
+                    elif len(chat_raw) < len(seen_chat) * 0.5:
+                        # DOM switched context (e.g. participant list → actual chat
+                        # messages on onepizza).  The new content is entirely different
+                        # and much shorter — treat it as a fresh bootstrap so we pick
+                        # up any messages that arrived during the switch.
+                        logger.info("Chat DOM context switch detected (was %d chars, now %d) — re-bootstrapping",
+                                    len(seen_chat), len(chat_raw))
                         seen_chat = chat_raw
                         new_chat_text = ""
+                    else:
+                        # Chat panel re-rendered (e.g. scroll, DOM refresh).
+                        # Content is different but similar length — check if new
+                        # content contains bot name as it might be a new message.
+                        if bot_name_lower in chat_raw.lower() and bot_name_lower not in seen_chat.lower():
+                            new_chat_text = chat_raw
+                            logger.info("Chat re-rendered but new mention detected — processing full content")
+                        else:
+                            new_chat_text = ""
                     seen_chat = chat_raw
 
                 if new_chat_text.strip():
