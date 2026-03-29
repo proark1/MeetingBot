@@ -4,7 +4,21 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.28.1 — **Last updated:** 2026-03-29
+> **Latest version:** 2.29.0 — **Last updated:** 2026-03-29
+
+---
+
+## [2.29.0] - 2026-03-29
+
+### Added
+- **Favicon** — Brand icon (microphone on dark background) now shows in browser tabs
+- **Toast animations** — Notifications slide in from right with backdrop blur and bounce easing
+- **Modal bounce animation** — Ask, Email, Re-analyze modals now scale-bounce in instead of plain fade
+- **Search highlight styling** — `<mark>` elements get yellow background with rounded corners
+- **Landing page scroll animations** — Feature cards, pricing cards, integration items fade-in with stagger as user scrolls
+- **Landing page animated stat counters** — Numbers count up from 0 when scrolled into view
+- **Analysis card polish** — Each analysis section (Summary, Key Points, Action Items, Decisions, Next Steps, Risks, Unresolved) now has a color-coded left accent border, gradient background, and icon badge
+- **Dashboard welcome card** — New users see a branded dark gradient card with "Send your first bot" CTA, dismissible with ×
 
 ---
 

@@ -266,8 +266,8 @@
   <div class="section-title mb-3">AI Analysis</div>
 
   {% if bot.analysis.summary %}
-  <div class="mb-4">
-    <div class="section-subtitle mb-2" style="font-weight:600;color:#0f172a">Summary</div>
+  <div class="mb-4" style="background:linear-gradient(135deg,rgba(59,130,246,0.05) 0%,rgba(59,130,246,0.01) 100%);border-left:3px solid #3b82f6;border-radius:8px;padding:1rem 1.25rem">
+    <div class="section-subtitle mb-2" style="font-weight:700;color:#0f172a;display:flex;align-items:center;gap:0.4rem"><span style="font-size:1.1rem">📝</span> Summary</div>
     <p style="color:#334155;margin:0;line-height:1.7">{{ bot.analysis.summary }}</p>
   </div>
   {% endif %}
@@ -297,8 +297,8 @@
   {% endif %}
 
   {% if bot.analysis.key_points %}
-  <div class="mb-3">
-    <div class="section-subtitle mb-2" style="font-weight:600;color:#0f172a">Key Points</div>
+  <div class="mb-3" style="background:linear-gradient(135deg,rgba(245,158,11,0.05) 0%,rgba(245,158,11,0.01) 100%);border-left:3px solid #f59e0b;border-radius:8px;padding:1rem 1.25rem">
+    <div class="section-subtitle mb-2" style="font-weight:700;color:#0f172a;display:flex;align-items:center;gap:0.4rem"><span style="font-size:1.1rem">⚡</span> Key Points</div>
     <ul style="margin:0;padding-left:1.25rem;color:#334155">
       {% for point in bot.analysis.key_points %}
       <li style="margin-bottom:4px">{{ point }}</li>
@@ -308,8 +308,8 @@
   {% endif %}
 
   {% if bot.analysis.action_items %}
-  <div class="mb-3">
-    <div class="section-subtitle mb-2" style="font-weight:600;color:#0f172a">Action Items</div>
+  <div class="mb-3" style="background:linear-gradient(135deg,rgba(139,92,246,0.05) 0%,rgba(139,92,246,0.01) 100%);border-left:3px solid #8b5cf6;border-radius:8px;padding:1rem 1.25rem">
+    <div class="section-subtitle mb-2" style="font-weight:700;color:#0f172a;display:flex;align-items:center;gap:0.4rem"><span style="font-size:1.1rem">✅</span> Action Items</div>
     <div style="display:flex;flex-direction:column;gap:6px">
       {% for item in bot.analysis.action_items %}
       <div style="background:#f8fafc;border:1px solid #D8CFC8;border-radius:8px;padding:10px 14px;display:flex;gap:10px;align-items:flex-start">
@@ -326,8 +326,8 @@
   {% endif %}
 
   {% if bot.analysis.decisions %}
-  <div class="mb-3">
-    <div class="section-subtitle mb-2" style="font-weight:600;color:#0f172a">Decisions</div>
+  <div class="mb-3" style="background:linear-gradient(135deg,rgba(16,185,129,0.05) 0%,rgba(16,185,129,0.01) 100%);border-left:3px solid #10b981;border-radius:8px;padding:1rem 1.25rem">
+    <div class="section-subtitle mb-2" style="font-weight:700;color:#0f172a;display:flex;align-items:center;gap:0.4rem"><span style="font-size:1.1rem">🔨</span> Decisions</div>
     <ul style="margin:0;padding-left:1.25rem;color:#334155">
       {% for d in bot.analysis.decisions %}
       <li style="margin-bottom:4px">{{ d }}</li>
@@ -337,8 +337,8 @@
   {% endif %}
 
   {% if bot.analysis.next_steps %}
-  <div class="mb-3">
-    <div class="section-subtitle mb-2" style="font-weight:600;color:#0f172a">Next Steps</div>
+  <div class="mb-3" style="background:linear-gradient(135deg,rgba(59,130,246,0.04) 0%,transparent 100%);border-left:3px solid #60a5fa;border-radius:8px;padding:1rem 1.25rem">
+    <div class="section-subtitle mb-2" style="font-weight:700;color:#0f172a;display:flex;align-items:center;gap:0.4rem"><span style="font-size:1.1rem">➡️</span> Next Steps</div>
     <ul style="margin:0;padding-left:1.25rem;color:#334155">
       {% for step in bot.analysis.next_steps %}
       <li style="margin-bottom:4px">{{ step }}</li>
@@ -348,8 +348,8 @@
   {% endif %}
 
   {% if bot.analysis.risks_blockers %}
-  <div class="mb-3">
-    <div class="section-subtitle mb-2" style="font-weight:600;color:#0f172a">Risks &amp; Blockers</div>
+  <div class="mb-3" style="background:linear-gradient(135deg,rgba(239,68,68,0.05) 0%,rgba(239,68,68,0.01) 100%);border-left:3px solid #ef4444;border-radius:8px;padding:1rem 1.25rem">
+    <div class="section-subtitle mb-2" style="font-weight:700;color:#0f172a;display:flex;align-items:center;gap:0.4rem"><span style="font-size:1.1rem">⚠️</span> Risks &amp; Blockers</div>
     <ul style="margin:0;padding-left:1.25rem;color:#dc2626">
       {% for item in bot.analysis.risks_blockers %}
       <li style="margin-bottom:4px">{{ item }}</li>
@@ -359,8 +359,8 @@
   {% endif %}
 
   {% if bot.analysis.unresolved_items %}
-  <div class="mb-3">
-    <div class="section-subtitle mb-2" style="font-weight:600;color:#0f172a">Unresolved Items</div>
+  <div class="mb-3" style="background:linear-gradient(135deg,rgba(245,158,11,0.04) 0%,transparent 100%);border-left:3px solid #f59e0b;border-radius:8px;padding:1rem 1.25rem">
+    <div class="section-subtitle mb-2" style="font-weight:700;color:#0f172a;display:flex;align-items:center;gap:0.4rem"><span style="font-size:1.1rem">❓</span> Unresolved Items</div>
     <ul style="margin:0;padding-left:1.25rem;color:#A03D22">
       {% for item in bot.analysis.unresolved_items %}
       <li style="margin-bottom:4px">{{ item }}</li>

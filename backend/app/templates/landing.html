@@ -2161,6 +2161,58 @@ function toggleTheme() {
   html.setAttribute('data-theme', next);
   localStorage.setItem('theme', next);
 }
+
+// ── Scroll-triggered fade-in animations ──────────────────────────────────
+(function() {
+  const style = document.createElement('style');
+  style.textContent = `
+    .scroll-reveal { opacity: 0; transform: translateY(24px); transition: opacity 0.6s ease, transform 0.6s ease; }
+    .scroll-reveal.visible { opacity: 1; transform: translateY(0); }
+  `;
+  document.head.appendChild(style);
+
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach((entry, i) => {
+      if (entry.isIntersecting) {
+        // Stagger children slightly
+        const delay = entry.target.dataset.delay || 0;
+        setTimeout(() => entry.target.classList.add('visible'), delay);
+        observer.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.1 });
+
+  document.querySelectorAll('.feature-card, .pricing-card, .integration-item, .ui-step-card, .step-item').forEach((el, i) => {
+    el.classList.add('scroll-reveal');
+    el.dataset.delay = (i % 4) * 80;  // stagger within each row
+    observer.observe(el);
+  });
+})();
+
+// ── Animated stat counters ───────────────────────────────────────────────
+(function() {
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting && !entry.target.dataset.counted) {
+        entry.target.dataset.counted = '1';
+        const text = entry.target.textContent.trim();
+        const match = text.match(/^([\d,.]+)/);
+        if (!match) return;
+        const target = parseFloat(match[1].replace(/,/g, ''));
+        const suffix = text.slice(match[0].length);
+        const isInt = Number.isInteger(target);
+        let current = 0;
+        const step = target / 40;
+        const timer = setInterval(() => {
+          current += step;
+          if (current >= target) { current = target; clearInterval(timer); }
+          entry.target.textContent = (isInt ? Math.round(current).toLocaleString() : current.toFixed(1)) + suffix;
+        }, 25);
+      }
+    });
+  }, { threshold: 0.3 });
+  document.querySelectorAll('.stat-num').forEach(el => observer.observe(el));
+})();
 </script>
 </body>
 </html>
