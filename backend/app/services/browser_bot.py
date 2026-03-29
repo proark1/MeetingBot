@@ -2341,8 +2341,16 @@ async def _speak_in_meeting(
 ) -> bool:
     """Speak *text* aloud in the meeting via TTS → PulseAudio virtual mic.
 
-    When start_muted=True (default): unmute before speaking, mute again after.
-    When start_muted=False: mic is already on — just play the audio.
+    When start_muted=True: unmute before speaking, mute again after.
+    When start_muted=False: unmute before speaking (platform may have auto-muted
+        on join), leave mic on after speaking.
+
+    _unmute_mic is always called regardless of start_muted because platforms
+    such as Zoom and Teams auto-mute bots on admission even when the bot is
+    configured with start_muted=False.  Without an explicit unmute the TTS
+    audio is captured by WebRTC but never transmitted.  _unmute_mic is safe
+    to call when the mic is already on — it checks the current UI state
+    before acting and never accidentally toggles an unmuted mic to muted.
 
     pre_synthesized_path: if provided, skip TTS synthesis and use this file
     directly.  Allows the caller to start synthesis concurrently with other
@@ -2364,11 +2372,11 @@ async def _speak_in_meeting(
             logger.warning("TTS synthesis returned no file — skipping voice response")
             return False
 
-        # Step 2: unmute before speaking only when the bot is configured to stay muted.
-        # When start_muted=False the mic is already on — calling _unmute_mic risks
-        # Ctrl+D toggling it OFF (since Ctrl+D is a toggle, not a set-unmute command).
-        if start_muted:
-            await _unmute_mic(page, platform)
+        # Step 2: always unmute before speaking — platforms such as Zoom and Teams
+        # auto-mute bots on join regardless of start_muted, so the mic button may
+        # still be muted even when start_muted=False.  _unmute_mic checks the
+        # current UI state and is a no-op when the mic is already on.
+        await _unmute_mic(page, platform)
 
         # Step 3: re-sync Chrome's mic capture to the TTS virtual source right before
         # playback — the periodic sync may be up to 20 s stale, so doing it here
@@ -3036,7 +3044,9 @@ async def _mention_monitor(
         )
         try:
             if mention_response_mode == "voice":
-                await _speak_in_meeting(page, platform, reply, tts_provider, gemini_api_key, start_muted, pulse_mic)
+                ok = await _speak_in_meeting(page, platform, reply, tts_provider, gemini_api_key, start_muted, pulse_mic)
+                if not ok:
+                    logger.warning("Voice response failed (mode=voice) — TTS synthesis or PulseAudio error")
             elif mention_response_mode == "both":
                 # TTS synthesis (pure HTTP) runs concurrently with chat typing
                 # so that the audio file is ready by the time chat finishes.
