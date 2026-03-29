@@ -4052,27 +4052,32 @@ async def run_browser_bot(
                 )
 
             # Race: natural meeting end vs explicit leave command from a participant
-            end_task   = asyncio.create_task(
-                _wait_for_meeting_end(
-                    page, platform, max_duration, alone_timeout, _participants,
-                    pulse_sink=pulse_sink, pulse_mic=pulse_mic, pulse_source=pulse_source_name,
-                )
-            )
-            leave_task = asyncio.create_task(leave_event.wait())
-            done, pending = await asyncio.wait(
-                {end_task, leave_task},
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            for t in pending:
-                t.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await t
-
-            if leave_task in done:
+            # Check if leave was already triggered (e.g. API called before we got here)
+            if leave_event.is_set():
+                logger.info("Leave event already set before monitoring started — leaving immediately")
                 exit_reason = "leave_command"
-                logger.info("Bot leaving meeting on participant command")
             else:
-                exit_reason = end_task.result()
+                end_task   = asyncio.create_task(
+                    _wait_for_meeting_end(
+                        page, platform, max_duration, alone_timeout, _participants,
+                        pulse_sink=pulse_sink, pulse_mic=pulse_mic, pulse_source=pulse_source_name,
+                    )
+                )
+                leave_task = asyncio.create_task(leave_event.wait())
+                done, pending = await asyncio.wait(
+                    {end_task, leave_task},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                for t in pending:
+                    t.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await t
+
+                if leave_task in done:
+                    exit_reason = "leave_command"
+                    logger.info("Bot leaving meeting on participant command")
+                else:
+                    exit_reason = end_task.result()
 
             # Cancel background tasks cleanly when the meeting ends
             if transcription_task is not None:

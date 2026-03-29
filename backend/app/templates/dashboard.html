@@ -2428,8 +2428,7 @@ document.querySelectorAll('[data-delete-cal]').forEach(btn => btn.addEventListen
     const transLang = document.getElementById('sbTranslationLang')?.value.trim();
     if (transLang) payload.translation_language = transLang;
     // Voice / chat interaction options
-    const respondOnMention = document.getElementById('sbRespondOnMention')?.checked;
-    payload.respond_on_mention = respondOnMention !== false;
+    payload.respond_on_mention = document.getElementById('sbRespondOnMention')?.checked ?? true;
     const responseMode = document.getElementById('sbMentionResponseMode')?.value;
     if (responseMode) payload.mention_response_mode = responseMode;
     const ttsProvider = document.getElementById('sbTtsProvider')?.value;
@@ -2437,10 +2436,10 @@ document.querySelectorAll('[data-delete-cal]').forEach(btn => btn.addEventListen
     if (document.getElementById('sbConsentEnabled')?.checked) payload.consent_enabled = true;
     if (document.getElementById('sbAutoFollowup')?.checked) payload.auto_followup_email = true;
     const transcriptionProvider = document.getElementById('sbTranscriptionProvider')?.value;
-    if (transcriptionProvider && transcriptionProvider !== 'gemini') payload.transcription_provider = transcriptionProvider;
+    if (transcriptionProvider) payload.transcription_provider = transcriptionProvider;
     // Analysis & cost options
     const analysisMode = document.getElementById('sbAnalysisMode')?.value;
-    if (analysisMode && analysisMode !== 'full') payload.analysis_mode = analysisMode;
+    if (analysisMode) payload.analysis_mode = analysisMode;
     if (document.getElementById('sbStartMuted')?.checked) payload.start_muted = true;
     const hourlyRate = parseFloat(document.getElementById('sbHourlyRate')?.value);
     if (hourlyRate > 0) payload.avg_hourly_rate_usd = hourlyRate;

@@ -4,7 +4,17 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.27.0 — **Last updated:** 2026-03-29
+> **Latest version:** 2.27.1 — **Last updated:** 2026-03-29
+
+---
+
+## [2.27.1] - 2026-03-29
+
+### Fixed
+- **Leave event race condition** — If the leave API was called between bot admission and the monitoring loop start (~3-5s window), the event was set before anything was waiting on it. Now checks `leave_event.is_set()` before creating the wait task
+- **`respond_on_mention` form logic** — Used `!== false` which returned `true` for `undefined` (when element missing). Now uses nullish coalescing `?? true`
+- **Form always sends `transcription_provider` and `analysis_mode`** — Previously skipped sending defaults (`gemini`, `full`), which was fragile if server defaults changed
+- **Leave command logging** — Fixed misplaced log statement outside the if-block
 
 ---
 
