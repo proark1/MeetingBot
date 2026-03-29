@@ -3839,22 +3839,28 @@ async def run_browser_bot(
                                     } catch(e) {}
                                 });
 
-                                // Also scan for RTCPeerConnection instances stored on
-                                // common library globals (PeerJS, SimplePeer, socket.io)
+                                // Scan for RTCPeerConnection instances stored on
+                                // common library globals (PeerJS, SimplePeer, socket.io, etc.)
                                 const pcScan = [];
                                 try {
-                                    // PeerJS stores connections in Peer.connections
-                                    if (window.Peer) {
-                                        for (const k of Object.keys(window)) {
+                                    for (const k of Object.keys(window)) {
+                                        try {
                                             const v = window[k];
-                                            if (v && v.connections) {
+                                            if (!v || typeof v !== 'object') continue;
+                                            // PeerJS: peer.connections → {id: [conn]} where conn.peerConnection is RTCPeerConnection
+                                            if (v.connections && typeof v.connections === 'object') {
                                                 for (const conns of Object.values(v.connections)) {
                                                     for (const c of (Array.isArray(conns) ? conns : [conns])) {
                                                         if (c && c.peerConnection) pcScan.push(c.peerConnection);
                                                     }
                                                 }
                                             }
-                                        }
+                                            // SimplePeer / generic: object with _pc or peerConnection property
+                                            if (v._pc && v._pc.getReceivers) pcScan.push(v._pc);
+                                            if (v.peerConnection && v.peerConnection.getReceivers) pcScan.push(v.peerConnection);
+                                            // Direct RTCPeerConnection stored on window
+                                            if (v instanceof RTCPeerConnection) pcScan.push(v);
+                                        } catch(e) {} // skip inaccessible cross-origin frames etc.
                                     }
                                 } catch(e) {}
 

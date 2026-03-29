@@ -4,7 +4,14 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.27.3 — **Last updated:** 2026-03-29
+> **Latest version:** 2.27.4 — **Last updated:** 2026-03-29
+
+---
+
+## [2.27.4] - 2026-03-29
+
+### Fixed
+- **Audio force-connect only scanned PeerJS** (CRITICAL) — The `if (window.Peer)` guard prevented RTCPeerConnection scanning on non-PeerJS platforms like onepizza.io. Removed the guard and expanded scanning to cover SimplePeer (`_pc` property), generic `peerConnection` properties, and direct `RTCPeerConnection` instances on `window`
 
 ---
 
