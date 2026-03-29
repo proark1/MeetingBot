@@ -3476,6 +3476,8 @@ async def run_browser_bot(
     record_video: bool = False,
     video_path: Optional[str] = None,
     external_leave_event: Optional[asyncio.Event] = None,
+    consent_enabled: bool = False,
+    consent_message: Optional[str] = None,
 ) -> dict:
     """
     Join a meeting as a named guest, record audio, wait for it to end.
@@ -3704,6 +3706,19 @@ async def run_browser_bot(
             await _screenshot(page, f"{platform}_in_meeting")
             logger.info("Bot is in the meeting — monitoring for end…")
 
+            # ── Send consent announcement if enabled ──────────────────────────
+            if consent_enabled:
+                try:
+                    from app.services.consent_service import build_announcement_message
+                    announcement = build_announcement_message(consent_message)
+                    sent = await _send_chat_message(page, platform, announcement)
+                    if sent:
+                        logger.info("Consent announcement sent to chat: %s", announcement[:100])
+                    else:
+                        logger.warning("Consent announcement: _send_chat_message returned False")
+                except Exception as exc:
+                    logger.warning("Failed to send consent announcement: %s", exc)
+
             # ── Optional video recording via ffmpeg X11grab ────────────────────
             if record_video and video_path and xvfb_proc is not None:
                 try:
@@ -3796,6 +3811,75 @@ async def run_browser_bot(
                     }
                 """)
                 logger.info("Audio elements unmuted in page (AudioContext state: %s)", _audio_ctx_state)
+
+                # If our init script patch didn't fire (AudioContext not created),
+                # force-connect all existing RTCPeerConnection remote streams.
+                # This handles platforms like onepizza that may use PeerJS/SimplePeer
+                # or other WebRTC wrappers that store RTCPeerConnection references
+                # before our init script runs.
+                if _audio_ctx_state == "no-audio-ctx-yet":
+                    try:
+                        _force_state = await page.evaluate("""
+                            async () => {
+                                const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                                if (!AudioCtx) return 'no-AudioContext-API';
+                                const ctx = new AudioCtx({ latencyHint: 'playback' });
+                                await ctx.resume().catch(() => {});
+                                window._mbAudioCtx = ctx;
+
+                                // Find all audio/video elements and connect their streams
+                                let connected = 0;
+                                document.querySelectorAll('audio, video').forEach(el => {
+                                    try {
+                                        if (el.srcObject) {
+                                            const src = ctx.createMediaStreamSource(el.srcObject);
+                                            src.connect(ctx.destination);
+                                            connected++;
+                                        }
+                                    } catch(e) {}
+                                });
+
+                                // Also scan for RTCPeerConnection instances stored on
+                                // common library globals (PeerJS, SimplePeer, socket.io)
+                                const pcScan = [];
+                                try {
+                                    // PeerJS stores connections in Peer.connections
+                                    if (window.Peer) {
+                                        for (const k of Object.keys(window)) {
+                                            const v = window[k];
+                                            if (v && v.connections) {
+                                                for (const conns of Object.values(v.connections)) {
+                                                    for (const c of (Array.isArray(conns) ? conns : [conns])) {
+                                                        if (c && c.peerConnection) pcScan.push(c.peerConnection);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                } catch(e) {}
+
+                                // Scan RTCPeerConnections for remote audio tracks
+                                for (const pc of pcScan) {
+                                    try {
+                                        const receivers = pc.getReceivers ? pc.getReceivers() : [];
+                                        for (const r of receivers) {
+                                            if (r.track && r.track.kind === 'audio') {
+                                                const stream = new MediaStream([r.track]);
+                                                const src = ctx.createMediaStreamSource(stream);
+                                                src.connect(ctx.destination);
+                                                connected++;
+                                            }
+                                        }
+                                    } catch(e) {}
+                                }
+
+                                return ctx.state + ':connected=' + connected;
+                            }
+                        """)
+                        logger.info("Audio force-connect fallback: %s", _force_state)
+                    except Exception as exc:
+                        logger.debug("Audio force-connect failed: %s", exc)
+
             except Exception as exc:
                 logger.debug("Audio unmute injection failed: %s", exc)
 
@@ -3807,6 +3891,28 @@ async def run_browser_bot(
                 (ffmpeg_proc.poll() is None) if ffmpeg_proc else False,
                 pulse_sink, pulse_mic,
             )
+            # Dump PulseAudio sink-inputs so we can see if Chrome audio is routed
+            try:
+                _si = subprocess.run(["pactl", "list", "short", "sink-inputs"],
+                                     capture_output=True, text=True, timeout=5)
+                logger.info("PulseAudio sink-inputs:\n%s", _si.stdout.strip() or "(none)")
+            except Exception:
+                pass
+
+            # Second PulseAudio routing sync after a longer delay —
+            # WebRTC streams on some platforms (onepizza) take several seconds
+            # to fully initialize, so the first sync at 0.8s may miss them.
+            await asyncio.sleep(3)
+            await asyncio.get_event_loop().run_in_executor(
+                None, functools.partial(_sync_chrome_audio_routing, pulse_sink, pulse_mic, pulse_source_name)
+            )
+            # Re-dump sink-inputs after second sync
+            try:
+                _si2 = subprocess.run(["pactl", "list", "short", "sink-inputs"],
+                                      capture_output=True, text=True, timeout=5)
+                logger.info("PulseAudio sink-inputs (post-sync-2):\n%s", _si2.stdout.strip() or "(none)")
+            except Exception:
+                pass
 
             # Enable live captions so the mention monitor can read them
             if respond_on_mention:

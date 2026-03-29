@@ -869,6 +869,8 @@ async def run_bot_lifecycle(bot_id: str) -> None:
                     record_video=bot.record_video,
                     video_path=video_path,
                     external_leave_event=_leave_event,
+                    consent_enabled=getattr(bot, "consent_enabled", False),
+                    consent_message=getattr(bot, "consent_message", None),
                 )
 
                 if bot_result["success"]:

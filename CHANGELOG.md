@@ -4,7 +4,20 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.26.0 — **Last updated:** 2026-03-28
+> **Latest version:** 2.27.0 — **Last updated:** 2026-03-29
+
+---
+
+## [2.27.0] - 2026-03-29
+
+### Fixed
+- **Consent announcement never sent** — The consent service only processed opt-outs after the meeting but never actually sent the announcement to the chat. Now `run_browser_bot` sends the consent message via `_send_chat_message` immediately after the bot is admitted to the meeting
+- **Audio silent on onepizza.io** — The RTCPeerConnection init script patch wasn't firing because onepizza may use PeerJS or another WebRTC wrapper. Added a force-connect fallback: after joining, the bot creates an AudioContext, finds all `<audio>`/`<video>` element streams and RTCPeerConnection receivers, and connects them to the audio destination so Chrome outputs audio to PulseAudio
+- **PulseAudio routing timing** — Added a second `_sync_chrome_audio_routing` call 3 seconds after the first (which runs at 0.8s). WebRTC streams on onepizza take several seconds to fully initialize, so the first sync missed them
+- **PulseAudio diagnostics** — Added `pactl list short sink-inputs` dump after joining so logs show whether Chrome audio is actually routed to the recording sink
+
+### Added
+- `consent_enabled` and `consent_message` params passed through to `run_browser_bot`
 
 ---
 
