@@ -4,7 +4,14 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.27.1 — **Last updated:** 2026-03-29
+> **Latest version:** 2.27.2 — **Last updated:** 2026-03-29
+
+---
+
+## [2.27.2] - 2026-03-29
+
+### Fixed
+- **Bot detail page crash on null list fields** — When loading a completed bot from the database, JSON `null` values for list fields (`transcript`, `chapters`, `speaker_stats`, `participants`, `vocabulary`, `opted_out_participants`, `keyword_alerts`, `ai_usage`) caused `TypeError: object of type 'NoneType' has no len()` in the Jinja2 template. Fixed with `or []` in both `store.py` deserialization and `ui.py` snapshot parsing
 
 ---
 

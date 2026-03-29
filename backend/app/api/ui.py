@@ -396,6 +396,12 @@ async def bot_session_page(
                 d = _json.loads(snap.data)
                 # Parse datetime strings back to datetime objects
                 _dt_fields = {"created_at", "updated_at", "started_at", "ended_at", "join_at", "expires_at"}
+                # Fields that must never be None (use empty list/dict instead)
+                _list_fields = {
+                    "transcript", "chapters", "speaker_stats", "participants",
+                    "vocabulary", "opted_out_participants", "keyword_alerts", "ai_usage",
+                }
+                _dict_fields = {"metadata"}
                 parsed = {}
                 for k, v in d.items():
                     if k not in BotSession.__dataclass_fields__:
@@ -406,6 +412,10 @@ async def bot_session_page(
                             parsed[k] = dt if dt.tzinfo else dt.replace(tzinfo=_tz.utc)
                         except Exception:
                             parsed[k] = None
+                    elif k in _list_fields:
+                        parsed[k] = v if isinstance(v, list) else []
+                    elif k in _dict_fields:
+                        parsed[k] = v if isinstance(v, dict) else {}
                     else:
                         parsed[k] = v
                 bot = BotSession(**parsed)
