@@ -319,11 +319,14 @@ async def transcribe_audio(
             genai.upload_file, audio_path, mime_type="audio/wav"
         )
 
-        # Wait until processing is complete (poll every 1 s for fast start)
-        for _ in range(60):
-            if uploaded.state.name != "PROCESSING":
-                break
-            await asyncio.sleep(1)
+        # Wait until processing is complete using exponential backoff
+        # (1 s → 2 s → 4 s … capped at 10 s; give up after 90 s total).
+        _poll_delay = 1.0
+        _poll_elapsed = 0.0
+        while _poll_elapsed < 90 and uploaded.state.name == "PROCESSING":
+            await asyncio.sleep(_poll_delay)
+            _poll_elapsed += _poll_delay
+            _poll_delay = min(_poll_delay * 2, 10.0)
             uploaded = await asyncio.to_thread(genai.get_file, uploaded.name)
 
         if uploaded.state.name != "ACTIVE":

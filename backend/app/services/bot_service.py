@@ -350,8 +350,16 @@ async def _do_analysis_inner(bot: BotSession, audio_path: str, use_real_bot: boo
                 try:
                     lang = bot.translation_language
                     logger.info("Bot %s: translating transcript to %s", bot.id, lang)
+                    # Limit concurrency to avoid flooding the AI provider with
+                    # hundreds of simultaneous requests on long transcripts.
+                    _sem = asyncio.Semaphore(20)
+
+                    async def _translate(text: str) -> str:
+                        async with _sem:
+                            return await intelligence_service.translate_text(text, lang)
+
                     translated_texts = await asyncio.gather(
-                        *[intelligence_service.translate_text(e.get("text", ""), lang) for e in transcript],
+                        *[_translate(e.get("text", "")) for e in transcript],
                         return_exceptions=True,
                     )
                     for entry, result in zip(transcript, translated_texts):
@@ -593,6 +601,8 @@ def _build_done_payload(bot: BotSession) -> dict:
 
 async def _post_completion_notifications(account_id: str, bot_data: dict, bot=None) -> None:
     """Send email + integrations after a bot completes.  Never raises."""
+    # Fetch account once and reuse across both notification branches below.
+    _account = None
     try:
         from app.db import AsyncSessionLocal
         from app.models.account import Account
@@ -600,11 +610,11 @@ async def _post_completion_notifications(account_id: str, bot_data: dict, bot=No
 
         async with AsyncSessionLocal() as session:
             result = await session.execute(select(Account).where(Account.id == account_id))
-            account = result.scalar_one_or_none()
+            _account = result.scalar_one_or_none()
 
-        if account and account.notify_on_done:
+        if _account and _account.notify_on_done:
             from app.services.email_service import notify_meeting_done
-            await notify_meeting_done(account.email, account.notify_email, bot_data)
+            await notify_meeting_done(_account.email, _account.notify_email, bot_data)
     except Exception as exc:
         logger.warning("Email notification failed for account %s: %s", account_id, exc)
 
@@ -618,14 +628,17 @@ async def _post_completion_notifications(account_id: str, bot_data: dict, bot=No
                 participants=bot.participants or [],
             )
             await store.update_bot(bot.id, followup_email=followup)
-            # Send it to the notification email
-            from app.db import AsyncSessionLocal
-            from app.models.account import Account
-            from sqlalchemy import select
+            # Reuse already-fetched account; fall back to a fresh query if the
+            # first fetch failed (e.g. DB error in the email branch above).
             from app.services.email_service import send_email
-            async with AsyncSessionLocal() as session:
-                result = await session.execute(select(Account).where(Account.id == account_id))
-                account = result.scalar_one_or_none()
+            account = _account
+            if account is None:
+                from app.db import AsyncSessionLocal
+                from app.models.account import Account
+                from sqlalchemy import select
+                async with AsyncSessionLocal() as session:
+                    result = await session.execute(select(Account).where(Account.id == account_id))
+                    account = result.scalar_one_or_none()
             if account:
                 recipient = account.notify_email or account.email
                 await send_email(recipient, followup.get("subject", "Meeting Follow-up"), followup.get("body", ""))

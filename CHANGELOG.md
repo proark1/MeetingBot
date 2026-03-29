@@ -4,7 +4,20 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.29.0 — **Last updated:** 2026-03-29
+> **Latest version:** 2.30.0 — **Last updated:** 2026-03-29
+
+---
+
+## [2.30.0] - 2026-03-29
+
+### Performance
+- **Weekly digest N+1 eliminated** — `send_weekly_digest` now issues 3 DB queries total (accounts, batch snapshots, batch action-item counts via `GROUP BY`) instead of 2 queries per account; `len(scalars().all())` count replaced with `func.count()` aggregation
+- **Webhook retry efficiency** — Retry loop pre-fetches all needed `WebhookEntry` objects in a single lock acquisition instead of N separate `store.get_webhook()` calls; `_retry_delays()` result cached as module constant `_RETRY_DELAYS` to avoid repeated string parsing
+- **Translation concurrency cap** — `asyncio.Semaphore(20)` added to post-meeting transcript translation to prevent unbounded concurrent AI requests on long transcripts
+- **Duplicate Account query eliminated** — `_post_completion_notifications` fetches `Account` once and reuses it across email notification and auto follow-up branches
+- **Gemini polling backoff** — File-state polling in `transcription_service` switched from a flat 1 s interval (max 60 polls) to exponential backoff (1 s → 2 s → 4 s … capped at 10 s; 90 s total budget), reducing unnecessary API calls for quickly-processed files
+- **Store lock contention reduced** — `list_webhooks` now copies values inside the lock and sorts outside, freeing the lock sooner
+- **DB indexes** — Added composite `(account_id, status)` index on `bot_snapshots`; added `status` index on `action_items` to speed up filtered queries
 
 ---
 

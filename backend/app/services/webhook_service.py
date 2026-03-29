@@ -69,6 +69,10 @@ def _retry_delays() -> list[int]:
         return [60, 300, 1500, 7200, 36000]
 
 
+# Cached at module load — settings don't change at runtime
+_RETRY_DELAYS: list[int] = _retry_delays()
+
+
 def _build_body(event: str, payload: dict) -> str:
     return json.dumps({"event": event, "data": payload, "ts": datetime.now(timezone.utc).isoformat()})
 
@@ -201,7 +205,7 @@ async def dispatch_event(
                 logger.info("Webhook delivered  wh=%s  url=%s  status=%d", wh.id, wh.url, status_code)
                 wh.consecutive_failures = 0
             else:
-                delays = _retry_delays()
+                delays = _RETRY_DELAYS
                 next_retry_at = now + timedelta(seconds=delays[0]) if delays else None
                 await _log_delivery(
                     webhook_id=wh.id, bot_id=bot_id, event=event,
@@ -259,7 +263,7 @@ async def _process_retries() -> None:
         return
 
     now = datetime.now(timezone.utc)
-    delays = _retry_delays()
+    delays = _RETRY_DELAYS
     max_attempts = settings.WEBHOOK_MAX_ATTEMPTS
 
     async with AsyncSessionLocal() as session:
@@ -272,9 +276,17 @@ async def _process_retries() -> None:
         )
         pending: list[WebhookDelivery] = list(result.scalars().all())
 
+    if not pending:
+        return
+
+    # Batch-fetch all needed webhooks in a single lock acquisition instead of N separate calls
+    from app.store import store
+    needed_ids = {d.webhook_id for d in pending}
+    async with store._lock:
+        webhooks_map = {wid: store._webhooks.get(wid) for wid in needed_ids}
+
     for delivery in pending:
-        from app.store import store
-        wh = await store.get_webhook(delivery.webhook_id)
+        wh = webhooks_map.get(delivery.webhook_id)
         if wh is None or not wh.is_active:
             await _log_delivery(
                 webhook_id=delivery.webhook_id, bot_id=delivery.bot_id,

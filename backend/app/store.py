@@ -355,7 +355,8 @@ class Store:
 
     async def list_webhooks(self) -> list[WebhookEntry]:
         async with self._lock:
-            return sorted(self._webhooks.values(), key=lambda w: w.created_at, reverse=True)
+            webhooks = list(self._webhooks.values())
+        return sorted(webhooks, key=lambda w: w.created_at, reverse=True)
 
     async def delete_webhook(self, webhook_id: str) -> bool:
         async with self._lock:

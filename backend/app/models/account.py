@@ -123,6 +123,8 @@ class BotSnapshot(Base):
         Index("ix_bot_snapshots_account_created", "account_id", "created_at"),
         # Composite index used by sub-user isolation queries
         Index("ix_bot_snapshots_account_sub_user", "account_id", "sub_user_id"),
+        # Composite index for weekly-digest and analytics queries that filter by account + status
+        Index("ix_bot_snapshots_account_status", "account_id", "status"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -439,7 +441,7 @@ class ActionItem(Base):
     assignee: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     due_date: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     confidence: Mapped[Optional[float]] = mapped_column(Numeric(3, 2), nullable=True)
-    status: Mapped[str] = mapped_column(String(20), default="open")  # open | done
+    status: Mapped[str] = mapped_column(String(20), default="open", index=True)  # open | done
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 

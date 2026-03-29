@@ -245,7 +245,7 @@ async def send_weekly_digest() -> int:
     import json as _json
     from app.db import AsyncSessionLocal
     from app.models.account import Account, BotSnapshot, ActionItem
-    from sqlalchemy import select
+    from sqlalchemy import select, func
 
     now = datetime.now(timezone.utc)
     week_ago = now - timedelta(days=7)
@@ -258,21 +258,48 @@ async def send_weekly_digest() -> int:
             )
             accounts = acct_result.scalars().all()
 
-            for account in accounts:
-                recipient = account.notify_email or account.email
-                if not recipient:
-                    continue
+            # Filter to accounts that have a valid recipient up front
+            eligible = [(a, a.notify_email or a.email) for a in accounts if a.notify_email or a.email]
+            if not eligible:
+                return 0
 
-                snap_result = await db.execute(
-                    select(BotSnapshot).where(
-                        BotSnapshot.account_id == account.id,
-                        BotSnapshot.created_at >= week_ago,
-                        BotSnapshot.status == "done",
-                    ).limit(200)
+            account_ids = [a.id for a, _ in eligible]
+
+            # Batch query: all snapshots for all eligible accounts in one round-trip
+            snap_result = await db.execute(
+                select(BotSnapshot).where(
+                    BotSnapshot.account_id.in_(account_ids),
+                    BotSnapshot.created_at >= week_ago,
+                    BotSnapshot.status == "done",
+                ).order_by(BotSnapshot.created_at.desc()).limit(min(200 * len(account_ids), 5000))
+            )
+            all_snapshots = snap_result.scalars().all()
+
+            # Group snapshots by account_id (cap at 200 per account)
+            snapshots_by_account: dict[str, list] = {}
+            for snap in all_snapshots:
+                if snap.account_id:
+                    bucket = snapshots_by_account.setdefault(snap.account_id, [])
+                    if len(bucket) < 200:
+                        bucket.append(snap)
+
+            # Batch query: open action-item counts per account in one round-trip
+            ai_count_result = await db.execute(
+                select(ActionItem.account_id, func.count().label("cnt"))
+                .where(
+                    ActionItem.account_id.in_(account_ids),
+                    ActionItem.status == "open",
                 )
-                snapshots = snap_result.scalars().all()
+                .group_by(ActionItem.account_id)
+            )
+            open_ai_counts: dict[str, int] = {row.account_id: row.cnt for row in ai_count_result}
+
+            for account, recipient in eligible:
+                snapshots = snapshots_by_account.get(account.id)
                 if not snapshots:
                     continue
+
+                open_ai_count = open_ai_counts.get(account.id, 0)
 
                 total_meetings = len(snapshots)
                 total_duration = 0.0
@@ -291,14 +318,6 @@ async def send_weekly_digest() -> int:
                     all_action_items.extend((analysis.get("action_items") or [])[:5])
                     plat = data.get("meeting_platform", "unknown")
                     platform_counts[plat] = platform_counts.get(plat, 0) + 1
-
-                ai_result = await db.execute(
-                    select(ActionItem).where(
-                        ActionItem.account_id == account.id,
-                        ActionItem.status == "open",
-                    )
-                )
-                open_ai_count = len(ai_result.scalars().all())
 
                 hours = int(total_duration // 3600)
                 minutes = int((total_duration % 3600) // 60)
