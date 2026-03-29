@@ -4,7 +4,15 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.28.0 — **Last updated:** 2026-03-29
+> **Latest version:** 2.28.1 — **Last updated:** 2026-03-29
+
+---
+
+## [2.28.1] - 2026-03-29
+
+### Fixed
+- **Dashboard sidebar navigation broken for History and Action Items** — Missing from `_VALID_SECTIONS` array, so URL hash navigation and browser back button didn't work for these sections
+- **Form error text persists on resubmission** — Old error message stayed visible when user fixed input and resubmitted. Now clears error text before each submission attempt
 
 ---
 

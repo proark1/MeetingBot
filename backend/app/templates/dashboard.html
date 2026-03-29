@@ -2066,7 +2066,7 @@
 {% block scripts %}
 <script>
 // ── Section navigation ─────────────────────────────────────────────────────
-const _VALID_SECTIONS = ['overview','bots','analytics','api-keys','webhooks','integrations','calendar','workspaces','billing','settings'];
+const _VALID_SECTIONS = ['overview','bots','analytics','api-keys','webhooks','integrations','calendar','workspaces','billing','settings','history','action-items'];
 
 function _activateSection(name) {
   document.querySelectorAll('.dash-section').forEach(el => el.classList.remove('active'));
@@ -2455,6 +2455,8 @@ document.querySelectorAll('[data-delete-cal]').forEach(btn => btn.addEventListen
     if (kwRaw) payload.keyword_alerts = kwRaw.split(',').map(s => s.trim()).filter(Boolean).map(k => ({keyword: k}));
 
     btn.disabled = true;
+    status.textContent = '';
+    status.style.color = '';
     status.textContent = isScheduled ? 'Scheduling…' : 'Sending…';
     status.style.color = '#94a3b8';
 
