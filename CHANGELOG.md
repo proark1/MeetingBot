@@ -4,7 +4,18 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.27.4 — **Last updated:** 2026-03-29
+> **Latest version:** 2.27.5 — **Last updated:** 2026-03-29
+
+---
+
+## [2.27.5] - 2026-03-29
+
+### Fixed
+- **XSS in dashboard** — Unescaped meeting URLs, status values, and error messages in JS template literals could allow HTML injection. All dynamic values now use `_escHtml()` before insertion
+- **Leave button not hidden on status change** — Dashboard polling now removes the Leave button when bot exits `in_call` status
+- **Null dereference in bot detail page** — `leaveBot()` and `cancelBot()` JS functions crashed if their button elements didn't exist in the DOM. Added null guards
+- **Calendar iCal parsing crash** — Malformed iCal feed data crashed the entire calendar sync. Now catches parse errors and returns empty list
+- **Calendar dispatch cache memory growth** — Dispatch dedup cache pruned every 24h, growing unbounded with large calendar feeds. Reduced to every 4h
 
 ---
 

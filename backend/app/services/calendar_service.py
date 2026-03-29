@@ -50,8 +50,16 @@ def _parse_ical(ical_data: bytes, lookahead_minutes: int = _LOOKAHEAD_MINUTES) -
     now = datetime.now(timezone.utc)
     window_end = now + timedelta(minutes=lookahead_minutes)
 
-    cal = icalendar.Calendar.from_ical(ical_data)
-    events = recurring_ical_events.of(cal).between(now, window_end)
+    try:
+        cal = icalendar.Calendar.from_ical(ical_data)
+    except Exception as exc:
+        logger.warning("Failed to parse iCal data: %s", exc)
+        return []
+    try:
+        events = recurring_ical_events.of(cal).between(now, window_end)
+    except Exception as exc:
+        logger.warning("Failed to query recurring events: %s", exc)
+        return []
 
     results = []
     for event in events:
@@ -252,6 +260,6 @@ async def calendar_poll_loop(interval_s: int = 300) -> None:
         except Exception as exc:
             logger.error("Calendar poll loop error: %s", exc)
         _poll_cycle_count += 1
-        if _poll_cycle_count % 288 == 0:  # ~24h at 5-min intervals
+        if _poll_cycle_count % 48 == 0:  # ~4h at 5-min intervals (was 288/24h)
             _prune_dispatched()
         await asyncio.sleep(interval_s)

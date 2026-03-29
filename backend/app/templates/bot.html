@@ -513,6 +513,7 @@ function openSpeakerModal() {
 async function leaveBot() {
   if (!confirm('Tell the bot to leave the meeting? It will still transcribe and analyse the recording.')) return;
   const btn = document.getElementById('leave-btn');
+  if (!btn) return;
   btn.disabled = true;
   btn.textContent = 'Leaving…';
   try {
@@ -531,6 +532,7 @@ async function leaveBot() {
 async function cancelBot() {
   if (!confirm('Cancel this bot? This will stop it immediately without transcription.')) return;
   const btn = document.getElementById('cancel-btn');
+  if (!btn) return;
   btn.disabled = true;
   try {
     const resp = await fetch(`/dashboard/bot/${_botId}/cancel`, { method: 'POST' });

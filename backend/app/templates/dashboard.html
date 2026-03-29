@@ -2970,7 +2970,10 @@ async function cancelBot(botId, btn) {
         const row = document.querySelector(`tr[data-bot-id="${b.id}"]`);
         if (!row) continue;
         const cell = row.querySelector('.bot-status-cell');
-        if (cell) cell.innerHTML = _STATUS_CHIP[b.status] || `<span class="chip chip-gray">${b.status}</span>`;
+        if (cell) cell.innerHTML = _STATUS_CHIP[b.status] || `<span class="chip chip-gray">${_escHtml(b.status)}</span>`;
+        // Hide leave button when not in_call
+        const leaveBtn = row.querySelector('.bot-actions-cell .btn-outline-warning');
+        if (leaveBtn && b.status !== 'in_call') leaveBtn.remove();
         // Hide cancel button for terminal bots
         if (_TERMINAL.has(b.status)) {
           const cancelBtn = row.querySelector('.bot-actions-cell .btn-outline-danger');
@@ -3007,9 +3010,9 @@ async function loadMeetingHistory() {
         ? '<span class="chip chip-success">Done</span>'
         : m.status === 'error'
           ? '<span class="chip chip-danger">Error</span>'
-          : '<span class="chip chip-gray">' + (m.status || 'unknown') + '</span>';
+          : '<span class="chip chip-gray">' + _escHtml(m.status || 'unknown') + '</span>';
       return `<tr>
-        <td style="font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${m.meeting_url || ''}">${m.meeting_url || '—'}</td>
+        <td style="font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${_escHtml(m.meeting_url || '')}">${_escHtml(m.meeting_url || '—')}</td>
         <td><span class="chip chip-gray">${platform}</span></td>
         <td>${statusChip}</td>
         <td style="font-size:12.5px">${dur}</td>
