@@ -4,7 +4,22 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.27.5 — **Last updated:** 2026-03-29
+> **Latest version:** 2.28.0 — **Last updated:** 2026-03-29
+
+---
+
+## [2.28.0] - 2026-03-29
+
+### Improved
+- **Bot detail auto-refresh** — Pages for active bots (joining, in_call, transcribing, etc.) now auto-refresh every 8 seconds instead of requiring manual refresh
+- **Error message prominent** — Error bots now show the error message directly below the status chip instead of buried in the details table
+- **Empty state fallbacks** — "No speaker statistics available" and "No AI analysis available (Transcript-only mode)" messages now shown for completed bots with missing data, instead of silently hiding sections
+- **Duration display** — Calls longer than 1 hour now show hours (e.g. "1h 23m 45s" instead of "83m 45s")
+- **Scheduled status chip** — Changed from yellow (warning) to blue (info) to distinguish from ready/queued
+- **Copyright year** — Updated from 2025 to 2026
+
+### Fixed
+- **API domain inconsistency** — Developer code sample on landing page used `api.meetingbot.dev` while hero used `api.justheretolisten.io`. Standardized to brand domain
 
 ---
 

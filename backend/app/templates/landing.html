@@ -1644,7 +1644,7 @@
           <div class="code-body">
 <span class="tok-comment"># 1. Create a bot — bot joins the meeting instantly</span>
 <span class="tok-obj">response</span> <span class="tok-punc">=</span> <span class="tok-fn">requests</span><span class="tok-punc">.</span><span class="tok-fn">post</span><span class="tok-punc">(</span>
-    <span class="tok-str">"https://api.meetingbot.dev/api/v1/bot"</span><span class="tok-punc">,</span>
+    <span class="tok-str">"https://api.justheretolisten.io/api/v1/bot"</span><span class="tok-punc">,</span>
     <span class="tok-fn">headers</span><span class="tok-punc">={</span><span class="tok-str">"Authorization"</span><span class="tok-punc">:</span> <span class="tok-str">"Bearer sk_live_..."</span><span class="tok-punc">},</span>
     <span class="tok-fn">json</span><span class="tok-punc">={</span>
         <span class="tok-str">"meeting_url"</span><span class="tok-punc">:</span> <span class="tok-str">"https://zoom.us/j/12345"</span><span class="tok-punc">,</span>
@@ -1659,7 +1659,7 @@
 
 <span class="tok-comment"># 2. Stream live transcript over WebSocket</span>
 <span class="tok-kw">async with</span> <span class="tok-fn">websockets</span><span class="tok-punc">.</span><span class="tok-fn">connect</span><span class="tok-punc">(</span>
-    <span class="tok-str">f"wss://api.meetingbot.dev/ws/{bot_id}"</span>
+    <span class="tok-str">f"wss://api.justheretolisten.io/ws/{bot_id}"</span>
 <span class="tok-punc">) as</span> <span class="tok-obj">ws</span><span class="tok-punc">:</span>
     <span class="tok-kw">async for</span> <span class="tok-obj">msg</span> <span class="tok-kw">in</span> <span class="tok-obj">ws</span><span class="tok-punc">:</span>
         <span class="tok-obj">event</span> <span class="tok-punc">=</span> <span class="tok-fn">json</span><span class="tok-punc">.</span><span class="tok-fn">loads</span><span class="tok-punc">(</span><span class="tok-obj">msg</span><span class="tok-punc">)</span>
@@ -2114,7 +2114,7 @@
       </div>
     </div>
     <div class="footer-copy d-flex justify-content-between align-items-center flex-wrap gap-2">
-      <span>© 2025 JustHereToListen.io. All rights reserved.</span>
+      <span>© 2026 JustHereToListen.io. All rights reserved.</span>
       <div class="d-flex gap-3">
         <div class="security-badge" style="font-size:0.72rem;padding:0.2rem 0.6rem">SOC 2 Ready</div>
         <div class="security-badge" style="font-size:0.72rem;padding:0.2rem 0.6rem">GDPR Compliant</div>

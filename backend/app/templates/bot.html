@@ -77,12 +77,17 @@
         <span class="chip chip-success">Done</span>
         {% elif bot.status == "error" %}
         <span class="chip chip-danger">Error</span>
+        {% if bot.error_message %}
+        <div style="color:#ef4444;font-size:12px;margin-top:6px;line-height:1.4">{{ bot.error_message }}</div>
+        {% endif %}
         {% elif bot.status == "cancelled" %}
         <span class="chip chip-gray">Cancelled</span>
         {% elif bot.status in ["joining", "in_call", "call_ended", "transcribing"] %}
         <span class="chip chip-info">{{ bot.status|replace("_"," ")|title }}</span>
         <div class="status-progress"><div class="status-progress-bar"></div></div>
-        {% elif bot.status in ["ready", "queued", "scheduled"] %}
+        {% elif bot.status == "scheduled" %}
+        <span class="chip chip-info">Scheduled</span>
+        {% elif bot.status in ["ready", "queued"] %}
         <span class="chip chip-warning">{{ bot.status|title }}</span>
         {% else %}
         <span class="chip chip-gray">{{ bot.status }}</span>
@@ -101,9 +106,10 @@
       <div class="stat-label">Duration</div>
       <div class="stat-value mt-1" style="font-size:1rem">
         {% if bot.duration_seconds %}
-          {% set mins = (bot.duration_seconds // 60)|int %}
+          {% set hours = (bot.duration_seconds // 3600)|int %}
+          {% set mins = ((bot.duration_seconds % 3600) // 60)|int %}
           {% set secs = (bot.duration_seconds % 60)|int %}
-          {{ mins }}m {{ secs }}s
+          {% if hours > 0 %}{{ hours }}h {% endif %}{{ mins }}m {{ secs }}s
         {% else %}
           —
         {% endif %}
@@ -248,6 +254,10 @@
     </table>
   </div>
 </div>
+{% elif bot.status == "done" %}
+<div class="card card-pad mb-4" style="text-align:center;color:#94a3b8;padding:1.5rem">
+  No speaker statistics available for this session.
+</div>
 {% endif %}
 
 {% if bot.analysis %}
@@ -365,6 +375,10 @@
     <span class="chip chip-gray" style="background:#eff6ff;color:#1d4ed8">📅 {{ bot.analysis.next_meeting }}</span>
   </div>
   {% endif %}
+</div>
+{% elif bot.status == "done" %}
+<div class="card card-pad mb-4" style="text-align:center;color:#94a3b8;padding:1.5rem">
+  No AI analysis available.{% if bot.analysis_mode == "transcript_only" %} (Transcript-only mode selected){% endif %}
 </div>
 {% endif %}
 
@@ -736,5 +750,14 @@ async function reanalyze() {
     btn.disabled = false;
   }
 }
+
+// ── Auto-refresh for active bot states ──────────────────────────────────────
+(function() {
+  const active = ['ready', 'scheduled', 'queued', 'joining', 'in_call', 'call_ended', 'transcribing'];
+  const status = '{{ bot.status }}';
+  if (active.includes(status)) {
+    setTimeout(() => location.reload(), 8000);
+  }
+})();
 </script>
 {% endblock %}
