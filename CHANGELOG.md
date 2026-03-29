@@ -4,7 +4,15 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.30.0 — **Last updated:** 2026-03-29
+> **Latest version:** 2.30.1 — **Last updated:** 2026-03-29
+
+---
+
+## [2.30.1] - 2026-03-29
+
+### Fixed
+- **Voice response not heard when bot is auto-muted on join** — `_speak_in_meeting` now always calls `_unmute_mic` before playing TTS audio, regardless of the `start_muted` setting. Previously, when `start_muted=False` (the default), the unmute step was skipped on the assumption the mic was already live. Zoom and Teams routinely auto-mute bots on admission, so TTS audio was captured by WebRTC but never transmitted. `_unmute_mic` is safe to call unconditionally — it checks the current UI state and is a no-op when the mic is already on.
+- **Silent voice failure** — `_dispatch_reply` now logs a warning when `_speak_in_meeting` returns `False` in `voice` mode, making TTS/PulseAudio errors visible in logs.
 
 ---
 
