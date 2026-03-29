@@ -4,7 +4,17 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.27.2 — **Last updated:** 2026-03-29
+> **Latest version:** 2.27.3 — **Last updated:** 2026-03-29
+
+---
+
+## [2.27.3] - 2026-03-29
+
+### Fixed
+- **Leave event reuse on retry** (CRITICAL) — `asyncio.Event` stays set once triggered. On bot join retries, the stale event caused the browser bot to immediately exit instead of waiting. Now creates a fresh event on each retry attempt
+- **Cancel leaves bot in non-terminal state** — Cancelling a bot in `joining` status left it stuck (never transitioned to `cancelled`). Now forces terminal state after task cancellation if still in an active status
+- **Consent message None crash** — If `CONSENT_MESSAGE` config was unset and no custom message provided, `build_announcement_message()` returned `None`, crashing `_send_chat_message`. Added hardcoded fallback
+- **`process_consent` None transcript crash** — Passing `None` instead of `[]` caused `TypeError` when iterating. Added early return guard
 
 ---
 

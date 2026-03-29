@@ -26,7 +26,11 @@ def _get_settings():
 def build_announcement_message(custom_message: Optional[str] = None) -> str:
     """Return the consent announcement text to send in meeting chat."""
     s = _get_settings()
-    return custom_message or s.CONSENT_MESSAGE
+    return (
+        custom_message
+        or s.CONSENT_MESSAGE
+        or "This meeting is being recorded. Say 'opt out' if you do not wish to be recorded."
+    )
 
 
 def check_transcript_for_optout(
@@ -88,6 +92,9 @@ async def process_consent(bot_id: str, transcript: list[dict]) -> list[dict]:
 
     This is called after transcription completes when consent_enabled=True.
     """
+    if not transcript:
+        return transcript or []
+
     from app.store import store
 
     bot = await store.get_bot(bot_id)

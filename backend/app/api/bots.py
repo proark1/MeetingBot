@@ -428,7 +428,10 @@ async def create_bot(payload: BotCreate, request: Request):
 
     from app.config import settings as _settings
 
-    # Resolve consent: per-bot override > platform default
+    # Resolve consent: if the user explicitly enabled it, use that; otherwise fall
+    # back to the platform default.  We use `or` intentionally here — the BotCreate
+    # schema defaults consent_enabled to False, so `True` only comes from an explicit
+    # user choice.  The platform default can upgrade False → True but never downgrade.
     consent_enabled = payload.consent_enabled or _settings.CONSENT_ANNOUNCEMENT_ENABLED
     consent_message = payload.consent_message  # None = use platform default
 
@@ -720,6 +723,12 @@ async def delete_bot(bot_id: str, request: Request):
                 await asyncio.wait_for(task, timeout=30.0)
             except (asyncio.TimeoutError, asyncio.CancelledError):
                 pass
+            # Ensure bot reaches a terminal state after task cancellation.
+            # The lifecycle task's error handler may have already done this,
+            # but if not (e.g. status still 'joining'), force it.
+            bot = await store.get_bot(bot_id)
+            if bot and bot.status not in ("done", "error", "cancelled"):
+                await store.mark_terminal(bot_id, "cancelled", ended_at=_now())
             logger.info("Cancelled lifecycle task for bot %s", bot_id)
         else:
             # Already finished — remove from memory immediately

@@ -849,6 +849,9 @@ async def run_bot_lifecycle(bot_id: str) -> None:
                     await asyncio.sleep(retry_delay)
                     admitted = False
                     _live_buffer.clear()
+                    # Create a fresh leave event — asyncio.Event is not reusable once set
+                    _leave_event = asyncio.Event()
+                    await store.update_bot(bot_id, leave_event=_leave_event)
 
                 bot_result = await run_browser_bot(
                     meeting_url=bot.meeting_url,
