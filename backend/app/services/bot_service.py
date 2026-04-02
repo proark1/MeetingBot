@@ -911,7 +911,7 @@ async def run_bot_lifecycle(bot_id: str) -> None:
                 final_buffer = list(_live_buffer)
             if final_buffer:
                 await store.update_bot(bot_id, transcript=final_buffer)
-                logger.info("Bot %s: flushed %d live transcript entries", bot_id, len(_live_buffer))
+                logger.info("Bot %s: flushed %d live transcript entries", bot_id, len(final_buffer))
 
             await _set_status(bot, "call_ended", ended_at=_now())
             await store.update_bot(bot_id, status="transcribing")

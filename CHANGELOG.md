@@ -4,7 +4,14 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.30.3 — **Last updated:** 2026-04-02
+> **Latest version:** 2.30.4 — **Last updated:** 2026-04-02
+
+---
+
+## [2.30.4] - 2026-04-02
+
+### Fixed
+- **Inaccurate live transcript flush log count** — `bot_service.py` logged `len(_live_buffer)` after releasing `_live_lock`, so the count reflected buffer state after new entries could have been appended by concurrent transcription. Now uses `len(final_buffer)` (the snapshot taken inside the lock).
 
 ---
 
