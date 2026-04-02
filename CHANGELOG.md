@@ -4,7 +4,14 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.30.2 — **Last updated:** 2026-04-02
+> **Latest version:** 2.30.3 — **Last updated:** 2026-04-02
+
+---
+
+## [2.30.3] - 2026-04-02
+
+### Fixed
+- **Wrong `bot_data` keys in Google Drive, Linear, and Jira integrations** — `integration_service.py` referenced `bot_data["id"]` and `bot_data["platform"]` but the payload built by `_build_done_payload()` uses `"bot_id"` and `"meeting_platform"`. Google Drive filenames silently fell back to `"unknown"`, and Linear/Jira issue descriptions used an empty bot ID.
 
 ---
 

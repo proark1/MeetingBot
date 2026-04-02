@@ -253,7 +253,7 @@ async def _post_to_google_drive(access_token: str, folder_id: Optional[str], bot
     """
     import httpx
 
-    bot_id = bot_data.get("id", "unknown")
+    bot_id = bot_data.get("bot_id", "unknown")
     # Build markdown content
     try:
         from app.api.exports import _build_markdown
@@ -268,7 +268,7 @@ async def _post_to_google_drive(access_token: str, folder_id: Optional[str], bot
         # Required fields
         session_kwargs.setdefault("id", bot_id)
         session_kwargs.setdefault("meeting_url", bot_data.get("meeting_url", ""))
-        session_kwargs.setdefault("meeting_platform", bot_data.get("platform", "unknown"))
+        session_kwargs.setdefault("meeting_platform", bot_data.get("meeting_platform", "unknown"))
         session_kwargs.setdefault("bot_name", "JustHereToListen.io")
         from datetime import datetime, timezone
         session_kwargs.setdefault("created_at", datetime.now(timezone.utc))
@@ -332,7 +332,7 @@ async def _post_to_linear(api_key: str, team_id: str, bot_data: dict) -> bool:
         return True  # nothing to create
 
     summary = (bot_data.get("analysis") or {}).get("summary", "")
-    bot_id = bot_data.get("id", "")
+    bot_id = bot_data.get("bot_id", "")
     headers = {"Authorization": api_key, "Content-Type": "application/json"}
     url = "https://api.linear.app/graphql"
     successes = 0
@@ -382,7 +382,7 @@ async def _post_to_jira(base_url: str, token: str, email: str, project_key: str,
         return True
 
     summary = (bot_data.get("analysis") or {}).get("summary", "")
-    bot_id = bot_data.get("id", "")
+    bot_id = bot_data.get("bot_id", "")
     auth = base64.b64encode(f"{email}:{token}".encode()).decode()
     headers = {
         "Authorization": f"Basic {auth}",
