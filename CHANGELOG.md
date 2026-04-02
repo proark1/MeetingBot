@@ -4,7 +4,16 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.30.1 — **Last updated:** 2026-03-29
+> **Latest version:** 2.30.2 — **Last updated:** 2026-04-02
+
+---
+
+## [2.30.2] - 2026-04-02
+
+### Fixed
+- **Python SDK crashes on all delete operations** — Every delete method (`cancel_bot`, `delete_webhook`, `revoke_api_key`, `delete_keyword_alert`, `delete_calendar_feed`, `delete_integration`, `delete_workspace`, `remove_workspace_member`) called `response.json()` on HTTP 204 No Content responses, causing a JSON decode error. Added `_delete_no_content()` helper and updated all affected methods in both sync and async clients to return `None` instead.
+- **Export endpoints leak data across sub-users** — The `_get_or_404` helper in `exports.py` only checked `account_id` but not `sub_user_id`, allowing business account sub-users to access each other's markdown, PDF, JSON, and SRT exports. Now enforces sub-user isolation matching the pattern in `bots.py`.
+- **Personal analytics ignores sub_user_id** — `GET /api/v1/analytics/me` returned aggregated data for all sub-users within a business account instead of scoping to the requesting sub-user via the `X-Sub-User` header.
 
 ---
 

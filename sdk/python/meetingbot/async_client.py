@@ -179,6 +179,11 @@ class AsyncMeetingBotClient:
         _raise_for_status(response)
         return response
 
+    async def _delete_no_content(self, path: str) -> None:
+        """Send DELETE and discard the body (for 204 No Content endpoints)."""
+        response = await self._client.delete(path)
+        _raise_for_status(response)
+
     # ------------------------------------------------------------------
     # Bots
     # ------------------------------------------------------------------
@@ -309,15 +314,13 @@ class AsyncMeetingBotClient:
         response = await self._get(f"/api/v1/bot/{bot_id}")
         return BotResponse.model_validate(response.json())
 
-    async def cancel_bot(self, bot_id: str) -> Dict[str, Any]:
+    async def cancel_bot(self, bot_id: str) -> None:
         """
         Cancel (delete) a bot.
 
         :param bot_id: The bot's unique identifier.
-        :returns: Raw JSON response dict.
         """
-        response = await self._delete(f"/api/v1/bot/{bot_id}")
-        return response.json()
+        await self._delete_no_content(f"/api/v1/bot/{bot_id}")
 
     async def download_recording(self, bot_id: str) -> bytes:
         """
@@ -417,15 +420,13 @@ class AsyncMeetingBotClient:
         response = await self._patch(f"/api/v1/webhook/{webhook_id}", json=body)
         return WebhookResponse.model_validate(response.json())
 
-    async def delete_webhook(self, webhook_id: str) -> Dict[str, Any]:
+    async def delete_webhook(self, webhook_id: str) -> None:
         """
         Delete a webhook.
 
         :param webhook_id: The webhook's unique identifier.
-        :returns: Raw JSON response dict.
         """
-        response = await self._delete(f"/api/v1/webhook/{webhook_id}")
-        return response.json()
+        await self._delete_no_content(f"/api/v1/webhook/{webhook_id}")
 
     async def list_webhook_deliveries(
         self,
@@ -508,15 +509,13 @@ class AsyncMeetingBotClient:
         response = await self._post("/api/v1/auth/keys", json={"name": name})
         return ApiKeyCreateResponse.model_validate(response.json())
 
-    async def revoke_api_key(self, key_id: str) -> Dict[str, Any]:
+    async def revoke_api_key(self, key_id: str) -> None:
         """
         Revoke an API key.
 
         :param key_id: The key's unique identifier.
-        :returns: Raw JSON response dict.
         """
-        response = await self._delete(f"/api/v1/auth/keys/{key_id}")
-        return response.json()
+        await self._delete_no_content(f"/api/v1/auth/keys/{key_id}")
 
     async def get_plan(self) -> PlanInfo:
         """
@@ -1124,15 +1123,13 @@ class AsyncMeetingBotClient:
         response = await self._patch(f"/api/v1/keyword-alerts/{alert_id}", json=body)
         return KeywordAlertResponse.model_validate(response.json())
 
-    async def delete_keyword_alert(self, alert_id: str) -> Dict[str, Any]:
+    async def delete_keyword_alert(self, alert_id: str) -> None:
         """
         Delete a keyword alert.
 
         :param alert_id: The alert's unique identifier.
-        :returns: Raw JSON response dict.
         """
-        response = await self._delete(f"/api/v1/keyword-alerts/{alert_id}")
-        return response.json()
+        await self._delete_no_content(f"/api/v1/keyword-alerts/{alert_id}")
 
     # ------------------------------------------------------------------
     # Calendar Feeds
@@ -1173,15 +1170,13 @@ class AsyncMeetingBotClient:
         response = await self._post("/api/v1/calendar", json=body)
         return CalendarFeedResponse.model_validate(response.json())
 
-    async def delete_calendar_feed(self, feed_id: str) -> Dict[str, Any]:
+    async def delete_calendar_feed(self, feed_id: str) -> None:
         """
         Delete a calendar feed.
 
         :param feed_id: The feed's unique identifier.
-        :returns: Raw JSON response dict.
         """
-        response = await self._delete(f"/api/v1/calendar/{feed_id}")
-        return response.json()
+        await self._delete_no_content(f"/api/v1/calendar/{feed_id}")
 
     async def sync_calendar_feed(self, feed_id: str) -> Dict[str, Any]:
         """
@@ -1244,15 +1239,13 @@ class AsyncMeetingBotClient:
         response = await self._patch(f"/api/v1/integrations/{integration_id}", json=body)
         return IntegrationResponse.model_validate(response.json())
 
-    async def delete_integration(self, integration_id: str) -> Dict[str, Any]:
+    async def delete_integration(self, integration_id: str) -> None:
         """
         Delete an integration.
 
         :param integration_id: The integration's unique identifier.
-        :returns: Raw JSON response dict.
         """
-        response = await self._delete(f"/api/v1/integrations/{integration_id}")
-        return response.json()
+        await self._delete_no_content(f"/api/v1/integrations/{integration_id}")
 
     # ------------------------------------------------------------------
     # Workspaces
@@ -1309,15 +1302,13 @@ class AsyncMeetingBotClient:
         response = await self._patch(f"/api/v1/workspaces/{workspace_id}", json=body)
         return WorkspaceResponse.model_validate(response.json())
 
-    async def delete_workspace(self, workspace_id: str) -> Dict[str, Any]:
+    async def delete_workspace(self, workspace_id: str) -> None:
         """
         Delete a workspace (owner only).
 
         :param workspace_id: The workspace's unique identifier.
-        :returns: Raw JSON response dict.
         """
-        response = await self._delete(f"/api/v1/workspaces/{workspace_id}")
-        return response.json()
+        await self._delete_no_content(f"/api/v1/workspaces/{workspace_id}")
 
     async def list_workspace_members(self, workspace_id: str) -> WorkspaceMemberListResponse:
         """
@@ -1347,16 +1338,14 @@ class AsyncMeetingBotClient:
         response = await self._post(f"/api/v1/workspaces/{workspace_id}/members", json=body)
         return response.json()
 
-    async def remove_workspace_member(self, workspace_id: str, account_id: str) -> Dict[str, Any]:
+    async def remove_workspace_member(self, workspace_id: str, account_id: str) -> None:
         """
         Remove a member from a workspace.
 
         :param workspace_id: The workspace's unique identifier.
         :param account_id: The account ID to remove.
-        :returns: Raw JSON response dict.
         """
-        response = await self._delete(f"/api/v1/workspaces/{workspace_id}/members/{account_id}")
-        return response.json()
+        await self._delete_no_content(f"/api/v1/workspaces/{workspace_id}/members/{account_id}")
 
     # ------------------------------------------------------------------
     # Retention

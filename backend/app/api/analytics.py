@@ -547,12 +547,14 @@ async def get_my_analytics(request: Request):
     if not account_id:
         raise HTTPException(status_code=401, detail="Authentication required")
 
+    sub_user_id = (request.headers.get("X-Sub-User", "").strip()[:255]) or None
+
     now = datetime.now(timezone.utc)
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     week_starts = [now - timedelta(weeks=i+1) for i in range(4)]
 
     # Use account-scoped store (never superadmin expanded)
-    all_bots, _ = await store.list_bots(limit=10000, account_id=account_id)
+    all_bots, _ = await store.list_bots(limit=10000, account_id=account_id, sub_user_id=sub_user_id)
 
     meetings_this_month = 0
     ai_cost_this_month = 0.0

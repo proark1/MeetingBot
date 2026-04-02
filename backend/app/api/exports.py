@@ -31,7 +31,7 @@ def _fmt_ts(secs: float) -> str:
     return f"{m:02d}:{s:02d}"
 
 
-async def _get_or_404(bot_id: str, account_id=None) -> BotSession:
+async def _get_or_404(bot_id: str, account_id=None, sub_user_id=None) -> BotSession:
     bot = await store.get_bot(bot_id)
     if bot is None:
         raise HTTPException(status_code=404, detail=f"Bot {bot_id!r} not found")
@@ -42,7 +42,15 @@ async def _get_or_404(bot_id: str, account_id=None) -> BotSession:
         and bot.account_id != account_id
     ):
         raise HTTPException(status_code=404, detail=f"Bot {bot_id!r} not found")
+    if sub_user_id is not None and bot.sub_user_id != sub_user_id:
+        raise HTTPException(status_code=404, detail=f"Bot {bot_id!r} not found")
     return bot
+
+
+def _get_sub_user_from_request(request) -> "Optional[str]":
+    """Extract sub_user_id from X-Sub-User header."""
+    val = request.headers.get("X-Sub-User", "").strip()[:255]
+    return val or None
 
 
 # ── Markdown export ───────────────────────────────────────────────────────────
@@ -50,7 +58,7 @@ async def _get_or_404(bot_id: str, account_id=None) -> BotSession:
 @router.get("/{bot_id}/export/markdown", response_class=PlainTextResponse)
 async def export_markdown(bot_id: str, request: Request):
     """Export the meeting report as a Markdown document."""
-    bot = await _get_or_404(bot_id, getattr(request.state, "account_id", None))
+    bot = await _get_or_404(bot_id, getattr(request.state, "account_id", None), _get_sub_user_from_request(request))
     md = _build_markdown(bot)
     filename = f"meeting-{bot_id[:8]}.md"
     return PlainTextResponse(
@@ -73,7 +81,7 @@ async def export_pdf(bot_id: str, request: Request):
             detail="PDF export requires reportlab — run: pip install reportlab",
         )
 
-    bot = await _get_or_404(bot_id, getattr(request.state, "account_id", None))
+    bot = await _get_or_404(bot_id, getattr(request.state, "account_id", None), _get_sub_user_from_request(request))
     pdf_bytes = _build_pdf(bot)
     filename = f"meeting-{bot_id[:8]}.pdf"
     return Response(
@@ -369,7 +377,7 @@ class _ExportJsonResponse(BaseModel):
 @router.get("/{bot_id}/export/json", response_model=_ExportJsonResponse)
 async def export_json(bot_id: str, request: Request):
     """Export the full bot session as structured JSON."""
-    bot = await _get_or_404(bot_id, getattr(request.state, "account_id", None))
+    bot = await _get_or_404(bot_id, getattr(request.state, "account_id", None), _get_sub_user_from_request(request))
     return _ExportJsonResponse(
         id=bot.id,
         meeting_url=bot.meeting_url,
@@ -435,7 +443,7 @@ def _build_srt(bot: BotSession) -> str:
 @router.get("/{bot_id}/export/srt")
 async def export_srt(bot_id: str, request: Request):
     """Export the meeting transcript as an SRT subtitle file."""
-    bot = await _get_or_404(bot_id, getattr(request.state, "account_id", None))
+    bot = await _get_or_404(bot_id, getattr(request.state, "account_id", None), _get_sub_user_from_request(request))
     srt_content = _build_srt(bot)
     filename = f"meeting-{bot_id[:8]}.srt"
     return PlainTextResponse(
