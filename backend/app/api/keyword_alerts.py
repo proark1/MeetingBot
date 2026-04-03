@@ -199,5 +199,8 @@ async def delete_keyword_alert(alert_id: str, request: Request):
         row = result.scalar_one_or_none()
         if row is None:
             raise HTTPException(status_code=404, detail=f"Keyword alert {alert_id!r} not found")
-        await db.execute(delete(KeywordAlert).where(KeywordAlert.id == alert_id))
+        await db.execute(delete(KeywordAlert).where(
+            KeywordAlert.id == alert_id,
+            KeywordAlert.account_id == account_id,
+        ))
         await db.commit()

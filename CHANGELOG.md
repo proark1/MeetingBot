@@ -4,7 +4,22 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.30.4 — **Last updated:** 2026-04-02
+> **Latest version:** 2.31.0 — **Last updated:** 2026-04-03
+
+---
+
+## [2.31.0] - 2026-04-03
+
+### Fixed
+- **Keyword alert deletion ignores account_id** — `DELETE /api/v1/keyword-alerts/{id}` checked ownership in the SELECT but not in the DELETE statement, allowing cross-account deletion by ID guessing
+- **Export-to-Drive endpoint leaks data across sub-users** — `POST /api/v1/bot/{id}/export/drive` was the only export endpoint missing the `sub_user_id` isolation check added in v2.30.2
+- **TypeScript SDK error messages always return 0** — `parseErrorDetail()` used bitwise OR (`|`) instead of logical OR (`||`), causing error detail strings to be coerced to `0` via bitwise operations at runtime
+- **Stripe top-up commits before credits are added** — `process_stripe_webhook()` committed the topup as "completed" before calling `add_credits()`, so a failure in credit addition would leave the customer charged but with no credits
+- **PDF export crashes on text with angle brackets** — Six `Paragraph()` calls in PDF export passed AI-generated text (summaries, action items, chapter titles) without HTML-escaping, causing ReportLab parse errors when text contained `<`, `>`, or tag-like sequences
+- **SSRF bypass via keyword alert webhook URLs** — Bot creation validated the main `webhook_url` against internal IPs but did not validate individual `keyword_alerts[].webhook_url` entries, allowing SSRF to internal infrastructure
+- **Webhook null-safety crash on startup** — `load_persisted_webhooks()` accessed `.tzinfo` on `row.created_at` without a null guard, crashing if any webhook record had a NULL `created_at`
+- **monthly_reset_task not cancelled on shutdown** — All background tasks were cancelled during lifespan shutdown except `monthly_reset_task`, causing task leaks and potentially blocking graceful shutdown
+- **Bot scheduling ignores client timezone** — `join_at.replace(tzinfo=timezone.utc)` forcefully replaced the timezone label instead of converting, so a bot scheduled for `14:00 EST` would join at `14:00 UTC` (5 hours early)
 
 ---
 

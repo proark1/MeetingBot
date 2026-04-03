@@ -356,6 +356,7 @@ async def lifespan(app: FastAPI):
     webhook_retry_task.cancel()
     calendar_task.cancel()
     retention_task.cancel()
+    monthly_reset_task.cancel()
     digest_task.cancel()
 
     if _running_tasks:

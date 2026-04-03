@@ -594,7 +594,7 @@ async def load_persisted_webhooks() -> int:
                     events=events,
                     secret=row.secret,
                     is_active=row.is_active,
-                    created_at=row.created_at if row.created_at.tzinfo else row.created_at.replace(tzinfo=timezone.utc),
+                    created_at=(row.created_at if row.created_at and row.created_at.tzinfo else (row.created_at.replace(tzinfo=timezone.utc) if row.created_at else datetime.now(timezone.utc))),
                     delivery_attempts=row.delivery_attempts or 0,
                     last_delivery_at=row.last_delivery_at,
                     last_delivery_status=row.last_delivery_status,

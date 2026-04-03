@@ -102,8 +102,8 @@ const DEFAULT_BASE_URL = "https://api.yourserver.com";
 async function parseErrorDetail(response: Response): Promise<string | undefined> {
   try {
     const body = await response.clone().json();
-    return (body as Record<string, unknown>)["detail"] as string |
-      (body as Record<string, unknown>)["message"] as string |
+    return ((body as Record<string, unknown>)["detail"] as string) ||
+      ((body as Record<string, unknown>)["message"] as string) ||
       JSON.stringify(body);
   } catch {
     try {

@@ -421,10 +421,10 @@ async def create_bot(payload: BotCreate, request: Request):
             if getattr(payload, "keyword_alerts", None):
                 await check_feature("keyword_alerts", account_id, _fdb)
 
-    is_scheduled = (
-        payload.join_at is not None
-        and payload.join_at.replace(tzinfo=timezone.utc) > _now()
-    )
+    _join_at_utc = None
+    if payload.join_at is not None:
+        _join_at_utc = payload.join_at if payload.join_at.tzinfo else payload.join_at.replace(tzinfo=timezone.utc)
+    is_scheduled = _join_at_utc is not None and _join_at_utc > _now()
 
     from app.config import settings as _settings
 
@@ -442,9 +442,12 @@ async def create_bot(payload: BotCreate, request: Request):
     ]
 
     # SSRF protection: validate per-bot webhook_url before storing
+    from app.api.webhooks import _block_ssrf
     if payload.webhook_url:
-        from app.api.webhooks import _block_ssrf
         await _block_ssrf(payload.webhook_url)
+    for _ka in (payload.keyword_alerts or []):
+        if _ka.webhook_url:
+            await _block_ssrf(_ka.webhook_url)
 
     _normalized_url = bot_service.normalize_meeting_url(str(payload.meeting_url))
 
@@ -531,7 +534,7 @@ async def create_bot(payload: BotCreate, request: Request):
 
     if is_scheduled:
         # Defer start until join time — does NOT occupy a concurrent slot while waiting.
-        delay = max(0, (payload.join_at.replace(tzinfo=timezone.utc) - _now()).total_seconds())
+        delay = max(0, (_join_at_utc - _now()).total_seconds())
         if delay < 1:
             # join_at is essentially now — start immediately instead of scheduling a 0s timer
             await _start_or_queue_bot(bot.id)

@@ -144,7 +144,6 @@ async def handle_checkout_completed(session: dict) -> Optional[Decimal]:
             db.add(topup)
 
         topup.status = "completed"
-        await db.commit()
 
         await add_credits(
             account_id=account_id,

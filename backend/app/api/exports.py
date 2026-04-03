@@ -270,13 +270,13 @@ def _build_pdf(bot: BotSession) -> bytes:
         if not items:
             return
         story.append(Paragraph(title, h2))
-        list_items = [ListItem(Paragraph(str(i), body), leftIndent=15) for i in items]
+        list_items = [ListItem(Paragraph(_he(str(i)), body), leftIndent=15) for i in items]
         story.append(ListFlowable(list_items, bulletType="bullet"))
 
     summary = analysis.get("summary", "")
     if summary:
         story.append(Paragraph("Summary", h2))
-        story.append(Paragraph(summary, body))
+        story.append(Paragraph(_he(summary), body))
 
     _section("Key Points", analysis.get("key_points", []))
     _section("Decisions", analysis.get("decisions", []))
@@ -293,7 +293,7 @@ def _build_pdf(bot: BotSession) -> bytes:
                 suffix += f" → {assignee}"
             if due:
                 suffix += f" (due {due})"
-            story.append(Paragraph(f"☐  {task}{suffix}", body))
+            story.append(Paragraph(f"☐  {_he(task)}{_he(suffix)}", body))
 
     _section("Next Steps", analysis.get("next_steps", []))
     _section("Risks & Blockers", analysis.get("risks_blockers", []))
@@ -302,7 +302,7 @@ def _build_pdf(bot: BotSession) -> bytes:
     next_meeting = analysis.get("next_meeting")
     if next_meeting:
         story.append(Paragraph("Next Meeting", h2))
-        story.append(Paragraph(str(next_meeting), body))
+        story.append(Paragraph(_he(str(next_meeting)), body))
 
     speaker_stats = bot.speaker_stats or []
     if speaker_stats:
@@ -336,9 +336,9 @@ def _build_pdf(bot: BotSession) -> bytes:
         story.append(Paragraph("Chapters", h2))
         for ch in chapters:
             ts = _fmt_ts(ch.get("start_time", 0))
-            story.append(Paragraph(f"{ts} — {ch.get('title', '')}", h3))
+            story.append(Paragraph(f"{ts} — {_he(ch.get('title', ''))}", h3))
             if ch.get("summary"):
-                story.append(Paragraph(ch["summary"], body))
+                story.append(Paragraph(_he(ch["summary"]), body))
 
     transcript = bot.transcript or []
     if transcript:
@@ -476,7 +476,7 @@ async def export_to_drive(bot_id: str, body: DriveExportRequest, request: Reques
     """
     import httpx as _httpx
 
-    bot = await _get_or_404(bot_id, getattr(request.state, "account_id", None))
+    bot = await _get_or_404(bot_id, getattr(request.state, "account_id", None), _get_sub_user_from_request(request))
 
     # Accept token from body or Authorization header (stripped of "Bearer " prefix)
     token = body.access_token
