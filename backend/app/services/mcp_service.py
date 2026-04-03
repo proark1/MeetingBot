@@ -485,7 +485,7 @@ async def _tool_get_meeting_cost_summary(args: dict, account_id: Optional[str]) 
     by_platform: dict[str, dict] = {}
 
     for bot in all_bots:
-        if bot.created_at and bot.created_at.replace(tzinfo=timezone.utc if bot.created_at.tzinfo is None else bot.created_at.tzinfo) < cutoff:
+        if bot.created_at and (bot.created_at if bot.created_at.tzinfo else bot.created_at.replace(tzinfo=timezone.utc)) < cutoff:
             continue
         plat = bot.meeting_platform or "unknown"
         entry = by_platform.setdefault(plat, {"meeting_cost_usd": 0.0, "ai_cost_usd": 0.0, "count": 0})
