@@ -98,6 +98,12 @@ async def lifespan(app: FastAPI):
 
     # ── Startup validation ────────────────────────────────────────────────
     if settings.JWT_SECRET == "change-me-in-production":
+        if settings.ENVIRONMENT.lower() == "production":
+            raise SystemExit(
+                "FATAL: JWT_SECRET is the insecure default and ENVIRONMENT=production. "
+                "Set a strong JWT_SECRET before starting in production:\n"
+                "  export JWT_SECRET=$(openssl rand -hex 32)"
+            )
         import secrets as _secrets
         settings.JWT_SECRET = _secrets.token_hex(32)
         logger.warning(
@@ -164,23 +170,31 @@ async def lifespan(app: FastAPI):
 
     signal.signal(signal.SIGTERM, _handle_sigterm)
 
+    # Task heartbeat registry — tracks last activity per background task
+    _task_heartbeats: dict[str, datetime] = {}
+
     async def _supervised(name: str, coro_fn, *args, max_restarts: int = 20, **kwargs) -> None:
         """Run a background coroutine and restart it if it crashes.
 
         Without this, a single unhandled exception in a background task silently
         kills the task — webhooks stop retrying, cleanup stops running, etc.
         This wrapper logs the crash and restarts with exponential backoff.
+        Records a heartbeat on each loop iteration for health monitoring.
         """
+        from datetime import datetime as _dt, timezone as _tz
         restarts = 0
         backoff = 5.0
         while restarts < max_restarts:
             try:
+                _task_heartbeats[name] = _dt.now(_tz.utc)
                 await coro_fn(*args, **kwargs)
                 # Coroutine returned normally (shouldn't happen for loops) — restart cleanly
+                _task_heartbeats[name] = _dt.now(_tz.utc)
                 restarts = 0
                 backoff = 5.0
             except asyncio.CancelledError:
                 logger.info("Background task %r cancelled", name)
+                _task_heartbeats.pop(name, None)
                 return
             except Exception:
                 restarts += 1
@@ -191,6 +205,7 @@ async def lifespan(app: FastAPI):
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, 300.0)
         logger.critical("Background task %r exceeded max restarts (%d) — giving up", name, max_restarts)
+        _task_heartbeats.pop(name, None)
 
     # Start bot queue processor
     queue_task = asyncio.create_task(_supervised("queue_processor", _queue_processor))
@@ -200,7 +215,7 @@ async def lifespan(app: FastAPI):
     async def _cleanup_loop():
         from app.store import store
         while True:
-            await asyncio.sleep(3600)  # every hour
+            await asyncio.sleep(settings.STORE_CLEANUP_INTERVAL_SECONDS)
             await store.cleanup_expired()
 
     cleanup_task = asyncio.create_task(_supervised("cleanup_loop", _cleanup_loop))
@@ -364,6 +379,9 @@ async def lifespan(app: FastAPI):
         for task in list(_running_tasks.values()):
             task.cancel()
         await asyncio.gather(*list(_running_tasks.values()), return_exceptions=True)
+
+    from app.services.bot_service import cancel_all_tracked_tasks
+    await cancel_all_tracked_tasks()
 
     from app.services import webhook_service
     await webhook_service.close_http_client()
@@ -901,8 +919,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=_origins if not _wildcard else ["*"],
     allow_credentials=not _wildcard,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Idempotency-Key", "X-Sub-User"],
 )
 app.add_middleware(PrometheusMiddleware)
 
@@ -1052,14 +1070,22 @@ _ERROR_CODE_MAP: dict[int, tuple[str, bool]] = {
 from fastapi.exceptions import RequestValidationError as _RequestValidationError
 
 
+def _incident_id() -> str:
+    """Generate a short unique incident ID for error tracking."""
+    import uuid as _uuid
+    return _uuid.uuid4().hex[:12]
+
+
 @app.exception_handler(_RequestValidationError)
 async def _validation_exception_handler(request, exc: _RequestValidationError):
     """Wrap Pydantic validation errors into the machine-readable structure."""
+    iid = _incident_id()
     return _JSONResponse(
         status_code=422,
         content={
             "detail": exc.errors(),
             "error_code": "validation_error",
+            "incident_id": iid,
             "retryable": False,
         },
     )
@@ -1069,13 +1095,16 @@ async def _validation_exception_handler(request, exc: _RequestValidationError):
 async def _http_exception_handler(request, exc: _HTTPException):
     """Wrap FastAPI HTTPExceptions into a machine-readable structure."""
     code, retryable = _ERROR_CODE_MAP.get(exc.status_code, ("unknown_error", exc.status_code >= 500))
+    body: dict = {
+        "detail": exc.detail,
+        "error_code": code,
+        "retryable": retryable,
+    }
+    if exc.status_code >= 500:
+        body["incident_id"] = _incident_id()
     return _JSONResponse(
         status_code=exc.status_code,
-        content={
-            "detail": exc.detail,
-            "error_code": code,
-            "retryable": retryable,
-        },
+        content=body,
     )
 
 
@@ -1083,11 +1112,13 @@ async def _http_exception_handler(request, exc: _HTTPException):
 async def _unhandled_exception_handler(request, exc):
     """Log full traceback for unhandled exceptions so production errors are diagnosable."""
     import traceback
+    iid = _incident_id()
     logger.error(
-        "Unhandled %s on %s %s:\n%s",
+        "Unhandled %s on %s %s (incident=%s):\n%s",
         type(exc).__name__,
         request.method,
         request.url.path,
+        iid,
         traceback.format_exc(),
     )
     return _JSONResponse(
@@ -1095,6 +1126,7 @@ async def _unhandled_exception_handler(request, exc):
         content={
             "detail": "Internal Server Error",
             "error_code": "internal_error",
+            "incident_id": iid,
             "retryable": True,
         },
     )
@@ -1157,8 +1189,38 @@ async def health():
 
     Does NOT check external dependencies (use /ready for that).
     Kubernetes: use this as the `livenessProbe`.
+    Includes background task heartbeat status.
     """
-    return {"status": "ok", "service": "JustHereToListen.io", "version": _APP_VERSION}
+    from datetime import datetime as _dt, timezone as _tz
+    now = _dt.now(_tz.utc)
+    # Expected task names and their max allowed silence (seconds)
+    _EXPECTED_TASKS = {
+        "queue_processor": 120,
+        "cleanup_loop": 7200,
+        "webhook_retry": 120,
+        "calendar_poll": 600,
+        "retention_enforcement": 7200,
+        "monthly_reset": 7200,
+        "weekly_digest": 604800,
+    }
+    tasks_status = {}
+    for name, max_silence_s in _EXPECTED_TASKS.items():
+        hb = _task_heartbeats.get(name)
+        if hb is None:
+            tasks_status[name] = {"status": "not_started"}
+        else:
+            age_s = (now - hb).total_seconds()
+            tasks_status[name] = {
+                "status": "healthy" if age_s < max_silence_s else "stale",
+                "last_heartbeat": hb.isoformat(),
+                "age_seconds": round(age_s),
+            }
+    return {
+        "status": "ok",
+        "service": "JustHereToListen.io",
+        "version": _APP_VERSION,
+        "background_tasks": tasks_status,
+    }
 
 
 @app.get("/ready", tags=["Health"])

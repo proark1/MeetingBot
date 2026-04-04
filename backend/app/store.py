@@ -14,7 +14,9 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-BOT_TTL_HOURS = 24  # how long to keep completed bots in memory
+from app.config import settings as _settings
+
+BOT_TTL_HOURS = _settings.BOT_TTL_HOURS  # how long to keep completed bots in memory
 
 
 def _now() -> datetime:
@@ -186,6 +188,19 @@ class Store:
     async def create_bot(self, session: BotSession) -> None:
         async with self._lock:
             self._bots[session.id] = session
+            # LRU eviction: if store exceeds max, evict oldest terminal bots
+            max_bots = _settings.STORE_MAX_BOTS
+            if len(self._bots) > max_bots:
+                terminal = sorted(
+                    (b for b in self._bots.values() if b.status in ("done", "error", "cancelled")),
+                    key=lambda b: b.updated_at or b.created_at,
+                )
+                evict_count = len(self._bots) - max_bots
+                for bot in terminal[:evict_count]:
+                    self._bots.pop(bot.id, None)
+                if evict_count > 0:
+                    logger.info("Evicted %d terminal bot(s) from memory (store size %d > %d)",
+                                min(evict_count, len(terminal)), len(self._bots), max_bots)
 
     async def get_bot(self, bot_id: str) -> Optional[BotSession]:
         async with self._lock:
@@ -357,6 +372,17 @@ class Store:
         async with self._lock:
             webhooks = list(self._webhooks.values())
         return sorted(webhooks, key=lambda w: w.created_at, reverse=True)
+
+    async def update_webhook(self, webhook_id: str, **kwargs) -> Optional[WebhookEntry]:
+        """Update webhook fields in memory and persist to DB."""
+        async with self._lock:
+            wh = self._webhooks.get(webhook_id)
+            if wh is None:
+                return None
+            for k, v in kwargs.items():
+                setattr(wh, k, v)
+        await self._persist_webhook(wh)
+        return wh
 
     async def delete_webhook(self, webhook_id: str) -> bool:
         async with self._lock:

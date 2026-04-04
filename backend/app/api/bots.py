@@ -788,6 +788,7 @@ async def get_transcript(bot_id: str, request: Request):
 # ── GET /api/v1/bot/{id}/recording ───────────────────────────────────────────
 
 @router.get("/{bot_id}/recording")
+@_limiter.limit("5/minute")
 async def download_recording(bot_id: str, request: Request):
     """Download the meeting audio recording (WAV).
 
@@ -810,6 +811,7 @@ async def download_recording(bot_id: str, request: Request):
 # ── GET /api/v1/bot/{id}/video ───────────────────────────────────────────────
 
 @router.get("/{bot_id}/video")
+@_limiter.limit("5/minute")
 async def download_video(bot_id: str, request: Request):
     """Download the meeting video recording (MP4).
 

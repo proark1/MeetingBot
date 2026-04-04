@@ -90,21 +90,42 @@ def _to_response(integration: Integration) -> IntegrationResponse:
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
-@router.get("", response_model=list[IntegrationResponse])
+@router.get("")
 async def list_integrations(
     account_id: Optional[str] = Depends(get_current_account_id),
     db: AsyncSession = Depends(get_db),
+    limit: int = 50,
+    offset: int = 0,
 ):
-    """List all integrations for the current account."""
+    """List all integrations for the current account.
+
+    Returns a paginated envelope with `results`, `total`, `limit`, `offset`, and `has_more`.
+    """
     if not account_id or account_id == SUPERADMIN_ACCOUNT_ID:
         raise HTTPException(status_code=403, detail="Use per-user authentication")
+
+    from sqlalchemy import func
+    total_result = await db.execute(
+        select(func.count(Integration.id))
+        .where(Integration.account_id == account_id)
+    )
+    total = total_result.scalar() or 0
 
     result = await db.execute(
         select(Integration)
         .where(Integration.account_id == account_id)
         .order_by(Integration.created_at.desc())
+        .limit(limit)
+        .offset(offset)
     )
-    return [_to_response(i) for i in result.scalars().all()]
+    items = [_to_response(i) for i in result.scalars().all()]
+    return {
+        "results": items,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "has_more": offset + limit < total,
+    }
 
 
 def _validate_integration_config(type_: str, config: dict) -> None:

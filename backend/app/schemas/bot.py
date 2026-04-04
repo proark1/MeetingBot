@@ -7,8 +7,8 @@ from pydantic import BaseModel, Field, field_validator, AnyHttpUrl
 
 class KeywordAlertConfig(BaseModel):
     """Per-bot keyword alert specification."""
-    keyword: str = Field(description="The trigger keyword or phrase (case-insensitive).")
-    webhook_url: Optional[str] = Field(default=None, description="Optional webhook URL to notify in addition to global webhooks.")
+    keyword: str = Field(max_length=100, description="The trigger keyword or phrase (case-insensitive).")
+    webhook_url: Optional[str] = Field(default=None, max_length=2048, description="Optional webhook URL to notify in addition to global webhooks.")
 
 
 def _reject_private_url(v: Any) -> str:
@@ -46,6 +46,7 @@ class BotCreate(BaseModel):
     # Where to deliver results when the bot finishes
     webhook_url: Optional[str] = Field(
         default=None,
+        max_length=2048,
         description=(
             "HTTPS URL to POST the full meeting results to once the bot finishes. "
             "The payload includes status, transcript, analysis, participants, and AI usage. "
@@ -67,7 +68,10 @@ class BotCreate(BaseModel):
             "`transcript_only` — skip all AI analysis, return only the raw transcript."
         ),
     )
-    template: Optional[str] = Field(
+    template: Optional[Literal[
+        "default", "sales", "standup", "1on1", "retro",
+        "kickoff", "allhands", "postmortem", "interview", "design-review",
+    ]] = Field(
         default=None,
         description=(
             "Built-in analysis template. One of: default, sales, standup, 1on1, retro, "
@@ -216,13 +220,34 @@ class BotCreate(BaseModel):
     # Pass-through metadata — returned as-is in bot responses and webhook payloads
     metadata: dict[str, Any] = Field(
         default={},
-        description="Arbitrary key-value pairs stored with the bot and echoed in all responses.",
+        description="Arbitrary key-value pairs stored with the bot and echoed in all responses. Max 20 keys, 64 char keys, 256 char string values.",
     )
 
     @field_validator("meeting_url", mode="before")
     @classmethod
     def validate_meeting_url(cls, v: Any) -> Any:
         return _reject_private_url(v)
+
+    @field_validator("metadata", mode="after")
+    @classmethod
+    def validate_metadata(cls, v: dict[str, Any]) -> dict[str, Any]:
+        if len(v) > 20:
+            raise ValueError("metadata may contain at most 20 keys")
+        for key, val in v.items():
+            if len(key) > 64:
+                raise ValueError(f"metadata key {key!r} exceeds 64 characters")
+            if isinstance(val, str) and len(val) > 256:
+                raise ValueError(f"metadata value for {key!r} exceeds 256 characters")
+        return v
+
+    @field_validator("vocabulary", mode="after")
+    @classmethod
+    def validate_vocabulary_items(cls, v: Optional[list[str]]) -> Optional[list[str]]:
+        if v is not None:
+            for term in v:
+                if len(term) > 200:
+                    raise ValueError(f"vocabulary term exceeds 200 characters: {term[:30]!r}...")
+        return v
 
 
 # ── Response schemas ───────────────────────────────────────────────────────────
@@ -371,6 +396,15 @@ class BotSummary(BaseModel):
     ai_total_tokens: int = 0
     ai_total_cost_usd: float = 0.0
     ai_primary_model: Optional[str] = None
+
+
+class PaginatedResponse(BaseModel):
+    """Generic paginated response envelope."""
+    results: list = []
+    total: int = 0
+    limit: int = 50
+    offset: int = 0
+    has_more: bool = False
 
 
 class BotListResponse(BaseModel):

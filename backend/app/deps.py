@@ -100,15 +100,26 @@ async def get_current_account_id(
     return api_key.account_id
 
 
+import re as _re
+
+_SUB_USER_RE = _re.compile(r"^[a-zA-Z0-9_\-\.@]{1,255}$")
+
+
 async def get_sub_user_id(request: Request) -> Optional[str]:
     """Extract X-Sub-User header for business account data isolation.
 
     Business accounts pass this header to scope bot data per end-user.
     Returns None for personal accounts or when the header is absent.
+    Validates format: alphanumeric, underscore, dash, dot, or @ (max 255 chars).
     """
     sub_user = request.headers.get("X-Sub-User")
     if sub_user:
-        sub_user = sub_user.strip()[:255]  # limit length
+        sub_user = sub_user.strip()
+        if not _SUB_USER_RE.match(sub_user):
+            raise HTTPException(
+                status_code=400,
+                detail="X-Sub-User must be 1–255 characters: alphanumeric, underscore, dash, dot, or @",
+            )
     request.state.sub_user_id = sub_user or None
     return sub_user or None
 

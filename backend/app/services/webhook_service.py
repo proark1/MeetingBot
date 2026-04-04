@@ -222,6 +222,17 @@ async def dispatch_event(
                 if wh.consecutive_failures >= 5:
                     wh.is_active = False
                     logger.warning("Webhook %s auto-disabled (5 consecutive failures)", wh.id)
+                    try:
+                        from app.services.audit_log_service import log_event as _audit_log
+                        asyncio.create_task(_audit_log(
+                            account_id=None,
+                            action="webhook.auto_disabled",
+                            resource_type="webhook",
+                            resource_id=wh.id,
+                            details={"url": wh.url, "consecutive_failures": wh.consecutive_failures},
+                        ))
+                    except Exception:
+                        pass
 
             wh.delivery_attempts += 1
             wh.last_delivery_at = now

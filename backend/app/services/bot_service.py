@@ -13,6 +13,26 @@ from urllib.parse import urlparse, parse_qs, unquote
 
 from app.config import settings
 from app.store import store, BotSession, _now
+
+# ── Tracked background tasks (cancelled on shutdown) ─────────────────────────
+_background_tasks: set[asyncio.Task] = set()
+
+
+def _tracked_task(coro) -> asyncio.Task:
+    """Create an asyncio.Task that is tracked for graceful shutdown."""
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return task
+
+
+async def cancel_all_tracked_tasks() -> None:
+    """Cancel and await all tracked background tasks (called on shutdown)."""
+    if _background_tasks:
+        logger.info("Cancelling %d tracked background task(s)…", len(_background_tasks))
+        for task in list(_background_tasks):
+            task.cancel()
+        await asyncio.gather(*list(_background_tasks), return_exceptions=True)
 from app.api.ws import manager as ws_manager
 from app.services import intelligence_service, webhook_service
 from app.services.browser_bot import run_browser_bot
@@ -774,7 +794,7 @@ async def run_bot_lifecycle(bot_id: str) -> None:
                         except Exception:
                             logger.debug("SSE push failed for bot %s", _bid, exc_info=True)
 
-                    asyncio.create_task(_safe_sse_push())
+                    _tracked_task(_safe_sse_push())
                 except Exception:
                     logger.debug("SSE push setup failed for bot %s", bot_id, exc_info=True)
 
@@ -789,7 +809,7 @@ async def run_bot_lifecycle(bot_id: str) -> None:
 
                 # ── Real-time translation ─────────────────────────────────────
                 if getattr(bot, "translation_language", None):
-                    asyncio.create_task(
+                    _tracked_task(
                         _translate_and_broadcast(bot_id, bot.account_id, entry, bot.translation_language)
                     )
 
@@ -841,7 +861,7 @@ async def run_bot_lifecycle(bot_id: str) -> None:
                     async with _live_lock:
                         slice_start = max(0, buf_len - 10)
                         transcript_slice = list(_live_buffer[slice_start:buf_len])
-                    asyncio.create_task(
+                    _tracked_task(
                         _extract_and_broadcast_action_items(bot_id, bot.account_id, transcript_slice)
                     )
 
@@ -1049,12 +1069,12 @@ async def run_bot_lifecycle(bot_id: str) -> None:
 
         # Fire integrations (Slack / Notion / CRM) and email notification in parallel
         if bot.account_id:
-            asyncio.create_task(_post_completion_notifications(bot.account_id, done_payload, bot=bot))
+            _tracked_task(_post_completion_notifications(bot.account_id, done_payload, bot=bot))
 
         # Notify SSE subscribers that the stream is complete
         try:
             from app.services.sse_manager import push_terminal as _sse_terminal
-            asyncio.create_task(_sse_terminal(bot_id, "done"))
+            _tracked_task(_sse_terminal(bot_id, "done"))
         except Exception:
             pass
 

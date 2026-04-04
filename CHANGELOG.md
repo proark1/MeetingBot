@@ -4,7 +4,33 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.31.0 — **Last updated:** 2026-04-03
+> **Latest version:** 2.32.0 — **Last updated:** 2026-04-04
+
+---
+
+## [2.32.0] - 2026-04-04
+
+### Added
+- **Structured error responses with incident IDs** — All 5xx errors now include a unique `incident_id` for tracking; 422 validation errors also include `incident_id`
+- **Background task health monitoring** — `/health` endpoint now reports heartbeat status for all 7 background tasks (queue processor, cleanup, webhook retry, calendar poll, retention, monthly reset, weekly digest) with staleness detection
+- **Webhook PATCH endpoint** — `PATCH /api/v1/webhook/{id}` allows updating URL, events, or re-enabling auto-disabled webhooks (resets `consecutive_failures` on re-enable)
+- **Webhook auto-disable audit logging** — When a webhook is auto-disabled after 5 consecutive failures, an audit log entry (`webhook.auto_disabled`) is now created
+- **Paginated envelope for list endpoints** — Webhook list, delivery logs, and integrations now return `{results, total, limit, offset, has_more}` instead of bare arrays
+- **Webhook event payload schemas** — OpenAPI docs now include `WebhookEventPayload` and `WebhookEventList` models documenting the webhook delivery format
+- **WebSocket message format documentation** — `/ws` endpoint docstring now documents the JSON message format and all broadcast event types
+- **`PaginatedResponse` schema** — Reusable pagination envelope in `schemas/bot.py` for consistent list responses
+- **`ENVIRONMENT` config setting** — New `ENVIRONMENT` env var (default: `development`) to control production-strict behavior
+- **Bot store memory settings** — New `BOT_TTL_HOURS`, `STORE_CLEANUP_INTERVAL_SECONDS`, `STORE_MAX_BOTS` config settings for tuning in-memory store
+
+### Improved
+- **Input validation hardened** — `webhook_url` and `keyword_alerts[].webhook_url` capped at 2048 chars; `template` field enforced as Literal enum; `metadata` limited to 20 keys (64-char keys, 256-char string values); `vocabulary` items capped at 200 chars per term; `keyword` capped at 100 chars
+- **CORS tightened** — `allow_methods` restricted to `GET/POST/PUT/PATCH/DELETE/OPTIONS` (was `*`); `allow_headers` restricted to `Authorization/Content-Type/X-Idempotency-Key/X-Sub-User` (was `*`)
+- **Sub-user ID validation** — `X-Sub-User` header now validated against `^[a-zA-Z0-9_\-\.@]{1,255}$` regex; rejects special characters
+- **JWT production safety** — Server now refuses to start if `JWT_SECRET` is the default value and `ENVIRONMENT=production`
+- **Graceful shutdown** — All fire-and-forget `asyncio.create_task()` calls in bot_service.py now tracked via `_tracked_task()` and cancelled on shutdown
+- **Background task supervision** — `_supervised()` now records heartbeats per task; logs at CRITICAL level (not just error) when max restarts exceeded
+- **Memory management** — Bot store cleanup interval configurable (default 30 min, was 1 hour); LRU eviction of terminal bots when store exceeds `STORE_MAX_BOTS` (default 10,000)
+- **Rate limiting** — Added rate limits to recording download (5/min), video download (5/min), PDF export (5/min), markdown/JSON/SRT exports (10/min)
 
 ---
 

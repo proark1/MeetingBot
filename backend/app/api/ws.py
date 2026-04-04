@@ -115,6 +115,30 @@ manager = ConnectionManager()
 
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = None) -> None:
+    """Real-time event stream via WebSocket.
+
+    **Authentication:** Pass your API key or JWT as `?token=<key>`.
+
+    **Message format (JSON):**
+    ```json
+    {
+        "event": "bot.live_transcript",
+        "bot_id": "abc123",
+        "account_id": "acc_456",
+        "data": { ... }
+    }
+    ```
+
+    **Events broadcast:**
+    - `bot.joining`, `bot.in_call`, `bot.call_ended`, `bot.done`, `bot.error`
+    - `bot.live_transcript` — real-time transcript entries during the call
+    - `bot.live_transcript_translated` — translated entries (when translation_language is set)
+    - `bot.keyword_alert` — keyword/phrase detected in live transcript
+    - `bot.coaching_alert` — dominant speaker or other coaching signals
+    - `bot.action_item` — live-extracted action items
+
+    Events are scoped to the authenticated account's bots.
+    """
     from app.config import settings
 
     account_id = await _resolve_ws_account(token)

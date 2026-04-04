@@ -152,10 +152,20 @@ async def create_webhook(payload: WebhookCreate, request: _Request):
     return _to_response(wh)
 
 
-@router.get("", response_model=list[WebhookResponse])
+@router.get("")
 async def list_webhooks():
-    """List all registered global webhooks."""
-    return [_to_response(wh) for wh in await store.list_webhooks()]
+    """List all registered global webhooks.
+
+    Returns a paginated envelope with `results`, `total`, and `has_more`.
+    """
+    webhooks = await store.list_webhooks()
+    return {
+        "results": [_to_response(wh) for wh in webhooks],
+        "total": len(webhooks),
+        "limit": len(webhooks),
+        "offset": 0,
+        "has_more": False,
+    }
 
 
 @router.get("/events")
@@ -191,21 +201,23 @@ class DeliveryResponse(_BM):
     created_at: _dt
 
 
-@router.get("/deliveries", response_model=list[DeliveryResponse], tags=["Webhooks"])
+@router.get("/deliveries", tags=["Webhooks"])
 async def list_all_deliveries(
     limit: int = 50,
     offset: int = 0,
 ):
     """List the most recent webhook delivery attempts across ALL registered webhooks.
 
-    Useful for the webhook testing playground. Returns up to `limit` entries sorted
-    newest-first, combining deliveries from every webhook in the account.
+    Useful for the webhook testing playground. Returns a paginated envelope with `results`,
+    `total`, `limit`, `offset`, and `has_more`.
     """
     try:
         from app.db import AsyncSessionLocal
         from app.models.account import WebhookDelivery
-        from sqlalchemy import select
+        from sqlalchemy import select, func
         async with AsyncSessionLocal() as session:
+            total_result = await session.execute(select(func.count(WebhookDelivery.id)))
+            total = total_result.scalar() or 0
             result = await session.execute(
                 select(WebhookDelivery)
                 .order_by(WebhookDelivery.created_at.desc())
@@ -217,7 +229,7 @@ async def list_all_deliveries(
         logger.exception("Failed to list webhook deliveries")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-    return [
+    items = [
         DeliveryResponse(
             id=r.id,
             webhook_id=r.webhook_id,
@@ -234,6 +246,69 @@ async def list_all_deliveries(
         )
         for r in rows
     ]
+    return {
+        "results": items,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "has_more": offset + limit < total,
+    }
+
+
+class WebhookUpdate(_BM):
+    """Partial update for a registered webhook."""
+    url: _Opt[str] = None
+    events: _Opt[list[str]] = None
+    is_active: _Opt[bool] = None
+
+
+@router.patch("/{webhook_id}", response_model=WebhookResponse)
+@_limiter.limit("10/minute")
+async def update_webhook(webhook_id: str, payload: WebhookUpdate, request: _Request):
+    """Update a registered webhook (URL, events, or active status).
+
+    Use this to re-enable a webhook that was auto-disabled after consecutive failures.
+    When re-enabling (`is_active: true`), `consecutive_failures` is reset to 0.
+    """
+    wh = await store.get_webhook(webhook_id)
+    if wh is None:
+        raise HTTPException(status_code=404, detail=f"Webhook {webhook_id!r} not found")
+
+    updates: dict = {}
+    if payload.url is not None:
+        await _block_ssrf(payload.url)
+        updates["url"] = payload.url
+    if payload.events is not None:
+        # Validate events
+        if payload.events != ["*"]:
+            unknown = [e for e in payload.events if e not in WEBHOOK_EVENTS]
+            if unknown:
+                raise HTTPException(status_code=422, detail=f"Unknown event(s): {unknown!r}")
+        updates["events"] = payload.events
+    if payload.is_active is not None:
+        updates["is_active"] = payload.is_active
+        if payload.is_active:
+            updates["consecutive_failures"] = 0  # reset on re-enable
+
+    if not updates:
+        return _to_response(wh)
+
+    wh = await store.update_webhook(webhook_id, **updates)
+    if wh is None:
+        raise HTTPException(status_code=404, detail=f"Webhook {webhook_id!r} not found")
+
+    import asyncio as _asyncio
+    from app.services.audit_log_service import log_event as _audit
+    _asyncio.create_task(_audit(
+        account_id=None,
+        action="webhook.updated",
+        resource_type="webhook",
+        resource_id=webhook_id,
+        ip_address=request.client.host if request.client else None,
+        details=updates,
+    ))
+
+    return _to_response(wh)
 
 
 @router.get("/{webhook_id}", response_model=WebhookResponse)
@@ -282,7 +357,7 @@ async def test_webhook(webhook_id: str, request: _Request):
     return {"status_code": status_code, "url": wh.url}
 
 
-@router.get("/{webhook_id}/deliveries", response_model=list[DeliveryResponse])
+@router.get("/{webhook_id}/deliveries")
 async def list_deliveries(
     webhook_id: str,
     limit: int = 50,
@@ -290,8 +365,8 @@ async def list_deliveries(
 ):
     """List delivery log entries for a registered webhook.
 
-    Entries are sorted newest-first. Each entry includes the attempt status,
-    HTTP response code, any error message, and the time of next retry (if pending).
+    Returns a paginated envelope. Entries are sorted newest-first. Each entry
+    includes the attempt status, HTTP response code, error message, and next retry time.
     """
     wh = await store.get_webhook(webhook_id)
     if wh is None:
@@ -300,8 +375,13 @@ async def list_deliveries(
     try:
         from app.db import AsyncSessionLocal
         from app.models.account import WebhookDelivery
-        from sqlalchemy import select
+        from sqlalchemy import select, func
         async with AsyncSessionLocal() as session:
+            total_result = await session.execute(
+                select(func.count(WebhookDelivery.id))
+                .where(WebhookDelivery.webhook_id == webhook_id)
+            )
+            total = total_result.scalar() or 0
             result = await session.execute(
                 select(WebhookDelivery)
                 .where(WebhookDelivery.webhook_id == webhook_id)
@@ -314,7 +394,7 @@ async def list_deliveries(
         logger.exception("Failed to list webhook deliveries for webhook %s", webhook_id)
         raise HTTPException(status_code=500, detail="Internal server error")
 
-    return [
+    items = [
         DeliveryResponse(
             id=r.id,
             webhook_id=r.webhook_id,
@@ -331,3 +411,10 @@ async def list_deliveries(
         )
         for r in rows
     ]
+    return {
+        "results": items,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "has_more": offset + limit < total,
+    }

@@ -7,6 +7,8 @@ from html import escape as _he
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response, PlainTextResponse
 from pydantic import BaseModel
+from slowapi import Limiter as _Limiter
+from slowapi.util import get_remote_address as _get_remote_address
 from typing import Any, Dict, List, Optional
 
 from app.deps import SUPERADMIN_ACCOUNT_ID
@@ -14,6 +16,7 @@ from app.store import store, BotSession
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/bot", tags=["Exports"])
+_limiter = _Limiter(key_func=_get_remote_address)
 
 
 def _fmt_duration(start, end) -> str:
@@ -56,6 +59,7 @@ def _get_sub_user_from_request(request) -> "Optional[str]":
 # ── Markdown export ───────────────────────────────────────────────────────────
 
 @router.get("/{bot_id}/export/markdown", response_class=PlainTextResponse)
+@_limiter.limit("10/minute")
 async def export_markdown(bot_id: str, request: Request):
     """Export the meeting report as a Markdown document."""
     bot = await _get_or_404(bot_id, getattr(request.state, "account_id", None), _get_sub_user_from_request(request))
@@ -71,6 +75,7 @@ async def export_markdown(bot_id: str, request: Request):
 # ── PDF export ────────────────────────────────────────────────────────────────
 
 @router.get("/{bot_id}/export/pdf")
+@_limiter.limit("5/minute")
 async def export_pdf(bot_id: str, request: Request):
     """Export the meeting report as a PDF document."""
     try:
@@ -375,6 +380,7 @@ class _ExportJsonResponse(BaseModel):
 
 
 @router.get("/{bot_id}/export/json", response_model=_ExportJsonResponse)
+@_limiter.limit("10/minute")
 async def export_json(bot_id: str, request: Request):
     """Export the full bot session as structured JSON."""
     bot = await _get_or_404(bot_id, getattr(request.state, "account_id", None), _get_sub_user_from_request(request))
@@ -441,6 +447,7 @@ def _build_srt(bot: BotSession) -> str:
 
 
 @router.get("/{bot_id}/export/srt")
+@_limiter.limit("10/minute")
 async def export_srt(bot_id: str, request: Request):
     """Export the meeting transcript as an SRT subtitle file."""
     bot = await _get_or_404(bot_id, getattr(request.state, "account_id", None), _get_sub_user_from_request(request))

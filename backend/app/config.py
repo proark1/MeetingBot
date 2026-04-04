@@ -72,6 +72,9 @@ class Settings(BaseSettings):
     JWT_SECRET: str = "change-me-in-production"
     JWT_EXPIRE_HOURS: int = 24
 
+    # Environment — set to "production" to enforce strict security defaults
+    ENVIRONMENT: str = "development"
+
     # ── Cloud storage ─────────────────────────────────────────────────────────
     STORAGE_BACKEND: str = "local"          # "local" | "s3"
     S3_BUCKET: str = ""
@@ -133,6 +136,11 @@ class Settings(BaseSettings):
     VIDEO_CRF: int = 28                   # ffmpeg CRF (lower = better quality, larger file)
     VIDEO_FPS: int = 15                   # capture framerate
     VIDEO_SCALE: str = "1280:720"         # output resolution WxH
+
+    # ── Bot store memory management ──────────────────────────────────────────
+    BOT_TTL_HOURS: int = 24               # how long to keep completed bots in memory
+    STORE_CLEANUP_INTERVAL_SECONDS: int = 1800   # how often to run cleanup (30 min)
+    STORE_MAX_BOTS: int = 10000           # max bots in memory before LRU eviction
 
     # ── Idempotency ───────────────────────────────────────────────────────────
     IDEMPOTENCY_TTL_HOURS: int = 24       # how long to cache key → bot_id mappings
