@@ -4,7 +4,14 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.32.0 — **Last updated:** 2026-04-04
+> **Latest version:** 2.32.1 — **Last updated:** 2026-04-06
+
+---
+
+## [2.32.1] - 2026-04-06
+
+### Fixed
+- **NameError in health endpoint** — Fixed `_task_heartbeats` variable scope issue causing 500 errors on GET /health. Moved variable to module-level scope so background task health monitoring works correctly.
 
 ---
 

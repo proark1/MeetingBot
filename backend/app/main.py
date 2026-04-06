@@ -8,6 +8,7 @@ import asyncio
 import logging
 import signal
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 
 # Read version from VERSION file (check multiple possible locations)
@@ -67,6 +68,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
+
+# Task heartbeat registry — tracks last activity per background task
+_task_heartbeats: dict[str, datetime] = {}
 
 # ── Lifespan ──────────────────────────────────────────────────────────────────
 
@@ -169,9 +173,6 @@ async def lifespan(app: FastAPI):
         kill_all_procs()
 
     signal.signal(signal.SIGTERM, _handle_sigterm)
-
-    # Task heartbeat registry — tracks last activity per background task
-    _task_heartbeats: dict[str, datetime] = {}
 
     async def _supervised(name: str, coro_fn, *args, max_restarts: int = 20, **kwargs) -> None:
         """Run a background coroutine and restart it if it crashes.
