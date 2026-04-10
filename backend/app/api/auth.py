@@ -269,6 +269,8 @@ async def login(
     _LOCKOUT_MINUTES = 30
     if account and (account.failed_login_attempts or 0) >= _LOCKOUT_ATTEMPTS:
         lockout_until = account.last_failed_login_at + timedelta(minutes=_LOCKOUT_MINUTES) if account.last_failed_login_at else None
+        if lockout_until and lockout_until.tzinfo is None:
+            lockout_until = lockout_until.replace(tzinfo=timezone.utc)
         if lockout_until and datetime.now(timezone.utc) < lockout_until:
             raise HTTPException(
                 status_code=429,

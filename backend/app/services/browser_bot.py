@@ -2705,6 +2705,7 @@ async def _streaming_transcription_loop(
         except asyncio.CancelledError:
             for _t in _pending_transcribe:
                 _t.cancel()
+            await asyncio.gather(*_pending_transcribe, return_exceptions=True)
             raise
         except Exception as exc:
             logger.warning("Streaming transcription frame error (%s): %s", type(exc).__name__, exc)

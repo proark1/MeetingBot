@@ -4,7 +4,15 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.33.2 — **Last updated:** 2026-04-10
+> **Latest version:** 2.33.3 — **Last updated:** 2026-04-10
+
+---
+
+## [2.33.3] - 2026-04-10
+
+### Fixed
+- **Login lockout crashes on SQLite** — `last_failed_login_at` loaded from SQLite is a naive datetime; comparing it with `datetime.now(timezone.utc)` raised `TypeError`. Normalise to UTC before the comparison (matches the existing pattern in `store.py`)
+- **Streaming transcription tasks not fully cleaned up on cancel** — Cancelled `_transcribe_utterance` tasks were not awaited after cancellation, leaving them in `"cancelling"` state and producing asyncio warnings. Now awaited with `gather(return_exceptions=True)` before re-raising `CancelledError`
 
 ---
 
