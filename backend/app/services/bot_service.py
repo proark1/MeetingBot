@@ -682,9 +682,12 @@ async def _post_completion_notifications(account_id: str, bot_data: dict, bot=No
     if bot:
         try:
             from urllib.parse import urlparse
-            parsed = urlparse(bot.meeting_url)
-            path = parsed.path.split("?")[0]
-            canonical_url = parsed.scheme + "://" + (parsed.netloc or "") + path
+
+            def _canonical_meeting_url(url) -> str:
+                p = urlparse(str(url))
+                return p.scheme + "://" + p.netloc + p.path.split("?")[0].rstrip("/")
+
+            canonical_url = _canonical_meeting_url(bot.meeting_url)
 
             recent_bots, _ = await store.list_bots(limit=500, account_id=account_id)
             matching = [
@@ -692,7 +695,7 @@ async def _post_completion_notifications(account_id: str, bot_data: dict, bot=No
                 if b.id != bot.id
                 and b.status == "done"
                 and b.analysis
-                and urlparse(b.meeting_url).path.split("?")[0] == path
+                and _canonical_meeting_url(b.meeting_url) == canonical_url
             ]
             if len(matching) >= 2:  # 3+ total including current
                 past_summaries = [

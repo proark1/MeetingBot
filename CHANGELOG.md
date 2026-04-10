@@ -4,7 +4,16 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.33.0 — **Last updated:** 2026-04-10
+> **Latest version:** 2.33.1 — **Last updated:** 2026-04-10
+
+---
+
+## [2.33.1] - 2026-04-10
+
+### Fixed
+- **Recurring meeting intelligence false matches** — URL comparison now uses scheme+netloc+path instead of path only, preventing meetings on different platforms with coincidentally identical path segments from being grouped together
+- **Bot GET endpoint 500 on malformed analysis data** — `MeetingAnalysis` and `AIUsageEntry` Pydantic construction in `_to_response()` is now wrapped in try/except; bots with old or partially-corrupted stored data return a valid (empty) response instead of crashing
+- **Webhook body/header timestamp inconsistency** — `_build_body` and `_sign` now share a single `datetime.now()` call in `dispatch_event`, so the `ts` field in the JSON body and the `X-MeetingBot-Timestamp` header always represent the same second
 
 ---
 

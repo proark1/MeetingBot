@@ -73,19 +73,22 @@ def _retry_delays() -> list[int]:
 _RETRY_DELAYS: list[int] = _retry_delays()
 
 
-def _build_body(event: str, payload: dict) -> str:
-    return json.dumps({"event": event, "data": payload, "ts": datetime.now(timezone.utc).isoformat()})
+def _build_body(event: str, payload: dict, ts_iso: "str | None" = None) -> str:
+    if ts_iso is None:
+        ts_iso = datetime.now(timezone.utc).isoformat()
+    return json.dumps({"event": event, "data": payload, "ts": ts_iso})
 
 
-def _sign(body: str, secret: str) -> tuple[str, str]:
+def _sign(body: str, secret: str, ts_unix: "str | None" = None) -> tuple[str, str]:
     """Return (signature, timestamp_str). Timestamp is included in the signed payload.
 
     BREAKING CHANGE: Signed payload is f"{timestamp}.{body}".
     Reject deliveries where abs(time.time() - int(X-MeetingBot-Timestamp)) > 300 seconds.
     """
-    ts = str(int(datetime.now(timezone.utc).timestamp()))
-    sig = "sha256=" + hmac.new(secret.encode(), f"{ts}.{body}".encode(), hashlib.sha256).hexdigest()
-    return sig, ts
+    if ts_unix is None:
+        ts_unix = str(int(datetime.now(timezone.utc).timestamp()))
+    sig = "sha256=" + hmac.new(secret.encode(), f"{ts_unix}.{body}".encode(), hashlib.sha256).hexdigest()
+    return sig, ts_unix
 
 
 # ── Delivery logging ───────────────────────────────────────────────────────────
@@ -171,7 +174,9 @@ async def dispatch_event(
 
     from app.store import store
 
-    body = _build_body(event, payload)
+    _now_dt = datetime.now(timezone.utc)
+    body = _build_body(event, payload, ts_iso=_now_dt.isoformat())
+    _ts_unix = str(int(_now_dt.timestamp()))
     headers_base = {"Content-Type": "application/json", "User-Agent": "JustHereToListen.io/1.0"}
     bot_id: "str | None" = payload.get("id") or payload.get("bot_id")
 
@@ -183,7 +188,7 @@ async def dispatch_event(
         async with _get_webhook_lock(wh.id):
             hdrs = dict(headers_base)
             if wh.secret:
-                sig, ts = _sign(body, wh.secret)
+                sig, ts = _sign(body, wh.secret, ts_unix=_ts_unix)
                 hdrs["X-MeetingBot-Signature"] = sig
                 hdrs["X-MeetingBot-Timestamp"] = ts
 

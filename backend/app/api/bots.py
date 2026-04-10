@@ -208,6 +208,14 @@ async def _check_workspace_role(bot: BotSession, account_id: Optional[str], min_
 
 
 def _to_response(bot: BotSession) -> BotResponse:
+    try:
+        analysis = MeetingAnalysis(**bot.analysis) if bot.analysis else None
+    except Exception:
+        analysis = MeetingAnalysis()
+    try:
+        operations = [AIUsageEntry(**r) for r in bot.ai_usage]
+    except Exception:
+        operations = []
     return BotResponse(
         id=bot.id,
         meeting_url=bot.meeting_url,
@@ -222,7 +230,7 @@ def _to_response(bot: BotSession) -> BotResponse:
         duration_seconds=bot.duration_seconds,
         participants=bot.participants,
         transcript=bot.transcript,
-        analysis=MeetingAnalysis(**bot.analysis) if bot.analysis else None,
+        analysis=analysis,
         chapters=bot.chapters,
         speaker_stats=bot.speaker_stats,
         recording_available=bot.recording_available,
@@ -240,7 +248,7 @@ def _to_response(bot: BotSession) -> BotResponse:
             total_tokens=bot.ai_total_tokens,
             total_cost_usd=bot.ai_total_cost_usd,
             primary_model=bot.ai_primary_model,
-            operations=[AIUsageEntry(**r) for r in bot.ai_usage],
+            operations=operations,
         ),
     )
 
