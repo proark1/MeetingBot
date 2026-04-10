@@ -166,6 +166,19 @@
         <td style="color:#ef4444">{{ bot.error_message }}</td>
       </tr>
       {% endif %}
+      <tr>
+        <td style="color:#64748b">Response Mode</td>
+        <td>
+          {% if bot.respond_on_mention %}
+            <span class="chip chip-success" style="font-size:11px">{{ bot.mention_response_mode|default('text') }}</span>
+            {% if bot.mention_response_mode in ['voice', 'both'] %}
+              · TTS: {{ bot.tts_provider|default('edge') }}
+            {% endif %}
+          {% else %}
+            <span class="chip chip-gray" style="font-size:11px">disabled</span>
+          {% endif %}
+        </td>
+      </tr>
     </tbody>
   </table>
   </div>

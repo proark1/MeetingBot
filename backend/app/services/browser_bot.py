@@ -1772,11 +1772,22 @@ async def _open_chat(page: Page, platform: str) -> None:
             "button[aria-label*='Open chat' i]",
         ], timeout=1500)
     elif platform == "onepizza":
+        # Step 1: open the side panel via the bottom-bar Chat button
         await _click(page, [
             "#chatBtn",
             "button:has-text('Chat')",
         ], timeout=1500)
-        await asyncio.sleep(0.3)
+        await asyncio.sleep(0.5)
+        # Step 2: click the Chat TAB inside the side panel — the panel may
+        # default to People tab, so we must explicitly select Chat.
+        try:
+            chat_tab = page.locator("#sidePanel button:has-text('Chat'), #sidePanel [data-tab='chat']").first
+            if await chat_tab.is_visible(timeout=1000):
+                await chat_tab.click()
+                await asyncio.sleep(0.3)
+                logger.info("onepizza: Chat tab clicked inside side panel")
+        except Exception as exc:
+            logger.debug("onepizza: Chat tab click skipped: %s", exc)
 
 
 async def _scrape_captions(page: Page, platform: str) -> str:
@@ -2076,38 +2087,54 @@ async def _scrape_chat_messages(page: Page, platform: str) -> str:
             # The panel contains tabs (People/Chat/Q&A) — we only want chat message
             # content, not participant list text.  Chat messages follow the pattern:
             #   SenderName\nMessageText\nTimestamp\n↩\n+
-            # We look for the chat input's sibling container that holds messages.
             text = await page.evaluate("""
                 () => {
                     const chatInput = document.getElementById('chatInput');
                     if (!chatInput) return '';
-                    // The chat messages are siblings or nearby relatives of #chatInput.
-                    // Walk up from chatInput to find the scrollable message area.
-                    let container = chatInput.parentElement;
-                    // The input is typically inside a form/div at the bottom of the chat.
-                    // The messages are in a sibling scrollable div above it.
-                    if (container) {
-                        // Look for a scrollable sibling that contains messages
-                        const parent = container.parentElement;
-                        if (parent) {
-                            for (const child of parent.children) {
-                                if (child.contains(chatInput)) continue;
-                                // Skip small elements (buttons, headers)
-                                const t = (child.innerText || '').trim();
-                                if (t.length > 3 && child.scrollHeight > 10) {
-                                    // This is likely the message area
-                                    return t;
-                                }
+
+                    // Strategy 1: walk up from chatInput and find sibling message container.
+                    // Walk up to 5 levels to find the chat panel parent, then look for
+                    // the scrollable message area among its children.
+                    let el = chatInput;
+                    for (let depth = 0; depth < 5; depth++) {
+                        el = el.parentElement;
+                        if (!el) break;
+                        for (const child of el.children) {
+                            if (child.contains(chatInput)) continue;
+                            const t = (child.innerText || '').trim();
+                            if (t.length > 3 && child.scrollHeight > 10) {
+                                return t;
                             }
                         }
                     }
-                    // Fallback: get the side panel text but exclude tab headers and
-                    // participant list content by looking for timestamp patterns
+
+                    // Strategy 2: get all text in #sidePanel and check for chat patterns.
+                    // Chat messages contain timestamps (HH:MM AM/PM or HH:MM).
                     const panel = document.getElementById('sidePanel');
                     if (panel) {
                         const t = (panel.innerText || '').trim();
-                        // If content has timestamp patterns (HH:MM AM/PM), it's chat messages
-                        if (/\\d{1,2}:\\d{2}\\s*(AM|PM)/i.test(t)) return t;
+                        if (t.length > 3 && (/\\d{1,2}:\\d{2}\\s*(AM|PM)/i.test(t) || /\\d{1,2}:\\d{2}/.test(t))) {
+                            return t;
+                        }
+                        // Even without timestamp, if there's meaningful text and
+                        // the chatInput is visible (Chat tab active), return it.
+                        if (t.length > 3 && chatInput.offsetParent !== null) {
+                            return t;
+                        }
+                    }
+
+                    // Strategy 3: look for any chat message containers by common patterns
+                    const msgSels = [
+                        '#chatMessages', '#chatList', '#messageList',
+                        '[class*="chat-message"]', '[class*="chatMsg"]',
+                        '[class*="message-list"]', '[data-chat]',
+                    ];
+                    for (const s of msgSels) {
+                        const el = document.querySelector(s);
+                        if (el) {
+                            const t = (el.innerText || '').trim();
+                            if (t.length > 3) return t;
+                        }
                     }
                     return '';
                 }
@@ -3239,6 +3266,23 @@ async def _mention_monitor(
             if _poll_count <= 20 or _poll_count % 30 == 0:
                 logger.info("Chat scrape (poll %d): len=%d %r", _poll_count, len(chat_raw), (chat_raw or "")[:300])
 
+            # One-time diagnostic if chat is still empty after 30 polls (~10s) on onepizza
+            if platform == "onepizza" and _poll_count == 30 and not chat_raw and not seen_chat:
+                try:
+                    diag = await page.evaluate("""() => {
+                        const ci = document.getElementById('chatInput');
+                        const sp = document.getElementById('sidePanel');
+                        return {
+                            chatInput_visible: ci ? (ci.offsetParent !== null) : false,
+                            sidePanel_visible: sp ? (sp.offsetParent !== null) : false,
+                            sidePanel_text: sp ? (sp.innerText || '').trim().slice(0, 500) : '(not found)',
+                            sidePanel_childCount: sp ? sp.children.length : -1,
+                        };
+                    }""")
+                    logger.warning("onepizza chat diagnostic (poll 30, still empty): %s", diag)
+                except Exception as exc:
+                    logger.debug("Chat diagnostic failed: %s", exc)
+
             if chat_raw and chat_raw != seen_chat:
                 if not seen_chat:
                     # First poll — bootstrap without treating existing history as new.
@@ -3731,7 +3775,18 @@ async def run_browser_bot(
                 )
 
             await _screenshot(page, f"{platform}_in_meeting")
-            logger.info("Bot is in the meeting — monitoring for end…")
+            logger.info(
+                "Bot is in the meeting — monitoring for end…\n"
+                "  ├─ bot_name=%r  platform=%s  meeting_url=%s\n"
+                "  ├─ respond_on_mention=%s  mention_response_mode=%s  tts_provider=%s\n"
+                "  ├─ start_muted=%s  consent_enabled=%s\n"
+                "  └─ pulse_sink=%s  pulse_mic=%s  ffmpeg=%s",
+                bot_name, platform, meeting_url,
+                respond_on_mention, mention_response_mode, tts_provider,
+                start_muted, consent_enabled,
+                pulse_sink, pulse_mic,
+                "running" if (ffmpeg_proc and ffmpeg_proc.poll() is None) else "NOT running",
+            )
 
             # ── Send consent announcement if enabled ──────────────────────────
             if consent_enabled:

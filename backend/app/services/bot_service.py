@@ -745,7 +745,16 @@ async def run_bot_lifecycle(bot_id: str) -> None:
 
         # ── 1. Joining ────────────────────────────────────────────────────
         await _set_status(bot, "joining")
-        logger.info("Bot %s joining %s (%s)", bot_id, bot.meeting_url, bot.meeting_platform)
+        logger.info(
+            "Bot %s joining %s (%s) — settings: bot_name=%r respond_on_mention=%s "
+            "mention_response_mode=%s tts_provider=%s start_muted=%s",
+            bot_id, bot.meeting_url, bot.meeting_platform,
+            getattr(bot, "bot_name", "?"),
+            getattr(bot, "respond_on_mention", "?"),
+            getattr(bot, "mention_response_mode", "?"),
+            getattr(bot, "tts_provider", "?"),
+            getattr(bot, "start_muted", "?"),
+        )
 
         if use_real_bot:
             admitted = False
