@@ -603,7 +603,7 @@ def _build_done_payload(bot: BotSession) -> dict:
         "chapters":         bot.chapters,
         "speaker_stats":    bot.speaker_stats,
         "duration_seconds": bot.duration_seconds,
-        "recording_available": bot.recording_available(),
+        "recording_available": bot.recording_available,
         "is_demo_transcript": bot.is_demo_transcript,
         "health_score":     bot.health_score,
         "meeting_cost_usd": bot.meeting_cost_usd,
