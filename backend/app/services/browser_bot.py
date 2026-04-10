@@ -316,7 +316,7 @@ def _move_chrome_audio(sink: str = PULSE_SINK_NAME) -> None:
         logger.debug("_move_chrome_audio failed: %s", exc)
 
 
-def _move_chrome_source_output(source: str = f"{PULSE_MIC_NAME}.monitor") -> None:
+def _move_chrome_source_output(source: str = f"{PULSE_MIC_NAME}.monitor") -> int:
     """Move Chrome's microphone capture (source-outputs) to meetingbot_mic.monitor.
 
     This ensures that when TTS audio is played into meetingbot_mic, Chrome
@@ -327,12 +327,14 @@ def _move_chrome_source_output(source: str = f"{PULSE_MIC_NAME}.monitor") -> Non
     other than "chromium" (e.g. "chrome", "Chromium", or just the binary name),
     and after disabling WebRtcPipeWireCapture it will appear as a PulseAudio
     source-output.  We skip only known recorder processes.
+
+    Returns the number of source-outputs successfully moved.
     """
     SKIP_APPS = {"ffmpeg", "ffmpeg-static", "arecord", "parecord", "parec"}
     try:
         detail = _run(["pactl", "list", "source-outputs"])
         if detail.returncode != 0:
-            return
+            return 0
 
         # Parse long-form output into per-entry dicts
         entries: list[dict] = []
@@ -353,7 +355,7 @@ def _move_chrome_source_output(source: str = f"{PULSE_MIC_NAME}.monitor") -> Non
 
         if not entries:
             logger.debug("_move_chrome_source_output: no source-outputs found at all")
-            return
+            return 0
 
         logger.debug(
             "_move_chrome_source_output: found %d source-output(s): %s",
@@ -389,8 +391,10 @@ def _move_chrome_source_output(source: str = f"{PULSE_MIC_NAME}.monitor") -> Non
                 "check --disable-features=WebRtcPipeWireCapture is in launch args)",
                 source,
             )
+        return moved
     except Exception as exc:
         logger.debug("_move_chrome_source_output failed: %s", exc)
+        return 0
 
 
 def _sync_chrome_audio_routing(
@@ -2128,7 +2132,7 @@ async def _type_into_chat(page: Page, selectors: list[str], message: str, timeou
             await el.click()
             # Clear existing content (triple-click selects all, then type replaces)
             await page.keyboard.press("Control+a")
-            await page.keyboard.type(message, delay=10)
+            await page.keyboard.type(message, delay=3)
             return True
         except Exception as exc:
             logger.debug("_type_into_chat selector %r failed: %s", sel, exc)
@@ -2382,9 +2386,19 @@ async def _speak_in_meeting(
         # playback — the periodic sync may be up to 20 s stale, so doing it here
         # guarantees Chrome is reading from the correct source when audio starts.
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(
+        moved = await loop.run_in_executor(
             None, lambda: _move_chrome_source_output(f"{pulse_mic}_virt")
         )
+        # If no source-outputs found, Chrome may not have enumerated its mic yet.
+        # The unmute above should have triggered mic access; wait briefly and retry.
+        if not moved:
+            logger.info("TTS mic routing: no source-outputs on first try, retrying after 0.5s…")
+            await asyncio.sleep(0.5)
+            moved = await loop.run_in_executor(
+                None, lambda: _move_chrome_source_output(f"{pulse_mic}_virt")
+            )
+            if not moved:
+                logger.warning("TTS mic routing: still no source-outputs after retry — voice may not reach meeting")
 
         # Step 4: play into this bot's TTS mic sink (Chrome hears it as mic input)
         await tts_service.play_audio(tts_path, pulse_mic)
@@ -3213,8 +3227,8 @@ async def _mention_monitor(
             # Truncate unconditionally (prevents unbounded growth in quiet periods)
             caption_log = caption_log[-40:]
 
-        # ── Chat polling (every 2 s — every other caption poll) ──────────────
-        if _poll_count % 2 == 0:
+        # ── Chat polling (every poll cycle for faster mention detection) ─────
+        if True:
             try:
                 chat_raw = await _scrape_chat_messages(page, platform)
             except Exception as exc:
@@ -3397,11 +3411,14 @@ async def _wait_for_meeting_end(
 
         now = time.monotonic()
 
-        # ── PulseAudio routing sync (every 15s) ───────────────────────────
+        # ── PulseAudio routing sync ────────────────────────────────────────
         # Re-route Chrome's audio output to our recording sink and its
         # microphone to our TTS virtual source.  Run in a thread so the
         # sync pactl calls don't block the asyncio event loop.
-        if now - _last_audio_routing_sync >= 15:
+        # Sync every 8s during the first 2 minutes (WebRTC streams may
+        # appear late), then every 15s for the remainder of the call.
+        _routing_interval = 8 if (now < _join_grace_until + 60) else 15
+        if now - _last_audio_routing_sync >= _routing_interval:
             _last_audio_routing_sync = now
             await asyncio.get_event_loop().run_in_executor(
                 None, functools.partial(_sync_chrome_audio_routing, pulse_sink, pulse_mic, pulse_source)
@@ -3929,6 +3946,28 @@ async def run_browser_bot(
                 logger.info("PulseAudio sink-inputs (post-sync-2):\n%s", _si2.stdout.strip() or "(none)")
             except Exception:
                 pass
+
+            # Third and fourth routing syncs at ~8s and ~15s after join — onepizza
+            # and other WebRTC platforms may create sink-inputs late.  These extra
+            # syncs dramatically improve the chance of capturing user audio from
+            # the very start of the meeting.
+            async def _late_routing_syncs():
+                await asyncio.sleep(5)   # ~8s after join (0.8 + 3 + 5)
+                await asyncio.get_event_loop().run_in_executor(
+                    None, functools.partial(_sync_chrome_audio_routing, pulse_sink, pulse_mic, pulse_source_name)
+                )
+                logger.info("PulseAudio routing sync 3 (~8s) complete")
+                await asyncio.sleep(7)   # ~15s after join
+                await asyncio.get_event_loop().run_in_executor(
+                    None, functools.partial(_sync_chrome_audio_routing, pulse_sink, pulse_mic, pulse_source_name)
+                )
+                logger.info("PulseAudio routing sync 4 (~15s) complete")
+                await asyncio.sleep(15)  # ~30s after join
+                await asyncio.get_event_loop().run_in_executor(
+                    None, functools.partial(_sync_chrome_audio_routing, pulse_sink, pulse_mic, pulse_source_name)
+                )
+                logger.info("PulseAudio routing sync 5 (~30s) complete")
+            asyncio.create_task(_late_routing_syncs())
 
             # Enable live captions so the mention monitor can read them
             if respond_on_mention:

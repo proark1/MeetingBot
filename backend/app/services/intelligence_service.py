@@ -250,6 +250,43 @@ async def _claude_complete(prompt: str, max_tokens: int = 4096, temperature: flo
     return ""
 
 
+async def _claude_fast_complete(prompt: str, max_tokens: int = 1024, operation: str = "unknown") -> str:
+    """Fast Claude call for latency-sensitive operations (mention replies).
+
+    Uses claude-sonnet-4-6 without thinking for sub-3-second responses.
+    """
+    client = _get_anthropic_client()
+    model_id = "claude-sonnet-4-6"
+    t0 = time.monotonic()
+    response = await client.messages.create(
+        model=model_id,
+        max_tokens=max_tokens,
+        messages=[{"role": "user", "content": prompt}],
+        timeout=30.0,
+    )
+    duration_s = round(time.monotonic() - t0, 2)
+
+    input_tokens = getattr(response.usage, "input_tokens", 0)
+    output_tokens = getattr(response.usage, "output_tokens", 0)
+    cost = _estimate_cost(model_id, input_tokens, output_tokens)
+
+    _record_usage({
+        "operation": operation,
+        "provider": "anthropic",
+        "model": model_id,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": input_tokens + output_tokens,
+        "cost_usd": round(cost, 6),
+        "duration_s": duration_s,
+    })
+
+    for block in response.content:
+        if block.type == "text":
+            return block.text
+    return ""
+
+
 async def _claude_analyze_transcript(
     transcript: list[dict[str, Any]],
     prompt_override: str | None = None,
@@ -326,7 +363,7 @@ async def _claude_mention_response(
         "6. Return ONLY the answer text — no name prefix, no quotes, no preamble.\n\n"
         f"{context_label}\n{caption_context}"
     )
-    text = await _claude_complete(prompt, max_tokens=max_tokens, operation="mention_response")
+    text = await _claude_fast_complete(prompt, max_tokens=max_tokens, operation="mention_response")
     if text.startswith("{") or text.endswith("}"):
         text = text.strip("{}").strip()
     return text.strip('"').strip("'")

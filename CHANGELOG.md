@@ -4,7 +4,17 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.32.2 — **Last updated:** 2026-04-10
+> **Latest version:** 2.33.0 — **Last updated:** 2026-04-10
+
+---
+
+## [2.33.0] - 2026-04-10
+
+### Improved
+- **Faster mention responses** — Mention replies now use `claude-sonnet-4-6` (no thinking) instead of `claude-opus-4-6` with adaptive thinking, cutting response latency from 10-20s to 2-4s.
+- **Faster chat detection** — Chat messages are now polled every 300ms cycle (was every 600ms). Typing delay reduced from 10ms to 3ms per character.
+- **Better audio capture** — Added 5 PulseAudio routing syncs in the first 30s after joining (was only 2 in 4s), and increased sync frequency to every 8s during the first 2 minutes. Fixes silent recordings on onepizza.io and other WebRTC platforms where sink-inputs appear late.
+- **Voice response reliability** — `_speak_in_meeting()` now retries mic routing if Chrome hasn't opened its mic yet, and `_move_chrome_source_output()` returns the number of moved outputs so callers can detect and handle failures.
 
 ---
 
