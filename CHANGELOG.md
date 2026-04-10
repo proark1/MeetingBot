@@ -4,7 +4,17 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.32.1 — **Last updated:** 2026-04-06
+> **Latest version:** 2.32.2 — **Last updated:** 2026-04-10
+
+---
+
+## [2.32.2] - 2026-04-10
+
+### Fixed
+- **MCP `create_bot` tool broken** — Fixed `AttributeError` caused by calling `bot_service._detect_platform()` (private name that doesn't exist); corrected to `bot_service.detect_platform()`. AI agents using the MCP server could not create bots.
+- **UI audio download button always visible** — `BotSession.recording_available()` was a plain method, not a `@property`. Jinja2 evaluated it as a truthy method object, showing the audio download button on every bot page even when no recording file existed.
+- **UI video download button never visible** — `BotSession.video_available` property was missing entirely. Jinja2 returned `Undefined` (falsy), hiding the video download button even when a video file was present. Added the `@property`.
+- **Idempotency keys never cleaned up** — The retention loop checked `expires_at` on read but never deleted expired rows, causing the `idempotency_keys` table to grow unboundedly. Expired keys are now batch-deleted each retention cycle.
 
 ---
 

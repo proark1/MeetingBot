@@ -396,7 +396,7 @@ async def _tool_create_bot(args: dict, account_id: Optional[str]) -> dict:
     from app.config import settings
 
     bot_id = str(uuid.uuid4())
-    platform = bot_service._detect_platform(str(payload.meeting_url))
+    platform = bot_service.detect_platform(str(payload.meeting_url))
     bot = BotSession(
         id=bot_id,
         meeting_url=str(payload.meeting_url),

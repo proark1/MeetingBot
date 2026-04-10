@@ -152,9 +152,15 @@ class BotSession:
             model_tokens[m] = model_tokens.get(m, 0) + r.get("total_tokens", 0)
         return max(model_tokens, key=model_tokens.get) if model_tokens else None
 
+    @property
     def recording_available(self) -> bool:
         import os
         return bool(self.recording_path and os.path.exists(self.recording_path))
+
+    @property
+    def video_available(self) -> bool:
+        import os
+        return bool(self.video_path and os.path.exists(self.video_path))
 
 
 # ── Webhook entry ──────────────────────────────────────────────────────────────

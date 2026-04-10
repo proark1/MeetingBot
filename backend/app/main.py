@@ -308,8 +308,19 @@ async def lifespan(app: FastAPI):
                 if ids_to_delete:
                     await db.execute(_sqldelete(BotSnapshot).where(BotSnapshot.id.in_(ids_to_delete)))
 
+                # Clean up expired idempotency keys
+                from app.models.account import IdempotencyKey as _IKModel
+                ik_result = await db.execute(
+                    _sqldelete(_IKModel).where(_IKModel.expires_at < now)
+                )
+                ik_deleted = ik_result.rowcount if ik_result.rowcount is not None else 0
+
                 await db.commit()
-                logger.info("Retention enforcement complete: deleted %d snapshots", len(ids_to_delete))
+                logger.info(
+                    "Retention enforcement complete: deleted %d snapshots, %d idempotency keys",
+                    len(ids_to_delete),
+                    ik_deleted,
+                )
 
     retention_task = asyncio.create_task(_supervised("retention_loop", _retention_loop))
 
