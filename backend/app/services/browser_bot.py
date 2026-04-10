@@ -2532,6 +2532,9 @@ async def _streaming_transcription_loop(
     utterance_pcm    = bytearray()
     utterance_start_byte = 0  # file offset where current utterance began
 
+    # Track in-flight transcription tasks so they can be cancelled on shutdown
+    _pending_transcribe: set[asyncio.Task] = set()
+
     logger.info("Streaming transcription loop started")
 
     def _is_speech_frame(pcm_frame: bytes) -> bool:
@@ -2652,7 +2655,9 @@ async def _streaming_transcription_loop(
                             pcm_copy = bytes(utterance_pcm)
                             start_copy = utterance_start_byte
                             utterance_pcm = bytearray()
-                            asyncio.create_task(_transcribe_utterance(pcm_copy, start_copy))
+                            _t = asyncio.create_task(_transcribe_utterance(pcm_copy, start_copy))
+                            _pending_transcribe.add(_t)
+                            _t.add_done_callback(_pending_transcribe.discard)
                         else:
                             utterance_pcm = bytearray()
 
@@ -2698,6 +2703,8 @@ async def _streaming_transcription_loop(
                     )
 
         except asyncio.CancelledError:
+            for _t in _pending_transcribe:
+                _t.cancel()
             raise
         except Exception as exc:
             logger.warning("Streaming transcription frame error (%s): %s", type(exc).__name__, exc)

@@ -101,7 +101,7 @@ async def get_analytics(request: Request):
         if hs is not None:
             health_scores.append(hs)
         mc = getattr(bot, "meeting_cost_usd", None)
-        if mc:
+        if mc is not None:
             total_meeting_cost += mc
         if bot.workspace_id:
             by_workspace[bot.workspace_id] = by_workspace.get(bot.workspace_id, 0) + 1
@@ -517,7 +517,8 @@ async def get_audit_log(
             result = await db.execute(query)
             rows = result.scalars().all()
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+        logger.error("Audit log query failed: %s", exc)
+        raise HTTPException(status_code=500, detail="Audit log query failed")
 
     return [
         AuditLogEntryResponse(

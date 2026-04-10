@@ -114,8 +114,8 @@ def _migrate_schema(conn) -> None:
             if _tbl in existing_tables:
                 try:
                     conn.execute(text(idx_sql))
-                except Exception:
-                    pass
+                except Exception as _idx_exc:
+                    _log.debug("Index migration skipped (already exists): %s", _idx_exc)
         return
 
     # ── SQLite fallback (dev/test only) — inspector-based checks ──────────────
@@ -219,5 +219,5 @@ def _migrate_schema(conn) -> None:
         if _tbl in existing_tables:
             try:
                 conn.execute(text(_idx_sql))
-            except Exception:
-                pass  # index already exists or table schema mismatch — safe to ignore
+            except Exception as _idx_exc:
+                _log.debug("Index migration skipped (already exists or schema mismatch): %s", _idx_exc)

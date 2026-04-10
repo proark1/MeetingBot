@@ -4,7 +4,18 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.33.1 — **Last updated:** 2026-04-10
+> **Latest version:** 2.33.2 — **Last updated:** 2026-04-10
+
+---
+
+## [2.33.2] - 2026-04-10
+
+### Fixed
+- **Analytics meeting cost undercount** — `if mc:` changed to `if mc is not None:` so meetings with a computed cost of exactly `$0.00` are included in the total meeting cost stat
+- **Silent integration failures** — `dispatch_integrations()` now logs a warning for each failed task after `asyncio.gather()`, making Google Drive / Notion / Linear failures visible in logs
+- **Audit log 500 leaks raw DB error** — `GET /api/v1/analytics/audit-log` now returns a generic "Audit log query failed" message instead of raw SQLAlchemy exception text
+- **Streaming transcription task leak** — `_transcribe_utterance` tasks are now tracked in a set and cancelled when the streaming transcription loop is cancelled, preventing orphaned Gemini API calls after bot shutdown
+- **Silent migration error pass** — Index creation failures in both PostgreSQL and SQLite migration paths now log at `DEBUG` level instead of silently `pass`
 
 ---
 

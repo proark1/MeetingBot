@@ -485,7 +485,10 @@ async def dispatch_integrations(account_id: str, bot_data: dict) -> None:
             # (called separately from bot_service._post_completion_notifications)
 
         if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
+            _results = await asyncio.gather(*tasks, return_exceptions=True)
+            for _r in _results:
+                if isinstance(_r, Exception):
+                    logger.warning("Integration task failed: %s", _r)
 
     except Exception as exc:
         logger.error("dispatch_integrations failed for account %s: %s", account_id, exc)
