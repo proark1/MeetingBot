@@ -418,6 +418,99 @@ def _sync_chrome_audio_routing(
     _move_chrome_source_output(target)
 
 
+_FORCE_CONNECT_JS = """
+    async () => {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) return { state: 'no-AudioContext-API', newly: 0, total: 0 };
+
+        if (!window._mbAudioCtx) {
+            window._mbAudioCtx = new AudioCtx({ latencyHint: 'playback' });
+        }
+        if (!window._mbConnectedTracks) window._mbConnectedTracks = new WeakSet();
+        const ctx = window._mbAudioCtx;
+        try { await ctx.resume(); } catch (e) {}
+
+        const connect = window._mbConnectTrack || function (track, stream) {
+            if (!track || track.kind !== 'audio') return false;
+            if (window._mbConnectedTracks.has(track)) return false;
+            try {
+                const s = stream || new MediaStream([track]);
+                const src = ctx.createMediaStreamSource(s);
+                src.connect(ctx.destination);
+                window._mbConnectedTracks.add(track);
+                return true;
+            } catch (e) { return false; }
+        };
+
+        let newly = 0;
+
+        // 1) Audio/video elements with srcObject
+        document.querySelectorAll('audio, video').forEach(el => {
+            try {
+                if (!el.srcObject) return;
+                el.srcObject.getAudioTracks().forEach(t => { if (connect(t, el.srcObject)) newly++; });
+                if (el.muted) el.muted = false;
+                if (el.volume === 0) el.volume = 1;
+                el.play().catch(() => {});
+            } catch (e) {}
+        });
+
+        // 2) Scan window for RTCPeerConnection wrappers (PeerJS / SimplePeer / direct)
+        const seen = new Set();
+        function scanReceivers(pc) {
+            if (!pc || seen.has(pc) || !pc.getReceivers) return;
+            seen.add(pc);
+            try {
+                pc.getReceivers().forEach(r => {
+                    if (r && r.track && connect(r.track, null)) newly++;
+                });
+            } catch (e) {}
+        }
+        try {
+            for (const k of Object.keys(window)) {
+                let v;
+                try { v = window[k]; } catch (e) { continue; }
+                if (!v || typeof v !== 'object') continue;
+                try {
+                    if (v instanceof RTCPeerConnection) scanReceivers(v);
+                    if (v._pc) scanReceivers(v._pc);
+                    if (v.peerConnection) scanReceivers(v.peerConnection);
+                    if (v.connections && typeof v.connections === 'object') {
+                        for (const conns of Object.values(v.connections)) {
+                            const arr = Array.isArray(conns) ? conns : [conns];
+                            for (const c of arr) {
+                                if (c && c.peerConnection) scanReceivers(c.peerConnection);
+                            }
+                        }
+                    }
+                } catch (e) {}
+            }
+        } catch (e) {}
+
+        // 3) Approximate total: count of items currently in the WeakSet is not
+        // observable; report a derived figure from the per-call newly count.
+        return { state: ctx.state, newly: newly };
+    }
+"""
+
+
+async def _force_connect_webrtc_audio(page) -> dict:
+    """Walk the page's audio/video + RTCPeerConnections and wire any audio tracks
+    not yet connected into the Web Audio destination.
+
+    Idempotent: a WeakSet on `window._mbConnectedTracks` prevents double-connecting
+    the same MediaStreamTrack (which would corrupt audio). Safe to call repeatedly
+    throughout the meeting to catch peers that initialise late.
+
+    Returns a dict like {state: "running", newly: 2} or {} on failure.
+    """
+    try:
+        return await page.evaluate(_FORCE_CONNECT_JS)
+    except Exception as exc:
+        logger.debug("_force_connect_webrtc_audio failed: %s", exc)
+        return {}
+
+
 # ── Xvfb & ffmpeg ─────────────────────────────────────────────────────────────
 
 def _start_xvfb() -> tuple[Optional[subprocess.Popen], str]:
@@ -3835,6 +3928,11 @@ async def run_browser_bot(
 
                 var _AudioCtx = window.AudioContext || window.webkitAudioContext;
                 window._mbAudioCtx = null;
+                // WeakSet of MediaStreamTracks already wired into the audio graph.
+                // Re-runs of the imperative fallback consult this to avoid
+                // double-connecting the same stream (which would corrupt audio).
+                window._mbConnectedTracks = new WeakSet();
+
                 function getCtx() {
                     if (!window._mbAudioCtx) {
                         window._mbAudioCtx = new _AudioCtx({ latencyHint: 'playback' });
@@ -3843,24 +3941,68 @@ async def run_browser_bot(
                     return window._mbAudioCtx;
                 }
 
+                function connectTrack(track, stream) {
+                    if (!track || track.kind !== 'audio') return false;
+                    if (window._mbConnectedTracks.has(track)) return false;
+                    try {
+                        var s = stream || new MediaStream([track]);
+                        var ctx = getCtx();
+                        var src = ctx.createMediaStreamSource(s);
+                        src.connect(ctx.destination);
+                        window._mbConnectedTracks.add(track);
+                        console.log('[MeetingBot] Audio track connected, ctx=' + ctx.state);
+                        return true;
+                    } catch (err) {
+                        console.warn('[MeetingBot] Failed to connect audio track:', err);
+                        return false;
+                    }
+                }
+                window._mbConnectTrack = connectTrack;
+
+                function scanReceivers(pc) {
+                    if (!pc || !pc.getReceivers) return 0;
+                    var n = 0;
+                    try {
+                        pc.getReceivers().forEach(function (r) {
+                            if (r && r.track && connectTrack(r.track, null)) n++;
+                        });
+                    } catch (e) {}
+                    return n;
+                }
+
                 var _OrigRTC = window.RTCPeerConnection;
+                var _OrigSetRemote = _OrigRTC.prototype.setRemoteDescription;
+                // Patch setRemoteDescription so every offer/answer triggers a
+                // sweep of all current receivers — more reliable than the
+                // 'track' event across PeerJS / SimplePeer / unified-plan libs.
+                _OrigRTC.prototype.setRemoteDescription = function () {
+                    var pc = this;
+                    var ret = _OrigSetRemote.apply(pc, arguments);
+                    if (ret && typeof ret.then === 'function') {
+                        ret.then(function () { scanReceivers(pc); })
+                           .catch(function () {});
+                    } else {
+                        try { scanReceivers(pc); } catch (e) {}
+                    }
+                    return ret;
+                };
+
                 function PatchedRTC() {
                     var pc = new (Function.prototype.bind.apply(
                         _OrigRTC, [null].concat(Array.prototype.slice.call(arguments))
                     ))();
                     pc.addEventListener('track', function (e) {
-                        if (e.track.kind !== 'audio') return;
+                        var stream = (e.streams && e.streams[0]) ? e.streams[0] : null;
+                        connectTrack(e.track, stream);
+                    });
+                    // Legacy WebRTC API some libraries still use
+                    pc.addEventListener('addstream', function (e) {
+                        if (!e.stream) return;
                         try {
-                            var stream = (e.streams && e.streams[0])
-                                ? e.streams[0]
-                                : new MediaStream([e.track]);
-                            var ctx = getCtx();
-                            var src = ctx.createMediaStreamSource(stream);
-                            src.connect(ctx.destination);
-                            console.log('[MeetingBot] Audio track connected to AudioContext, state=' + ctx.state);
-                        } catch (err) {
-                            console.warn('[MeetingBot] Failed to connect audio track:', err);
-                        }
+                            e.stream.getAudioTracks().forEach(function (t) {
+                                connectTrack(t, e.stream);
+                            });
+                        } catch (err) {}
                     });
                     return pc;
                 }
@@ -4002,109 +4144,17 @@ async def run_browser_bot(
                 None, functools.partial(_sync_chrome_audio_routing, pulse_sink, pulse_mic, pulse_source_name)
             )
 
-            # Unmute all audio/video elements in the page.  In headless/automated
-            # Chrome, Google Meet may leave its WebRTC audio output element muted
-            # (or at zero volume), causing the PulseAudio sink-input to carry
-            # silence even though WebRTC packets are received.  Force-playing with
-            # volume=1 ensures Chrome actually pushes PCM samples to PulseAudio.
-            try:
-                _audio_ctx_state = await page.evaluate("""
-                    async () => {
-                        document.querySelectorAll('audio, video').forEach(el => {
-                            el.muted  = false;
-                            el.volume = 1.0;
-                            el.play().catch(() => {});
-                        });
-                        // Explicitly resume the RTCPeerConnection audio context so
-                        // incoming WebRTC audio is rendered to PulseAudio.  Chrome
-                        // may suspend AudioContexts until a user gesture; the flag
-                        // --autoplay-policy=no-user-gesture-required helps but an
-                        // explicit resume() here is belt-and-suspenders.
-                        if (window._mbAudioCtx) {
-                            try { await window._mbAudioCtx.resume(); } catch(e) {}
-                            return window._mbAudioCtx.state;
-                        }
-                        return 'no-audio-ctx-yet';
-                    }
-                """)
-                logger.info("Audio elements unmuted in page (AudioContext state: %s)", _audio_ctx_state)
-
-                # If our init script patch didn't fire (AudioContext not created),
-                # force-connect all existing RTCPeerConnection remote streams.
-                # This handles platforms like onepizza that may use PeerJS/SimplePeer
-                # or other WebRTC wrappers that store RTCPeerConnection references
-                # before our init script runs.
-                if _audio_ctx_state == "no-audio-ctx-yet":
-                    try:
-                        _force_state = await page.evaluate("""
-                            async () => {
-                                const AudioCtx = window.AudioContext || window.webkitAudioContext;
-                                if (!AudioCtx) return 'no-AudioContext-API';
-                                const ctx = new AudioCtx({ latencyHint: 'playback' });
-                                await ctx.resume().catch(() => {});
-                                window._mbAudioCtx = ctx;
-
-                                // Find all audio/video elements and connect their streams
-                                let connected = 0;
-                                document.querySelectorAll('audio, video').forEach(el => {
-                                    try {
-                                        if (el.srcObject) {
-                                            const src = ctx.createMediaStreamSource(el.srcObject);
-                                            src.connect(ctx.destination);
-                                            connected++;
-                                        }
-                                    } catch(e) {}
-                                });
-
-                                // Scan for RTCPeerConnection instances stored on
-                                // common library globals (PeerJS, SimplePeer, socket.io, etc.)
-                                const pcScan = [];
-                                try {
-                                    for (const k of Object.keys(window)) {
-                                        try {
-                                            const v = window[k];
-                                            if (!v || typeof v !== 'object') continue;
-                                            // PeerJS: peer.connections → {id: [conn]} where conn.peerConnection is RTCPeerConnection
-                                            if (v.connections && typeof v.connections === 'object') {
-                                                for (const conns of Object.values(v.connections)) {
-                                                    for (const c of (Array.isArray(conns) ? conns : [conns])) {
-                                                        if (c && c.peerConnection) pcScan.push(c.peerConnection);
-                                                    }
-                                                }
-                                            }
-                                            // SimplePeer / generic: object with _pc or peerConnection property
-                                            if (v._pc && v._pc.getReceivers) pcScan.push(v._pc);
-                                            if (v.peerConnection && v.peerConnection.getReceivers) pcScan.push(v.peerConnection);
-                                            // Direct RTCPeerConnection stored on window
-                                            if (v instanceof RTCPeerConnection) pcScan.push(v);
-                                        } catch(e) {} // skip inaccessible cross-origin frames etc.
-                                    }
-                                } catch(e) {}
-
-                                // Scan RTCPeerConnections for remote audio tracks
-                                for (const pc of pcScan) {
-                                    try {
-                                        const receivers = pc.getReceivers ? pc.getReceivers() : [];
-                                        for (const r of receivers) {
-                                            if (r.track && r.track.kind === 'audio') {
-                                                const stream = new MediaStream([r.track]);
-                                                const src = ctx.createMediaStreamSource(stream);
-                                                src.connect(ctx.destination);
-                                                connected++;
-                                            }
-                                        }
-                                    } catch(e) {}
-                                }
-
-                                return ctx.state + ':connected=' + connected;
-                            }
-                        """)
-                        logger.info("Audio force-connect fallback: %s", _force_state)
-                    except Exception as exc:
-                        logger.debug("Audio force-connect failed: %s", exc)
-
-            except Exception as exc:
-                logger.debug("Audio unmute injection failed: %s", exc)
+            # Force-connect any WebRTC remote audio tracks already received into
+            # the page's Web Audio destination, so Chrome actually renders PCM
+            # to PulseAudio (otherwise sink-input routing is moot — the sink
+            # records pure silence). This runs again at 8/15/30 s in
+            # _late_routing_syncs to catch peers that initialise late.
+            _wc = await _force_connect_webrtc_audio(page)
+            if _wc:
+                logger.info(
+                    "WebRTC connect (post-admit): state=%s newly=%s",
+                    _wc.get("state"), _wc.get("newly"),
+                )
 
             # Diagnostic: check ffmpeg and PulseAudio state
             logger.info(
@@ -4136,27 +4186,46 @@ async def run_browser_bot(
                 logger.info("PulseAudio sink-inputs (post-sync-2):\n%s", _si2.stdout.strip() or "(none)")
             except Exception:
                 pass
+            # Re-attempt WebRTC audio connect after the 3s sink-input sweep —
+            # onepizza's PeerJS connections often appear in this window.
+            _wc2 = await _force_connect_webrtc_audio(page)
+            if _wc2:
+                logger.info(
+                    "WebRTC connect (~3s): state=%s newly=%s",
+                    _wc2.get("state"), _wc2.get("newly"),
+                )
 
             # Third and fourth routing syncs at ~8s and ~15s after join — onepizza
             # and other WebRTC platforms may create sink-inputs late.  These extra
             # syncs dramatically improve the chance of capturing user audio from
-            # the very start of the meeting.
+            # the very start of the meeting.  At each step we also re-run the
+            # WebRTC track force-connect (idempotent via window._mbConnectedTracks
+            # WeakSet) so newly-established peers get wired into Chrome's audio
+            # output pipeline.
             async def _late_routing_syncs():
-                await asyncio.sleep(5)   # ~8s after join (0.8 + 3 + 5)
-                await asyncio.get_event_loop().run_in_executor(
-                    None, functools.partial(_sync_chrome_audio_routing, pulse_sink, pulse_mic, pulse_source_name)
-                )
-                logger.info("PulseAudio routing sync 3 (~8s) complete")
-                await asyncio.sleep(7)   # ~15s after join
-                await asyncio.get_event_loop().run_in_executor(
-                    None, functools.partial(_sync_chrome_audio_routing, pulse_sink, pulse_mic, pulse_source_name)
-                )
-                logger.info("PulseAudio routing sync 4 (~15s) complete")
-                await asyncio.sleep(15)  # ~30s after join
-                await asyncio.get_event_loop().run_in_executor(
-                    None, functools.partial(_sync_chrome_audio_routing, pulse_sink, pulse_mic, pulse_source_name)
-                )
-                logger.info("PulseAudio routing sync 5 (~30s) complete")
+                async def _step(label: str, sleep_s: float) -> None:
+                    await asyncio.sleep(sleep_s)
+                    await asyncio.get_event_loop().run_in_executor(
+                        None,
+                        functools.partial(
+                            _sync_chrome_audio_routing,
+                            pulse_sink, pulse_mic, pulse_source_name,
+                        ),
+                    )
+                    logger.info("PulseAudio routing sync %s complete", label)
+                    _wc = await _force_connect_webrtc_audio(page)
+                    if _wc:
+                        logger.info(
+                            "WebRTC connect (%s): state=%s newly=%s",
+                            label, _wc.get("state"), _wc.get("newly"),
+                        )
+
+                await _step("3 (~8s)", 5)
+                await _step("4 (~15s)", 7)
+                await _step("5 (~30s)", 15)
+                # One more pass at ~60s catches very-late peers (e.g. participants
+                # joining after the bot, or onepizza renegotiations).
+                await _step("6 (~60s)", 30)
             asyncio.create_task(_late_routing_syncs())
 
             # Enable live captions so the mention monitor can read them

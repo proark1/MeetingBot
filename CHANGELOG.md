@@ -4,7 +4,17 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.34.0 — **Last updated:** 2026-04-16
+> **Latest version:** 2.34.1 — **Last updated:** 2026-04-16
+
+---
+
+## [2.34.1] - 2026-04-16
+
+### Fixed
+- **onepizza.io: recorded audio was always silent (peak amplitude 0) → empty transcript** — Chrome's WebRTC remote-audio tracks were never wired into the page's Web Audio destination, so even though the PulseAudio sink-input was routed correctly to the bot's recording sink, ffmpeg captured pure zeros (`VAD: zero speech frames detected in 196 s`). The post-admission "Audio force-connect fallback" only ran once at admission+0.8 s — at that point onepizza's PeerJS connections didn't exist yet, so it found `connected=0` and never retried. Two complementary fixes in `backend/app/services/browser_bot.py`:
+  - **Periodic re-attempts** — extracted the imperative WebRTC track-connect logic into a new module-level helper `_force_connect_webrtc_audio(page)` and call it after every routing-sync step (post-admit, ~3 s, ~8 s, ~15 s, ~30 s, and a new ~60 s pass). Each call walks `<audio>` / `<video>` elements with `srcObject`, scans `window` for RTCPeerConnection wrappers (PeerJS / SimplePeer / direct), and hooks any new audio receivers into `ctx.destination`. A `window._mbConnectedTracks` `WeakSet` makes the call idempotent — previously-connected MediaStreamTracks are skipped, so repeated invocations cannot double-connect a stream
+  - **Stronger init-script patch** — `RTCPeerConnection.prototype.setRemoteDescription` is now patched in addition to the `track` event listener. After every offer/answer resolves, the patched method sweeps `pc.getReceivers()` and force-connects any new audio tracks. This is more reliable than the `track` event across PeerJS / SimplePeer / unified-plan implementations. Also added a legacy `addstream` event listener for older WebRTC libraries
+- Effect: on onepizza, the next periodic pass after a participant's PeerJS connection establishes will discover and connect the audio track, forcing Chrome to render the decoded PCM through PulseAudio. ffmpeg then captures real samples and transcription proceeds normally. No regression on Google Meet / Zoom / Teams — the idempotency guard prevents any double-connect
 
 ---
 

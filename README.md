@@ -1,8 +1,8 @@
 # MeetingBot API
 
-**Version 2.34.0** — A stateless meeting bot API service with multi-tenant billing, business account support, Google/Microsoft SSO, Python & JS SDKs, webhook retry/delivery logs, bot persona customization, video recording, Prometheus metrics, idempotency keys, cloud storage, email notifications, calendar auto-join, Slack/Notion integrations, and GDPR compliance.
+**Version 2.34.1** — A stateless meeting bot API service with multi-tenant billing, business account support, Google/Microsoft SSO, Python & JS SDKs, webhook retry/delivery logs, bot persona customization, video recording, Prometheus metrics, idempotency keys, cloud storage, email notifications, calendar auto-join, Slack/Notion integrations, and GDPR compliance.
 
-> **Last updated:** 2026-04-16 · **API version in Swagger UI:** 2.34.0 · **Build:** Interactive live bot — unified voice+chat transcript, /say, /chat <!-- auto-updated on each release -->
+> **Last updated:** 2026-04-16 · **API version in Swagger UI:** 2.34.1 · **Build:** Fix onepizza WebRTC silent-sink — periodic audio force-connect <!-- auto-updated on each release -->
 
 
 Send bots into **Zoom**, **Google Meet**, **Microsoft Teams**, and **onepizza.io** meetings to record, transcribe, and analyse them with **Claude** (Anthropic) or **Gemini** (Google) AI.
