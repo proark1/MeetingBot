@@ -17,7 +17,9 @@ async def test_create_bot(auth_client: httpx.AsyncClient):
     assert resp.status_code in (200, 201)
     data = resp.json()
     assert "id" in data
-    assert data.get("status") in ("ready", "scheduled", "queued")
+    # The bot starts transitioning immediately after create; any early-lifecycle
+    # status is acceptable here (status strings per CLAUDE.md).
+    assert data.get("status") in ("ready", "scheduled", "queued", "joining")
 
 
 @pytest.mark.asyncio
@@ -60,4 +62,5 @@ async def test_cancel_bot(auth_client: httpx.AsyncClient):
     bot_id = create_resp.json()["id"]
 
     resp = await auth_client.delete(f"/api/v1/bot/{bot_id}")
-    assert resp.status_code == 200
+    # DELETE /api/v1/bot/{id} is declared status_code=204 (REST convention)
+    assert resp.status_code == 204

@@ -51,7 +51,8 @@ async def test_delete_webhook(auth_client: httpx.AsyncClient):
     wh_id = create_resp.json()["id"]
 
     resp = await auth_client.delete(f"/api/v1/webhook/{wh_id}")
-    assert resp.status_code == 200
+    # DELETE /api/v1/webhook/{id} is declared status_code=204 (REST convention)
+    assert resp.status_code == 204
 
 
 @pytest.mark.asyncio
