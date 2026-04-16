@@ -62,6 +62,9 @@ The bot sends webhook POST requests to your `webhook_url` at each status change:
 | `bot.done` | Fully complete | Show results |
 | `bot.error` | Something failed | Show error, offer retry |
 | `bot.cancelled` | Bot was deleted/cancelled | Clean up |
+| `bot.live_transcript` | New voice transcript entry (~1 s after speech ends) | Stream into your UI / agent |
+| `bot.live_chat_message` | New chat message captured from the meeting chat panel | Stream into your UI / agent |
+| `bot.keyword_alert` | A configured keyword was spoken or typed | Trigger your alert workflow |
 
 **Webhook payload example:**
 ```json
@@ -85,6 +88,66 @@ curl https://your-instance.railway.app/api/v1/bot/{bot_id}/transcript \
 curl https://your-instance.railway.app/api/v1/bot/{bot_id} \
   -H "Authorization: Bearer sk_live_abc123..."
 ```
+
+---
+
+## Driving the Bot Mid-Meeting (v2.34.0+)
+
+The bot exposes two endpoints that let an external agent (your code, your AI, a
+human-in-the-loop UI) drive the bot while it's in the call:
+
+### Speak text aloud — `POST /api/v1/bot/{id}/say`
+
+```bash
+curl -X POST https://your-instance.railway.app/api/v1/bot/{bot_id}/say \
+  -H "Authorization: Bearer sk_live_..." \
+  -H "Content-Type: application/json" \
+  -d '{"text": "Sorry to interrupt — quick question.", "voice": "gemini"}'
+```
+
+- Returns 202 immediately with a `task_id`. Audio plays through the bot's
+  virtual mic ~1–2 s later (Gemini TTS) or ~300–500 ms later with `"voice":"edge"`.
+- Concurrent calls **queue** behind a per-bot lock — speech never overlaps.
+- Pass `"interrupt": true` to cancel any in-flight speak and jump ahead.
+- Requires `bot.status == "in_call"` (HTTP 409 otherwise).
+- The spoken text is appended to the unified transcript with
+  `"source": "voice", "bot_generated": true`.
+
+### Post text to the chat — `POST /api/v1/bot/{id}/chat`
+
+```bash
+curl -X POST https://your-instance.railway.app/api/v1/bot/{bot_id}/chat \
+  -H "Authorization: Bearer sk_live_..." \
+  -H "Content-Type: application/json" \
+  -d '{"text": "Sharing the doc: https://example.com/spec"}'
+```
+
+- Returns 202 immediately. Message appears in the meeting chat ~300–500 ms later.
+- Works on Google Meet, Zoom, Microsoft Teams, and onepizza.
+- The bot's own message is filtered from `bot.live_chat_message` so you don't
+  get an echo for messages you posted yourself.
+
+### Consume the live stream — `GET /api/v1/bot/{id}/stream`
+
+Server-Sent Events delivering every transcript entry as it's created. Each
+event is one JSON line:
+
+```json
+data: {"speaker":"Alice","text":"Should we move to the next topic?","timestamp":42.31,"source":"voice"}
+data: {"speaker":"Bob","text":"+1","timestamp":44.10,"source":"chat","message_id":"a1b2c3d4e5f60718"}
+```
+
+The same entries are also broadcast over WebSocket (`/api/v1/ws`) and via
+webhooks (`bot.live_transcript` for voice, `bot.live_chat_message` for chat).
+
+### A typical interactive loop
+
+1. Subscribe to `bot.live_transcript` + `bot.live_chat_message`.
+2. When you decide a response is needed, call your AI of choice with the
+   recent transcript window as context.
+3. Call `POST /say` (voice) or `POST /chat` (text) with the generated reply.
+4. The bot speaks/posts within ~1–2 s — and your reply also appears in the
+   stream (with `bot_generated: true`) so multi-turn context stays consistent.
 
 ---
 

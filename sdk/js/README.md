@@ -185,13 +185,48 @@ const stats = await client.getBotStats();
 console.log(stats.total, stats.completed, stats.failed);
 ```
 
+### Live interaction (v2.34.0+)
+
+The bot can be driven mid-meeting via two endpoints. They aren't yet wrapped
+as typed SDK methods — call them directly with `fetch`:
+
+```ts
+const base = "https://your-instance.railway.app";
+const headers = { Authorization: "Bearer sk_live_...", "Content-Type": "application/json" };
+
+// Make the bot speak (Gemini TTS by default — natural voice in ~1–2 s)
+await fetch(`${base}/api/v1/bot/${botId}/say`, {
+  method: "POST",
+  headers,
+  body: JSON.stringify({ text: "Hello team — quick update.", voice: "gemini" }),
+});
+
+// Make the bot post into the meeting chat
+await fetch(`${base}/api/v1/bot/${botId}/chat`, {
+  method: "POST",
+  headers,
+  body: JSON.stringify({ text: "Sharing the doc: https://example.com/spec" }),
+});
+
+// Subscribe to the unified live transcript (voice + chat) via SSE
+const es = new EventSource(`${base}/api/v1/bot/${botId}/stream`);
+es.onmessage = (e) => {
+  const entry = JSON.parse(e.data);
+  console.log(entry.source, entry.speaker, entry.text); // source: "voice" | "chat"
+};
+```
+
+Both POSTs return 202 immediately and run the actual work in the background
+behind a per-bot lock. Pass `interrupt: true` to `/say` to cancel any
+in-flight speech and jump ahead. Requires the bot to be `in_call`.
+
 ### Webhooks
 
 ```ts
 // Register a webhook
 const wh = await client.createWebhook({
   url: "https://myapp.com/webhooks",
-  events: ["bot.completed", "bot.failed"],
+  events: ["bot.done", "bot.error", "bot.live_transcript", "bot.live_chat_message"],
   secret: "my_signing_secret",  // optional
 });
 

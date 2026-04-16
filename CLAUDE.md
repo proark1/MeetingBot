@@ -146,15 +146,21 @@ All templates return JSON matching `MeetingAnalysis` schema:
 
 ---
 
-## Webhook Events (13 total)
+## Webhook Events (14 total)
 
 Defined in `WEBHOOK_EVENTS` in `api/webhooks.py`. Signed with HMAC-SHA256.
 
 ```
 bot.joining  bot.in_call  bot.call_ended  bot.transcript_ready  bot.analysis_ready
 bot.done  bot.error  bot.cancelled  bot.keyword_alert
-bot.live_transcript  bot.live_transcript_translated  bot.recurring_intel_ready  bot.test
+bot.live_transcript  bot.live_transcript_translated  bot.live_chat_message
+bot.recurring_intel_ready  bot.test
 ```
+
+`bot.live_transcript` payload carries `entry.source = "voice"`;
+`bot.live_chat_message` carries `entry.source = "chat"` plus a `message_id`.
+Both flow through `bot_service.on_live_entry` — voice goes WS+SSE only,
+chat additionally fans out via `webhook_service.dispatch_event`.
 
 **Do not rename** `X-MeetingBot-Signature` / `X-MeetingBot-Timestamp` headers — SDK consumers depend on them.
 

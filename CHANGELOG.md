@@ -10,6 +10,13 @@ Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
 ## [2.34.0] - 2026-04-16
 
+### Documentation
+- **`api/openapi.json`** — bumped `info.version` to 2.34.0; added `/say` and `/chat` paths and `SayRequest` / `SayResponse` / `ChatRequest` / `ChatResponse` component schemas; extended `BotResponse.transcript` description with the new `source` / `message_id` / `bot_generated` fields; expanded `WebhookCreate.events` description to enumerate all supported events including `bot.live_chat_message`
+- **`README.md`** — added the v2.34.0 entry under "Recent changes", added `/say`, `/chat`, `/stream` rows to the Bots endpoint table, added a full "Supported events" webhook table, updated the Bot response object's `transcript` field description, and the webhook payload example now includes both a voice and a chat entry
+- **`INTEGRATION_GUIDE.md`** — new "Driving the Bot Mid-Meeting" section with `curl` examples for `/say`, `/chat`, and the SSE `/stream`; added the new live events to the webhook table
+- **`sdk/python/README.md`, `sdk/js/README.md`** — added "Live interaction" sections showing how to call `/say`, `/chat`, and consume `/stream` directly until typed wrappers ship; updated webhook-create examples to include `bot.live_chat_message`
+- **`CLAUDE.md`** — bumped the webhook event count from 13 to 14 and described the source/message_id semantics
+
 ### Added
 - **Unified live transcript (voice + chat)** — meeting chat messages are now captured as first-class transcript entries alongside voice. A new `_chat_capture_loop` in `browser_bot.py` polls the chat panel at 4 Hz across Google Meet / Zoom / Teams / onepizza, dedups per-line via a stable short sha1, and appends each new message to the shared `structured_transcript` with `source="chat"` and a `message_id` field. Voice entries carry `source="voice"` (default). Both flow through the existing `on_live_entry` pipeline, so WebSocket, SSE, DB persistence, and webhook fan-out come free
 - **New webhook event `bot.live_chat_message`** — fired for every captured chat message. Added to `WEBHOOK_EVENTS` in `api/webhooks.py`. `bot_service.on_live_entry` branches on `entry["source"]` to dispatch this event for chat and the existing `bot.live_transcript` for voice

@@ -11,7 +11,14 @@ Send bots into **Zoom**, **Google Meet**, **Microsoft Teams**, and **onepizza.io
 
 ---
 
-## Recent changes (2026-03-28)
+## Recent changes (2026-04-16)
+
+### Interactive bot — voice + chat, both ways (v2.34.0)
+- **Unified live transcript** — every voice utterance AND every chat message now flows through the same `transcript` array with a new `source: "voice" | "chat"` field. Chat messages are captured at 4 Hz from the meeting chat panel on Google Meet / Zoom / Teams / onepizza, deduped by stable per-line hash, and persisted alongside voice entries.
+- **`POST /api/v1/bot/{id}/say`** — make the bot speak arbitrary text in the live meeting. Body: `{text, voice?: "gemini"|"edge", interrupt?: bool}`. Default voice is **Gemini TTS** for natural sound. Returns 202 immediately; concurrent calls queue behind a per-bot lock so audio never overlaps; `interrupt:true` cancels in-flight speech.
+- **`POST /api/v1/bot/{id}/chat`** — make the bot post arbitrary text into the meeting chat panel. Body: `{text}`. Same 202 + per-bot-lock pattern.
+- **New webhook event `bot.live_chat_message`** — fires for every captured chat message; payload mirrors `bot.live_transcript` but with `source: "chat"`.
+- See [Driving the Bot Mid-Meeting](INTEGRATION_GUIDE.md#driving-the-bot-mid-meeting-v2340) in the integration guide for end-to-end examples.
 
 ### Integration improvements (v2.20.x)
 - **`POST /api/v1/bot/validate-meeting-url`** — Pre-flight endpoint to check URL validity, detect platform, and report whether real recording is supported. Use before `POST /bot` to fast-fail on unsupported URLs.
@@ -307,7 +314,7 @@ Returned by `GET /api/v1/bot/{id}` and `POST /api/v1/bot`.
 | `ended_at` | ISO-8601\|null | When the meeting ended |
 | `duration_seconds` | float\|null | Meeting duration in seconds |
 | `participants` | string[] | Names of meeting participants |
-| `transcript` | object[] | Array of `{speaker, text, timestamp}` entries. Available once `status` is `done` |
+| `transcript` | object[] | Array of `{speaker, text, timestamp, source, message_id?, bot_generated?}` entries. `source` is `voice` (default — spoken utterance) or `chat` (captured from the meeting chat panel). `message_id` is a stable short hash for chat dedup. `bot_generated: true` marks entries produced by `POST /say` or `POST /chat`. Available once `status` is `done` |
 | `analysis` | object\|null | AI-generated analysis (see [Analysis object](#analysis-object)). Available once `status` is `done` and `analysis_mode` is `full` |
 | `chapters` | object[] | Array of `{title, start_time, summary}` chapter segments |
 | `speaker_stats` | object[] | Array of `{name, talk_time_s, talk_pct, turns}` per speaker |
@@ -401,6 +408,29 @@ The `ai_usage` field on every bot response provides full cost and token tracking
 
 ## Webhook payload
 
+### Supported events
+
+| Event | Fires when |
+|-------|------------|
+| `bot.joining` | Browser is launching, joining the meeting |
+| `bot.in_call` | Bot has been admitted and is recording |
+| `bot.call_ended` | Meeting ended, bot is leaving |
+| `bot.transcript_ready` | Transcript is finalised |
+| `bot.analysis_ready` | AI analysis is complete |
+| `bot.done` | Fully complete — final results in payload |
+| `bot.error` | Unrecoverable failure |
+| `bot.cancelled` | Bot was deleted or `/leave`-d |
+| `bot.keyword_alert` | A configured keyword was matched |
+| `bot.live_transcript` | New voice transcript entry (~1 s after speech ends). `data.entry = {speaker, text, timestamp, source: "voice"}` |
+| `bot.live_transcript_translated` | Translated entry (when `translation_language` is set) |
+| `bot.live_chat_message` | New chat message captured from the meeting chat panel. `data.entry = {speaker, text, timestamp, source: "chat", message_id}` |
+| `bot.recurring_intel_ready` | Recurring-meeting intelligence finished |
+| `bot.test` | Sent by `POST /api/v1/webhook/{id}/test` |
+
+Subscribe via `POST /api/v1/webhook` with `events: ["bot.done", "bot.live_chat_message", ...]`, or use `["*"]` for everything.
+
+### Payload format
+
 Full payload posted to `webhook_url` when a bot finishes.
 
 ```json
@@ -416,7 +446,8 @@ Full payload posted to `webhook_url` when a bot finishes.
     "participants": ["Alice", "Bob", "Carol"],
     "duration_seconds": 3612,
     "transcript": [
-      { "speaker": "Alice", "text": "Let's kick off the review.", "timestamp": 2.0 }
+      { "speaker": "Alice", "text": "Let's kick off the review.", "timestamp": 2.0, "source": "voice" },
+      { "speaker": "Bob",   "text": "Sharing the doc",            "timestamp": 5.4, "source": "chat", "message_id": "a1b2c3d4e5f60718" }
     ],
     "analysis": {
       "summary": "The team reviewed sprint progress.",
@@ -588,6 +619,9 @@ The background poll loop checks all active feeds every `CALENDAR_POLL_INTERVAL_S
 | `POST` | `/api/v1/bot/{id}/analyze` | (Re-)run AI analysis. Body: `{template?, prompt_override?}`. Blocks up to 25 s waiting for transcript. Returns Analysis object. Use to switch templates or apply a custom prompt on an existing transcript |
 | `POST` | `/api/v1/bot/{id}/ask` | Q&A on the transcript. Body: `{question}`. Returns `{bot_id, question, answer}`. Rate limit: 10/min. HTTP 425 if no transcript yet |
 | `POST` | `/api/v1/bot/{id}/ask-live` | Q&A on a bot currently in a call (uses live buffer). Body: `{question}`. Rate limit: 10/min |
+| `POST` | `/api/v1/bot/{id}/say` | **Speak text aloud in the live meeting.** Body: `{text, voice?: "gemini"\|"edge", interrupt?: bool}`. Returns 202 with `{bot_id, task_id, queued, interrupted_previous}`. TTS+playback runs in the background; concurrent calls serialise behind a per-bot lock. Default voice: Gemini TTS (~1–2 s); use `edge` for ~300–500 ms latency. `interrupt:true` cancels in-flight speech. HTTP 409 if not `in_call`. Rate limit: 30/min |
+| `POST` | `/api/v1/bot/{id}/chat` | **Post text to the live meeting chat.** Body: `{text}`. Returns 202 with `{bot_id, task_id, queued}`. Keyboard typing runs in the background behind a per-bot lock. Works on Google Meet, Zoom, Teams, onepizza. HTTP 409 if not `in_call`. Rate limit: 30/min |
+| `GET` | `/api/v1/bot/{id}/stream` | **Server-Sent Events** delivering every transcript entry (voice + chat) as it's created. Each event is a JSON object with `{speaker, text, timestamp, source: "voice"\|"chat", message_id?, bot_generated?}`. Closes with `{__terminal__: true, status}` when the bot finishes |
 | `POST` | `/api/v1/bot/{id}/share` | Generate a shareable public link. Returns `{share_url, bot_id}`. Only works for `done` bots |
 | `POST` | `/api/v1/bot/{id}/followup-email` | Draft follow-up email. Returns `{bot_id, subject, body}`. Rate limit: 5/min. HTTP 425 if no transcript or analysis yet |
 | `GET` | `/api/v1/bot/{id}/export/markdown` | Export full report as Markdown file |

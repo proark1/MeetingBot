@@ -172,13 +172,51 @@ stats = client.get_bot_stats()
 print(stats.total, stats.completed, stats.failed)
 ```
 
+### Live interaction (v2.34.0+)
+
+The bot can be driven mid-meeting via two endpoints. They are not yet wrapped
+as typed SDK methods — call them directly with `httpx`:
+
+```python
+import httpx
+
+base = "https://your-instance.railway.app"
+headers = {"Authorization": "Bearer sk_live_..."}
+
+# Make the bot speak (Gemini TTS by default — natural voice in ~1–2 s)
+httpx.post(
+    f"{base}/api/v1/bot/{bot_id}/say",
+    headers=headers,
+    json={"text": "Hello team — quick update.", "voice": "gemini"},
+).raise_for_status()
+
+# Make the bot post into the meeting chat
+httpx.post(
+    f"{base}/api/v1/bot/{bot_id}/chat",
+    headers=headers,
+    json={"text": "Sharing the doc: https://example.com/spec"},
+).raise_for_status()
+
+# Subscribe to the unified live transcript (voice + chat) via SSE
+with httpx.stream("GET", f"{base}/api/v1/bot/{bot_id}/stream", headers=headers) as r:
+    for line in r.iter_lines():
+        if line.startswith("data: "):
+            entry = json.loads(line[6:])
+            print(entry["source"], entry["speaker"], entry["text"])
+```
+
+Both POST endpoints return 202 immediately and run the actual work in the
+background behind a per-bot `asyncio.Lock`. Pass `"interrupt": true` to `/say`
+to cancel any in-flight speech and jump ahead. Requires the bot to be
+`in_call`. See the [API Reference](https://github.com/proark1/meetingbot#bots) for full schemas.
+
 ### Webhooks
 
 ```python
 # Register a webhook
 wh = client.create_webhook(
     url="https://myapp.com/webhooks",
-    events=["bot.completed", "bot.failed"],
+    events=["bot.done", "bot.error", "bot.live_transcript", "bot.live_chat_message"],
     secret="my_signing_secret",  # optional
 )
 
