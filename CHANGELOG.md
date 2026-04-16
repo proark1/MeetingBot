@@ -4,7 +4,14 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.33.4 — **Last updated:** 2026-04-16
+> **Latest version:** 2.33.5 — **Last updated:** 2026-04-16
+
+---
+
+## [2.33.5] - 2026-04-16
+
+### Fixed
+- **Dashboard API key row XSS (defense-in-depth)** — `_prependKeyRow()` in `dashboard.html` was interpolating the user-supplied key name directly into `innerHTML`. Exploitable only as self-XSS today (you can only set your own key name), but the name is also rendered on shared surfaces, so the pattern needed fixing. Name cell is now populated via `textContent`; the interpolated fields that remain (`key_preview`, `full_key`, `id`) are all server-generated. Also aligned the Copy button markup with the server-rendered row (`type="button"`, `title="Copy key"`, `⎘` glyph) so JS-inserted rows match their Jinja-rendered siblings exactly.
 
 ---
 
