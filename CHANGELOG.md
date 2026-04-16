@@ -4,7 +4,14 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.33.3 — **Last updated:** 2026-04-10
+> **Latest version:** 2.33.4 — **Last updated:** 2026-04-16
+
+---
+
+## [2.33.4] - 2026-04-16
+
+### Fixed
+- **Dashboard API key Name/Key columns swapped on creation** — `_prependKeyRow()` in `dashboard.html` built the new `<tr>` with the key preview in the first cell and the user-supplied name in the second, mismatching the table header (`Name | Key | Last used`) and the Jinja-rendered rows. The cell order is now Name → Key → Last used (set to `Never` for a freshly created key) so newly created keys render identically to existing ones without requiring a page reload
 
 ---
 

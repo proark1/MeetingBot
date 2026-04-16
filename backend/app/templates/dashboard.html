@@ -2146,11 +2146,11 @@ function _prependKeyRow(data, mode) {
   if (!tbody) return;
   const tr = document.createElement('tr');
   tr.innerHTML = `
+    <td style="font-weight:500">${data.name || '—'}</td>
     <td><code style="font-size:11.5px">${data.key_preview}</code>
       <button class="btn btn-xs btn-outline-secondary ms-1 copy-key-btn" data-key="${data.full_key}" title="Copy full key">Copy</button>
     </td>
-    <td style="color:#64748b;font-size:13px">${data.name || '—'}</td>
-    <td style="color:#94a3b8;font-size:12px">${new Date(data.created_at).toLocaleDateString()}</td>
+    <td style="color:#94a3b8;font-size:12.5px">Never</td>
     <td>
       <button type="button" class="btn btn-xs btn-outline-danger" data-revoke-key="${data.id}">Revoke</button>
     </td>`;
