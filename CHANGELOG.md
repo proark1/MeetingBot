@@ -4,7 +4,14 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.33.4 — **Last updated:** 2026-04-16
+> **Latest version:** 2.33.5 — **Last updated:** 2026-04-16
+
+---
+
+## [2.33.5] - 2026-04-16
+
+### Fixed
+- **Per-bot `webhook_url` only received terminal events** — `_set_status()` and six other `dispatch_event()` callsites in `bot_service.py` (for `bot.joining`, `bot.in_call`, `bot.call_ended`, `bot.transcribing`, `bot.transcript_ready`, `bot.analysis_ready`, `bot.coaching_summary`, `bot.coaching_alert`, `bot.recurring_intel_ready`) did not pass `extra_webhook_url=bot.webhook_url`, so integrations that rely on the per-bot URL (e.g. 1tab.ai / onepizza.io) never saw non-terminal lifecycle events and their `meeting_recordings.status` appeared frozen at `joining` even when the bot had joined successfully. All ten in-lifecycle callsites now fan out to the per-bot webhook; the `BotSession.webhook_url` comment is updated to match the new contract
 
 ---
 
