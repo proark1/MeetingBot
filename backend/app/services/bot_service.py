@@ -274,6 +274,7 @@ async def _set_status(bot: BotSession, status: str, **kwargs) -> None:
             "account_id":       bot.account_id,
             "ts":               _now().isoformat(),
         },
+        extra_webhook_url=bot.webhook_url,
         account_id=bot.account_id,
     )
 
@@ -394,6 +395,7 @@ async def _do_analysis_inner(bot: BotSession, audio_path: str, use_real_bot: boo
         await webhook_service.dispatch_event(
             "bot.transcript_ready",
             {"bot_id": bot.id, "account_id": bot.account_id, "entry_count": len(transcript)},
+            extra_webhook_url=bot.webhook_url,
             account_id=bot.account_id,
         )
 
@@ -532,12 +534,18 @@ async def _do_analysis_inner(bot: BotSession, audio_path: str, use_real_bot: boo
                         "quiet_participants": quiet_participants,
                         "health_score": health_score,
                     },
+                    extra_webhook_url=bot.webhook_url,
                     account_id=bot.account_id,
                 )
             except Exception as exc:
                 logger.debug("Bot %s: coaching_summary dispatch failed: %s", bot.id, exc)
 
-        await webhook_service.dispatch_event("bot.analysis_ready", {"bot_id": bot.id, "account_id": bot.account_id}, account_id=bot.account_id)
+        await webhook_service.dispatch_event(
+            "bot.analysis_ready",
+            {"bot_id": bot.id, "account_id": bot.account_id},
+            extra_webhook_url=bot.webhook_url,
+            account_id=bot.account_id,
+        )
 
         # ── Keyword alert scanning ────────────────────────────────────────
         try:
@@ -711,6 +719,7 @@ async def _post_completion_notifications(account_id: str, bot_data: dict, bot=No
                     await webhook_service.dispatch_event(
                         "bot.recurring_intel_ready",
                         {"bot_id": bot.id, "account_id": account_id, "recurring_intel": intel},
+                        extra_webhook_url=bot.webhook_url,
                         account_id=account_id,
                     )
                     logger.info("Bot %s: recurring intelligence generated", bot.id)
@@ -857,6 +866,7 @@ async def run_bot_lifecycle(bot_id: str) -> None:
                                             "speaker": spkr,
                                             "pct": round(pct * 100, 1),
                                         },
+                                        extra_webhook_url=bot.webhook_url,
                                         account_id=bot.account_id,
                                     )
                                     logger.info(
@@ -1033,6 +1043,7 @@ async def run_bot_lifecycle(bot_id: str) -> None:
         await webhook_service.dispatch_event(
             "bot.transcript_ready",
             {"bot_id": bot_id, "account_id": bot.account_id, "entry_count": len(transcript)},
+            extra_webhook_url=bot.webhook_url,
             account_id=bot.account_id,
         )
 

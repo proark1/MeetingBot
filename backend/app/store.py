@@ -33,7 +33,7 @@ class BotSession:
     bot_name: str
     status: str  # ready | scheduled | queued | joining | in_call | call_ended | transcribing | done | error | cancelled
 
-    # Per-bot webhook — called once when bot reaches a terminal state
+    # Per-bot webhook — called for every lifecycle event dispatched via webhook_service
     webhook_url: Optional[str] = None
 
     # Results (populated during/after the meeting)
