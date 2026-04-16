@@ -12,6 +12,7 @@ Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
 ### Fixed
 - **Dashboard API key row XSS (defense-in-depth)** — `_prependKeyRow()` in `dashboard.html` was interpolating the user-supplied key name directly into `innerHTML`. Exploitable only as self-XSS today (you can only set your own key name), but the name is also rendered on shared surfaces, so the pattern needed fixing. Name cell is now populated via `textContent`; the interpolated fields that remain (`key_preview`, `full_key`, `id`) are all server-generated. Also aligned the Copy button markup with the server-rendered row (`type="button"`, `title="Copy key"`, `⎘` glyph) so JS-inserted rows match their Jinja-rendered siblings exactly.
+- **Revoke API key returned 405 Method Not Allowed** — `_handleRevoke()` POSTed to `/dashboard/keys/{id}` but the backend route is `POST /dashboard/keys/{id}/revoke` (ui.py:534). Added the missing `/revoke` suffix so the button actually revokes the key.
 
 ---
 

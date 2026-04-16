@@ -2174,7 +2174,7 @@ async function _handleRevoke() {
   const btn = this;
   btn.disabled = true;
   try {
-    await apiFetch(`/dashboard/keys/${btn.dataset.revokeKey}`, { method: 'POST' });
+    await apiFetch(`/dashboard/keys/${btn.dataset.revokeKey}/revoke`, { method: 'POST' });
     btn.closest('tr').remove();
     showToast('Key revoked', 'success');
   } catch(e) { showToast(e.message, 'danger'); btn.disabled = false; }
