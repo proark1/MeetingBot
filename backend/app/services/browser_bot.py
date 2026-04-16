@@ -2146,6 +2146,130 @@ async def _scrape_chat_messages(page: Page, platform: str) -> str:
         return ""
 
 
+def _chat_split_messages(text: str) -> list[str]:
+    """Split a chat-panel innerText dump into probable message lines.
+
+    Strips blank lines and lines that are clearly decorative (the "↩" reply
+    glyph and "+" emoji-react button used on onepizza). Timestamp lines such
+    as "14:32" are kept because they make per-line hashes stable across polls.
+    """
+    out: list[str] = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if line in ("↩", "+", "Send", "Send message"):
+            continue
+        out.append(line)
+    return out
+
+
+import hashlib as _chat_hashlib
+
+
+def _chat_message_id(line: str) -> str:
+    """Stable short hash used to dedup chat messages across polls."""
+    return _chat_hashlib.sha1(line.encode("utf-8", errors="ignore")).hexdigest()[:16]
+
+
+async def _chat_capture_loop(
+    page: Page,
+    platform: str,
+    bot_name: str,
+    structured_transcript: list,
+    seen_chat_ids: set,
+    on_transcript_entry=None,
+    recording_t0: float = 0.0,
+) -> None:
+    """Poll the meeting chat panel and emit new messages as structured entries.
+
+    Each message is appended to ``structured_transcript`` with
+    ``source="chat"`` and dispatched via ``on_transcript_entry`` so that
+    WebSocket / SSE / webhook delivery happens via the same path voice
+    entries use (see bot_service.on_live_entry).
+
+    First successful poll is treated as a bootstrap — existing chat history is
+    added to ``seen_chat_ids`` so only messages posted AFTER the bot joins
+    produce live events.
+
+    ``recording_t0`` is the monotonic time when audio recording started;
+    entry timestamps are computed relative to it so they align with voice
+    entries on the same timeline.
+    """
+    POLL_S = 0.25  # 4 Hz — perceived-live without fighting the DOM
+    bootstrapped = False
+    prev_text = ""
+    logger.info("Chat capture loop started for bot '%s' on %s", bot_name, platform)
+
+    # Best-effort: open chat panel so new messages are rendered into the DOM.
+    try:
+        await _open_chat(page, platform)
+    except Exception as exc:
+        logger.debug("Chat capture: could not open chat panel on %s: %s", platform, exc)
+
+    while True:
+        await asyncio.sleep(POLL_S)
+        try:
+            text = await _scrape_chat_messages(page, platform)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.debug("Chat capture scrape error: %s", exc)
+            continue
+
+        if not text or text == prev_text:
+            continue
+
+        if not bootstrapped:
+            # First non-empty poll — seed seen_chat_ids with everything visible
+            # so we don't flood downstream with pre-existing history.
+            for line in _chat_split_messages(text):
+                seen_chat_ids.add(_chat_message_id(line))
+            bootstrapped = True
+            prev_text = text
+            logger.info("Chat capture bootstrapped (%d existing msgs ignored)", len(seen_chat_ids))
+            continue
+
+        now_ts = round(max(0.0, time.monotonic() - recording_t0), 2) if recording_t0 else 0.0
+        new_entries: list[dict] = []
+
+        for line in _chat_split_messages(text):
+            msg_id = _chat_message_id(line)
+            if msg_id in seen_chat_ids:
+                continue
+            seen_chat_ids.add(msg_id)
+            # Heuristic split "Speaker: text" — common in Zoom / onepizza.
+            if ":" in line and len(line) - line.index(":") > 2:
+                maybe_speaker, _, body = line.partition(":")
+                if 0 < len(maybe_speaker.strip()) <= 60 and body.strip():
+                    speaker = maybe_speaker.strip()
+                    body_text = body.strip()
+                else:
+                    speaker, body_text = "chat", line
+            else:
+                speaker, body_text = "chat", line
+            entry = {
+                "speaker": speaker,
+                "text": body_text,
+                "timestamp": now_ts,
+                "source": "chat",
+                "message_id": msg_id,
+            }
+            structured_transcript.append(entry)
+            new_entries.append(entry)
+
+        prev_text = text
+
+        if new_entries and on_transcript_entry is not None:
+            for entry in new_entries:
+                try:
+                    await on_transcript_entry(entry)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as cb_exc:
+                    logger.warning("Chat capture on_transcript_entry error: %s", cb_exc)
+
+
 async def _type_into_chat(page: Page, selectors: list[str], message: str, timeout: int = 4000) -> bool:
     """Click and type a message into a chat input — works for both <textarea> and contenteditable divs.
 
@@ -3557,6 +3681,8 @@ async def run_browser_bot(
     external_leave_event: Optional[asyncio.Event] = None,
     consent_enabled: bool = False,
     consent_message: Optional[str] = None,
+    on_runtime_ready: Optional[Callable[[dict], Awaitable[None]]] = None,
+    seen_chat_ids: Optional[set] = None,
 ) -> dict:
     """
     Join a meeting as a named guest, record audio, wait for it to end.
@@ -3750,6 +3876,7 @@ async def run_browser_bot(
         transcription_task: asyncio.Task | None = None   # VAD streaming transcription
         voice_task:         asyncio.Task | None = None   # Gemini Live voice responses
         monitor_task:       asyncio.Task | None = None
+        chat_capture_task:  asyncio.Task | None = None   # Structured chat capture
 
         try:
             logger.info(
@@ -4148,6 +4275,47 @@ async def run_browser_bot(
                     )
                 )
 
+            # ── Structured chat capture (voice + chat unified transcript) ─────
+            # Polls the chat panel at 4 Hz, dedups by per-line hash, and emits
+            # every new chat message into structured_transcript with
+            # source="chat". Uses the same on_live_transcript_entry callback as
+            # the VAD loop so WS / SSE / webhook delivery is unified.
+            _chat_seen_ids: set = seen_chat_ids if seen_chat_ids is not None else set()
+            try:
+                chat_capture_task = asyncio.create_task(
+                    _chat_capture_loop(
+                        page=page,
+                        platform=platform,
+                        bot_name=bot_name,
+                        structured_transcript=structured_transcript,
+                        seen_chat_ids=_chat_seen_ids,
+                        on_transcript_entry=on_live_transcript_entry,
+                        recording_t0=t0,
+                    )
+                )
+            except Exception as exc:
+                logger.warning("Failed to start chat capture loop: %s", exc)
+
+            # ── Register live-interaction runtime handle ──────────────────────
+            # Makes the Playwright page + audio routing accessible to the /say
+            # and /chat API endpoints via the BotSession.runtime dict.
+            if on_runtime_ready is not None:
+                try:
+                    await on_runtime_ready({
+                        "page": page,
+                        "platform": platform,
+                        "pulse_mic": pulse_mic,
+                        "tts_provider": tts_provider,
+                        "gemini_api_key": _key,
+                        "start_muted": start_muted,
+                        "speak_lock": asyncio.Lock(),
+                        "chat_lock": asyncio.Lock(),
+                        "speak_task": None,
+                        "recording_t0": t0,
+                    })
+                except Exception as exc:
+                    logger.warning("on_runtime_ready callback failed: %s", exc)
+
             # Run mention monitor concurrently with the meeting-end watcher.
             # When Gemini Live is active, the monitor also checks live_transcript
             # as a fallback (in case Gemini Live doesn't respond to a mention).
@@ -4210,6 +4378,15 @@ async def run_browser_bot(
                 monitor_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await monitor_task
+            if chat_capture_task is not None:
+                chat_capture_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await chat_capture_task
+
+            # Clear the runtime handle so /say and /chat stop accepting calls
+            if on_runtime_ready is not None:
+                with contextlib.suppress(Exception):
+                    await on_runtime_ready(None)
 
             # Gracefully leave the call (best-effort, bot may already be removed)
             if exit_reason not in ("ended",):

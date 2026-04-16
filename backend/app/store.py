@@ -119,6 +119,28 @@ class BotSession:
     # Set by the API leave endpoint; the browser bot's _mention_monitor checks it.
     leave_event: Optional[asyncio.Event] = field(default=None, repr=False)
 
+    # ── Live interaction handle ──────────────────────────────────────────────
+    # Set by run_browser_bot once the bot is admitted; cleared on exit.
+    # Holds the Playwright Page + per-bot audio routing info so the /say and
+    # /chat API endpoints can drive the live bot without going through
+    # run_browser_bot. Shape:
+    #   {
+    #     "page": Playwright Page,
+    #     "platform": str,
+    #     "pulse_mic": str,
+    #     "tts_provider": str,
+    #     "gemini_api_key": str,
+    #     "start_muted": bool,
+    #     "speak_lock": asyncio.Lock,
+    #     "chat_lock": asyncio.Lock,
+    #     "speak_task": Optional[asyncio.Task],
+    #   }
+    runtime: Optional[dict] = field(default=None, repr=False)
+
+    # ── Chat capture dedup ───────────────────────────────────────────────────
+    # Populated by _chat_capture_loop to suppress duplicate chat messages.
+    seen_chat_ids: set = field(default_factory=set, repr=False)
+
     # Timestamps
     created_at: datetime = field(default_factory=_now)
     updated_at: datetime = field(default_factory=_now)

@@ -798,12 +798,34 @@ async def run_bot_lifecycle(bot_id: str) -> None:
                     buf_len = len(_live_buffer)
                     should_flush = buf_len >= 10 or time.monotonic() - _last_flush >= 30
 
-                # Broadcast raw live transcript
+                # Voice entries → bot.live_transcript; chat entries → bot.live_chat_message
+                _is_chat = entry.get("source") == "chat"
+                _event_name = "bot.live_chat_message" if _is_chat else "bot.live_transcript"
+
+                # Broadcast raw live transcript / chat message
                 await ws_manager.broadcast(
-                    "bot.live_transcript",
+                    _event_name,
                     {"bot_id": bot_id, "account_id": bot.account_id, "entry": entry},
                     account_id=bot.account_id,
                 )
+
+                # Fan out chat messages to webhook subscribers. Voice entries
+                # are broadcast over WebSocket and SSE only (high-volume); chat
+                # messages are low-volume and valuable for integrations.
+                if _is_chat:
+                    try:
+                        await webhook_service.dispatch_event(
+                            "bot.live_chat_message",
+                            {
+                                "bot_id": bot_id,
+                                "account_id": bot.account_id,
+                                "entry": entry,
+                            },
+                            extra_webhook_url=bot.webhook_url,
+                            account_id=bot.account_id,
+                        )
+                    except Exception as exc:
+                        logger.debug("Bot %s: live chat webhook dispatch failed: %s", bot_id, exc)
 
                 # Push to SSE subscribers
                 try:
@@ -908,6 +930,20 @@ async def run_bot_lifecycle(bot_id: str) -> None:
                     _leave_event = asyncio.Event()
                     await store.update_bot(bot_id, leave_event=_leave_event)
 
+                async def on_runtime_ready(runtime: Optional[dict]) -> None:
+                    """Store/clear the live-interaction runtime handle on the BotSession.
+
+                    Attaches the ``on_live_entry`` callback so the API endpoints
+                    (/say, /chat) can push bot-generated entries through the
+                    same WS / SSE / webhook / DB pipeline voice entries use.
+                    """
+                    try:
+                        if runtime is not None:
+                            runtime["emit_entry"] = on_live_entry
+                        await store.update_bot(bot_id, runtime=runtime)
+                    except Exception as exc:
+                        logger.debug("Bot %s: runtime registration failed: %s", bot_id, exc)
+
                 bot_result = await run_browser_bot(
                     meeting_url=bot.meeting_url,
                     platform=bot.meeting_platform,
@@ -929,6 +965,8 @@ async def run_bot_lifecycle(bot_id: str) -> None:
                     external_leave_event=_leave_event,
                     consent_enabled=getattr(bot, "consent_enabled", False),
                     consent_message=getattr(bot, "consent_message", None),
+                    on_runtime_ready=on_runtime_ready,
+                    seen_chat_ids=bot.seen_chat_ids,
                 )
 
                 if bot_result["success"]:

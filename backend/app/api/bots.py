@@ -19,6 +19,7 @@ from app.schemas.bot import (
     BotCreate, BotListResponse, BotResponse, BotSummary,
     MeetingAnalysis, AIUsageSummary, AIUsageEntry,
     Highlight, HighlightResponse,
+    SayRequest, SayResponse, ChatRequest, ChatResponse,
 )
 from app.services import bot_service, intelligence_service
 from app.store import store, BotSession, _now
@@ -1111,3 +1112,166 @@ async def create_share_link(bot_id: str, request: Request):
 
     base_url = str(request.base_url).rstrip("/")
     return {"share_url": f"{base_url}/share/{token}", "bot_id": bot_id}
+
+
+# ── POST /api/v1/bot/{id}/say — speak arbitrary text in the live meeting ─────
+
+@router.post("/{bot_id}/say", response_model=SayResponse)
+@_limiter.limit("30/minute")
+async def say_in_meeting(bot_id: str, request: Request, payload: SayRequest):
+    """Make the bot speak arbitrary text in the live meeting via TTS.
+
+    Requires the bot to be in `in_call` status. Returns 202 immediately after
+    the speak task is queued — synthesis and playback run in the background.
+    Concurrent calls serialise behind an asyncio.Lock (`queue`). Pass
+    `interrupt=true` to cancel an in-flight speak task and jump ahead.
+    """
+    text = payload.text.strip()
+    if not text:
+        raise HTTPException(status_code=422, detail="text is required")
+    account_id: Optional[str] = getattr(request.state, "account_id", None)
+    sub_user_id = _get_sub_user_from_request(request)
+    bot = await _get_or_404(bot_id, account_id, sub_user_id)
+
+    if bot.status != "in_call":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Bot is not in a call (status={bot.status!r}); /say requires 'in_call'.",
+        )
+
+    runtime = bot.runtime
+    if not runtime or runtime.get("page") is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Bot runtime not ready — the browser session has not been admitted yet.",
+        )
+
+    from app.services.browser_bot import _speak_in_meeting
+    from app.store import _now as _now_fn
+
+    task_id = uuid.uuid4().hex
+    speak_lock: asyncio.Lock = runtime["speak_lock"]
+    prev_task: Optional[asyncio.Task] = runtime.get("speak_task")
+    interrupted = False
+
+    if payload.interrupt and prev_task is not None and not prev_task.done():
+        prev_task.cancel()
+        interrupted = True
+
+    async def _run_speak() -> None:
+        async with speak_lock:
+            try:
+                ok = await _speak_in_meeting(
+                    page=runtime["page"],
+                    platform=runtime["platform"],
+                    text=text,
+                    tts_provider=payload.voice,
+                    gemini_api_key=runtime.get("gemini_api_key"),
+                    start_muted=runtime.get("start_muted", False),
+                    pulse_mic=runtime["pulse_mic"],
+                )
+                if ok:
+                    recording_t0 = runtime.get("recording_t0") or 0.0
+                    import time as _time
+                    ts = round(max(0.0, _time.monotonic() - recording_t0), 2) if recording_t0 else 0.0
+                    entry = {
+                        "speaker": bot.bot_name or "bot",
+                        "text": text,
+                        "timestamp": ts,
+                        "source": "voice",
+                        "bot_generated": True,
+                    }
+                    emit = runtime.get("emit_entry")
+                    if emit is not None:
+                        await emit(entry)
+                    else:
+                        bot.transcript.append(entry)
+            except asyncio.CancelledError:
+                logger.info("Bot %s: /say task %s cancelled by interrupt", bot_id, task_id)
+                raise
+            except Exception as exc:
+                logger.warning("Bot %s: /say task %s failed: %s", bot_id, task_id, exc)
+
+    speak_task = asyncio.create_task(_run_speak())
+    runtime["speak_task"] = speak_task
+
+    logger.info("Bot %s: queued /say task %s (interrupt=%s len=%d)", bot_id, task_id, interrupted, len(text))
+    return SayResponse(bot_id=bot_id, task_id=task_id, interrupted_previous=interrupted)
+
+
+# ── POST /api/v1/bot/{id}/chat — post arbitrary text to the meeting chat ─────
+
+@router.post("/{bot_id}/chat", response_model=ChatResponse)
+@_limiter.limit("30/minute")
+async def chat_in_meeting(bot_id: str, request: Request, payload: ChatRequest):
+    """Post arbitrary text into the live meeting's chat panel.
+
+    Requires `in_call` status. Returns 202 immediately — the keyboard typing
+    runs in the background. Concurrent calls serialise behind an asyncio.Lock
+    to avoid racing the per-platform chat DOM selectors.
+    """
+    text = payload.text.strip()
+    if not text:
+        raise HTTPException(status_code=422, detail="text is required")
+    account_id: Optional[str] = getattr(request.state, "account_id", None)
+    sub_user_id = _get_sub_user_from_request(request)
+    bot = await _get_or_404(bot_id, account_id, sub_user_id)
+
+    if bot.status != "in_call":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Bot is not in a call (status={bot.status!r}); /chat requires 'in_call'.",
+        )
+
+    runtime = bot.runtime
+    if not runtime or runtime.get("page") is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Bot runtime not ready — the browser session has not been admitted yet.",
+        )
+
+    from app.services.browser_bot import _send_chat_message
+
+    task_id = uuid.uuid4().hex
+    chat_lock: asyncio.Lock = runtime["chat_lock"]
+
+    async def _run_chat() -> None:
+        async with chat_lock:
+            try:
+                ok = await _send_chat_message(
+                    page=runtime["page"],
+                    platform=runtime["platform"],
+                    message=text,
+                )
+                if ok:
+                    recording_t0 = runtime.get("recording_t0") or 0.0
+                    import time as _time
+                    ts = round(max(0.0, _time.monotonic() - recording_t0), 2) if recording_t0 else 0.0
+                    # Pre-register this message id so the chat capture loop
+                    # doesn't re-emit it when it sees the bot's own text in the
+                    # chat panel a moment later.
+                    from app.services.browser_bot import _chat_message_id
+                    msg_id = _chat_message_id(text)
+                    bot.seen_chat_ids.add(msg_id)
+                    entry = {
+                        "speaker": bot.bot_name or "bot",
+                        "text": text,
+                        "timestamp": ts,
+                        "source": "chat",
+                        "message_id": msg_id,
+                        "bot_generated": True,
+                    }
+                    emit = runtime.get("emit_entry")
+                    if emit is not None:
+                        await emit(entry)
+                    else:
+                        bot.transcript.append(entry)
+                else:
+                    logger.warning("Bot %s: /chat task %s returned False from _send_chat_message", bot_id, task_id)
+            except Exception as exc:
+                logger.warning("Bot %s: /chat task %s failed: %s", bot_id, task_id, exc)
+
+    asyncio.create_task(_run_chat())
+
+    logger.info("Bot %s: queued /chat task %s (len=%d)", bot_id, task_id, len(text))
+    return ChatResponse(bot_id=bot_id, task_id=task_id)

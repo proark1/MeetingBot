@@ -4,7 +4,19 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.33.5 — **Last updated:** 2026-04-16
+> **Latest version:** 2.34.0 — **Last updated:** 2026-04-16
+
+---
+
+## [2.34.0] - 2026-04-16
+
+### Added
+- **Unified live transcript (voice + chat)** — meeting chat messages are now captured as first-class transcript entries alongside voice. A new `_chat_capture_loop` in `browser_bot.py` polls the chat panel at 4 Hz across Google Meet / Zoom / Teams / onepizza, dedups per-line via a stable short sha1, and appends each new message to the shared `structured_transcript` with `source="chat"` and a `message_id` field. Voice entries carry `source="voice"` (default). Both flow through the existing `on_live_entry` pipeline, so WebSocket, SSE, DB persistence, and webhook fan-out come free
+- **New webhook event `bot.live_chat_message`** — fired for every captured chat message. Added to `WEBHOOK_EVENTS` in `api/webhooks.py`. `bot_service.on_live_entry` branches on `entry["source"]` to dispatch this event for chat and the existing `bot.live_transcript` for voice
+- **`POST /api/v1/bot/{id}/say`** — make the bot speak arbitrary text in a live meeting. Body: `{text, voice: "gemini"|"edge", interrupt: bool}`. Defaults to Gemini TTS for natural voice. Returns 202 immediately; synthesis + playback run in the background. Concurrent calls serialise behind an `asyncio.Lock` on the `BotSession`; `interrupt=true` cancels the in-flight speak task and jumps ahead. Requires `in_call` status, enforces ownership check, rate-limited at 30/min
+- **`POST /api/v1/bot/{id}/chat`** — post arbitrary text into the live meeting's chat panel. Body: `{text}`. Returns 202 immediately; keyboard typing runs in the background behind an `asyncio.Lock` so concurrent calls don't race the per-platform chat DOM selectors. The bot's own message id is pre-registered in `seen_chat_ids` so the capture loop doesn't re-emit the bot's own messages
+- **`BotSession.runtime`** — new in-memory handle (populated after admission, cleared on exit via `on_runtime_ready` callback) that exposes the Playwright Page, per-bot pulse-mic name, TTS config, and the two serialisation locks so the API endpoints can drive the live bot without going through `run_browser_bot`
+- **`BotSession.seen_chat_ids`** — per-bot set of chat message hashes, seeded on first successful capture poll and preserved across browser reconnects within a single bot lifecycle
 
 ---
 
