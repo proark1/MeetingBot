@@ -1394,71 +1394,79 @@ async def _join_onepizza(page: Page, url: str, bot_name: str, start_muted: bool 
     except Exception as e:
         logger.debug("onepizza: DOM probe failed: %s", e)
 
-    # Check what state we're in — try specific IDs first, then broader selectors.
-    # When ?name= auto-join works, #meetingRoom container may exist but not pass
-    # Playwright's visibility check (zero-size wrapper), while toolbar buttons
-    # like #leaveBtn and #micBtn ARE visible.  Include those as meeting-room
-    # indicators so we don't false-fail when already in the meeting.
+    # Detect page state. We use a single JS probe (rather than several
+    # Playwright wait_for_selector calls with state="visible") because
+    # onepizza keeps both #lobby and #meetingRoom in the DOM at all times
+    # and toggles them via display/offsetParent — Playwright's stricter
+    # "visible" check times out on #meetingRoom even when join has started,
+    # which previously caused us to fall through to a "button" catch-all
+    # that matched #lobbyMicBtn instead of #lobbyJoinBtn (see 2.37.1).
+    state_probe_js = """() => {
+        const $ = (id) => document.getElementById(id);
+        const visible = (el) => {
+            if (!el) return false;
+            if (el.offsetParent === null && el.tagName !== 'BODY') return false;
+            const cs = getComputedStyle(el);
+            if (cs.display === 'none' || cs.visibility === 'hidden') return false;
+            return true;
+        };
+        // Already in meeting? Toolbar buttons are the most reliable signal.
+        if (visible($('leaveBtn')) || visible($('micBtn')) || visible($('camBtn'))) {
+            return { state: 'in_meeting', tag: 'leaveBtn' };
+        }
+        if (visible($('waitingRoomOverlay'))) {
+            return { state: 'waiting', tag: 'waitingRoomOverlay' };
+        }
+        // Lobby?
+        if (visible($('lobbyJoinBtn')) || visible($('lobbyName'))) {
+            return { state: 'lobby', tag: 'lobbyJoinBtn' };
+        }
+        // Last-resort: lobby is hidden, meetingRoom container exists -> in meeting
+        const mr = $('meetingRoom');
+        const lb = $('lobby');
+        if (mr && (!lb || !visible(lb))) {
+            return { state: 'in_meeting', tag: 'meetingRoom' };
+        }
+        return { state: 'unknown', tag: null };
+    }"""
+
+    state = None
     tag = None
-    selectors = [
-        "#meetingRoom, #lobbyJoinBtn, #waitingRoomOverlay",  # known IDs
-        "#leaveBtn, #micBtn, #camBtn",  # meeting toolbar — visible when in call
-        "[id*='meeting'], [id*='Meeting'], [id*='room'], [id*='Room']",  # partial ID matches
-        "button, [role='button']",  # any button at all
-    ]
-
-    for attempt in range(4):
-        for sel in selectors:
-            try:
-                which = await page.wait_for_selector(sel, state="visible", timeout=3_000)
-                if which:
-                    tag = await which.get_attribute("id") or ""
-                    logger.info("onepizza: found element with selector=%s id=%s", sel, tag)
-                    break
-            except Exception:
-                continue
-        if tag is not None:
-            break
-        # Fallback: check if we're already in the meeting via JS (handles cases
-        # where #meetingRoom exists in DOM but Playwright doesn't see it as visible)
+    for attempt in range(8):  # ~24 s total
         try:
-            in_meeting = await page.evaluate('''() => {
-                const mr = document.getElementById("meetingRoom");
-                const lb = document.getElementById("lobby");
-                const leave = document.getElementById("leaveBtn");
-                // In meeting if meetingRoom exists and lobby is hidden, or leave button exists
-                if (leave && leave.offsetParent !== null) return "leaveBtn";
-                if (mr && lb && (lb.style.display === "none" || !lb.offsetParent)) return "meetingRoom";
-                if (mr && !lb) return "meetingRoom";
-                return null;
-            }''')
-            if in_meeting:
-                tag = in_meeting
-                logger.info("onepizza: detected in-meeting state via JS fallback (id=%s)", tag)
+            result = await page.evaluate(state_probe_js)
+            if result and result.get('state') and result.get('state') != 'unknown':
+                state = result['state']
+                tag = result.get('tag')
+                logger.info(
+                    "onepizza: detected state=%s (id=%s) on attempt %d",
+                    state, tag, attempt + 1,
+                )
                 break
-        except Exception:
-            pass
-        if attempt < 3:
-            logger.info("onepizza: no UI element found yet, retrying (attempt %d)", attempt + 1)
-            await asyncio.sleep(5)
-        else:
-            await _screenshot(page, "onepizza_join_failed")
-            raise MeetingBotError("Could not join onepizza.io meeting — neither lobby nor meeting room appeared")
+        except Exception as e:
+            logger.debug("onepizza: state probe failed: %s", e)
+        if attempt < 7:
+            await asyncio.sleep(3)
 
-    # Determine state from detected element
-    tag_lower = (tag or "").lower()
-    # Toolbar buttons (#leaveBtn, #micBtn, #camBtn) mean we're already in the meeting
-    _meeting_toolbar_ids = {"leavebtn", "micbtn", "cambtn"}
-    is_in_meeting = "meeting" in tag_lower or "room" in tag_lower or tag_lower in _meeting_toolbar_ids
-    is_waiting = "waiting" in tag_lower
-    is_lobby = "lobby" in tag_lower or "join" in tag_lower
+    if state is None:
+        await _screenshot(page, "onepizza_join_failed")
+        raise MeetingBotError(
+            "Could not join onepizza.io meeting — neither lobby nor meeting room visible"
+        )
+
+    is_in_meeting = state == 'in_meeting'
+    is_waiting = state == 'waiting'
+    is_lobby = state == 'lobby'
 
     if is_in_meeting:
         logger.info("onepizza: auto-joined via ?name= parameter (id=%s)", tag)
     elif is_waiting:
         logger.info("onepizza: waiting room — waiting for host to admit (id=%s)", tag)
     else:
-        # Either lobby button found, or we found some generic button — try to join
+        # Lobby — fill name, click join, then wait for ANY progress signal
+        # before considering trying the next strategy.  Multi-clicking is the
+        # original cause of the SDP `setRemoteDescription wrong state: stable`
+        # crash that left recordings silent (see 2.37.1).
         logger.info("onepizza: lobby/join UI detected (id=%s), attempting to join", tag)
 
         # Fill name input if it exists and is empty
@@ -1473,8 +1481,60 @@ async def _join_onepizza(page: Page, url: str, bot_name: str, start_muted: bool 
         except Exception as e:
             logger.debug("onepizza: name input fill failed: %s", e)
 
-        # Click join button — try multiple strategies
-        joined = False
+        # Progress probe: returns one of
+        #   'in_meeting' | 'waiting' | 'joining' | 'connecting' | 'lobby'
+        # 'lobby' is the only outcome that means "the click did nothing" —
+        # everything else means we should stop clicking and let the join finish.
+        progress_probe_js = """() => {
+            const $ = (id) => document.getElementById(id);
+            const visible = (el) => {
+                if (!el) return false;
+                if (el.offsetParent === null && el.tagName !== 'BODY') return false;
+                const cs = getComputedStyle(el);
+                if (cs.display === 'none' || cs.visibility === 'hidden') return false;
+                return true;
+            };
+            if (visible($('leaveBtn')) || visible($('micBtn')) || visible($('camBtn'))) return 'in_meeting';
+            if (visible($('waitingRoomOverlay'))) return 'waiting';
+            const mr = $('meetingRoom');
+            const lb = $('lobby');
+            if (mr && lb && !visible(lb)) return 'in_meeting';
+            // Join in progress? button disabled or text changed to "Joining…"
+            const btn = $('lobbyJoinBtn');
+            if (btn) {
+                if (btn.disabled) return 'joining';
+                const t = (btn.textContent || '').toLowerCase();
+                if (t.includes('joining') || t.includes('connecting') || t.includes('please wait')) {
+                    return 'joining';
+                }
+            }
+            // RTCPeerConnection has progressed past 'new'? (added in 2.37.0)
+            try {
+                const pcs = window.__mbRtcPcs || [];
+                for (const pc of pcs) {
+                    const s = pc.connectionState || pc.iceConnectionState;
+                    if (s && s !== 'new' && s !== 'closed') return 'connecting';
+                }
+            } catch (e) {}
+            return 'lobby';
+        }"""
+
+        async def _wait_for_progress(timeout_s: float) -> str:
+            """Poll progress_probe_js every 500 ms; return as soon as it stops
+            returning 'lobby', or after timeout (still 'lobby')."""
+            loop = asyncio.get_event_loop()
+            deadline = loop.time() + timeout_s
+            last = 'lobby'
+            while loop.time() < deadline:
+                try:
+                    last = await page.evaluate(progress_probe_js)
+                except Exception:
+                    last = 'lobby'
+                if last != 'lobby':
+                    return last
+                await asyncio.sleep(0.5)
+            return last
+
         strategies = [
             ("locator click", lambda: page.locator("#lobbyJoinBtn").click(timeout=5_000)),
             ("JS click by ID", lambda: page.evaluate('document.getElementById("lobbyJoinBtn")?.click()')),
@@ -1488,60 +1548,28 @@ async def _join_onepizza(page: Page, url: str, bot_name: str, start_muted: bool 
                     return false;
                 })()
             ''')),
-            ("JS text match", lambda: page.evaluate('''
-                (() => {
-                    const btns = [...document.querySelectorAll("button, [role='button'], a.btn")];
-                    for (const b of btns) {
-                        const txt = (b.textContent || "").toLowerCase();
-                        if ((txt.includes("join") || txt.includes("enter")) && b.offsetParent !== null) {
-                            b.click();
-                            return true;
-                        }
-                    }
-                    return false;
-                })()
-            ''')),
-            ("JS form submit", lambda: page.evaluate('''
-                (() => {
-                    const form = document.querySelector("form");
-                    if (form) { form.submit(); return true; }
-                    // Try calling joinMeeting() directly if it exists globally
-                    if (typeof joinMeeting === "function") { joinMeeting(); return true; }
-                    if (typeof window.joinMeeting === "function") { window.joinMeeting(); return true; }
-                    return false;
-                })()
-            ''')),
         ]
 
+        final = 'lobby'
         for name, strategy in strategies:
             try:
                 await strategy()
-                logger.info("onepizza: join attempted via %s", name)
-                # Check if we entered the meeting room
-                try:
-                    await page.wait_for_selector(
-                        "#meetingRoom, #waitingRoomOverlay",
-                        state="visible", timeout=8_000,
-                    )
-                    joined = True
-                    logger.info("onepizza: joined meeting after %s", name)
+                logger.info("onepizza: join click via %s — waiting up to 20 s for progress…", name)
+                final = await _wait_for_progress(20.0)
+                if final != 'lobby':
+                    logger.info("onepizza: state advanced to '%s' after %s", final, name)
                     break
-                except Exception:
-                    logger.info("onepizza: %s clicked but meeting room not visible yet", name)
+                logger.info("onepizza: %s: no progress after 20 s — trying next strategy", name)
             except Exception as e:
                 logger.debug("onepizza: strategy %s failed: %s", name, e)
 
-        if not joined:
+        if final == 'lobby':
             await _screenshot(page, "onepizza_no_join_button")
-            raise MeetingBotError("Could not click join button on onepizza.io")
+            raise MeetingBotError("Could not join onepizza.io — lobby never advanced after click")
 
-        # Check if we landed in waiting room after clicking join
-        try:
-            wr = await page.query_selector("#waitingRoomOverlay")
-            if wr and await wr.is_visible():
-                logger.info("onepizza: in waiting room after join click — waiting for host")
-        except Exception:
-            pass
+        # If we landed in waiting room, that's a valid join state — note it.
+        if final == 'waiting':
+            logger.info("onepizza: in waiting room after join click — waiting for host")
 
     # Mute mic after joining
     if start_muted:

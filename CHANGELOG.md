@@ -4,7 +4,20 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.37.0 — **Last updated:** 2026-04-17
+> **Latest version:** 2.37.1 — **Last updated:** 2026-04-17
+
+---
+
+## [2.37.1] - 2026-04-17
+
+### Fixed
+- **onepizza: silent recordings were caused by a join-detection bug, not audio routing** — confirmed by the v2.37.0 diagnostic. `console_log_tail` of bot `1ddac2dd…` (08:54 UTC) showed `[error] Set answer error: InvalidStateError: Failed to execute 'setRemoteDescription' on 'RTCPeerConnection': Failed to set remote answer sdp: Called in wrong state: stable`. Combined with the click sequence in the API logs (5 different join-button strategies fired in 30 s on attempt 1, then a fresh Xvfb display/Chrome process for attempt 2), the root cause is that `_join_onepizza` was multi-clicking the join button and corrupting onepizza's WebRTC SDP state machine. Each click initiates a new SDP offer; by the time `setRemoteDescription` is called for the second answer, the peer is already in `stable` state → InvalidStateError → no remote audio ever rendered → null-sink records pure zeros (peak_amp=0). The user-visible symptom was the bot "blinking" / "doubling, tripling" in the meeting then disconnecting — multiple `RTCPeerConnection` instances, each one a fresh participant, before the SDP failure killed them.
+- **Why the multi-click happened**: the state-detection loop at the top of `_join_onepizza` had a catch-all selector `"button, [role='button']"` as its 4th tier. When Playwright's stricter `wait_for_selector(state="visible")` timed out on `#meetingRoom` (which IS in the DOM but hidden until joined) it fell through to the catch-all and matched `#lobbyMicBtn` (first button in document order) instead of `#lobbyJoinBtn`. The branch then ran all 5 click strategies on `#lobbyJoinBtn` back-to-back, because the post-click `wait_for_selector("#meetingRoom, #waitingRoomOverlay", state="visible", timeout=8_000)` had the same Playwright-visibility issue and kept timing out.
+- **Fix in `backend/app/services/browser_bot.py:_join_onepizza`**:
+  - Replaced the 4-tier selector list (and the brittle `wait_for_selector(state="visible")` checks) with a single JS state-probe (`state_probe_js`) that returns `'in_meeting' | 'waiting' | 'lobby' | 'unknown'` based on actual DOM visibility (offsetParent + computed display/visibility). No more catch-all that could match the wrong button
+  - Replaced the per-strategy 8-second `wait_for_selector` with a JS progress-probe (`progress_probe_js`) polled every 500 ms for up to 20 s. The probe returns `'in_meeting' | 'waiting' | 'joining' | 'connecting' | 'lobby'` and looks at: visible toolbar (`#leaveBtn` / `#micBtn` / `#camBtn`), hidden `#lobby`, `#lobbyJoinBtn.disabled`, button text containing "joining"/"connecting"/"please wait", and any `RTCPeerConnection` whose `connectionState`/`iceConnectionState` advanced past `'new'` (using the `window.__mbRtcPcs` registry from 2.37.0)
+  - The strategy loop now bails as soon as the probe returns anything other than `'lobby'`. Anything-but-`'lobby'` means the click registered with onepizza's JS — clicking again would corrupt the SDP exchange
+  - Reduced strategies from 5 → 3 (removed the JS text match and JS form submit fallbacks; if the first three real clicks on `#lobbyJoinBtn` fail to advance the page, the 4th and 5th would just queue duplicate join attempts and make things worse)
 
 ---
 
