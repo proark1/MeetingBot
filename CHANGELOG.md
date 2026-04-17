@@ -4,6 +4,7 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
+> **Latest version:** 2.33.5 — **Last updated:** 2026-04-16
 > **Latest version:** 2.39.0 — **Last updated:** 2026-04-17
 
 ---
@@ -159,6 +160,8 @@ Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 ## [2.33.5] - 2026-04-16
 
 ### Fixed
+- **Dashboard API key row XSS (defense-in-depth)** — `_prependKeyRow()` in `dashboard.html` was interpolating the user-supplied key name directly into `innerHTML`. Exploitable only as self-XSS today (you can only set your own key name), but the name is also rendered on shared surfaces, so the pattern needed fixing. Name cell is now populated via `textContent`; the interpolated fields that remain (`key_preview`, `full_key`, `id`) are all server-generated. Also aligned the Copy button markup with the server-rendered row (`type="button"`, `title="Copy key"`, `⎘` glyph) so JS-inserted rows match their Jinja-rendered siblings exactly.
+- **Revoke API key returned 405 Method Not Allowed** — `_handleRevoke()` POSTed to `/dashboard/keys/{id}` but the backend route is `POST /dashboard/keys/{id}/revoke` (ui.py:534). Added the missing `/revoke` suffix so the button actually revokes the key.
 - **Per-bot `webhook_url` only received terminal events** — `_set_status()` and six other `dispatch_event()` callsites in `bot_service.py` (for `bot.joining`, `bot.in_call`, `bot.call_ended`, `bot.transcribing`, `bot.transcript_ready`, `bot.analysis_ready`, `bot.coaching_summary`, `bot.coaching_alert`, `bot.recurring_intel_ready`) did not pass `extra_webhook_url=bot.webhook_url`, so integrations that rely on the per-bot URL (e.g. 1tab.ai / onepizza.io) never saw non-terminal lifecycle events and their `meeting_recordings.status` appeared frozen at `joining` even when the bot had joined successfully. All ten in-lifecycle callsites now fan out to the per-bot webhook; the `BotSession.webhook_url` comment is updated to match the new contract
 
 ---

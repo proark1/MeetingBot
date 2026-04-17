@@ -2176,15 +2176,19 @@ function _prependKeyRow(data, mode) {
   const tbody = document.querySelector(`#${mode}-keys-table tbody`);
   if (!tbody) return;
   const tr = document.createElement('tr');
+  // Name cell is populated via textContent below to avoid XSS from user-typed
+  // names; other interpolated values (key_preview, full_key, id) are
+  // server-generated (see /dashboard/keys handler) so they're safe here.
   tr.innerHTML = `
-    <td style="font-weight:500">${data.name || '—'}</td>
-    <td><code style="font-size:11.5px">${data.key_preview}</code>
-      <button class="btn btn-xs btn-outline-secondary ms-1 copy-key-btn" data-key="${data.full_key}" title="Copy full key">Copy</button>
+    <td style="font-weight:500"></td>
+    <td><code>${data.key_preview}</code>
+      <button type="button" class="btn btn-xs btn-outline-secondary ms-1 copy-key-btn" data-key="${data.full_key}" title="Copy key">⎘</button>
     </td>
     <td style="color:#94a3b8;font-size:12.5px">Never</td>
     <td>
       <button type="button" class="btn btn-xs btn-outline-danger" data-revoke-key="${data.id}">Revoke</button>
     </td>`;
+  tr.cells[0].textContent = data.name || '—';
   tbody.prepend(tr);
   // wire up copy button on new row
   tr.querySelector('.copy-key-btn')?.addEventListener('click', function() {
@@ -2201,7 +2205,7 @@ async function _handleRevoke() {
   const btn = this;
   btn.disabled = true;
   try {
-    await apiFetch(`/dashboard/keys/${btn.dataset.revokeKey}`, { method: 'POST' });
+    await apiFetch(`/dashboard/keys/${btn.dataset.revokeKey}/revoke`, { method: 'POST' });
     btn.closest('tr').remove();
     showToast('Key revoked', 'success');
   } catch(e) { showToast(e.message, 'danger'); btn.disabled = false; }
