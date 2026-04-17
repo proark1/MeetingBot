@@ -694,6 +694,7 @@ async def get_bot_debug(bot_id: str, request: Request):
         "ffmpeg_stderr_tail": getattr(bot, "ffmpeg_stderr_tail", None),
         "audio_peak_amplitude": getattr(bot, "audio_peak_amplitude", None),
         "audio_health_samples": getattr(bot, "audio_health_samples", []) or [],
+        "webrtc_stats_samples": getattr(bot, "webrtc_stats_samples", []) or [],
         "pactl_dumps": getattr(bot, "pactl_dumps", {}) or {},
         "console_log_tail": getattr(bot, "console_log_tail", []) or [],
         "gemini_finish_reason": getattr(bot, "last_gemini_finish_reason", None),

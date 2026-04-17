@@ -4,7 +4,18 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.36.0 — **Last updated:** 2026-04-17
+> **Latest version:** 2.37.0 — **Last updated:** 2026-04-17
+
+---
+
+## [2.37.0] - 2026-04-17
+
+### Added
+- **WebRTC-stats diagnostic probe** — additive, diagnostic-only, no behavior change. The 2.35.1 getUserMedia shim got onepizza through the join flow, but a subsequent production run (bot `2a97d1e9…`, 2026-04-17 08:54 UTC) still ended with `peak_amp: 0.0` and `max_sink_inputs_on_target: 0` across the whole call, even though `pre_leave` pactl showed the Chromium sink-input correctly attached to the target sink, not muted, not corked. The null-sink recorded 2.8 MB of pure zeros. The distinction we couldn't make from existing diagnostics: is Chrome receiving remote audio RTP at all (signalling / ICE failure), or is it receiving packets but not playing them to PulseAudio (audio-element / autoplay failure)? This release collects the data to tell those apart.
+- **New init script** in `backend/app/services/browser_bot.py` wraps `window.RTCPeerConnection` a third time (on top of the audio-forcing + getUserMedia shims) to push every created `pc` into `window.__mbRtcPcs`, and exposes `window.__mbCollectWebrtcStats()` — a JSON-safe snapshot of every peer-connection's `connectionState` / `iceConnectionState` / `signalingState` plus `getStats()` inbound-rtp audio (packets, bytes, jitter, `totalAudioEnergy`) and outbound-rtp counters, plus every `<audio>` / `<video>` element on the page with `paused` / `muted` / `volume` / `audio_tracks` / `has_srcobject`
+- **New async loop `_webrtc_stats_loop(bot_id, page, debug_dir, stop_event)`** in `browser_bot.py` polls that function every 15 s via `page.evaluate()` (5 s timeout), appends the snapshot to `bot.webrtc_stats_samples` (capped at the last 40) and to `{debug_dir}/webrtc_stats.jsonl`. Safe no-op when `bot_id` is empty or when `window.__mbCollectWebrtcStats` isn't defined yet
+- **New `BotSession.webrtc_stats_samples: list`** in `backend/app/store.py`, persisted into `BotSnapshot.data`, restored on startup, and surfaced by `GET /api/v1/bot/{bot_id}/debug` as `webrtc_stats_samples`. No DB migration required
+- Looking for `connection_state: 'failed'` / `'disconnected'` vs. `'connected'` with `inbound_audio.packets == 0` distinguishes a handshake failure from a received-but-not-played failure; a playing `<audio>` with `paused: false` and `audio_tracks > 0` confirms remote tracks are wired; `totalAudioEnergy` remaining 0 over several samples with non-zero `packets` points at the autoplay / audio-element attach path
 
 ---
 

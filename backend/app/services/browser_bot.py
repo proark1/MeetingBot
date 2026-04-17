@@ -757,6 +757,53 @@ async def _audio_health_loop(
             continue
 
 
+async def _webrtc_stats_loop(
+    bot_id: str,
+    page,
+    debug_dir: Path,
+    stop_event: asyncio.Event,
+) -> None:
+    """Every 15 s, poll window.__mbCollectWebrtcStats() in the page context.
+
+    Diagnostic for the onepizza (and related) silent-recording failure mode:
+    tells us whether remote audio packets are actually arriving at the
+    RTCPeerConnection (inbound_audio.packets / bytes) and whether the remote
+    track is attached to an <audio> element that's playing — vs. paused /
+    muted / autoplay-blocked.
+    """
+    from app.store import store  # deferred to avoid import cycles
+    while not stop_event.is_set():
+        try:
+            try:
+                snap = await asyncio.wait_for(
+                    page.evaluate(
+                        "() => (window.__mbCollectWebrtcStats ? window.__mbCollectWebrtcStats() : null)"
+                    ),
+                    timeout=5,
+                )
+            except Exception as e:
+                snap = {"error": f"evaluate_failed: {e!r}"}
+            sample = {"ts": time.time(), "snap": snap}
+            try:
+                with open(debug_dir / "webrtc_stats.jsonl", "a") as f:
+                    f.write(json.dumps(sample) + "\n")
+            except Exception:
+                pass
+            if bot_id:
+                bot = await store.get_bot(bot_id)
+                if bot:
+                    samples = list(getattr(bot, "webrtc_stats_samples", []) or [])
+                    samples.append(sample)
+                    await store.update_bot(bot_id, webrtc_stats_samples=samples[-40:])
+        except Exception as e:
+            logger.debug("webrtc_stats_loop error: %s", e)
+
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=15)
+        except asyncio.TimeoutError:
+            continue
+
+
 # ── Screenshot ────────────────────────────────────────────────────────────────
 
 async def _screenshot(page: Page, label: str) -> None:
@@ -4226,6 +4273,132 @@ async def run_browser_bot(
             })();
         """)
 
+        # ── WebRTC stats probe ──────────────────────────────────────────────
+        # Diagnostic-only. Registers every RTCPeerConnection the page creates
+        # and exposes window.__mbCollectWebrtcStats() which the Python side
+        # polls every 15 s via page.evaluate. This is the data we need to
+        # distinguish "no remote audio packets are arriving" (signalling /
+        # ICE problem) from "remote packets arrive but Chrome isn't rendering
+        # them to PulseAudio" (audio-element / autoplay problem).
+        # Runs after the forcing patch above so we wrap the PatchedRTC that
+        # already exists on window — a third layer is safe and additive.
+        await ctx.add_init_script("""
+            (function () {
+                if (window._mbRtcStatsPatched) return;
+                window._mbRtcStatsPatched = true;
+                window.__mbRtcPcs = [];
+
+                var _Orig = window.RTCPeerConnection;
+                if (!_Orig) return;
+                function Wrapped() {
+                    var pc = new (Function.prototype.bind.apply(
+                        _Orig, [null].concat(Array.prototype.slice.call(arguments))
+                    ))();
+                    try { window.__mbRtcPcs.push(pc); } catch (e) {}
+                    return pc;
+                }
+                Wrapped.prototype = _Orig.prototype;
+                Object.setPrototypeOf(Wrapped, _Orig);
+                window.RTCPeerConnection = Wrapped;
+
+                // Called from Python via page.evaluate(). Returns a compact
+                // JSON-safe snapshot of every live peer-connection and every
+                // audio/video element's play state. Kept synchronous-ish to
+                // avoid hanging: each getStats() has a 2 s bail-out.
+                window.__mbCollectWebrtcStats = async function () {
+                    var out = { pcs: [], media_elements: [], ts_js: Date.now() };
+                    // Peer connections
+                    var pcs = (window.__mbRtcPcs || []).slice();
+                    for (var i = 0; i < pcs.length; i++) {
+                        var pc = pcs[i];
+                        var entry = {
+                            index: i,
+                            connection_state: null,
+                            ice_connection_state: null,
+                            ice_gathering_state: null,
+                            signaling_state: null,
+                            inbound_audio: null,
+                            inbound_video: null,
+                            outbound_audio: null,
+                            outbound_video: null,
+                            receivers: 0,
+                            senders: 0,
+                            error: null
+                        };
+                        try {
+                            entry.connection_state = pc.connectionState || null;
+                            entry.ice_connection_state = pc.iceConnectionState || null;
+                            entry.ice_gathering_state = pc.iceGatheringState || null;
+                            entry.signaling_state = pc.signalingState || null;
+                            try { entry.receivers = (pc.getReceivers && pc.getReceivers().length) || 0; } catch(e){}
+                            try { entry.senders = (pc.getSenders && pc.getSenders().length) || 0; } catch(e){}
+                            var statsP = pc.getStats();
+                            var statsReport = await Promise.race([
+                                statsP,
+                                new Promise(function (_, rj) { setTimeout(function(){ rj(new Error('stats-timeout')); }, 2000); })
+                            ]);
+                            statsReport.forEach(function (r) {
+                                if (!r || !r.type) return;
+                                if (r.type === 'inbound-rtp' && r.kind === 'audio') {
+                                    entry.inbound_audio = {
+                                        packets: r.packetsReceived || 0,
+                                        bytes: r.bytesReceived || 0,
+                                        packets_lost: r.packetsLost || 0,
+                                        jitter: r.jitter || 0,
+                                        total_audio_energy: r.totalAudioEnergy || 0,
+                                        total_samples_duration: r.totalSamplesDuration || 0
+                                    };
+                                } else if (r.type === 'inbound-rtp' && r.kind === 'video') {
+                                    entry.inbound_video = {
+                                        packets: r.packetsReceived || 0,
+                                        bytes: r.bytesReceived || 0,
+                                        frames_decoded: r.framesDecoded || 0
+                                    };
+                                } else if (r.type === 'outbound-rtp' && r.kind === 'audio') {
+                                    entry.outbound_audio = {
+                                        packets: r.packetsSent || 0,
+                                        bytes: r.bytesSent || 0
+                                    };
+                                } else if (r.type === 'outbound-rtp' && r.kind === 'video') {
+                                    entry.outbound_video = {
+                                        packets: r.packetsSent || 0,
+                                        bytes: r.bytesSent || 0
+                                    };
+                                }
+                            });
+                        } catch (e) {
+                            entry.error = String(e && e.message || e);
+                        }
+                        out.pcs.push(entry);
+                    }
+                    // Audio/video elements — are remote tracks actually being played?
+                    try {
+                        var els = document.querySelectorAll('audio,video');
+                        els.forEach(function (el) {
+                            var audioTracks = 0, videoTracks = 0;
+                            try {
+                                if (el.srcObject && el.srcObject.getAudioTracks) audioTracks = el.srcObject.getAudioTracks().length;
+                                if (el.srcObject && el.srcObject.getVideoTracks) videoTracks = el.srcObject.getVideoTracks().length;
+                            } catch(e){}
+                            out.media_elements.push({
+                                tag: el.tagName.toLowerCase(),
+                                paused: !!el.paused,
+                                muted: !!el.muted,
+                                volume: typeof el.volume === 'number' ? el.volume : null,
+                                autoplay: !!el.autoplay,
+                                ready_state: el.readyState,
+                                audio_tracks: audioTracks,
+                                video_tracks: videoTracks,
+                                has_srcobject: !!el.srcObject,
+                                current_time: el.currentTime || 0
+                            });
+                        });
+                    } catch (e) {}
+                    return out;
+                };
+            })();
+        """)
+
         # ── getUserMedia fallback shim ──────────────────────────────────────
         # The bot container has no camera — only the PulseAudio virtual mic.
         # Meeting platforms that request `getUserMedia({video:true, audio:true})`
@@ -4389,6 +4562,8 @@ async def run_browser_bot(
         voice_task:         asyncio.Task | None = None   # Gemini Live voice responses
         monitor_task:       asyncio.Task | None = None
         chat_capture_task:  asyncio.Task | None = None   # Structured chat capture
+        webrtc_stats_task:  asyncio.Task | None = None   # WebRTC stats probe (diagnostic)
+        webrtc_stats_stop_event = asyncio.Event()
 
         try:
             logger.info(
@@ -4852,6 +5027,21 @@ async def run_browser_bot(
             except Exception as exc:
                 logger.warning("Failed to start chat capture loop: %s", exc)
 
+            # ── WebRTC stats probe (diagnostic) ───────────────────────────────
+            # Appends a snapshot to bot.webrtc_stats_samples every 15 s so we
+            # can see in /api/v1/bot/{id}/debug whether remote audio packets
+            # arrived (inbound_audio.packets/bytes) and whether any <audio>
+            # element actually played them. Safe no-op if bot_id is empty.
+            if bot_id:
+                try:
+                    webrtc_stats_task = asyncio.create_task(
+                        _webrtc_stats_loop(
+                            bot_id, page, debug_dir, webrtc_stats_stop_event,
+                        )
+                    )
+                except Exception as exc:
+                    logger.debug("Failed to start webrtc stats loop: %s", exc)
+
             # ── Register live-interaction runtime handle ──────────────────────
             # Makes the Playwright page + audio routing accessible to the /say
             # and /chat API endpoints via the BotSession.runtime dict.
@@ -4938,6 +5128,11 @@ async def run_browser_bot(
                 chat_capture_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await chat_capture_task
+            if webrtc_stats_task is not None:
+                webrtc_stats_stop_event.set()
+                webrtc_stats_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await webrtc_stats_task
 
             # Clear the runtime handle so /say and /chat stop accepting calls
             if on_runtime_ready is not None:

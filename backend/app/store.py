@@ -145,6 +145,7 @@ class BotSession:
     # Persisted into BotSnapshot.data so they survive restarts and are readable
     # via GET /api/bots/{bot_id}/debug for post-mortem of failed transcriptions.
     audio_health_samples: list = field(default_factory=list)   # [{ts,size,size_delta,ffmpeg_alive,sink_inputs_*}]
+    webrtc_stats_samples: list = field(default_factory=list)   # [{ts,pcs:[{state,inbound_audio:{packets,bytes,jitter},...}],audio_elements:[...]}]
     pactl_dumps: dict = field(default_factory=dict)            # label -> truncated pactl output
     console_log_tail: list = field(default_factory=list)       # [{ts,kind,msg}] last ~200 from Playwright
     ffmpeg_exit_code: Optional[int] = None
@@ -363,6 +364,7 @@ class Store:
                     "ai_usage": bot.ai_usage,
                     # ── Diagnostic / forensic fields ─────────────────────────
                     "audio_health_samples": (bot.audio_health_samples or [])[-40:],
+                    "webrtc_stats_samples": (bot.webrtc_stats_samples or [])[-40:],
                     "pactl_dumps": {
                         k: (v[-8192:] if isinstance(v, str) else v)
                         for k, v in (bot.pactl_dumps or {}).items()
@@ -632,6 +634,7 @@ async def load_persisted_bots() -> int:
                     ai_usage=d.get("ai_usage") or [],
                     # ── Diagnostic / forensic fields ─────────────────────────
                     audio_health_samples=d.get("audio_health_samples") or [],
+                    webrtc_stats_samples=d.get("webrtc_stats_samples") or [],
                     pactl_dumps=d.get("pactl_dumps") or {},
                     console_log_tail=d.get("console_log_tail") or [],
                     ffmpeg_exit_code=d.get("ffmpeg_exit_code"),
