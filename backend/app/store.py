@@ -141,6 +141,19 @@ class BotSession:
     # Populated by _chat_capture_loop to suppress duplicate chat messages.
     seen_chat_ids: set = field(default_factory=set, repr=False)
 
+    # ── Diagnostic / forensic data (populated by browser_bot + transcription) ─
+    # Persisted into BotSnapshot.data so they survive restarts and are readable
+    # via GET /api/bots/{bot_id}/debug for post-mortem of failed transcriptions.
+    audio_health_samples: list = field(default_factory=list)   # [{ts,size,size_delta,ffmpeg_alive,sink_inputs_*}]
+    pactl_dumps: dict = field(default_factory=dict)            # label -> truncated pactl output
+    console_log_tail: list = field(default_factory=list)       # [{ts,kind,msg}] last ~200 from Playwright
+    ffmpeg_exit_code: Optional[int] = None
+    ffmpeg_stderr_tail: Optional[str] = None                    # last 16 KB of ffmpeg stderr
+    audio_peak_amplitude: Optional[float] = None                # from _check_audio_has_speech
+    last_gemini_finish_reason: Optional[str] = None
+    last_gemini_safety_blocks: list = field(default_factory=list)
+    debug_dir: Optional[str] = None                             # {RECORDINGS_DIR}/debug/{bot_id}
+
     # Timestamps
     created_at: datetime = field(default_factory=_now)
     updated_at: datetime = field(default_factory=_now)
@@ -348,6 +361,19 @@ class Store:
                     "meeting_cost_usd": bot.meeting_cost_usd,
                     "avg_hourly_rate_usd": bot.avg_hourly_rate_usd,
                     "ai_usage": bot.ai_usage,
+                    # ── Diagnostic / forensic fields ─────────────────────────
+                    "audio_health_samples": (bot.audio_health_samples or [])[-40:],
+                    "pactl_dumps": {
+                        k: (v[-8192:] if isinstance(v, str) else v)
+                        for k, v in (bot.pactl_dumps or {}).items()
+                    },
+                    "console_log_tail": (bot.console_log_tail or [])[-200:],
+                    "ffmpeg_exit_code": bot.ffmpeg_exit_code,
+                    "ffmpeg_stderr_tail": (bot.ffmpeg_stderr_tail or "")[-16384:] if bot.ffmpeg_stderr_tail else None,
+                    "audio_peak_amplitude": bot.audio_peak_amplitude,
+                    "last_gemini_finish_reason": bot.last_gemini_finish_reason,
+                    "last_gemini_safety_blocks": bot.last_gemini_safety_blocks or [],
+                    "debug_dir": bot.debug_dir,
                     "created_at": _dt(bot.created_at),
                     "updated_at": _dt(bot.updated_at),
                     "started_at": _dt(bot.started_at),
@@ -604,6 +630,16 @@ async def load_persisted_bots() -> int:
                     meeting_cost_usd=d.get("meeting_cost_usd"),
                     avg_hourly_rate_usd=d.get("avg_hourly_rate_usd"),
                     ai_usage=d.get("ai_usage") or [],
+                    # ── Diagnostic / forensic fields ─────────────────────────
+                    audio_health_samples=d.get("audio_health_samples") or [],
+                    pactl_dumps=d.get("pactl_dumps") or {},
+                    console_log_tail=d.get("console_log_tail") or [],
+                    ffmpeg_exit_code=d.get("ffmpeg_exit_code"),
+                    ffmpeg_stderr_tail=d.get("ffmpeg_stderr_tail"),
+                    audio_peak_amplitude=d.get("audio_peak_amplitude"),
+                    last_gemini_finish_reason=d.get("last_gemini_finish_reason"),
+                    last_gemini_safety_blocks=d.get("last_gemini_safety_blocks") or [],
+                    debug_dir=d.get("debug_dir"),
                     created_at=_parse_dt(d.get("created_at")) or now,
                     updated_at=_parse_dt(d.get("updated_at")) or now,
                     started_at=_parse_dt(d.get("started_at")),

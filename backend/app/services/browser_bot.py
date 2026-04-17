@@ -15,12 +15,14 @@ import base64
 import contextlib
 import functools
 import itertools
+import json
 import logging
 import os
 import re
 import struct
 import subprocess
 import time
+from collections import defaultdict, deque
 from pathlib import Path
 from typing import Awaitable, Callable, Optional
 
@@ -548,13 +550,28 @@ def _start_xvfb() -> tuple[Optional[subprocess.Popen], str]:
     return None, ":99"
 
 
-def _start_ffmpeg(audio_path: str, pulse_sink: str = PULSE_SINK_NAME) -> Optional[subprocess.Popen]:
+def _start_ffmpeg(
+    audio_path: str,
+    pulse_sink: str = PULSE_SINK_NAME,
+    stderr_log_path: Optional[str] = None,
+) -> Optional[subprocess.Popen]:
     try:
         # Carry PulseAudio server address explicitly so ffmpeg connects to the
         # same server even if XDG_RUNTIME_DIR is not set in the child env.
         pulse_env = {**os.environ}
         rt = os.environ.get("XDG_RUNTIME_DIR", "/tmp/runtime-meetingbot")
         pulse_env.setdefault("PULSE_SERVER", f"unix:{rt}/pulse/native")
+
+        # Capture stderr to a file so we can diagnose "no audio captured"
+        # post-mortem. Silent DEVNULL made every ffmpeg failure invisible.
+        stderr_fh: object
+        if stderr_log_path:
+            try:
+                stderr_fh = open(stderr_log_path, "ab", buffering=0)
+            except Exception:
+                stderr_fh = subprocess.DEVNULL
+        else:
+            stderr_fh = subprocess.DEVNULL
 
         proc = subprocess.Popen(
             [
@@ -564,15 +581,27 @@ def _start_ffmpeg(audio_path: str, pulse_sink: str = PULSE_SINK_NAME) -> Optiona
                 audio_path,
             ],
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=stderr_fh,
             env=pulse_env,
         )
+        # Stash the stderr path so _stop_ffmpeg can append the exit code.
+        try:
+            setattr(proc, "_stderr_log_path", stderr_log_path)
+        except Exception:
+            pass
         time.sleep(0.5)
         if proc.poll() is None:
             _register_proc(proc)
-            logger.info("ffmpeg recording %s → %s", pulse_sink, audio_path)
+            logger.info("ffmpeg recording %s → %s (stderr=%s)", pulse_sink, audio_path, stderr_log_path or "DEVNULL")
             return proc
         logger.warning("ffmpeg exited immediately — PulseAudio sink %s may not be ready", pulse_sink)
+        # Record the immediate exit code so the diag bundle captures it.
+        if stderr_log_path:
+            try:
+                with open(stderr_log_path, "ab") as f:
+                    f.write(f"\n=== IMMEDIATE EXIT {proc.returncode} ===\n".encode())
+            except Exception:
+                pass
         return None
     except FileNotFoundError:
         logger.warning("ffmpeg not found — audio recording disabled")
@@ -590,6 +619,142 @@ def _stop_ffmpeg(proc: subprocess.Popen) -> None:
             proc.wait()  # reap zombie after SIGKILL
         except Exception:
             pass
+    # Append exit code to the stderr log for post-mortem.
+    stderr_log_path = getattr(proc, "_stderr_log_path", None)
+    if stderr_log_path:
+        try:
+            with open(stderr_log_path, "ab") as f:
+                f.write(f"\n=== EXIT {proc.returncode} ===\n".encode())
+        except Exception:
+            pass
+
+
+# ── Diagnostic infrastructure ─────────────────────────────────────────────────
+# All of the following exist so that when a bot fails with "no audio captured"
+# we can tell what actually happened: ffmpeg stderr, PulseAudio state, audio
+# file growth over time, and browser console / network errors. Everything is
+# written to {RECORDINGS_DIR}/debug/{bot_id}/ and also mirrored onto BotSession
+# fields so it survives a restart via BotSnapshot persistence.
+
+_debug_rings: dict[str, deque] = defaultdict(lambda: deque(maxlen=200))
+
+
+def _debug_dir_for(bot_id: str) -> Path:
+    base = Path(os.environ.get("RECORDINGS_DIR", "/app/data/recordings"))
+    d = base / "debug" / (bot_id or "unknown")
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+    return d
+
+
+def _ring_push(bot_id: str, debug_dir: Path, kind: str, msg: str) -> None:
+    """Append a browser-console / pageerror / requestfailed entry."""
+    try:
+        entry = {"ts": time.time(), "kind": kind, "msg": (msg or "")[:2000]}
+        _debug_rings[bot_id].append(entry)
+        with open(debug_dir / "console.jsonl", "a") as f:
+            f.write(json.dumps(entry) + "\n")
+    except Exception:
+        # Diagnostic logging must never break the bot.
+        pass
+
+
+def _pactl_snapshot(debug_dir: Path, label: str) -> str:
+    """Dump PulseAudio state to {debug_dir}/pactl_{label}.txt and return it."""
+    out = []
+    for cmd in (
+        ["pactl", "list", "sinks", "short"],
+        ["pactl", "list", "sink-inputs"],
+        ["pactl", "list", "sources", "short"],
+        ["pactl", "list", "modules", "short"],
+    ):
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            out.append(f"$ {' '.join(cmd)}\n{r.stdout}{r.stderr}\n")
+        except Exception as e:
+            out.append(f"$ {' '.join(cmd)}\nERR: {e}\n")
+    blob = "\n".join(out)
+    try:
+        (debug_dir / f"pactl_{label}.txt").write_text(blob)
+    except Exception:
+        pass
+    return blob[:8192]
+
+
+def _tail_file(path: Path, n: int) -> Optional[str]:
+    try:
+        data = path.read_text(errors="replace")
+        return data[-n:] if data else None
+    except Exception:
+        return None
+
+
+async def _audio_health_loop(
+    bot_id: str,
+    audio_path: str,
+    pulse_sink: str,
+    ffmpeg_proc: Optional[subprocess.Popen],
+    debug_dir: Path,
+    stop_event: asyncio.Event,
+) -> None:
+    """Every 30 s, record file size + ffmpeg liveliness + sink-input routing.
+
+    This is the single highest-signal diagnostic for the recurring
+    "no audio captured" failure mode: it lets us see whether the file grew,
+    whether ffmpeg stayed alive, and whether Chrome's WebRTC sink-input ever
+    got routed onto our null sink.
+    """
+    from app.store import store  # deferred to avoid import cycles
+    last_size = 0
+    while not stop_event.is_set():
+        sample: dict = {"ts": time.time()}
+        try:
+            exists = os.path.exists(audio_path)
+            size = os.path.getsize(audio_path) if exists else 0
+            sample.update({
+                "exists": exists,
+                "size": size,
+                "size_delta": size - last_size,
+                "ffmpeg_alive": (ffmpeg_proc.poll() is None) if ffmpeg_proc else False,
+            })
+            last_size = size
+            try:
+                r = subprocess.run(
+                    ["pactl", "list", "sink-inputs"],
+                    capture_output=True, text=True, timeout=3,
+                )
+                txt = r.stdout or ""
+                inputs_total = txt.count("Sink Input #")
+                inputs_on_target = sum(
+                    1 for block in txt.split("Sink Input #")[1:]
+                    if ("Sink: " in block) and (pulse_sink in block)
+                )
+            except Exception:
+                inputs_total = -1
+                inputs_on_target = -1
+            sample["sink_inputs_total"] = inputs_total
+            sample["sink_inputs_on_target"] = inputs_on_target
+
+            try:
+                with open(debug_dir / "audio_health.jsonl", "a") as f:
+                    f.write(json.dumps(sample) + "\n")
+            except Exception:
+                pass
+
+            bot = await store.get_bot(bot_id) if bot_id else None
+            if bot:
+                samples = list(getattr(bot, "audio_health_samples", []) or [])
+                samples.append(sample)
+                await store.update_bot(bot_id, audio_health_samples=samples[-40:])
+        except Exception as e:
+            logger.debug("audio_health_loop error: %s", e)
+
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=30)
+        except asyncio.TimeoutError:
+            continue
 
 
 # ── Screenshot ────────────────────────────────────────────────────────────────
@@ -3776,6 +3941,7 @@ async def run_browser_bot(
     consent_message: Optional[str] = None,
     on_runtime_ready: Optional[Callable[[dict], Awaitable[None]]] = None,
     seen_chat_ids: Optional[set] = None,
+    bot_id: str = "",
 ) -> dict:
     """
     Join a meeting as a named guest, record audio, wait for it to end.
@@ -3823,15 +3989,51 @@ async def run_browser_bot(
     # Will be set to the virtual source name after _create_pulse_mic() succeeds
     pulse_source_name: str = f"{pulse_mic}.monitor"
 
+    # ── Diagnostic bundle setup ──────────────────────────────────────────────
+    # Resolve bot_id (prefer caller-supplied, fall back to audio_path stem).
+    diag_id = bot_id or Path(audio_path).stem
+    debug_dir = _debug_dir_for(diag_id)
+    health_stop_event: asyncio.Event = asyncio.Event()
+    health_task: Optional[asyncio.Task] = None
+    ffmpeg_stderr_path = str(debug_dir / "ffmpeg.stderr.log")
+
+    async def _save_pactl(label: str) -> None:
+        """Persist a pactl snapshot both to disk and onto the BotSession."""
+        try:
+            blob = await asyncio.to_thread(_pactl_snapshot, debug_dir, label)
+            if bot_id:
+                try:
+                    from app.store import store as _store
+                    b = await _store.get_bot(bot_id)
+                    dumps = dict(getattr(b, "pactl_dumps", {}) or {}) if b else {}
+                    dumps[label] = blob
+                    await _store.update_bot(bot_id, pactl_dumps=dumps)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
     # ── Infrastructure ──────────────────────────────────────────────────────
+    await _save_pactl("pre_pulse")
     pulse_ok = _start_pulseaudio()
     if pulse_ok:
         pulse_idx = _create_pulse_sink(pulse_sink)
         if pulse_idx:
-            ffmpeg_proc = _start_ffmpeg(audio_path, pulse_sink)
+            ffmpeg_proc = _start_ffmpeg(audio_path, pulse_sink, stderr_log_path=ffmpeg_stderr_path)
         # Create the TTS mic sink + virtual source so the bot can speak.
         # Must be created before Chrome launches so PULSE_SOURCE takes effect.
         pulse_mic_idx, pulse_mic_virt_idx, pulse_source_name = _create_pulse_mic(pulse_mic)
+
+    await _save_pactl("post_setup")
+    if ffmpeg_proc is not None:
+        # Snapshot right after ffmpeg starts so we can see its sink-input.
+        await _save_pactl("post_ffmpeg")
+        health_task = asyncio.create_task(
+            _audio_health_loop(
+                bot_id or diag_id, audio_path, pulse_sink,
+                ffmpeg_proc, debug_dir, health_stop_event,
+            )
+        )
 
     xvfb_proc, xvfb_display = _start_xvfb()
     headless = xvfb_proc is None   # fall back to headless if no Xvfb
@@ -4026,6 +4228,26 @@ async def run_browser_bot(
 
         page = await ctx.new_page()
         await _apply_stealth(page)
+
+        # Capture browser-side diagnostics so post-mortems can see what the
+        # meeting's JS was complaining about. Writes to {debug_dir}/console.jsonl
+        # and mirrors the last 200 entries onto the BotSession.
+        try:
+            _diag_id = bot_id or diag_id
+            page.on(
+                "console",
+                lambda m: _ring_push(_diag_id, debug_dir, "console", f"[{m.type}] {m.text}"),
+            )
+            page.on(
+                "pageerror",
+                lambda e: _ring_push(_diag_id, debug_dir, "pageerror", str(e)),
+            )
+            page.on(
+                "requestfailed",
+                lambda r: _ring_push(_diag_id, debug_dir, "reqfail", f"{r.method} {r.url} :: {r.failure}"),
+            )
+        except Exception:
+            pass
 
         transcription_task: asyncio.Task | None = None   # VAD streaming transcription
         voice_task:         asyncio.Task | None = None   # Gemini Live voice responses
@@ -4290,7 +4512,7 @@ async def run_browser_bot(
                                 "ffmpeg died mid-recording (pid=%s exit=%s); restarting once",
                                 ffmpeg_proc.pid, ffmpeg_proc.returncode,
                             )
-                            new_proc = _start_ffmpeg(audio_path, pulse_sink)
+                            new_proc = _start_ffmpeg(audio_path, pulse_sink, stderr_log_path=ffmpeg_stderr_path)
                             if new_proc is not None:
                                 ffmpeg_proc = new_proc
                                 logger.info("ffmpeg restarted (pid=%s)", new_proc.pid)
@@ -4636,6 +4858,12 @@ async def run_browser_bot(
             }
 
         finally:
+            # Snapshot PulseAudio state before we tear anything down, so
+            # post-mortems show the end state.
+            try:
+                await _save_pactl("pre_leave")
+            except Exception:
+                pass
             # Always cancel background tasks (handles external cancellation of run_browser_bot)
             if transcription_task is not None and not transcription_task.done():
                 transcription_task.cancel()
@@ -4649,6 +4877,11 @@ async def run_browser_bot(
                 monitor_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError, Exception):
                     await monitor_task
+            # Stop the audio health loop.
+            if health_task is not None:
+                health_stop_event.set()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await asyncio.wait_for(health_task, timeout=5)
             await browser.close()
             if ffmpeg_video_proc:
                 _stop_ffmpeg(ffmpeg_video_proc)
@@ -4660,6 +4893,23 @@ async def run_browser_bot(
                 _unload_pulse_sink(pulse_mic_virt_idx)
             if pulse_mic_idx:
                 _unload_pulse_sink(pulse_mic_idx)
+            # ── Flush diagnostic bundle onto the BotSession ──────────────────
+            # This is the data /api/bots/{bot_id}/debug will surface.
+            try:
+                if bot_id:
+                    from app.store import store as _store
+                    _ring = _debug_rings.pop(bot_id or diag_id, None)
+                    await _store.update_bot(
+                        bot_id,
+                        ffmpeg_exit_code=(ffmpeg_proc.returncode if ffmpeg_proc else None),
+                        ffmpeg_stderr_tail=_tail_file(Path(ffmpeg_stderr_path), 16384),
+                        console_log_tail=list(_ring) if _ring is not None else [],
+                        debug_dir=str(debug_dir),
+                    )
+                else:
+                    _debug_rings.pop(diag_id, None)
+            except Exception:
+                pass
             if xvfb_proc:
                 _unregister_proc(xvfb_proc)
                 try:

@@ -655,6 +655,55 @@ async def get_bot(bot_id: str, request: Request):
     return _to_response(bot)
 
 
+# ── GET /api/v1/bot/{id}/debug ─────────────────────────────────────────────────
+
+@router.get("/{bot_id}/debug")
+async def get_bot_debug(bot_id: str, request: Request):
+    """Return the diagnostic bundle for a bot.
+
+    Surfaces forensic data captured during the bot's run — ffmpeg stderr,
+    PulseAudio state at key lifecycle moments, audio-file growth samples,
+    browser console / page errors / failed network requests, and Gemini's
+    finish_reason / safety blocks. Used to triage transcription failures
+    without having to repro the meeting.
+    """
+    account_id: Optional[str] = getattr(request.state, "account_id", None)
+    sub_user_id = _get_sub_user_from_request(request)
+    bot = await _get_or_404(bot_id, account_id, sub_user_id)
+
+    from glob import glob as _glob
+    import os as _os
+    screenshot_dir = _os.environ.get("SCREENSHOT_DIR", "/app/data/screenshots")
+    try:
+        screenshots = sorted(
+            _glob(f"{screenshot_dir}/*{bot_id[:10]}*") +
+            _glob(f"{screenshot_dir}/*{bot.meeting_platform}*")
+        )[-20:]
+    except Exception:
+        screenshots = []
+
+    return {
+        "bot_id": bot.id,
+        "status": bot.status,
+        "meeting_platform": bot.meeting_platform,
+        "meeting_url": bot.meeting_url,
+        "error_message": bot.error_message,
+        "started_at": bot.started_at.isoformat() if bot.started_at else None,
+        "ended_at": bot.ended_at.isoformat() if bot.ended_at else None,
+        "ffmpeg_exit_code": getattr(bot, "ffmpeg_exit_code", None),
+        "ffmpeg_stderr_tail": getattr(bot, "ffmpeg_stderr_tail", None),
+        "audio_peak_amplitude": getattr(bot, "audio_peak_amplitude", None),
+        "audio_health_samples": getattr(bot, "audio_health_samples", []) or [],
+        "pactl_dumps": getattr(bot, "pactl_dumps", {}) or {},
+        "console_log_tail": getattr(bot, "console_log_tail", []) or [],
+        "gemini_finish_reason": getattr(bot, "last_gemini_finish_reason", None),
+        "gemini_safety_blocks": getattr(bot, "last_gemini_safety_blocks", []) or [],
+        "debug_dir": getattr(bot, "debug_dir", None),
+        "screenshots": screenshots,
+        "recording_path": bot.recording_path,
+    }
+
+
 # ── POST /api/v1/bot/{id}/leave ────────────────────────────────────────────────
 
 @router.post("/{bot_id}/leave", status_code=200)

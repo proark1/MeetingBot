@@ -1,6 +1,7 @@
 """Bot lifecycle management — drives a real browser bot through a meeting."""
 
 import asyncio
+import json
 import logging
 import os
 import re as _re
@@ -310,7 +311,7 @@ async def _transcribe_audio_for_bot(bot: BotSession, audio_path: str) -> list:
             logger.warning("Bot %s: Whisper failed (%s) — falling back to Gemini", bot.id, exc)
 
     # Default / fallback: Gemini transcription
-    return await transcribe_audio(audio_path)
+    return await transcribe_audio(audio_path, bot_id=bot.id)
 
 
 async def _do_analysis(bot: BotSession, audio_path: str, use_real_bot: bool, video_path: Optional[str] = None) -> None:
@@ -326,6 +327,32 @@ async def _do_analysis(bot: BotSession, audio_path: str, use_real_bot: bool, vid
         _analysis_in_flight.discard(bot.id)
 
 
+def _build_transcription_diag(bot: BotSession, audio_path: str) -> str:
+    """Serialise a compact diagnostic bundle for transcription failure messages.
+
+    Read by the dashboard and included in webhook error payloads so operators
+    can triage "no audio captured" failures without digging through server logs.
+    """
+    try:
+        samples = list(getattr(bot, "audio_health_samples", None) or [])
+        diag = {
+            "audio_size": os.path.getsize(audio_path) if os.path.exists(audio_path) else 0,
+            "peak_amp": getattr(bot, "audio_peak_amplitude", None),
+            "ffmpeg_exit": getattr(bot, "ffmpeg_exit_code", None),
+            "ffmpeg_stderr_tail": (getattr(bot, "ffmpeg_stderr_tail", None) or "")[-500:] or None,
+            "max_sink_inputs_on_target": max(
+                (s.get("sink_inputs_on_target", 0) for s in samples), default=0,
+            ),
+            "last_size_delta": (samples[-1].get("size_delta") if samples else None),
+            "gemini_finish_reason": getattr(bot, "last_gemini_finish_reason", None),
+            "gemini_safety": getattr(bot, "last_gemini_safety_blocks", None) or None,
+            "debug_url": f"/api/v1/bot/{bot.id}/debug",
+        }
+        return json.dumps(diag, default=str)
+    except Exception:
+        return "{}"
+
+
 async def _do_analysis_inner(bot: BotSession, audio_path: str, use_real_bot: bool, video_path: Optional[str] = None) -> None:
     """Inner implementation of _do_analysis (called after in-flight guard check)."""
     # ── transcript ─────────────────────────────────────────────────────────
@@ -337,12 +364,18 @@ async def _do_analysis_inner(bot: BotSession, audio_path: str, use_real_bot: boo
             transcript = await _transcribe_audio_for_bot(bot, audio_path)
 
         if not transcript:
-            logger.warning("Bot %s: no usable audio captured — transcript will be empty", bot.id)
+            # Re-fetch so diagnostic fields populated after we snapshotted `bot` are visible.
+            _fresh = await store.get_bot(bot.id) or bot
+            diag = _build_transcription_diag(_fresh, audio_path)
+            logger.warning(
+                "Bot %s: no usable audio captured — transcript will be empty. diag=%s",
+                bot.id, diag,
+            )
             current = bot.error_message or ""
             await store.update_bot(
                 bot.id,
                 transcript=[],
-                error_message=current + " No audio was captured or transcription returned no content.",
+                error_message=current + f" No audio was captured or transcription returned no content. diag={diag}",
             )
         else:
             # ── Consent processing ────────────────────────────────────────
@@ -967,6 +1000,7 @@ async def run_bot_lifecycle(bot_id: str) -> None:
                     consent_message=getattr(bot, "consent_message", None),
                     on_runtime_ready=on_runtime_ready,
                     seen_chat_ids=bot.seen_chat_ids,
+                    bot_id=bot.id,
                 )
 
                 if bot_result["success"]:
@@ -1013,6 +1047,7 @@ async def run_bot_lifecycle(bot_id: str) -> None:
                             audio_path,
                             known_participants=scraped_participants,
                             language=settings.TRANSCRIPTION_LANGUAGE or None,
+                            bot_id=bot_id,
                         )
                 else:
                     logger.warning("Bot %s: Whisper not available — using Gemini", bot_id)
@@ -1020,12 +1055,14 @@ async def run_bot_lifecycle(bot_id: str) -> None:
                         audio_path,
                         known_participants=scraped_participants,
                         language=settings.TRANSCRIPTION_LANGUAGE or None,
+                        bot_id=bot_id,
                     )
             else:
                 transcript = await transcribe_audio(
                     audio_path,
                     known_participants=scraped_participants,
                     language=settings.TRANSCRIPTION_LANGUAGE or None,
+                    bot_id=bot_id,
                 )
 
             if live_transcript_entries:
@@ -1039,11 +1076,15 @@ async def run_bot_lifecycle(bot_id: str) -> None:
                         transcript = sorted(transcript + extra, key=lambda e: e.get("timestamp", 0))
 
             if not transcript:
-                logger.warning("Bot %s: Gemini returned empty transcript", bot_id)
+                _fresh = await store.get_bot(bot_id) or bot
+                diag = _build_transcription_diag(_fresh, audio_path)
+                logger.warning(
+                    "Bot %s: Gemini returned empty transcript. diag=%s", bot_id, diag,
+                )
                 current = bot.error_message or ""
                 await store.update_bot(
                     bot_id,
-                    error_message=current + " Transcription returned no content.",
+                    error_message=current + f" Transcription returned no content. diag={diag}",
                 )
 
         else:

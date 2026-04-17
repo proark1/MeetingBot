@@ -4,7 +4,26 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.34.2 — **Last updated:** 2026-04-17
+> **Latest version:** 2.35.0 — **Last updated:** 2026-04-17
+
+---
+
+## [2.35.0] - 2026-04-17
+
+### Added
+- **Transcription-failure diagnostic bundle + `GET /api/v1/bot/{id}/debug` endpoint** — prior attempts (2.34.1, 2.34.2) tried to fix "no audio captured" blindly; this release stops guessing and captures the data needed to diagnose the root cause on every run. When a bot ends with `"Transcription returned no content / No audio was captured"` the error message now carries a `diag={...}` JSON blob with: audio file size, silence-check peak amplitude, ffmpeg exit code + last 500 chars of stderr, peak count of PulseAudio sink-inputs routed onto the null sink during the call, last audio-file size delta, and Gemini's `finish_reason` + safety ratings. All of this plus full forensics is available at `GET /api/v1/bot/{bot_id}/debug` (owner-gated), including:
+  - `ffmpeg_stderr_tail` — last 16 KB of previously-discarded ffmpeg stderr (captured to `{RECORDINGS_DIR}/debug/{bot_id}/ffmpeg.stderr.log`)
+  - `audio_health_samples` — 30 s samples over the call showing file growth, ffmpeg liveliness, sink-input total + count routed to the bot's null sink
+  - `pactl_dumps` — PulseAudio state (`list sinks/sink-inputs/sources/modules short`) snapshotted at `pre_pulse`, `post_setup`, `post_ffmpeg`, and `pre_leave`
+  - `console_log_tail` — last 200 browser console / pageerror / requestfailed entries from Playwright (was never captured before)
+  - `last_gemini_finish_reason` + `last_gemini_safety_blocks` — distinguishes a SAFETY block from a silent recording
+- New `BotSession` dataclass fields (`audio_health_samples`, `pactl_dumps`, `console_log_tail`, `ffmpeg_exit_code`, `ffmpeg_stderr_tail`, `audio_peak_amplitude`, `last_gemini_finish_reason`, `last_gemini_safety_blocks`, `debug_dir`) are persisted into the existing `BotSnapshot.data` JSON column — no DB migration needed, survives restart, retains for the usual 24 h TTL
+- Per-bot diagnostic directory at `{RECORDINGS_DIR}/debug/{bot_id}/` holds `ffmpeg.stderr.log`, `audio_health.jsonl`, `console.jsonl`, and `pactl_*.txt`
+
+### Changed
+- `_start_ffmpeg()` in `backend/app/services/browser_bot.py` now accepts `stderr_log_path=` and pipes ffmpeg's stderr there instead of `DEVNULL`; backwards-compatible default preserves old behavior for any unforeseen caller. Exit code is appended to the log on termination
+- `run_browser_bot()` accepts a new `bot_id=""` kwarg so the audio-health loop / Playwright console ring-buffer / pactl snapshots can be attributed to a specific BotSession. `bot_service.run_bot_lifecycle` now passes `bot_id=bot.id`
+- `transcribe_audio()` in `backend/app/services/transcription_service.py` accepts a new `bot_id=` kwarg; when present, peak amplitude, Gemini finish_reason, and safety ratings are recorded on the BotSession
 
 ---
 

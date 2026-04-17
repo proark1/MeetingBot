@@ -14,7 +14,7 @@ import os
 import re
 import time
 import uuid
-from typing import Any
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -251,16 +251,31 @@ def _normalise_speakers(
     return result
 
 
+async def _set_diag(bot_id: Optional[str], **fields) -> None:
+    """Best-effort update of diagnostic fields on a BotSession."""
+    if not bot_id:
+        return
+    try:
+        from app.store import store as _store
+        await _store.update_bot(bot_id, **fields)
+    except Exception:
+        pass
+
+
 async def transcribe_audio(
     audio_path: str,
     known_participants: list[str] | None = None,
     language: str | None = None,
+    bot_id: Optional[str] = None,
 ) -> list[dict[str, Any]]:
     """
     Transcribe an audio file using the Gemini API.
 
     Args:
         audio_path: Path to a WAV (or MP3/M4A) file.
+        bot_id: Optional bot id; when provided, per-call diagnostics (peak
+            amplitude, Gemini finish_reason, safety blocks) are recorded on
+            the BotSession so /api/bots/{bot_id}/debug can surface them.
 
     Returns:
         List of transcript entries, or [] if transcription fails.
@@ -287,6 +302,7 @@ async def transcribe_audio(
     # A completely silent recording (e.g. from a PulseAudio routing failure)
     # would cause Gemini to hallucinate a transcript; we return [] instead.
     has_speech, peak = _check_audio_has_speech(audio_path)
+    await _set_diag(bot_id, audio_peak_amplitude=float(peak))
     if not has_speech:
         logger.warning(
             "Audio file appears to be silent (peak amplitude %.0f/32768 < threshold %d) — "
@@ -371,11 +387,34 @@ async def transcribe_audio(
         except Exception as _usage_exc:
             logger.debug("Failed to record transcription usage: %s", _usage_exc)
 
-        # Warn if the model stopped due to token limit (truncated JSON)
+        # Warn if the model stopped due to token limit (truncated JSON), and
+        # record finish_reason + safety ratings onto the BotSession so the
+        # debug endpoint can surface them — a "no content" failure caused by
+        # SAFETY blocking looks identical to one caused by a silent recording
+        # unless we capture this.
         try:
             finish_reason = response.candidates[0].finish_reason.name
             if finish_reason not in ("STOP", "1"):
                 logger.warning("Gemini stopped with finish_reason=%s — output may be truncated", finish_reason)
+            await _set_diag(bot_id, last_gemini_finish_reason=finish_reason)
+        except Exception:
+            pass
+        try:
+            safety_entries: list[dict] = []
+            pf = getattr(response, "prompt_feedback", None)
+            for r in (getattr(pf, "safety_ratings", None) or []):
+                safety_entries.append({
+                    "category": getattr(r.category, "name", str(r.category)),
+                    "probability": getattr(r.probability, "name", str(r.probability)),
+                })
+            for cand_r in (getattr(response.candidates[0], "safety_ratings", None) or []):
+                safety_entries.append({
+                    "source": "candidate",
+                    "category": getattr(cand_r.category, "name", str(cand_r.category)),
+                    "probability": getattr(cand_r.probability, "name", str(cand_r.probability)),
+                })
+            if safety_entries:
+                await _set_diag(bot_id, last_gemini_safety_blocks=safety_entries)
         except Exception:
             pass
 
