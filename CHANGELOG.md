@@ -4,7 +4,29 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.37.1 — **Last updated:** 2026-04-17
+> **Latest version:** 2.38.0 — **Last updated:** 2026-04-17
+
+---
+
+## [2.38.0] - 2026-04-17
+
+### Fixed
+- **onepizza: silent recordings were caused by a Chromium Web Audio bug, not audio routing or join logic** — confirmed by the v2.37.0 webrtc-stats diagnostic. Bot `edb8af4d…` (13:49 UTC) showed: `connection_state: "connected"`, `ice_connection_state: "connected"`, `signaling_state: "stable"` (v2.37.1 join fix is working), `inbound_audio.packets` climbing 639 → 3640 over 60 s, `inbound_audio.total_audio_energy` climbing 0.92 → 3.37 (**non-zero energy = Chrome IS decoding actual non-silent samples**), onepizza's active-speaker border flickering green (its own VAD sees incoming audio — matches user report of "frame flickering green"), the Chromium sink-input correctly attached to our null-sink with non-zero `Buffer Latency: 34058 usec`, and `<video>` elements with `paused: false muted: false volume: 1 ready_state: 4 audio_tracks: 1 current_time` advancing. And yet `peak_amp: 0.0` in the WAV and onepizza's caption UI reporting "No sound detected — check your mic".
+- **Root cause**: the init script `_mbRtcAudioForced` (added in 2.33.x) was doing `AudioContext.createMediaStreamSource(remoteStream).connect(ctx.destination)` for every remote audio track to "force" Chromium to render audio. That API path is a long-standing Chromium bug for remote WebRTC streams — Chrome silences the audio pipeline when a remote `MediaStreamTrack` is taken into Web Audio (chromium#121673, w3c/webrtc-pc#2564 and multiple community reports: *"when this code was added to the flow, Chrome stopped generating all WebRTC audio, though it worked on Firefox"*). Our own shim was the thing producing the silence.
+- **Fix in `backend/app/services/browser_bot.py`**: replaced the AudioContext-based `connectTrack()` with `attachAudioTrack()`, which creates a hidden `<audio autoplay srcObject=new MediaStream([track])>` element for each remote audio track inside a fixed-position off-viewport `<div id="_mb_audio_sinks">`. This is the WebRTC-samples canonical pattern and routes through Chrome's HTMLMediaElement pipeline, which respects `PULSE_SINK` and actually emits real samples to our null-sink. `createMediaStreamSource` is no longer called anywhere on remote tracks. Kept: the RTCPeerConnection constructor wrapping, `setRemoteDescription` receiver-sweep, `track`/`addstream` event listeners, and the periodic 3 s sweep of `window.__mbRtcPcs` for receivers added via `addTransceiver` or SDP re-offer.
+- Extended the v2.37.0 `__mbCollectWebrtcStats()` probe to also report `audio_sinks: [{trackId, paused, muted, volume, readyState, currentTime, srcObject, error, ...}]` — one entry per hidden `<audio>` element we created. Surfaced via `GET /api/v1/bot/{id}/debug` as `webrtc_stats_samples[*].snap.audio_sinks`. Lets us verify at a glance that every inbound track has a playing element.
+
+### Added
+- **Live Python-side peak-amplitude logger** (user-requested more logging). `_audio_health_loop` now reads the last ~3 s of the recording file on each iteration and logs one of:
+  - `audio_health: OK — size=… peak_recent=1234/32767 ✓`  (INFO, peak ≥ 200)
+  - `audio_health: SILENT — size=… peak_recent=0/32767 (<200 threshold)`  (WARNING)
+  - `audio_health: size=… peak_recent=n/a`  (file too small / probe failed)
+  This surfaces the silence-vs-audio distinction immediately in the Railway deploy-log tail without needing the `/debug` JSON. Loop frequency bumped 30 s → 15 s for faster feedback. `peak_recent_3s` added to each `audio_health_samples` entry.
+- **Compact webrtc-stats log line per 15 s sample**: `webrtc_stats: pc[0] state=connected ice=connected inAudio pkts=3640 bytes=267993 energy=3.372 | sinks=2 playing=2 | page_media_elems=3`. Makes the "is remote audio being received?" vs "are our sinks playing?" distinction visible in the normal log stream.
+- **Rich JS-side logging in the audio-attach shim**: `[mb-audio] attached track … -> <audio autoplay>, play() ok` / `[mb-audio] <audio>.play() rejected for track …:` / `[mb-audio] ontrack audio id=… enabled=… muted=… -> attached=true` / `[mb-audio] scanReceivers attached N audio track(s) after setRemoteDescription` / `[mb-audio] track … ended|muted|unmuted`. Captured by the v2.35.0 `console_log_tail` so the whole attach sequence is post-mortem-visible.
+
+### Context
+- The user also pointed at `github.com/proark1/meetingservice/` as a possible reference. Investigation confirmed that repo is the **onepizza platform itself** (Node.js + Express + Socket.IO, no Playwright/Puppeteer/ffmpeg/PulseAudio/Chromium), not a sibling bot implementation — nothing to borrow from it.
 
 ---
 

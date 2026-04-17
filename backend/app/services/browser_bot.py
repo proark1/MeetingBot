@@ -737,6 +737,53 @@ async def _audio_health_loop(
             sample["sink_inputs_total"] = inputs_total
             sample["sink_inputs_on_target"] = inputs_on_target
 
+            # Peak-amplitude probe on the last ~3 s of the WAV. This is the
+            # Python-side truth for "is ffmpeg actually receiving non-zero
+            # samples right now?" — independent of Gemini, onepizza UI,
+            # WebRTC stats. Logged at WARN if recording continues silent,
+            # INFO the first time audio is detected (2.38.0).
+            peak_recent = None
+            try:
+                if exists and size >= 4096:
+                    with open(audio_path, "rb") as f:
+                        # Read the last ~3 s = 3 * 16000 Hz * 2 bytes (mono s16le).
+                        # Default chunk overshoots header; good enough.
+                        f.seek(max(0, size - 96000))
+                        tail = f.read()
+                    if tail:
+                        mv = memoryview(tail)
+                        # Skip any odd trailing byte.
+                        n = (len(mv) // 2) * 2
+                        if n >= 2:
+                            import array as _array
+                            a = _array.array('h')
+                            a.frombytes(bytes(mv[:n]))
+                            peak_recent = max(abs(x) for x in a) if a else 0
+            except Exception as e:
+                logger.debug("audio_health_loop: peak probe failed: %s", e)
+            sample["peak_recent_3s"] = peak_recent
+
+            # Loud logging so this shows up in deploy tail without
+            # needing the /debug JSON. `peak` scale is 0..32767.
+            if peak_recent is None:
+                logger.info(
+                    "audio_health: size=%d Δ=%+d ffmpeg_alive=%s sink_inputs=%d on_target=%d peak_recent=n/a",
+                    size, size - (last_size if last_size else 0),
+                    sample["ffmpeg_alive"], inputs_total, inputs_on_target,
+                )
+            elif peak_recent < 200:
+                logger.warning(
+                    "audio_health: SILENT — size=%d Δ=+%d ffmpeg_alive=%s sink_inputs=%d on_target=%d peak_recent=%d/32767 (<200 threshold)",
+                    size, sample.get("size_delta", 0),
+                    sample["ffmpeg_alive"], inputs_total, inputs_on_target, peak_recent,
+                )
+            else:
+                logger.info(
+                    "audio_health: OK — size=%d Δ=+%d ffmpeg_alive=%s sink_inputs=%d on_target=%d peak_recent=%d/32767 ✓",
+                    size, sample.get("size_delta", 0),
+                    sample["ffmpeg_alive"], inputs_total, inputs_on_target, peak_recent,
+                )
+
             try:
                 with open(debug_dir / "audio_health.jsonl", "a") as f:
                     f.write(json.dumps(sample) + "\n")
@@ -752,7 +799,7 @@ async def _audio_health_loop(
             logger.debug("audio_health_loop error: %s", e)
 
         try:
-            await asyncio.wait_for(stop_event.wait(), timeout=30)
+            await asyncio.wait_for(stop_event.wait(), timeout=15)
         except asyncio.TimeoutError:
             continue
 
@@ -784,6 +831,34 @@ async def _webrtc_stats_loop(
             except Exception as e:
                 snap = {"error": f"evaluate_failed: {e!r}"}
             sample = {"ts": time.time(), "snap": snap}
+
+            # Compact, human-readable log line per sample so debug-via-tail
+            # works without the full JSON blob (2.38.0).
+            try:
+                if isinstance(snap, dict):
+                    pcs = snap.get("pcs") or []
+                    sinks = snap.get("audio_sinks") or []
+                    pc_line = "no-pcs"
+                    if pcs:
+                        pc = pcs[0]
+                        ia = pc.get("inbound_audio") or {}
+                        pc_line = (
+                            f"pc[0] state={pc.get('connection_state')} "
+                            f"ice={pc.get('ice_connection_state')} "
+                            f"inAudio pkts={ia.get('packets', 0)} "
+                            f"bytes={ia.get('bytes', 0)} "
+                            f"energy={ia.get('total_audio_energy', 0):.3f}"
+                        )
+                    sink_line = f"sinks={len(sinks)}"
+                    if sinks:
+                        playing = sum(1 for s in sinks if not s.get("paused") and s.get("readyState", 0) >= 2)
+                        sink_line = f"sinks={len(sinks)} playing={playing}"
+                    elems = snap.get("media_elements") or []
+                    elem_line = f"page_media_elems={len(elems)}"
+                    logger.info("webrtc_stats: %s | %s | %s", pc_line, sink_line, elem_line)
+            except Exception as _log_e:
+                logger.debug("webrtc_stats log-line failed: %s", _log_e)
+
             try:
                 with open(debug_dir / "webrtc_stats.jsonl", "a") as f:
                     f.write(json.dumps(sample) + "\n")
@@ -4192,84 +4267,163 @@ async def run_browser_bot(
             timezone_id="America/New_York",
         )
 
-        # Intercept RTCPeerConnection at the page level (before Google Meet
+        # Intercept RTCPeerConnection at the page level (before the meeting app
         # initialises its WebRTC) so that every incoming audio track is
-        # explicitly connected to a Web Audio context.  This forces Chrome to
-        # decode and render the incoming WebRTC audio through its normal audio
-        # output pipeline (→ PulseAudio null-sink) even in an automated/Xvfb
-        # environment where Chrome might otherwise suppress rendering.
+        # explicitly attached to a hidden <audio autoplay> element.
+        #
+        # ── Why this shape (see 2.38.0) ────────────────────────────────────
+        # Earlier releases (2.33.x–2.37.x) used `AudioContext.createMediaStreamSource(stream).connect(destination)`
+        # to "force" headless Chromium to render WebRTC audio to PulseAudio.
+        # That path is a KNOWN CHROME BUG for remote WebRTC streams —
+        # Chromium silences the audio pipeline (issue chromium#121673 and
+        # related; multiple community reports: "when this code was added to
+        # the flow, Chrome stopped generating all WebRTC audio"). The
+        # v2.37.0 diagnostic confirmed it in prod: inbound_audio.packets
+        # and totalAudioEnergy climbing (so Chrome IS decoding real audio),
+        # media elements playing, sink-input on the right sink with
+        # non-zero buffer latency — yet the recorded WAV is pure zeros.
+        #
+        # The documented-working WebRTC pattern for remote audio is to
+        # attach each remote track to an HTMLMediaElement (`<audio autoplay
+        # srcObject=stream>`) and let Chromium's HTMLMediaElement pipeline
+        # render it. That pipeline respects PULSE_SINK so audio reaches our
+        # null-sink and ffmpeg captures it. We do this in addition to —
+        # not replacing — whatever the meeting app itself does with
+        # `<video>` elements; having our OWN hidden `<audio>` sink-of-
+        # record guarantees at least one HTMLMediaElement is playing the
+        # remote audio even if the page's own media elements fail
+        # autoplay-policy checks in headless.
         await ctx.add_init_script("""
             (function () {
                 if (window._mbRtcAudioForced) return;
                 window._mbRtcAudioForced = true;
 
-                var _AudioCtx = window.AudioContext || window.webkitAudioContext;
-                window._mbAudioCtx = null;
-                // WeakSet of MediaStreamTracks already wired into the audio graph.
-                // Re-runs of the imperative fallback consult this to avoid
-                // double-connecting the same stream (which would corrupt audio).
+                // Registry (exported for diagnostics): element-per-track so
+                // Python can enumerate and verify attachment via page.evaluate.
+                window._mbAudioSinks = [];   // [{trackId, createdAt, el}]
                 window._mbConnectedTracks = new WeakSet();
 
-                function getCtx() {
-                    if (!window._mbAudioCtx) {
-                        window._mbAudioCtx = new _AudioCtx({ latencyHint: 'playback' });
-                        window._mbAudioCtx.resume().catch(function(){});
-                    }
-                    return window._mbAudioCtx;
+                // Single hidden container off-viewport so our sinks don't
+                // affect the visible meeting UI.
+                function ensureContainer() {
+                    var c = document.getElementById('_mb_audio_sinks');
+                    if (c) return c;
+                    c = document.createElement('div');
+                    c.id = '_mb_audio_sinks';
+                    c.style.cssText = 'position:fixed;left:-9999px;top:-9999px;width:1px;height:1px;overflow:hidden;opacity:0;pointer-events:none';
+                    if (document.body) document.body.appendChild(c);
+                    else document.addEventListener('DOMContentLoaded', function(){ document.body && document.body.appendChild(c); });
+                    return c;
                 }
 
-                // Some Chromium builds land the AudioContext in 'suspended' even
-                // with --autoplay-policy=no-user-gesture-required; a suspended
-                // context silently drops all audio graph output so the null-sink
-                // records silence.  Keep trying to resume every 2 s.
-                setInterval(function () {
-                    try {
-                        if (window._mbAudioCtx && window._mbAudioCtx.state !== 'running') {
-                            window._mbAudioCtx.resume().catch(function(){});
-                        }
-                    } catch (e) {}
-                }, 2000);
-
-                function connectTrack(track, stream) {
+                function attachAudioTrack(track, stream) {
                     if (!track || track.kind !== 'audio') return false;
                     if (window._mbConnectedTracks.has(track)) return false;
                     try {
+                        var container = ensureContainer();
+                        if (!container) return false;
+                        var el = document.createElement('audio');
+                        el.autoplay = true;
+                        el.controls = false;
+                        el.muted = false;
+                        el.volume = 1.0;
+                        // Don't set playsInline on <audio>; it's a no-op but
+                        // setting autoplay + srcObject is the canonical pattern.
                         var s = stream || new MediaStream([track]);
-                        var ctx = getCtx();
-                        var src = ctx.createMediaStreamSource(s);
-                        src.connect(ctx.destination);
+                        el.srcObject = s;
+                        container.appendChild(el);
                         window._mbConnectedTracks.add(track);
-                        console.log('[MeetingBot] Audio track connected, ctx=' + ctx.state);
+                        window._mbAudioSinks.push({
+                            trackId: track.id,
+                            trackLabel: track.label || '',
+                            trackEnabled: !!track.enabled,
+                            trackMuted: !!track.muted,
+                            readyState: track.readyState,
+                            createdAt: Date.now(),
+                            el: el
+                        });
+                        // Attempt explicit .play() in case autoplay is
+                        // blocked by policy — --autoplay-policy=no-user-gesture-required
+                        // should make this a no-op success.
+                        var p = el.play();
+                        if (p && p.catch) {
+                            p.then(function(){
+                                console.log('[mb-audio] attached track ' + track.id + ' -> <audio autoplay>, play() ok');
+                            }).catch(function(err){
+                                console.warn('[mb-audio] <audio>.play() rejected for track ' + track.id + ':', err && err.name, err && err.message);
+                            });
+                        } else {
+                            console.log('[mb-audio] attached track ' + track.id + ' -> <audio autoplay> (no promise)');
+                        }
+                        // Track.onended / onmute for diagnostics
+                        try {
+                            track.addEventListener('ended', function(){
+                                console.log('[mb-audio] track ' + track.id + ' ended');
+                            });
+                            track.addEventListener('mute', function(){
+                                console.log('[mb-audio] track ' + track.id + ' muted');
+                            });
+                            track.addEventListener('unmute', function(){
+                                console.log('[mb-audio] track ' + track.id + ' unmuted');
+                            });
+                        } catch (e) {}
                         return true;
                     } catch (err) {
-                        console.warn('[MeetingBot] Failed to connect audio track:', err);
+                        console.warn('[mb-audio] failed to attach track:', err);
                         return false;
                     }
                 }
-                window._mbConnectTrack = connectTrack;
+                window._mbAttachAudioTrack = attachAudioTrack;
 
                 function scanReceivers(pc) {
                     if (!pc || !pc.getReceivers) return 0;
                     var n = 0;
                     try {
                         pc.getReceivers().forEach(function (r) {
-                            if (r && r.track && connectTrack(r.track, null)) n++;
+                            if (r && r.track && r.track.kind === 'audio' && attachAudioTrack(r.track, null)) n++;
                         });
                     } catch (e) {}
                     return n;
                 }
 
+                // Diagnostic helper callable from Python
+                window.__mbCollectAudioSinks = function () {
+                    var out = [];
+                    (window._mbAudioSinks || []).forEach(function (s) {
+                        var el = s.el;
+                        out.push({
+                            trackId: s.trackId,
+                            trackLabel: s.trackLabel,
+                            trackEnabled: s.trackEnabled,
+                            trackMuted: s.trackMuted,
+                            createdAt: s.createdAt,
+                            paused: el ? !!el.paused : null,
+                            muted: el ? !!el.muted : null,
+                            volume: el ? el.volume : null,
+                            readyState: el ? el.readyState : null,
+                            currentTime: el ? el.currentTime : null,
+                            srcObject: el ? !!el.srcObject : null,
+                            error: el && el.error ? { code: el.error.code, msg: el.error.message } : null
+                        });
+                    });
+                    return out;
+                };
+
+                // Wrap RTCPeerConnection so every new pc gets a 'track'
+                // listener AND every setRemoteDescription sweeps receivers
+                // (more reliable across SimplePeer / PeerJS / mediasoup).
                 var _OrigRTC = window.RTCPeerConnection;
+                if (!_OrigRTC) return;
+
                 var _OrigSetRemote = _OrigRTC.prototype.setRemoteDescription;
-                // Patch setRemoteDescription so every offer/answer triggers a
-                // sweep of all current receivers — more reliable than the
-                // 'track' event across PeerJS / SimplePeer / unified-plan libs.
                 _OrigRTC.prototype.setRemoteDescription = function () {
                     var pc = this;
                     var ret = _OrigSetRemote.apply(pc, arguments);
                     if (ret && typeof ret.then === 'function') {
-                        ret.then(function () { scanReceivers(pc); })
-                           .catch(function () {});
+                        ret.then(function () {
+                            var n = scanReceivers(pc);
+                            if (n > 0) console.log('[mb-audio] scanReceivers attached ' + n + ' audio track(s) after setRemoteDescription');
+                        }).catch(function(){});
                     } else {
                         try { scanReceivers(pc); } catch (e) {}
                     }
@@ -4282,14 +4436,19 @@ async def run_browser_bot(
                     ))();
                     pc.addEventListener('track', function (e) {
                         var stream = (e.streams && e.streams[0]) ? e.streams[0] : null;
-                        connectTrack(e.track, stream);
+                        if (e.track && e.track.kind === 'audio') {
+                            var ok = attachAudioTrack(e.track, stream);
+                            console.log('[mb-audio] ontrack audio id=' + e.track.id + ' enabled=' + e.track.enabled + ' muted=' + e.track.muted + ' -> attached=' + ok);
+                        } else if (e.track) {
+                            console.log('[mb-audio] ontrack ' + e.track.kind + ' id=' + e.track.id);
+                        }
                     });
-                    // Legacy WebRTC API some libraries still use
+                    // Legacy addstream event (some older libs still emit it)
                     pc.addEventListener('addstream', function (e) {
                         if (!e.stream) return;
                         try {
                             e.stream.getAudioTracks().forEach(function (t) {
-                                connectTrack(t, e.stream);
+                                attachAudioTrack(t, e.stream);
                             });
                         } catch (err) {}
                     });
@@ -4298,6 +4457,17 @@ async def run_browser_bot(
                 PatchedRTC.prototype = _OrigRTC.prototype;
                 Object.setPrototypeOf(PatchedRTC, _OrigRTC);
                 window.RTCPeerConnection = PatchedRTC;
+
+                // Periodically sweep existing peer-connections (via the
+                // __mbRtcPcs registry added by the stats-probe init script)
+                // for any new receivers that might have appeared via
+                // addTransceiver or after an SDP re-offer.
+                setInterval(function () {
+                    try {
+                        var pcs = window.__mbRtcPcs || [];
+                        for (var i = 0; i < pcs.length; i++) scanReceivers(pcs[i]);
+                    } catch (e) {}
+                }, 3000);
             })();
         """)
 
@@ -4422,6 +4592,16 @@ async def run_browser_bot(
                             });
                         });
                     } catch (e) {}
+                    // Also include the state of our own hidden <audio>
+                    // elements created by the audio-attach shim (2.38.0).
+                    // This tells us whether each remote audio track was
+                    // successfully bound to an HTMLMediaElement and is
+                    // playing — separately from the meeting app's own
+                    // <video> elements which may or may not render audio.
+                    try {
+                        out.audio_sinks = (typeof window.__mbCollectAudioSinks === 'function')
+                            ? window.__mbCollectAudioSinks() : [];
+                    } catch (e) { out.audio_sinks = []; }
                     return out;
                 };
             })();
