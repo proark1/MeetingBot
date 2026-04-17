@@ -3941,6 +3941,18 @@ async def run_browser_bot(
                     return window._mbAudioCtx;
                 }
 
+                // Some Chromium builds land the AudioContext in 'suspended' even
+                // with --autoplay-policy=no-user-gesture-required; a suspended
+                // context silently drops all audio graph output so the null-sink
+                // records silence.  Keep trying to resume every 2 s.
+                setInterval(function () {
+                    try {
+                        if (window._mbAudioCtx && window._mbAudioCtx.state !== 'running') {
+                            window._mbAudioCtx.resume().catch(function(){});
+                        }
+                    } catch (e) {}
+                }, 2000);
+
                 function connectTrack(track, stream) {
                     if (!track || track.kind !== 'audio') return false;
                     if (window._mbConnectedTracks.has(track)) return false;
@@ -4202,8 +4214,15 @@ async def run_browser_bot(
             # WebRTC track force-connect (idempotent via window._mbConnectedTracks
             # WeakSet) so newly-established peers get wired into Chrome's audio
             # output pipeline.
+            #
+            # After the initial ramp (3/8/15/30/60 s) we drop into a continuous
+            # loop that keeps re-running routing + force-connect every 15 s for
+            # the rest of the meeting — WebRTC peers can renegotiate or join at
+            # any point and silent-sink regressions have been observed well past
+            # the 60 s mark on onepizza.  Repeat passes log at DEBUG unless they
+            # actually moved sink-inputs or connected new tracks.
             async def _late_routing_syncs():
-                async def _step(label: str, sleep_s: float) -> None:
+                async def _step(label: str, sleep_s: float, always_info: bool = True) -> None:
                     await asyncio.sleep(sleep_s)
                     await asyncio.get_event_loop().run_in_executor(
                         None,
@@ -4212,13 +4231,18 @@ async def run_browser_bot(
                             pulse_sink, pulse_mic, pulse_source_name,
                         ),
                     )
-                    logger.info("PulseAudio routing sync %s complete", label)
+                    if always_info:
+                        logger.info("PulseAudio routing sync %s complete", label)
+                    else:
+                        logger.debug("PulseAudio routing sync %s complete", label)
                     _wc = await _force_connect_webrtc_audio(page)
                     if _wc:
-                        logger.info(
-                            "WebRTC connect (%s): state=%s newly=%s",
-                            label, _wc.get("state"), _wc.get("newly"),
-                        )
+                        newly = _wc.get("newly") or 0
+                        if always_info or newly:
+                            logger.info(
+                                "WebRTC connect (%s): state=%s newly=%s",
+                                label, _wc.get("state"), newly,
+                            )
 
                 await _step("3 (~8s)", 5)
                 await _step("4 (~15s)", 7)
@@ -4226,7 +4250,112 @@ async def run_browser_bot(
                 # One more pass at ~60s catches very-late peers (e.g. participants
                 # joining after the bot, or onepizza renegotiations).
                 await _step("6 (~60s)", 30)
+                # Continuous safety loop — keeps routing + force-connect running
+                # every 15 s for the rest of the meeting.  Cancelled when the
+                # surrounding task group tears down the browser context.
+                _tick = 0
+                while True:
+                    _tick += 1
+                    await _step(f"cont#{_tick}", 15, always_info=False)
             asyncio.create_task(_late_routing_syncs())
+
+            # ── Audio-health watchdog ──────────────────────────────────────────
+            # Periodically sample the tail of the growing WAV file; if Chrome
+            # isn't actually rendering audio to PulseAudio the recording will be
+            # pure silence even though sink-input routing "looks" correct.  When
+            # we detect sustained silence we redo routing + force-connect out of
+            # band (i.e. without waiting for the next 15 s tick).  Also acts as
+            # a one-shot restart for a dead ffmpeg process.
+            from app.services.transcription_service import (
+                _check_audio_has_speech,
+                _SILENCE_PEAK_THRESHOLD,
+            )
+
+            async def _audio_health_watchdog():
+                nonlocal ffmpeg_proc
+                silence_streak = 0
+                ffmpeg_restarted = False
+                # Grace period — first seconds of a call are routinely silent
+                # while people dial in.
+                await asyncio.sleep(15)
+                while True:
+                    try:
+                        # 1) ffmpeg liveness — restart once if it has died.
+                        if (
+                            ffmpeg_proc is not None
+                            and ffmpeg_proc.poll() is not None
+                            and not ffmpeg_restarted
+                        ):
+                            logger.error(
+                                "ffmpeg died mid-recording (pid=%s exit=%s); restarting once",
+                                ffmpeg_proc.pid, ffmpeg_proc.returncode,
+                            )
+                            new_proc = _start_ffmpeg(audio_path, pulse_sink)
+                            if new_proc is not None:
+                                ffmpeg_proc = new_proc
+                                logger.info("ffmpeg restarted (pid=%s)", new_proc.pid)
+                            else:
+                                logger.error("ffmpeg restart failed; leaving recording as-is")
+                            ffmpeg_restarted = True
+
+                        # 2) Silence detection on the tail of the growing WAV.
+                        has_speech, peak = await asyncio.get_event_loop().run_in_executor(
+                            None, _check_audio_has_speech, audio_path,
+                        )
+                        if not has_speech and peak >= 0:
+                            silence_streak += 1
+                            logger.debug(
+                                "Audio watchdog: silent sample %d (peak=%.0f/%d)",
+                                silence_streak, peak, _SILENCE_PEAK_THRESHOLD,
+                            )
+                        else:
+                            if silence_streak:
+                                logger.info(
+                                    "Audio watchdog: speech detected (peak=%.0f) — streak reset",
+                                    peak,
+                                )
+                            silence_streak = 0
+
+                        # 3) After ~60 s of continuous silence, remediate.
+                        if silence_streak >= 3:
+                            try:
+                                _si = subprocess.run(
+                                    ["pactl", "list", "short", "sink-inputs"],
+                                    capture_output=True, text=True, timeout=5,
+                                )
+                                _si_count = len([l for l in _si.stdout.splitlines() if l.strip()])
+                            except Exception:
+                                _si_count = -1
+                            logger.warning(
+                                "Audio silence watchdog: no speech for ~%d s "
+                                "(peak=%.0f, sink=%s, mic=%s, ffmpeg_pid=%s alive=%s, "
+                                "sink-inputs=%d) — forcing routing + WebRTC re-connect",
+                                silence_streak * 20, peak, pulse_sink, pulse_mic,
+                                ffmpeg_proc.pid if ffmpeg_proc else None,
+                                (ffmpeg_proc.poll() is None) if ffmpeg_proc else False,
+                                _si_count,
+                            )
+                            await asyncio.get_event_loop().run_in_executor(
+                                None,
+                                functools.partial(
+                                    _sync_chrome_audio_routing,
+                                    pulse_sink, pulse_mic, pulse_source_name,
+                                ),
+                            )
+                            _wc = await _force_connect_webrtc_audio(page)
+                            if _wc:
+                                logger.info(
+                                    "Audio watchdog remediation: state=%s newly=%s",
+                                    _wc.get("state"), _wc.get("newly"),
+                                )
+                            # Reset streak so we don't remediate every tick.
+                            silence_streak = 0
+                    except Exception as exc:
+                        logger.debug("Audio health watchdog tick failed: %s", exc)
+
+                    await asyncio.sleep(20)
+
+            asyncio.create_task(_audio_health_watchdog())
 
             # Enable live captions so the mention monitor can read them
             if respond_on_mention:

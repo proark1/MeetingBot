@@ -4,7 +4,18 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.34.1 — **Last updated:** 2026-04-16
+> **Latest version:** 2.34.2 — **Last updated:** 2026-04-17
+
+---
+
+## [2.34.2] - 2026-04-17
+
+### Fixed
+- **"Transcription returned no content / No audio was captured" on long calls** — the one-shot WebRTC force-connect ramp shipped in 2.34.1 stopped at ~60 s, so any PeerJS / RTCPeerConnection established later (late joiners, renegotiations on onepizza) was never wired into Chrome's `AudioContext.destination` and Chrome stopped rendering that peer's audio to PulseAudio, leaving the null-sink recording silent for the remainder of the meeting. Three changes in `backend/app/services/browser_bot.py`:
+  - **Continuous routing + force-connect loop** — `_late_routing_syncs()` now keeps `_sync_chrome_audio_routing()` and `_force_connect_webrtc_audio()` running every 15 s for the entire meeting, not just the first 60 s. Repeat passes log at DEBUG unless they actually moved sink-inputs or connected new tracks, so log volume is unchanged in the healthy case
+  - **Audio-health watchdog** — new `_audio_health_watchdog()` task samples the tail of the growing WAV every 20 s (reusing `transcription_service._check_audio_has_speech` / `_SILENCE_PEAK_THRESHOLD`). After ~60 s of continuous silence it logs the current PulseAudio sink-input count + ffmpeg pid/liveness and triggers an out-of-band routing + WebRTC re-connect pass. Diagnostic-only — the meeting is not failed from the watchdog
+  - **One-shot ffmpeg restart** — if the ffmpeg recorder dies mid-meeting (pipe break, PulseAudio hiccup) the watchdog restarts it exactly once against the same WAV path, so a transient failure no longer produces a zero-byte recording
+- **Chromium AudioContext occasionally stuck in 'suspended'** — the init script in `browser_bot.py` now runs a 2 s `setInterval` that calls `_mbAudioCtx.resume()` whenever the context is not `running`. A suspended AudioContext silently drops all graph output, which manifested identically to the WebRTC-not-connected bug
 
 ---
 
