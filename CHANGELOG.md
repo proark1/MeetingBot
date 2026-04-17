@@ -4,7 +4,31 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.38.0 — **Last updated:** 2026-04-17
+> **Latest version:** 2.39.0 — **Last updated:** 2026-04-17
+
+---
+
+## [2.39.0] - 2026-04-17
+
+### Fixed
+- **onepizza: silent recordings — definitive fix by bypassing PulseAudio entirely** (industry-standard Recall.ai pattern). The v2.38.0 swap from AudioContext → hidden `<audio autoplay>` element produced the expected page-side state (`audio_sinks: [{paused:false, readyState:4, currentTime: advancing}]`, WebRTC `total_audio_energy` climbing 0.10 → 3.55 over 60 s), but ffmpeg STILL recorded `peak_amp:0` and `audio_health` logged `SILENT` every 15 s. Both AudioContext and HTMLMediaElement output paths produce silence to PulseAudio in headless+Xvfb Chromium for remote WebRTC streams — the issue is below the JS layer, in Chrome's audio renderer / Xvfb interaction.
+- **Fix in `backend/app/services/browser_bot.py`**: capture audio inside the page using `MediaRecorder` on the remote `MediaStream`, ship encoded chunks back to Python via Playwright `expose_function`, write them to disk, then ffmpeg-decode at end-of-meeting and use the resulting WAV as the source-of-truth recording. This is the documented Recall.ai approach (*"access a MediaStream object and its audio track from the webpage running inside the bot, and get samples of the meeting audio"*) and bypasses Chrome's audio output device, the `--use-fake-device-for-media-stream` debate, the AudioContext-on-remote-stream Chromium bug, the `<audio autoplay>` autoplay-policy debate, and the entire PulseAudio routing pipeline.
+
+### Added
+- **In-page MediaRecorder**: a new `_mbStartOrUpdateRecorder()` block in the audio-attach init script. When the first remote audio track arrives, creates a shared `MediaStream`, picks the best supported mime (`audio/webm;codecs=opus` → `audio/webm` → `audio/ogg;codecs=opus` → default), starts MediaRecorder at 64 kbps with `start(2000)` (2 s chunks), and on `ondataavailable` base64-encodes the blob and calls back to Python via `window._mbOnAudioBlob(b64, seq, size)`. If a second remote audio track appears mid-call, the recorder is stopped and restarted on the combined stream. Stop entry point exposed as `window._mbStopAudioRecorder()` so Python can flush the last chunk before tearing down.
+- **`page.expose_function('_mbOnAudioBlob', ...)`** registered on the BrowserContext. Receives `(b64, seq, size)`, base64-decodes, appends to `{audio_path}.remote.webm`. Logs `remote-audio: first MediaRecorder chunk received seq=N size=M` on first chunk and a counter every 15 chunks.
+- **Post-meeting WebM → WAV decode + swap** in the cleanup `finally` block: stops the recorder via `page.evaluate(window._mbStopAudioRecorder)`, sleeps 1.5 s for the final flush, closes the file, then runs `ffmpeg -i {webm} -ac 1 -ar 16000 -acodec pcm_s16le {wav}`. Peak-amplitude probes the result; if `peak ≥ 200/32767` it `os.replace`s the silent PulseAudio WAV with the MediaRecorder-derived one. Logs:
+  - `remote-audio: ✓ MediaRecorder WAV adopted as recording (peak=NNNN/32767, replaced PulseAudio WAV)` — success
+  - `remote-audio: MediaRecorder WAV has peak=N/32767 (<200), KEEPING PulseAudio WAV` — both silent
+  - `remote-audio: no MediaRecorder data captured (webm size=N)` — recorder never produced data
+- **Safety**: the PulseAudio path is preserved as a fallback. Other platforms (Meet, Zoom, Teams) where PulseAudio capture historically worked aren't disturbed — the WAV is only swapped when the MediaRecorder-derived file actually has signal.
+
+### JS-side logs added (visible via console_log_tail)
+- `[mb-rec] MediaRecorder started mime=audio/webm;codecs=opus tracks=1`
+- `[mb-rec] restarting recorder to include new track …` (multi-party mid-call)
+- `[mb-rec] start failed: …` (MediaRecorder API problem)
+- `[mb-rec] callback failed: …` (expose_function mismatch)
+- `[mb-rec] recorder stopped state=…` (clean shutdown)
 
 ---
 

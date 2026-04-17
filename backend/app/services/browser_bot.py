@@ -4267,6 +4267,57 @@ async def run_browser_bot(
             timezone_id="America/New_York",
         )
 
+        # ── MediaRecorder bypass: receive WebM/Opus audio chunks from the
+        # page (2.39.0). The init script below runs MediaRecorder on every
+        # remote MediaStream and pumps base64-encoded chunks to this
+        # callback, which we append to {audio_path}.remote.webm. After the
+        # meeting ends we ffmpeg-decode that file to PCM wav and use it as
+        # the source-of-truth recording — bypassing the PulseAudio output
+        # path entirely (which produces silence in headless+Xvfb Chromium
+        # for remote WebRTC audio; see 2.38.0 changelog and prod logs).
+        webm_path = audio_path + ".remote.webm"
+        webm_state = {
+            "fh": None,
+            "bytes": 0,
+            "chunks": 0,
+            "first_log_done": False,
+        }
+        try:
+            webm_state["fh"] = open(webm_path, "wb")
+        except Exception as e:
+            logger.warning("Could not open remote-audio webm sink %s: %s", webm_path, e)
+
+        async def _on_audio_blob(b64: str, seq: int = 0, blob_size: int = 0) -> None:
+            try:
+                if not webm_state["fh"]:
+                    return
+                import base64 as _b64
+                raw = _b64.b64decode(b64) if b64 else b""
+                if not raw:
+                    return
+                webm_state["fh"].write(raw)
+                webm_state["fh"].flush()
+                webm_state["bytes"] += len(raw)
+                webm_state["chunks"] += 1
+                if not webm_state["first_log_done"]:
+                    logger.info(
+                        "remote-audio: first MediaRecorder chunk received seq=%d size=%d → %s",
+                        seq, len(raw), webm_path,
+                    )
+                    webm_state["first_log_done"] = True
+                elif webm_state["chunks"] % 15 == 0:
+                    logger.info(
+                        "remote-audio: %d chunks received, %d bytes total → %s",
+                        webm_state["chunks"], webm_state["bytes"], webm_path,
+                    )
+            except Exception as exc:
+                logger.debug("_on_audio_blob failed: %s", exc)
+
+        try:
+            await ctx.expose_function("_mbOnAudioBlob", _on_audio_blob)
+        except Exception as e:
+            logger.warning("Failed to expose _mbOnAudioBlob: %s", e)
+
         # Intercept RTCPeerConnection at the page level (before the meeting app
         # initialises its WebRTC) so that every incoming audio track is
         # explicitly attached to a hidden <audio autoplay> element.
@@ -4333,6 +4384,9 @@ async def run_browser_bot(
                         el.srcObject = s;
                         container.appendChild(el);
                         window._mbConnectedTracks.add(track);
+                        // Also tap this track for our MediaRecorder bypass
+                        // (2.39.0). Idempotent — safe to call repeatedly.
+                        try { _mbAddTrackToRecorder(track); } catch (e) {}
                         window._mbAudioSinks.push({
                             trackId: track.id,
                             trackLabel: track.label || '',
@@ -4374,6 +4428,113 @@ async def run_browser_bot(
                     }
                 }
                 window._mbAttachAudioTrack = attachAudioTrack;
+
+                // ── MediaRecorder bypass (2.39.0) ─────────────────────────
+                // The HTMLMediaElement / AudioContext paths both produce
+                // silence to PulseAudio in headless+Xvfb Chromium for
+                // remote WebRTC audio (confirmed in 2.38.0 prod logs:
+                // <audio> playing, currentTime advancing, total_audio_energy
+                // > 0 — yet ffmpeg records zeros). Industry-standard
+                // workaround (per Recall.ai docs): grab the MediaStream
+                // INSIDE the page using MediaRecorder and ship encoded
+                // chunks back to the Python process via expose_function.
+                // Bypasses the entire audio output device path.
+                window._mbAudioRecorder = null;
+                window._mbAudioRecorderTracks = new Set();   // track ids already in the recorder
+                window._mbAudioMixedStream = null;            // shared MediaStream all remote audio tracks join
+                window._mbAudioRecorderChunkSeq = 0;
+
+                function _mbStartOrUpdateRecorder() {
+                    try {
+                        if (!window.MediaRecorder) {
+                            console.warn('[mb-rec] MediaRecorder unavailable in this Chromium build');
+                            return;
+                        }
+                        if (window._mbAudioRecorder && window._mbAudioRecorder.state === 'recording') return;
+                        if (!window._mbAudioMixedStream || window._mbAudioMixedStream.getAudioTracks().length === 0) return;
+                        var mimeCandidates = [
+                            'audio/webm;codecs=opus',
+                            'audio/webm',
+                            'audio/ogg;codecs=opus',
+                            ''
+                        ];
+                        var chosenMime = '';
+                        for (var i = 0; i < mimeCandidates.length; i++) {
+                            var m = mimeCandidates[i];
+                            if (m === '' || (window.MediaRecorder.isTypeSupported && window.MediaRecorder.isTypeSupported(m))) {
+                                chosenMime = m;
+                                break;
+                            }
+                        }
+                        var opts = chosenMime ? { mimeType: chosenMime, audioBitsPerSecond: 64000 } : { audioBitsPerSecond: 64000 };
+                        var mr = new MediaRecorder(window._mbAudioMixedStream, opts);
+                        mr.ondataavailable = function (e) {
+                            if (!e.data || !e.data.size) return;
+                            try {
+                                var fr = new FileReader();
+                                fr.onload = function () {
+                                    try {
+                                        var s = String(fr.result || '');
+                                        var idx = s.indexOf(',');
+                                        var b64 = idx >= 0 ? s.substring(idx + 1) : s;
+                                        if (typeof window._mbOnAudioBlob === 'function') {
+                                            window._mbOnAudioBlob(b64, ++window._mbAudioRecorderChunkSeq, e.data.size);
+                                        }
+                                    } catch (err) {
+                                        console.warn('[mb-rec] callback failed:', err);
+                                    }
+                                };
+                                fr.readAsDataURL(e.data);
+                            } catch (err) {
+                                console.warn('[mb-rec] dataavailable handler failed:', err);
+                            }
+                        };
+                        mr.onerror = function (e) { console.warn('[mb-rec] recorder error:', e && e.error); };
+                        mr.onstop  = function ()  { console.log('[mb-rec] recorder stopped state=' + mr.state); };
+                        mr.start(2000);   // 2 s chunks — small enough to feed live, large enough to keep webm container valid
+                        window._mbAudioRecorder = mr;
+                        console.log('[mb-rec] MediaRecorder started mime=' + (chosenMime || '<default>') + ' tracks=' + window._mbAudioMixedStream.getAudioTracks().length);
+                    } catch (err) {
+                        console.warn('[mb-rec] start failed:', err);
+                    }
+                }
+
+                function _mbAddTrackToRecorder(track) {
+                    if (!track || track.kind !== 'audio') return;
+                    if (window._mbAudioRecorderTracks.has(track.id)) return;
+                    window._mbAudioRecorderTracks.add(track.id);
+                    try {
+                        if (!window._mbAudioMixedStream) {
+                            window._mbAudioMixedStream = new MediaStream();
+                        }
+                        window._mbAudioMixedStream.addTrack(track);
+                    } catch (e) {
+                        console.warn('[mb-rec] addTrack failed:', e);
+                    }
+                    // Note: MediaRecorder does NOT pick up tracks added after
+                    // start() across all Chromium versions. If a SECOND
+                    // remote audio track appears mid-call, restart the
+                    // recorder so the new track is included. Multi-party
+                    // mid-call new joins are rare in onepizza/Meet/Zoom
+                    // bot use-cases.
+                    if (window._mbAudioRecorder && window._mbAudioRecorder.state === 'recording') {
+                        try {
+                            console.log('[mb-rec] restarting recorder to include new track ' + track.id);
+                            window._mbAudioRecorder.stop();
+                        } catch (e) {}
+                        window._mbAudioRecorder = null;
+                    }
+                    _mbStartOrUpdateRecorder();
+                }
+
+                window._mbStopAudioRecorder = function () {
+                    try {
+                        if (window._mbAudioRecorder && window._mbAudioRecorder.state === 'recording') {
+                            window._mbAudioRecorder.stop();
+                        }
+                    } catch (e) {}
+                };
+                window._mbAddTrackToRecorder = _mbAddTrackToRecorder;
 
                 function scanReceivers(pc) {
                     if (!pc || !pc.getReceivers) return 0;
@@ -5421,7 +5582,89 @@ async def run_browser_bot(
                 health_stop_event.set()
                 with contextlib.suppress(asyncio.CancelledError, Exception):
                     await asyncio.wait_for(health_task, timeout=5)
+            # ── Flush MediaRecorder so the last 2 s chunk lands before
+            # browser.close() kills the page. The expose_function callback
+            # is invoked synchronously by Chromium → Playwright → us, so
+            # giving it ~1.5 s after stop() is enough for the final
+            # ondataavailable to flush.
+            try:
+                await page.evaluate("() => { try { window._mbStopAudioRecorder && window._mbStopAudioRecorder(); } catch(e){} }")
+                await asyncio.sleep(1.5)
+            except Exception as _e:
+                logger.debug("MediaRecorder stop call failed: %s", _e)
             await browser.close()
+            # Close the webm sink (after browser close so any in-flight
+            # callbacks have already returned).
+            try:
+                if webm_state["fh"]:
+                    webm_state["fh"].close()
+                    webm_state["fh"] = None
+            except Exception:
+                pass
+            # ── Decode browser-captured WebM → 16 kHz mono WAV and use it
+            # as the source-of-truth recording. Only swap if the decoded
+            # file actually has signal — otherwise leave the PulseAudio
+            # WAV in place so platforms where PulseAudio works (Meet/Zoom
+            # historically) aren't disturbed.
+            try:
+                webm_size = os.path.getsize(webm_path) if os.path.exists(webm_path) else 0
+                if webm_size > 4096:
+                    webm_wav_path = audio_path + ".remote.wav"
+                    logger.info(
+                        "remote-audio: decoding %d-byte webm → wav (%s)",
+                        webm_size, webm_wav_path,
+                    )
+                    decode = subprocess.run(
+                        [
+                            "ffmpeg", "-y",
+                            "-i", webm_path,
+                            "-ac", "1",
+                            "-ar", "16000",
+                            "-acodec", "pcm_s16le",
+                            webm_wav_path,
+                        ],
+                        capture_output=True, text=True, timeout=120,
+                    )
+                    if decode.returncode == 0 and os.path.exists(webm_wav_path) and os.path.getsize(webm_wav_path) > 1024:
+                        # Peak-amplitude probe on decoded wav.
+                        peak = 0
+                        try:
+                            with open(webm_wav_path, "rb") as _f:
+                                _f.seek(44)   # skip header
+                                _data = _f.read()
+                            if _data:
+                                import array as _array
+                                _a = _array.array('h')
+                                _a.frombytes(_data[: (len(_data) // 2) * 2])
+                                peak = max((abs(x) for x in _a), default=0)
+                        except Exception as _pe:
+                            logger.debug("decoded-wav peak probe failed: %s", _pe)
+                        if peak >= 200:
+                            try:
+                                os.replace(webm_wav_path, audio_path)
+                                logger.info(
+                                    "remote-audio: ✓ MediaRecorder WAV adopted as recording (peak=%d/32767, replaced PulseAudio WAV)",
+                                    peak,
+                                )
+                            except Exception as _re:
+                                logger.warning("remote-audio: could not replace PulseAudio WAV: %s", _re)
+                        else:
+                            logger.warning(
+                                "remote-audio: MediaRecorder WAV has peak=%d/32767 (<200), KEEPING PulseAudio WAV — webm path may also be silent",
+                                peak,
+                            )
+                    else:
+                        logger.warning(
+                            "remote-audio: ffmpeg webm→wav decode failed (rc=%d): %s",
+                            decode.returncode, (decode.stderr or "")[-500:],
+                        )
+                else:
+                    logger.info(
+                        "remote-audio: no MediaRecorder data captured (webm size=%d) — falling back to PulseAudio WAV",
+                        webm_size,
+                    )
+            except Exception as _de:
+                logger.warning("remote-audio: post-meeting decode/swap failed: %s", _de)
             if ffmpeg_video_proc:
                 _stop_ffmpeg(ffmpeg_video_proc)
             if ffmpeg_proc:
