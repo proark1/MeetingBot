@@ -4,7 +4,19 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.35.0 — **Last updated:** 2026-04-17
+> **Latest version:** 2.35.1 — **Last updated:** 2026-04-17
+
+---
+
+## [2.35.1] - 2026-04-17
+
+### Fixed
+- **onepizza.io: empty transcript because Chrome produced no audio at all** — root cause confirmed via `/api/v1/bot/{id}/debug` data shipped in 2.35.0. Throughout a 3 m 50 s onepizza call, `audio_health_samples` showed `sink_inputs_total: 0` at 7 of 8 samples and `pactl_dumps.pre_leave` showed the bot's null sink **SUSPENDED** with zero sink-inputs. Chrome was never emitting *any* audio to PulseAudio — previous 2.34.1/2.34.2 fixes were routing a stream that didn't exist. The `console_log_tail` captured the real reason: `"[warning] Camera/mic access: NotFoundError Requested device not found"`. onepizza's WebRTC join flow calls `getUserMedia({video: true, audio: true})`; the bot container has no camera, Chrome throws `NotFoundError` for the whole constraint, onepizza's JS aborts its peer-connection setup and never receives remote audio.
+- **Fix in `backend/app/services/browser_bot.py`** — injected a second init script that patches `navigator.mediaDevices.getUserMedia` to retry with a synthetic fallback when the original call fails with `NotFoundError` / `NotReadableError` / `OverconstrainedError`. The fallback:
+  - keeps the real audio track (via the existing PulseAudio `module-virtual-source` virtual mic) so TTS still works
+  - provides a 640×480 15 fps black `canvas.captureStream()` video track when the camera is missing, so the meeting UI sees a working MediaStream
+  - also patches `enumerateDevices()` to always report at least one `videoinput` and `audioinput` entry, so meeting clients that probe devices before calling `getUserMedia` proceed through the join path
+- Other platforms (Google Meet, Zoom, Teams) already handle the missing-camera case themselves, so the shim only activates on failure and is a no-op in the healthy path — no regression risk there
 
 ---
 

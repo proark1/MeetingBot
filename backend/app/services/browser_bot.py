@@ -4226,6 +4226,142 @@ async def run_browser_bot(
             })();
         """)
 
+        # ── getUserMedia fallback shim ──────────────────────────────────────
+        # The bot container has no camera — only the PulseAudio virtual mic.
+        # Meeting platforms that request `getUserMedia({video:true, audio:true})`
+        # (notably onepizza.io) throw NotFoundError for the whole call when the
+        # camera is missing, which bails out their WebRTC setup and means no
+        # remote audio is ever rendered — the null-sink monitor then records
+        # 3+ minutes of pure silence (sink_inputs_total stays at 0 for the
+        # entire call — confirmed via /bot/{id}/debug on 2026-04-17).
+        #
+        # This shim retries a failed getUserMedia call with a synthetic
+        # canvas-captured video track + whatever audio the real device can
+        # produce, so meeting JS sees a working MediaStream and proceeds
+        # through its join flow. The synthetic video track is 640x480 black
+        # at 15 fps — invisible to other participants who see it as an
+        # off-camera tile, exactly what we want for a listen-only bot.
+        await ctx.add_init_script("""
+            (function () {
+                if (window._mbGumPatched) return;
+                if (!navigator || !navigator.mediaDevices) return;
+                window._mbGumPatched = true;
+
+                function _mbSyntheticVideoTrack() {
+                    try {
+                        var canvas = document.createElement('canvas');
+                        canvas.width = 640; canvas.height = 480;
+                        var ctx2d = canvas.getContext('2d');
+                        // Draw once so captureStream has a frame to emit.
+                        ctx2d.fillStyle = '#000';
+                        ctx2d.fillRect(0, 0, canvas.width, canvas.height);
+                        // Nudge the canvas every second so captureStream keeps
+                        // emitting frames even on implementations that stop
+                        // when the content is static.
+                        var i = 0;
+                        setInterval(function () {
+                            i = (i + 1) % 2;
+                            ctx2d.fillStyle = i ? '#000' : '#010101';
+                            ctx2d.fillRect(0, 0, 1, 1);
+                        }, 1000);
+                        var stream = canvas.captureStream ? canvas.captureStream(15) : null;
+                        if (!stream) return null;
+                        var tracks = stream.getVideoTracks();
+                        return tracks && tracks.length ? tracks[0] : null;
+                    } catch (e) {
+                        return null;
+                    }
+                }
+
+                function _mbSilentAudioTrack() {
+                    try {
+                        var AC = window.AudioContext || window.webkitAudioContext;
+                        if (!AC) return null;
+                        var ac = new AC();
+                        var dest = ac.createMediaStreamDestination();
+                        // Near-zero-amplitude oscillator keeps the track live
+                        // without producing audible sound to other peers.
+                        var osc = ac.createOscillator();
+                        var gain = ac.createGain();
+                        gain.gain.value = 0.0001;
+                        osc.frequency.value = 440;
+                        osc.connect(gain); gain.connect(dest);
+                        osc.start();
+                        var tracks = dest.stream.getAudioTracks();
+                        return tracks && tracks.length ? tracks[0] : null;
+                    } catch (e) {
+                        return null;
+                    }
+                }
+
+                var _origGum = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+                navigator.mediaDevices.getUserMedia = async function (constraints) {
+                    try {
+                        return await _origGum(constraints);
+                    } catch (err) {
+                        var name = err && err.name;
+                        if (name !== 'NotFoundError' && name !== 'NotReadableError' && name !== 'OverconstrainedError') {
+                            throw err;
+                        }
+                        console.warn('[mb-gum] original getUserMedia failed with', name, '— retrying with synthetic fallback');
+                        var want = constraints || {};
+                        var tracks = [];
+
+                        // Try real audio first (via PulseAudio virtual source).
+                        if (want.audio) {
+                            try {
+                                var aOnly = await _origGum({ audio: want.audio });
+                                aOnly.getAudioTracks().forEach(function(t){ tracks.push(t); });
+                            } catch (e2) {
+                                var fake = _mbSilentAudioTrack();
+                                if (fake) tracks.push(fake);
+                            }
+                        }
+
+                        // Try real video, otherwise synthetic canvas track.
+                        if (want.video) {
+                            try {
+                                var vOnly = await _origGum({ video: want.video });
+                                vOnly.getVideoTracks().forEach(function(t){ tracks.push(t); });
+                            } catch (e3) {
+                                var fv = _mbSyntheticVideoTrack();
+                                if (fv) tracks.push(fv);
+                            }
+                        }
+
+                        if (tracks.length === 0) {
+                            // Nothing we could synthesise — rethrow so the app
+                            // knows it truly has no media.
+                            throw err;
+                        }
+                        return new MediaStream(tracks);
+                    }
+                };
+
+                // Some apps probe enumerateDevices() and bail out before even
+                // calling getUserMedia. Ensure at least one videoinput /
+                // audioinput entry is always reported so that path works too.
+                var _origEnum = navigator.mediaDevices.enumerateDevices
+                    ? navigator.mediaDevices.enumerateDevices.bind(navigator.mediaDevices)
+                    : null;
+                if (_origEnum) {
+                    navigator.mediaDevices.enumerateDevices = async function () {
+                        var devs = [];
+                        try { devs = await _origEnum(); } catch (e) { devs = []; }
+                        var hasVideo = devs.some(function (d) { return d.kind === 'videoinput'; });
+                        var hasAudio = devs.some(function (d) { return d.kind === 'audioinput'; });
+                        if (!hasVideo) {
+                            devs.push({ kind: 'videoinput', deviceId: 'mb-fake-cam', groupId: 'mb', label: 'MeetingBot Virtual Camera', toJSON: function(){ return this; } });
+                        }
+                        if (!hasAudio) {
+                            devs.push({ kind: 'audioinput', deviceId: 'mb-fake-mic', groupId: 'mb', label: 'MeetingBot Virtual Mic', toJSON: function(){ return this; } });
+                        }
+                        return devs;
+                    };
+                }
+            })();
+        """)
+
         page = await ctx.new_page()
         await _apply_stealth(page)
 
