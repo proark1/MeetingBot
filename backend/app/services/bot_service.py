@@ -1,6 +1,7 @@
 """Bot lifecycle management — drives a real browser bot through a meeting."""
 
 import asyncio
+import json
 import logging
 import os
 import re as _re
@@ -274,6 +275,7 @@ async def _set_status(bot: BotSession, status: str, **kwargs) -> None:
             "account_id":       bot.account_id,
             "ts":               _now().isoformat(),
         },
+        extra_webhook_url=bot.webhook_url,
         account_id=bot.account_id,
     )
 
@@ -309,7 +311,7 @@ async def _transcribe_audio_for_bot(bot: BotSession, audio_path: str) -> list:
             logger.warning("Bot %s: Whisper failed (%s) — falling back to Gemini", bot.id, exc)
 
     # Default / fallback: Gemini transcription
-    return await transcribe_audio(audio_path)
+    return await transcribe_audio(audio_path, bot_id=bot.id)
 
 
 async def _do_analysis(bot: BotSession, audio_path: str, use_real_bot: bool, video_path: Optional[str] = None) -> None:
@@ -325,6 +327,32 @@ async def _do_analysis(bot: BotSession, audio_path: str, use_real_bot: bool, vid
         _analysis_in_flight.discard(bot.id)
 
 
+def _build_transcription_diag(bot: BotSession, audio_path: str) -> str:
+    """Serialise a compact diagnostic bundle for transcription failure messages.
+
+    Read by the dashboard and included in webhook error payloads so operators
+    can triage "no audio captured" failures without digging through server logs.
+    """
+    try:
+        samples = list(getattr(bot, "audio_health_samples", None) or [])
+        diag = {
+            "audio_size": os.path.getsize(audio_path) if os.path.exists(audio_path) else 0,
+            "peak_amp": getattr(bot, "audio_peak_amplitude", None),
+            "ffmpeg_exit": getattr(bot, "ffmpeg_exit_code", None),
+            "ffmpeg_stderr_tail": (getattr(bot, "ffmpeg_stderr_tail", None) or "")[-500:] or None,
+            "max_sink_inputs_on_target": max(
+                (s.get("sink_inputs_on_target", 0) for s in samples), default=0,
+            ),
+            "last_size_delta": (samples[-1].get("size_delta") if samples else None),
+            "gemini_finish_reason": getattr(bot, "last_gemini_finish_reason", None),
+            "gemini_safety": getattr(bot, "last_gemini_safety_blocks", None) or None,
+            "debug_url": f"/api/v1/bot/{bot.id}/debug",
+        }
+        return json.dumps(diag, default=str)
+    except Exception:
+        return "{}"
+
+
 async def _do_analysis_inner(bot: BotSession, audio_path: str, use_real_bot: bool, video_path: Optional[str] = None) -> None:
     """Inner implementation of _do_analysis (called after in-flight guard check)."""
     # ── transcript ─────────────────────────────────────────────────────────
@@ -336,12 +364,18 @@ async def _do_analysis_inner(bot: BotSession, audio_path: str, use_real_bot: boo
             transcript = await _transcribe_audio_for_bot(bot, audio_path)
 
         if not transcript:
-            logger.warning("Bot %s: no usable audio captured — transcript will be empty", bot.id)
+            # Re-fetch so diagnostic fields populated after we snapshotted `bot` are visible.
+            _fresh = await store.get_bot(bot.id) or bot
+            diag = _build_transcription_diag(_fresh, audio_path)
+            logger.warning(
+                "Bot %s: no usable audio captured — transcript will be empty. diag=%s",
+                bot.id, diag,
+            )
             current = bot.error_message or ""
             await store.update_bot(
                 bot.id,
                 transcript=[],
-                error_message=current + " No audio was captured or transcription returned no content.",
+                error_message=current + f" No audio was captured or transcription returned no content. diag={diag}",
             )
         else:
             # ── Consent processing ────────────────────────────────────────
@@ -394,6 +428,7 @@ async def _do_analysis_inner(bot: BotSession, audio_path: str, use_real_bot: boo
         await webhook_service.dispatch_event(
             "bot.transcript_ready",
             {"bot_id": bot.id, "account_id": bot.account_id, "entry_count": len(transcript)},
+            extra_webhook_url=bot.webhook_url,
             account_id=bot.account_id,
         )
 
@@ -532,12 +567,18 @@ async def _do_analysis_inner(bot: BotSession, audio_path: str, use_real_bot: boo
                         "quiet_participants": quiet_participants,
                         "health_score": health_score,
                     },
+                    extra_webhook_url=bot.webhook_url,
                     account_id=bot.account_id,
                 )
             except Exception as exc:
                 logger.debug("Bot %s: coaching_summary dispatch failed: %s", bot.id, exc)
 
-        await webhook_service.dispatch_event("bot.analysis_ready", {"bot_id": bot.id, "account_id": bot.account_id}, account_id=bot.account_id)
+        await webhook_service.dispatch_event(
+            "bot.analysis_ready",
+            {"bot_id": bot.id, "account_id": bot.account_id},
+            extra_webhook_url=bot.webhook_url,
+            account_id=bot.account_id,
+        )
 
         # ── Keyword alert scanning ────────────────────────────────────────
         try:
@@ -711,6 +752,7 @@ async def _post_completion_notifications(account_id: str, bot_data: dict, bot=No
                     await webhook_service.dispatch_event(
                         "bot.recurring_intel_ready",
                         {"bot_id": bot.id, "account_id": account_id, "recurring_intel": intel},
+                        extra_webhook_url=bot.webhook_url,
                         account_id=account_id,
                     )
                     logger.info("Bot %s: recurring intelligence generated", bot.id)
@@ -789,12 +831,34 @@ async def run_bot_lifecycle(bot_id: str) -> None:
                     buf_len = len(_live_buffer)
                     should_flush = buf_len >= 10 or time.monotonic() - _last_flush >= 30
 
-                # Broadcast raw live transcript
+                # Voice entries → bot.live_transcript; chat entries → bot.live_chat_message
+                _is_chat = entry.get("source") == "chat"
+                _event_name = "bot.live_chat_message" if _is_chat else "bot.live_transcript"
+
+                # Broadcast raw live transcript / chat message
                 await ws_manager.broadcast(
-                    "bot.live_transcript",
+                    _event_name,
                     {"bot_id": bot_id, "account_id": bot.account_id, "entry": entry},
                     account_id=bot.account_id,
                 )
+
+                # Fan out chat messages to webhook subscribers. Voice entries
+                # are broadcast over WebSocket and SSE only (high-volume); chat
+                # messages are low-volume and valuable for integrations.
+                if _is_chat:
+                    try:
+                        await webhook_service.dispatch_event(
+                            "bot.live_chat_message",
+                            {
+                                "bot_id": bot_id,
+                                "account_id": bot.account_id,
+                                "entry": entry,
+                            },
+                            extra_webhook_url=bot.webhook_url,
+                            account_id=bot.account_id,
+                        )
+                    except Exception as exc:
+                        logger.debug("Bot %s: live chat webhook dispatch failed: %s", bot_id, exc)
 
                 # Push to SSE subscribers
                 try:
@@ -857,6 +921,7 @@ async def run_bot_lifecycle(bot_id: str) -> None:
                                             "speaker": spkr,
                                             "pct": round(pct * 100, 1),
                                         },
+                                        extra_webhook_url=bot.webhook_url,
                                         account_id=bot.account_id,
                                     )
                                     logger.info(
@@ -898,6 +963,20 @@ async def run_bot_lifecycle(bot_id: str) -> None:
                     _leave_event = asyncio.Event()
                     await store.update_bot(bot_id, leave_event=_leave_event)
 
+                async def on_runtime_ready(runtime: Optional[dict]) -> None:
+                    """Store/clear the live-interaction runtime handle on the BotSession.
+
+                    Attaches the ``on_live_entry`` callback so the API endpoints
+                    (/say, /chat) can push bot-generated entries through the
+                    same WS / SSE / webhook / DB pipeline voice entries use.
+                    """
+                    try:
+                        if runtime is not None:
+                            runtime["emit_entry"] = on_live_entry
+                        await store.update_bot(bot_id, runtime=runtime)
+                    except Exception as exc:
+                        logger.debug("Bot %s: runtime registration failed: %s", bot_id, exc)
+
                 bot_result = await run_browser_bot(
                     meeting_url=bot.meeting_url,
                     platform=bot.meeting_platform,
@@ -919,6 +998,9 @@ async def run_bot_lifecycle(bot_id: str) -> None:
                     external_leave_event=_leave_event,
                     consent_enabled=getattr(bot, "consent_enabled", False),
                     consent_message=getattr(bot, "consent_message", None),
+                    on_runtime_ready=on_runtime_ready,
+                    seen_chat_ids=bot.seen_chat_ids,
+                    bot_id=bot.id,
                 )
 
                 if bot_result["success"]:
@@ -965,6 +1047,7 @@ async def run_bot_lifecycle(bot_id: str) -> None:
                             audio_path,
                             known_participants=scraped_participants,
                             language=settings.TRANSCRIPTION_LANGUAGE or None,
+                            bot_id=bot_id,
                         )
                 else:
                     logger.warning("Bot %s: Whisper not available — using Gemini", bot_id)
@@ -972,12 +1055,14 @@ async def run_bot_lifecycle(bot_id: str) -> None:
                         audio_path,
                         known_participants=scraped_participants,
                         language=settings.TRANSCRIPTION_LANGUAGE or None,
+                        bot_id=bot_id,
                     )
             else:
                 transcript = await transcribe_audio(
                     audio_path,
                     known_participants=scraped_participants,
                     language=settings.TRANSCRIPTION_LANGUAGE or None,
+                    bot_id=bot_id,
                 )
 
             if live_transcript_entries:
@@ -991,11 +1076,15 @@ async def run_bot_lifecycle(bot_id: str) -> None:
                         transcript = sorted(transcript + extra, key=lambda e: e.get("timestamp", 0))
 
             if not transcript:
-                logger.warning("Bot %s: Gemini returned empty transcript", bot_id)
+                _fresh = await store.get_bot(bot_id) or bot
+                diag = _build_transcription_diag(_fresh, audio_path)
+                logger.warning(
+                    "Bot %s: Gemini returned empty transcript. diag=%s", bot_id, diag,
+                )
                 current = bot.error_message or ""
                 await store.update_bot(
                     bot_id,
-                    error_message=current + " Transcription returned no content.",
+                    error_message=current + f" Transcription returned no content. diag={diag}",
                 )
 
         else:
@@ -1033,6 +1122,7 @@ async def run_bot_lifecycle(bot_id: str) -> None:
         await webhook_service.dispatch_event(
             "bot.transcript_ready",
             {"bot_id": bot_id, "account_id": bot.account_id, "entry_count": len(transcript)},
+            extra_webhook_url=bot.webhook_url,
             account_id=bot.account_id,
         )
 

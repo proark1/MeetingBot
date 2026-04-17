@@ -321,7 +321,12 @@ class BotResponse(BaseModel):
     participants: list[str] = []
     transcript: list[dict[str, Any]] = Field(
         default=[],
-        description="Array of {speaker, text, timestamp} entries. Available once status is `done`.",
+        description=(
+            "Array of `{speaker, text, timestamp, source, message_id?}` entries. "
+            "`source` is `voice` for spoken utterances (default) or `chat` for "
+            "messages captured from the meeting chat panel. `message_id` is a short "
+            "stable hash used internally for chat dedup. Available once status is `done`."
+        ),
     )
     analysis: Optional[MeetingAnalysis] = Field(
         default=None,
@@ -423,3 +428,47 @@ class Highlight(BaseModel):
 class HighlightResponse(BaseModel):
     bot_id: str
     highlights: list[Highlight]
+
+
+# ── Live interaction (POST /say and /chat) ────────────────────────────────────
+
+class SayRequest(BaseModel):
+    """Speak arbitrary text in the live meeting via TTS + virtual microphone."""
+    text: str = Field(min_length=1, max_length=2000, description="Text to speak aloud in the meeting.")
+    voice: Literal["gemini", "edge"] = Field(
+        default="gemini",
+        description=(
+            "TTS provider. `gemini` — Google Gemini TTS (natural, ~1–2 s). "
+            "`edge` — Microsoft Edge TTS (faster, ~300–500 ms, slightly robotic)."
+        ),
+    )
+    interrupt: bool = Field(
+        default=False,
+        description=(
+            "If true and the bot is already speaking, cancel the in-flight speech "
+            "and jump ahead. If false (default) this call queues behind the current speech."
+        ),
+    )
+
+
+class SayResponse(BaseModel):
+    """Acknowledgement returned by POST /say."""
+    bot_id: str
+    task_id: str = Field(description="Opaque id for the queued speak task. Useful for logging.")
+    queued: bool = True
+    interrupted_previous: bool = Field(
+        default=False,
+        description="True when interrupt=true cancelled an already-running speak task.",
+    )
+
+
+class ChatRequest(BaseModel):
+    """Post a message into the live meeting's chat panel."""
+    text: str = Field(min_length=1, max_length=2000, description="Text to post to the meeting chat.")
+
+
+class ChatResponse(BaseModel):
+    """Acknowledgement returned by POST /chat."""
+    bot_id: str
+    task_id: str = Field(description="Opaque id for the queued chat-post task.")
+    queued: bool = True

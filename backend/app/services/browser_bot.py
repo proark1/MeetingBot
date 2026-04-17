@@ -15,12 +15,14 @@ import base64
 import contextlib
 import functools
 import itertools
+import json
 import logging
 import os
 import re
 import struct
 import subprocess
 import time
+from collections import defaultdict, deque
 from pathlib import Path
 from typing import Awaitable, Callable, Optional
 
@@ -418,6 +420,99 @@ def _sync_chrome_audio_routing(
     _move_chrome_source_output(target)
 
 
+_FORCE_CONNECT_JS = """
+    async () => {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) return { state: 'no-AudioContext-API', newly: 0, total: 0 };
+
+        if (!window._mbAudioCtx) {
+            window._mbAudioCtx = new AudioCtx({ latencyHint: 'playback' });
+        }
+        if (!window._mbConnectedTracks) window._mbConnectedTracks = new WeakSet();
+        const ctx = window._mbAudioCtx;
+        try { await ctx.resume(); } catch (e) {}
+
+        const connect = window._mbConnectTrack || function (track, stream) {
+            if (!track || track.kind !== 'audio') return false;
+            if (window._mbConnectedTracks.has(track)) return false;
+            try {
+                const s = stream || new MediaStream([track]);
+                const src = ctx.createMediaStreamSource(s);
+                src.connect(ctx.destination);
+                window._mbConnectedTracks.add(track);
+                return true;
+            } catch (e) { return false; }
+        };
+
+        let newly = 0;
+
+        // 1) Audio/video elements with srcObject
+        document.querySelectorAll('audio, video').forEach(el => {
+            try {
+                if (!el.srcObject) return;
+                el.srcObject.getAudioTracks().forEach(t => { if (connect(t, el.srcObject)) newly++; });
+                if (el.muted) el.muted = false;
+                if (el.volume === 0) el.volume = 1;
+                el.play().catch(() => {});
+            } catch (e) {}
+        });
+
+        // 2) Scan window for RTCPeerConnection wrappers (PeerJS / SimplePeer / direct)
+        const seen = new Set();
+        function scanReceivers(pc) {
+            if (!pc || seen.has(pc) || !pc.getReceivers) return;
+            seen.add(pc);
+            try {
+                pc.getReceivers().forEach(r => {
+                    if (r && r.track && connect(r.track, null)) newly++;
+                });
+            } catch (e) {}
+        }
+        try {
+            for (const k of Object.keys(window)) {
+                let v;
+                try { v = window[k]; } catch (e) { continue; }
+                if (!v || typeof v !== 'object') continue;
+                try {
+                    if (v instanceof RTCPeerConnection) scanReceivers(v);
+                    if (v._pc) scanReceivers(v._pc);
+                    if (v.peerConnection) scanReceivers(v.peerConnection);
+                    if (v.connections && typeof v.connections === 'object') {
+                        for (const conns of Object.values(v.connections)) {
+                            const arr = Array.isArray(conns) ? conns : [conns];
+                            for (const c of arr) {
+                                if (c && c.peerConnection) scanReceivers(c.peerConnection);
+                            }
+                        }
+                    }
+                } catch (e) {}
+            }
+        } catch (e) {}
+
+        // 3) Approximate total: count of items currently in the WeakSet is not
+        // observable; report a derived figure from the per-call newly count.
+        return { state: ctx.state, newly: newly };
+    }
+"""
+
+
+async def _force_connect_webrtc_audio(page) -> dict:
+    """Walk the page's audio/video + RTCPeerConnections and wire any audio tracks
+    not yet connected into the Web Audio destination.
+
+    Idempotent: a WeakSet on `window._mbConnectedTracks` prevents double-connecting
+    the same MediaStreamTrack (which would corrupt audio). Safe to call repeatedly
+    throughout the meeting to catch peers that initialise late.
+
+    Returns a dict like {state: "running", newly: 2} or {} on failure.
+    """
+    try:
+        return await page.evaluate(_FORCE_CONNECT_JS)
+    except Exception as exc:
+        logger.debug("_force_connect_webrtc_audio failed: %s", exc)
+        return {}
+
+
 # ── Xvfb & ffmpeg ─────────────────────────────────────────────────────────────
 
 def _start_xvfb() -> tuple[Optional[subprocess.Popen], str]:
@@ -455,13 +550,28 @@ def _start_xvfb() -> tuple[Optional[subprocess.Popen], str]:
     return None, ":99"
 
 
-def _start_ffmpeg(audio_path: str, pulse_sink: str = PULSE_SINK_NAME) -> Optional[subprocess.Popen]:
+def _start_ffmpeg(
+    audio_path: str,
+    pulse_sink: str = PULSE_SINK_NAME,
+    stderr_log_path: Optional[str] = None,
+) -> Optional[subprocess.Popen]:
     try:
         # Carry PulseAudio server address explicitly so ffmpeg connects to the
         # same server even if XDG_RUNTIME_DIR is not set in the child env.
         pulse_env = {**os.environ}
         rt = os.environ.get("XDG_RUNTIME_DIR", "/tmp/runtime-meetingbot")
         pulse_env.setdefault("PULSE_SERVER", f"unix:{rt}/pulse/native")
+
+        # Capture stderr to a file so we can diagnose "no audio captured"
+        # post-mortem. Silent DEVNULL made every ffmpeg failure invisible.
+        stderr_fh: object
+        if stderr_log_path:
+            try:
+                stderr_fh = open(stderr_log_path, "ab", buffering=0)
+            except Exception:
+                stderr_fh = subprocess.DEVNULL
+        else:
+            stderr_fh = subprocess.DEVNULL
 
         proc = subprocess.Popen(
             [
@@ -471,15 +581,27 @@ def _start_ffmpeg(audio_path: str, pulse_sink: str = PULSE_SINK_NAME) -> Optiona
                 audio_path,
             ],
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=stderr_fh,
             env=pulse_env,
         )
+        # Stash the stderr path so _stop_ffmpeg can append the exit code.
+        try:
+            setattr(proc, "_stderr_log_path", stderr_log_path)
+        except Exception:
+            pass
         time.sleep(0.5)
         if proc.poll() is None:
             _register_proc(proc)
-            logger.info("ffmpeg recording %s → %s", pulse_sink, audio_path)
+            logger.info("ffmpeg recording %s → %s (stderr=%s)", pulse_sink, audio_path, stderr_log_path or "DEVNULL")
             return proc
         logger.warning("ffmpeg exited immediately — PulseAudio sink %s may not be ready", pulse_sink)
+        # Record the immediate exit code so the diag bundle captures it.
+        if stderr_log_path:
+            try:
+                with open(stderr_log_path, "ab") as f:
+                    f.write(f"\n=== IMMEDIATE EXIT {proc.returncode} ===\n".encode())
+            except Exception:
+                pass
         return None
     except FileNotFoundError:
         logger.warning("ffmpeg not found — audio recording disabled")
@@ -497,6 +619,264 @@ def _stop_ffmpeg(proc: subprocess.Popen) -> None:
             proc.wait()  # reap zombie after SIGKILL
         except Exception:
             pass
+    # Append exit code to the stderr log for post-mortem.
+    stderr_log_path = getattr(proc, "_stderr_log_path", None)
+    if stderr_log_path:
+        try:
+            with open(stderr_log_path, "ab") as f:
+                f.write(f"\n=== EXIT {proc.returncode} ===\n".encode())
+        except Exception:
+            pass
+
+
+# ── Diagnostic infrastructure ─────────────────────────────────────────────────
+# All of the following exist so that when a bot fails with "no audio captured"
+# we can tell what actually happened: ffmpeg stderr, PulseAudio state, audio
+# file growth over time, and browser console / network errors. Everything is
+# written to {RECORDINGS_DIR}/debug/{bot_id}/ and also mirrored onto BotSession
+# fields so it survives a restart via BotSnapshot persistence.
+
+_debug_rings: dict[str, deque] = defaultdict(lambda: deque(maxlen=200))
+
+
+def _debug_dir_for(bot_id: str) -> Path:
+    base = Path(os.environ.get("RECORDINGS_DIR", "/app/data/recordings"))
+    d = base / "debug" / (bot_id or "unknown")
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+    return d
+
+
+def _ring_push(bot_id: str, debug_dir: Path, kind: str, msg: str) -> None:
+    """Append a browser-console / pageerror / requestfailed entry."""
+    try:
+        entry = {"ts": time.time(), "kind": kind, "msg": (msg or "")[:2000]}
+        _debug_rings[bot_id].append(entry)
+        with open(debug_dir / "console.jsonl", "a") as f:
+            f.write(json.dumps(entry) + "\n")
+    except Exception:
+        # Diagnostic logging must never break the bot.
+        pass
+
+
+def _pactl_snapshot(debug_dir: Path, label: str) -> str:
+    """Dump PulseAudio state to {debug_dir}/pactl_{label}.txt and return it."""
+    out = []
+    for cmd in (
+        ["pactl", "list", "sinks", "short"],
+        ["pactl", "list", "sink-inputs"],
+        ["pactl", "list", "sources", "short"],
+        ["pactl", "list", "modules", "short"],
+    ):
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            out.append(f"$ {' '.join(cmd)}\n{r.stdout}{r.stderr}\n")
+        except Exception as e:
+            out.append(f"$ {' '.join(cmd)}\nERR: {e}\n")
+    blob = "\n".join(out)
+    try:
+        (debug_dir / f"pactl_{label}.txt").write_text(blob)
+    except Exception:
+        pass
+    return blob[:8192]
+
+
+def _tail_file(path: Path, n: int) -> Optional[str]:
+    try:
+        data = path.read_text(errors="replace")
+        return data[-n:] if data else None
+    except Exception:
+        return None
+
+
+async def _audio_health_loop(
+    bot_id: str,
+    audio_path: str,
+    pulse_sink: str,
+    ffmpeg_proc: Optional[subprocess.Popen],
+    debug_dir: Path,
+    stop_event: asyncio.Event,
+) -> None:
+    """Every 30 s, record file size + ffmpeg liveliness + sink-input routing.
+
+    This is the single highest-signal diagnostic for the recurring
+    "no audio captured" failure mode: it lets us see whether the file grew,
+    whether ffmpeg stayed alive, and whether Chrome's WebRTC sink-input ever
+    got routed onto our null sink.
+    """
+    from app.store import store  # deferred to avoid import cycles
+    last_size = 0
+    while not stop_event.is_set():
+        sample: dict = {"ts": time.time()}
+        try:
+            exists = os.path.exists(audio_path)
+            size = os.path.getsize(audio_path) if exists else 0
+            sample.update({
+                "exists": exists,
+                "size": size,
+                "size_delta": size - last_size,
+                "ffmpeg_alive": (ffmpeg_proc.poll() is None) if ffmpeg_proc else False,
+            })
+            last_size = size
+            try:
+                r = subprocess.run(
+                    ["pactl", "list", "sink-inputs"],
+                    capture_output=True, text=True, timeout=3,
+                )
+                txt = r.stdout or ""
+                inputs_total = txt.count("Sink Input #")
+                inputs_on_target = sum(
+                    1 for block in txt.split("Sink Input #")[1:]
+                    if ("Sink: " in block) and (pulse_sink in block)
+                )
+            except Exception:
+                inputs_total = -1
+                inputs_on_target = -1
+            sample["sink_inputs_total"] = inputs_total
+            sample["sink_inputs_on_target"] = inputs_on_target
+
+            # Peak-amplitude probe on the last ~3 s of the WAV. This is the
+            # Python-side truth for "is ffmpeg actually receiving non-zero
+            # samples right now?" — independent of Gemini, onepizza UI,
+            # WebRTC stats. Logged at WARN if recording continues silent,
+            # INFO the first time audio is detected (2.38.0).
+            peak_recent = None
+            try:
+                if exists and size >= 4096:
+                    with open(audio_path, "rb") as f:
+                        # Read the last ~3 s = 3 * 16000 Hz * 2 bytes (mono s16le).
+                        # Default chunk overshoots header; good enough.
+                        f.seek(max(0, size - 96000))
+                        tail = f.read()
+                    if tail:
+                        mv = memoryview(tail)
+                        # Skip any odd trailing byte.
+                        n = (len(mv) // 2) * 2
+                        if n >= 2:
+                            import array as _array
+                            a = _array.array('h')
+                            a.frombytes(bytes(mv[:n]))
+                            peak_recent = max(abs(x) for x in a) if a else 0
+            except Exception as e:
+                logger.debug("audio_health_loop: peak probe failed: %s", e)
+            sample["peak_recent_3s"] = peak_recent
+
+            # Loud logging so this shows up in deploy tail without
+            # needing the /debug JSON. `peak` scale is 0..32767.
+            if peak_recent is None:
+                logger.info(
+                    "audio_health: size=%d Δ=%+d ffmpeg_alive=%s sink_inputs=%d on_target=%d peak_recent=n/a",
+                    size, size - (last_size if last_size else 0),
+                    sample["ffmpeg_alive"], inputs_total, inputs_on_target,
+                )
+            elif peak_recent < 200:
+                logger.warning(
+                    "audio_health: SILENT — size=%d Δ=+%d ffmpeg_alive=%s sink_inputs=%d on_target=%d peak_recent=%d/32767 (<200 threshold)",
+                    size, sample.get("size_delta", 0),
+                    sample["ffmpeg_alive"], inputs_total, inputs_on_target, peak_recent,
+                )
+            else:
+                logger.info(
+                    "audio_health: OK — size=%d Δ=+%d ffmpeg_alive=%s sink_inputs=%d on_target=%d peak_recent=%d/32767 ✓",
+                    size, sample.get("size_delta", 0),
+                    sample["ffmpeg_alive"], inputs_total, inputs_on_target, peak_recent,
+                )
+
+            try:
+                with open(debug_dir / "audio_health.jsonl", "a") as f:
+                    f.write(json.dumps(sample) + "\n")
+            except Exception:
+                pass
+
+            bot = await store.get_bot(bot_id) if bot_id else None
+            if bot:
+                samples = list(getattr(bot, "audio_health_samples", []) or [])
+                samples.append(sample)
+                await store.update_bot(bot_id, audio_health_samples=samples[-40:])
+        except Exception as e:
+            logger.debug("audio_health_loop error: %s", e)
+
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=15)
+        except asyncio.TimeoutError:
+            continue
+
+
+async def _webrtc_stats_loop(
+    bot_id: str,
+    page,
+    debug_dir: Path,
+    stop_event: asyncio.Event,
+) -> None:
+    """Every 15 s, poll window.__mbCollectWebrtcStats() in the page context.
+
+    Diagnostic for the onepizza (and related) silent-recording failure mode:
+    tells us whether remote audio packets are actually arriving at the
+    RTCPeerConnection (inbound_audio.packets / bytes) and whether the remote
+    track is attached to an <audio> element that's playing — vs. paused /
+    muted / autoplay-blocked.
+    """
+    from app.store import store  # deferred to avoid import cycles
+    while not stop_event.is_set():
+        try:
+            try:
+                snap = await asyncio.wait_for(
+                    page.evaluate(
+                        "() => (window.__mbCollectWebrtcStats ? window.__mbCollectWebrtcStats() : null)"
+                    ),
+                    timeout=5,
+                )
+            except Exception as e:
+                snap = {"error": f"evaluate_failed: {e!r}"}
+            sample = {"ts": time.time(), "snap": snap}
+
+            # Compact, human-readable log line per sample so debug-via-tail
+            # works without the full JSON blob (2.38.0).
+            try:
+                if isinstance(snap, dict):
+                    pcs = snap.get("pcs") or []
+                    sinks = snap.get("audio_sinks") or []
+                    pc_line = "no-pcs"
+                    if pcs:
+                        pc = pcs[0]
+                        ia = pc.get("inbound_audio") or {}
+                        pc_line = (
+                            f"pc[0] state={pc.get('connection_state')} "
+                            f"ice={pc.get('ice_connection_state')} "
+                            f"inAudio pkts={ia.get('packets', 0)} "
+                            f"bytes={ia.get('bytes', 0)} "
+                            f"energy={ia.get('total_audio_energy', 0):.3f}"
+                        )
+                    sink_line = f"sinks={len(sinks)}"
+                    if sinks:
+                        playing = sum(1 for s in sinks if not s.get("paused") and s.get("readyState", 0) >= 2)
+                        sink_line = f"sinks={len(sinks)} playing={playing}"
+                    elems = snap.get("media_elements") or []
+                    elem_line = f"page_media_elems={len(elems)}"
+                    logger.info("webrtc_stats: %s | %s | %s", pc_line, sink_line, elem_line)
+            except Exception as _log_e:
+                logger.debug("webrtc_stats log-line failed: %s", _log_e)
+
+            try:
+                with open(debug_dir / "webrtc_stats.jsonl", "a") as f:
+                    f.write(json.dumps(sample) + "\n")
+            except Exception:
+                pass
+            if bot_id:
+                bot = await store.get_bot(bot_id)
+                if bot:
+                    samples = list(getattr(bot, "webrtc_stats_samples", []) or [])
+                    samples.append(sample)
+                    await store.update_bot(bot_id, webrtc_stats_samples=samples[-40:])
+        except Exception as e:
+            logger.debug("webrtc_stats_loop error: %s", e)
+
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=15)
+        except asyncio.TimeoutError:
+            continue
 
 
 # ── Screenshot ────────────────────────────────────────────────────────────────
@@ -1089,71 +1469,79 @@ async def _join_onepizza(page: Page, url: str, bot_name: str, start_muted: bool 
     except Exception as e:
         logger.debug("onepizza: DOM probe failed: %s", e)
 
-    # Check what state we're in — try specific IDs first, then broader selectors.
-    # When ?name= auto-join works, #meetingRoom container may exist but not pass
-    # Playwright's visibility check (zero-size wrapper), while toolbar buttons
-    # like #leaveBtn and #micBtn ARE visible.  Include those as meeting-room
-    # indicators so we don't false-fail when already in the meeting.
+    # Detect page state. We use a single JS probe (rather than several
+    # Playwright wait_for_selector calls with state="visible") because
+    # onepizza keeps both #lobby and #meetingRoom in the DOM at all times
+    # and toggles them via display/offsetParent — Playwright's stricter
+    # "visible" check times out on #meetingRoom even when join has started,
+    # which previously caused us to fall through to a "button" catch-all
+    # that matched #lobbyMicBtn instead of #lobbyJoinBtn (see 2.37.1).
+    state_probe_js = """() => {
+        const $ = (id) => document.getElementById(id);
+        const visible = (el) => {
+            if (!el) return false;
+            if (el.offsetParent === null && el.tagName !== 'BODY') return false;
+            const cs = getComputedStyle(el);
+            if (cs.display === 'none' || cs.visibility === 'hidden') return false;
+            return true;
+        };
+        // Already in meeting? Toolbar buttons are the most reliable signal.
+        if (visible($('leaveBtn')) || visible($('micBtn')) || visible($('camBtn'))) {
+            return { state: 'in_meeting', tag: 'leaveBtn' };
+        }
+        if (visible($('waitingRoomOverlay'))) {
+            return { state: 'waiting', tag: 'waitingRoomOverlay' };
+        }
+        // Lobby?
+        if (visible($('lobbyJoinBtn')) || visible($('lobbyName'))) {
+            return { state: 'lobby', tag: 'lobbyJoinBtn' };
+        }
+        // Last-resort: lobby is hidden, meetingRoom container exists -> in meeting
+        const mr = $('meetingRoom');
+        const lb = $('lobby');
+        if (mr && (!lb || !visible(lb))) {
+            return { state: 'in_meeting', tag: 'meetingRoom' };
+        }
+        return { state: 'unknown', tag: null };
+    }"""
+
+    state = None
     tag = None
-    selectors = [
-        "#meetingRoom, #lobbyJoinBtn, #waitingRoomOverlay",  # known IDs
-        "#leaveBtn, #micBtn, #camBtn",  # meeting toolbar — visible when in call
-        "[id*='meeting'], [id*='Meeting'], [id*='room'], [id*='Room']",  # partial ID matches
-        "button, [role='button']",  # any button at all
-    ]
-
-    for attempt in range(4):
-        for sel in selectors:
-            try:
-                which = await page.wait_for_selector(sel, state="visible", timeout=3_000)
-                if which:
-                    tag = await which.get_attribute("id") or ""
-                    logger.info("onepizza: found element with selector=%s id=%s", sel, tag)
-                    break
-            except Exception:
-                continue
-        if tag is not None:
-            break
-        # Fallback: check if we're already in the meeting via JS (handles cases
-        # where #meetingRoom exists in DOM but Playwright doesn't see it as visible)
+    for attempt in range(8):  # ~24 s total
         try:
-            in_meeting = await page.evaluate('''() => {
-                const mr = document.getElementById("meetingRoom");
-                const lb = document.getElementById("lobby");
-                const leave = document.getElementById("leaveBtn");
-                // In meeting if meetingRoom exists and lobby is hidden, or leave button exists
-                if (leave && leave.offsetParent !== null) return "leaveBtn";
-                if (mr && lb && (lb.style.display === "none" || !lb.offsetParent)) return "meetingRoom";
-                if (mr && !lb) return "meetingRoom";
-                return null;
-            }''')
-            if in_meeting:
-                tag = in_meeting
-                logger.info("onepizza: detected in-meeting state via JS fallback (id=%s)", tag)
+            result = await page.evaluate(state_probe_js)
+            if result and result.get('state') and result.get('state') != 'unknown':
+                state = result['state']
+                tag = result.get('tag')
+                logger.info(
+                    "onepizza: detected state=%s (id=%s) on attempt %d",
+                    state, tag, attempt + 1,
+                )
                 break
-        except Exception:
-            pass
-        if attempt < 3:
-            logger.info("onepizza: no UI element found yet, retrying (attempt %d)", attempt + 1)
-            await asyncio.sleep(5)
-        else:
-            await _screenshot(page, "onepizza_join_failed")
-            raise MeetingBotError("Could not join onepizza.io meeting — neither lobby nor meeting room appeared")
+        except Exception as e:
+            logger.debug("onepizza: state probe failed: %s", e)
+        if attempt < 7:
+            await asyncio.sleep(3)
 
-    # Determine state from detected element
-    tag_lower = (tag or "").lower()
-    # Toolbar buttons (#leaveBtn, #micBtn, #camBtn) mean we're already in the meeting
-    _meeting_toolbar_ids = {"leavebtn", "micbtn", "cambtn"}
-    is_in_meeting = "meeting" in tag_lower or "room" in tag_lower or tag_lower in _meeting_toolbar_ids
-    is_waiting = "waiting" in tag_lower
-    is_lobby = "lobby" in tag_lower or "join" in tag_lower
+    if state is None:
+        await _screenshot(page, "onepizza_join_failed")
+        raise MeetingBotError(
+            "Could not join onepizza.io meeting — neither lobby nor meeting room visible"
+        )
+
+    is_in_meeting = state == 'in_meeting'
+    is_waiting = state == 'waiting'
+    is_lobby = state == 'lobby'
 
     if is_in_meeting:
         logger.info("onepizza: auto-joined via ?name= parameter (id=%s)", tag)
     elif is_waiting:
         logger.info("onepizza: waiting room — waiting for host to admit (id=%s)", tag)
     else:
-        # Either lobby button found, or we found some generic button — try to join
+        # Lobby — fill name, click join, then wait for ANY progress signal
+        # before considering trying the next strategy.  Multi-clicking is the
+        # original cause of the SDP `setRemoteDescription wrong state: stable`
+        # crash that left recordings silent (see 2.37.1).
         logger.info("onepizza: lobby/join UI detected (id=%s), attempting to join", tag)
 
         # Fill name input if it exists and is empty
@@ -1168,8 +1556,60 @@ async def _join_onepizza(page: Page, url: str, bot_name: str, start_muted: bool 
         except Exception as e:
             logger.debug("onepizza: name input fill failed: %s", e)
 
-        # Click join button — try multiple strategies
-        joined = False
+        # Progress probe: returns one of
+        #   'in_meeting' | 'waiting' | 'joining' | 'connecting' | 'lobby'
+        # 'lobby' is the only outcome that means "the click did nothing" —
+        # everything else means we should stop clicking and let the join finish.
+        progress_probe_js = """() => {
+            const $ = (id) => document.getElementById(id);
+            const visible = (el) => {
+                if (!el) return false;
+                if (el.offsetParent === null && el.tagName !== 'BODY') return false;
+                const cs = getComputedStyle(el);
+                if (cs.display === 'none' || cs.visibility === 'hidden') return false;
+                return true;
+            };
+            if (visible($('leaveBtn')) || visible($('micBtn')) || visible($('camBtn'))) return 'in_meeting';
+            if (visible($('waitingRoomOverlay'))) return 'waiting';
+            const mr = $('meetingRoom');
+            const lb = $('lobby');
+            if (mr && lb && !visible(lb)) return 'in_meeting';
+            // Join in progress? button disabled or text changed to "Joining…"
+            const btn = $('lobbyJoinBtn');
+            if (btn) {
+                if (btn.disabled) return 'joining';
+                const t = (btn.textContent || '').toLowerCase();
+                if (t.includes('joining') || t.includes('connecting') || t.includes('please wait')) {
+                    return 'joining';
+                }
+            }
+            // RTCPeerConnection has progressed past 'new'? (added in 2.37.0)
+            try {
+                const pcs = window.__mbRtcPcs || [];
+                for (const pc of pcs) {
+                    const s = pc.connectionState || pc.iceConnectionState;
+                    if (s && s !== 'new' && s !== 'closed') return 'connecting';
+                }
+            } catch (e) {}
+            return 'lobby';
+        }"""
+
+        async def _wait_for_progress(timeout_s: float) -> str:
+            """Poll progress_probe_js every 500 ms; return as soon as it stops
+            returning 'lobby', or after timeout (still 'lobby')."""
+            loop = asyncio.get_event_loop()
+            deadline = loop.time() + timeout_s
+            last = 'lobby'
+            while loop.time() < deadline:
+                try:
+                    last = await page.evaluate(progress_probe_js)
+                except Exception:
+                    last = 'lobby'
+                if last != 'lobby':
+                    return last
+                await asyncio.sleep(0.5)
+            return last
+
         strategies = [
             ("locator click", lambda: page.locator("#lobbyJoinBtn").click(timeout=5_000)),
             ("JS click by ID", lambda: page.evaluate('document.getElementById("lobbyJoinBtn")?.click()')),
@@ -1183,60 +1623,28 @@ async def _join_onepizza(page: Page, url: str, bot_name: str, start_muted: bool 
                     return false;
                 })()
             ''')),
-            ("JS text match", lambda: page.evaluate('''
-                (() => {
-                    const btns = [...document.querySelectorAll("button, [role='button'], a.btn")];
-                    for (const b of btns) {
-                        const txt = (b.textContent || "").toLowerCase();
-                        if ((txt.includes("join") || txt.includes("enter")) && b.offsetParent !== null) {
-                            b.click();
-                            return true;
-                        }
-                    }
-                    return false;
-                })()
-            ''')),
-            ("JS form submit", lambda: page.evaluate('''
-                (() => {
-                    const form = document.querySelector("form");
-                    if (form) { form.submit(); return true; }
-                    // Try calling joinMeeting() directly if it exists globally
-                    if (typeof joinMeeting === "function") { joinMeeting(); return true; }
-                    if (typeof window.joinMeeting === "function") { window.joinMeeting(); return true; }
-                    return false;
-                })()
-            ''')),
         ]
 
+        final = 'lobby'
         for name, strategy in strategies:
             try:
                 await strategy()
-                logger.info("onepizza: join attempted via %s", name)
-                # Check if we entered the meeting room
-                try:
-                    await page.wait_for_selector(
-                        "#meetingRoom, #waitingRoomOverlay",
-                        state="visible", timeout=8_000,
-                    )
-                    joined = True
-                    logger.info("onepizza: joined meeting after %s", name)
+                logger.info("onepizza: join click via %s — waiting up to 20 s for progress…", name)
+                final = await _wait_for_progress(20.0)
+                if final != 'lobby':
+                    logger.info("onepizza: state advanced to '%s' after %s", final, name)
                     break
-                except Exception:
-                    logger.info("onepizza: %s clicked but meeting room not visible yet", name)
+                logger.info("onepizza: %s: no progress after 20 s — trying next strategy", name)
             except Exception as e:
                 logger.debug("onepizza: strategy %s failed: %s", name, e)
 
-        if not joined:
+        if final == 'lobby':
             await _screenshot(page, "onepizza_no_join_button")
-            raise MeetingBotError("Could not click join button on onepizza.io")
+            raise MeetingBotError("Could not join onepizza.io — lobby never advanced after click")
 
-        # Check if we landed in waiting room after clicking join
-        try:
-            wr = await page.query_selector("#waitingRoomOverlay")
-            if wr and await wr.is_visible():
-                logger.info("onepizza: in waiting room after join click — waiting for host")
-        except Exception:
-            pass
+        # If we landed in waiting room, that's a valid join state — note it.
+        if final == 'waiting':
+            logger.info("onepizza: in waiting room after join click — waiting for host")
 
     # Mute mic after joining
     if start_muted:
@@ -2144,6 +2552,130 @@ async def _scrape_chat_messages(page: Page, platform: str) -> str:
         return (text or "").strip()
     except Exception:
         return ""
+
+
+def _chat_split_messages(text: str) -> list[str]:
+    """Split a chat-panel innerText dump into probable message lines.
+
+    Strips blank lines and lines that are clearly decorative (the "↩" reply
+    glyph and "+" emoji-react button used on onepizza). Timestamp lines such
+    as "14:32" are kept because they make per-line hashes stable across polls.
+    """
+    out: list[str] = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if line in ("↩", "+", "Send", "Send message"):
+            continue
+        out.append(line)
+    return out
+
+
+import hashlib as _chat_hashlib
+
+
+def _chat_message_id(line: str) -> str:
+    """Stable short hash used to dedup chat messages across polls."""
+    return _chat_hashlib.sha1(line.encode("utf-8", errors="ignore")).hexdigest()[:16]
+
+
+async def _chat_capture_loop(
+    page: Page,
+    platform: str,
+    bot_name: str,
+    structured_transcript: list,
+    seen_chat_ids: set,
+    on_transcript_entry=None,
+    recording_t0: float = 0.0,
+) -> None:
+    """Poll the meeting chat panel and emit new messages as structured entries.
+
+    Each message is appended to ``structured_transcript`` with
+    ``source="chat"`` and dispatched via ``on_transcript_entry`` so that
+    WebSocket / SSE / webhook delivery happens via the same path voice
+    entries use (see bot_service.on_live_entry).
+
+    First successful poll is treated as a bootstrap — existing chat history is
+    added to ``seen_chat_ids`` so only messages posted AFTER the bot joins
+    produce live events.
+
+    ``recording_t0`` is the monotonic time when audio recording started;
+    entry timestamps are computed relative to it so they align with voice
+    entries on the same timeline.
+    """
+    POLL_S = 0.25  # 4 Hz — perceived-live without fighting the DOM
+    bootstrapped = False
+    prev_text = ""
+    logger.info("Chat capture loop started for bot '%s' on %s", bot_name, platform)
+
+    # Best-effort: open chat panel so new messages are rendered into the DOM.
+    try:
+        await _open_chat(page, platform)
+    except Exception as exc:
+        logger.debug("Chat capture: could not open chat panel on %s: %s", platform, exc)
+
+    while True:
+        await asyncio.sleep(POLL_S)
+        try:
+            text = await _scrape_chat_messages(page, platform)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.debug("Chat capture scrape error: %s", exc)
+            continue
+
+        if not text or text == prev_text:
+            continue
+
+        if not bootstrapped:
+            # First non-empty poll — seed seen_chat_ids with everything visible
+            # so we don't flood downstream with pre-existing history.
+            for line in _chat_split_messages(text):
+                seen_chat_ids.add(_chat_message_id(line))
+            bootstrapped = True
+            prev_text = text
+            logger.info("Chat capture bootstrapped (%d existing msgs ignored)", len(seen_chat_ids))
+            continue
+
+        now_ts = round(max(0.0, time.monotonic() - recording_t0), 2) if recording_t0 else 0.0
+        new_entries: list[dict] = []
+
+        for line in _chat_split_messages(text):
+            msg_id = _chat_message_id(line)
+            if msg_id in seen_chat_ids:
+                continue
+            seen_chat_ids.add(msg_id)
+            # Heuristic split "Speaker: text" — common in Zoom / onepizza.
+            if ":" in line and len(line) - line.index(":") > 2:
+                maybe_speaker, _, body = line.partition(":")
+                if 0 < len(maybe_speaker.strip()) <= 60 and body.strip():
+                    speaker = maybe_speaker.strip()
+                    body_text = body.strip()
+                else:
+                    speaker, body_text = "chat", line
+            else:
+                speaker, body_text = "chat", line
+            entry = {
+                "speaker": speaker,
+                "text": body_text,
+                "timestamp": now_ts,
+                "source": "chat",
+                "message_id": msg_id,
+            }
+            structured_transcript.append(entry)
+            new_entries.append(entry)
+
+        prev_text = text
+
+        if new_entries and on_transcript_entry is not None:
+            for entry in new_entries:
+                try:
+                    await on_transcript_entry(entry)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as cb_exc:
+                    logger.warning("Chat capture on_transcript_entry error: %s", cb_exc)
 
 
 async def _type_into_chat(page: Page, selectors: list[str], message: str, timeout: int = 4000) -> bool:
@@ -3557,6 +4089,9 @@ async def run_browser_bot(
     external_leave_event: Optional[asyncio.Event] = None,
     consent_enabled: bool = False,
     consent_message: Optional[str] = None,
+    on_runtime_ready: Optional[Callable[[dict], Awaitable[None]]] = None,
+    seen_chat_ids: Optional[set] = None,
+    bot_id: str = "",
 ) -> dict:
     """
     Join a meeting as a named guest, record audio, wait for it to end.
@@ -3604,15 +4139,51 @@ async def run_browser_bot(
     # Will be set to the virtual source name after _create_pulse_mic() succeeds
     pulse_source_name: str = f"{pulse_mic}.monitor"
 
+    # ── Diagnostic bundle setup ──────────────────────────────────────────────
+    # Resolve bot_id (prefer caller-supplied, fall back to audio_path stem).
+    diag_id = bot_id or Path(audio_path).stem
+    debug_dir = _debug_dir_for(diag_id)
+    health_stop_event: asyncio.Event = asyncio.Event()
+    health_task: Optional[asyncio.Task] = None
+    ffmpeg_stderr_path = str(debug_dir / "ffmpeg.stderr.log")
+
+    async def _save_pactl(label: str) -> None:
+        """Persist a pactl snapshot both to disk and onto the BotSession."""
+        try:
+            blob = await asyncio.to_thread(_pactl_snapshot, debug_dir, label)
+            if bot_id:
+                try:
+                    from app.store import store as _store
+                    b = await _store.get_bot(bot_id)
+                    dumps = dict(getattr(b, "pactl_dumps", {}) or {}) if b else {}
+                    dumps[label] = blob
+                    await _store.update_bot(bot_id, pactl_dumps=dumps)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
     # ── Infrastructure ──────────────────────────────────────────────────────
+    await _save_pactl("pre_pulse")
     pulse_ok = _start_pulseaudio()
     if pulse_ok:
         pulse_idx = _create_pulse_sink(pulse_sink)
         if pulse_idx:
-            ffmpeg_proc = _start_ffmpeg(audio_path, pulse_sink)
+            ffmpeg_proc = _start_ffmpeg(audio_path, pulse_sink, stderr_log_path=ffmpeg_stderr_path)
         # Create the TTS mic sink + virtual source so the bot can speak.
         # Must be created before Chrome launches so PULSE_SOURCE takes effect.
         pulse_mic_idx, pulse_mic_virt_idx, pulse_source_name = _create_pulse_mic(pulse_mic)
+
+    await _save_pactl("post_setup")
+    if ffmpeg_proc is not None:
+        # Snapshot right after ffmpeg starts so we can see its sink-input.
+        await _save_pactl("post_ffmpeg")
+        health_task = asyncio.create_task(
+            _audio_health_loop(
+                bot_id or diag_id, audio_path, pulse_sink,
+                ffmpeg_proc, debug_dir, health_stop_event,
+            )
+        )
 
     xvfb_proc, xvfb_display = _start_xvfb()
     headless = xvfb_proc is None   # fall back to headless if no Xvfb
@@ -3696,60 +4267,672 @@ async def run_browser_bot(
             timezone_id="America/New_York",
         )
 
-        # Intercept RTCPeerConnection at the page level (before Google Meet
+        # ── MediaRecorder bypass: receive WebM/Opus audio chunks from the
+        # page (2.39.0). The init script below runs MediaRecorder on every
+        # remote MediaStream and pumps base64-encoded chunks to this
+        # callback, which we append to {audio_path}.remote.webm. After the
+        # meeting ends we ffmpeg-decode that file to PCM wav and use it as
+        # the source-of-truth recording — bypassing the PulseAudio output
+        # path entirely (which produces silence in headless+Xvfb Chromium
+        # for remote WebRTC audio; see 2.38.0 changelog and prod logs).
+        webm_path = audio_path + ".remote.webm"
+        webm_state = {
+            "fh": None,
+            "bytes": 0,
+            "chunks": 0,
+            "first_log_done": False,
+        }
+        try:
+            webm_state["fh"] = open(webm_path, "wb")
+        except Exception as e:
+            logger.warning("Could not open remote-audio webm sink %s: %s", webm_path, e)
+
+        async def _on_audio_blob(b64: str, seq: int = 0, blob_size: int = 0) -> None:
+            try:
+                if not webm_state["fh"]:
+                    return
+                import base64 as _b64
+                raw = _b64.b64decode(b64) if b64 else b""
+                if not raw:
+                    return
+                webm_state["fh"].write(raw)
+                webm_state["fh"].flush()
+                webm_state["bytes"] += len(raw)
+                webm_state["chunks"] += 1
+                if not webm_state["first_log_done"]:
+                    logger.info(
+                        "remote-audio: first MediaRecorder chunk received seq=%d size=%d → %s",
+                        seq, len(raw), webm_path,
+                    )
+                    webm_state["first_log_done"] = True
+                elif webm_state["chunks"] % 15 == 0:
+                    logger.info(
+                        "remote-audio: %d chunks received, %d bytes total → %s",
+                        webm_state["chunks"], webm_state["bytes"], webm_path,
+                    )
+            except Exception as exc:
+                logger.debug("_on_audio_blob failed: %s", exc)
+
+        try:
+            await ctx.expose_function("_mbOnAudioBlob", _on_audio_blob)
+        except Exception as e:
+            logger.warning("Failed to expose _mbOnAudioBlob: %s", e)
+
+        # Intercept RTCPeerConnection at the page level (before the meeting app
         # initialises its WebRTC) so that every incoming audio track is
-        # explicitly connected to a Web Audio context.  This forces Chrome to
-        # decode and render the incoming WebRTC audio through its normal audio
-        # output pipeline (→ PulseAudio null-sink) even in an automated/Xvfb
-        # environment where Chrome might otherwise suppress rendering.
+        # explicitly attached to a hidden <audio autoplay> element.
+        #
+        # ── Why this shape (see 2.38.0) ────────────────────────────────────
+        # Earlier releases (2.33.x–2.37.x) used `AudioContext.createMediaStreamSource(stream).connect(destination)`
+        # to "force" headless Chromium to render WebRTC audio to PulseAudio.
+        # That path is a KNOWN CHROME BUG for remote WebRTC streams —
+        # Chromium silences the audio pipeline (issue chromium#121673 and
+        # related; multiple community reports: "when this code was added to
+        # the flow, Chrome stopped generating all WebRTC audio"). The
+        # v2.37.0 diagnostic confirmed it in prod: inbound_audio.packets
+        # and totalAudioEnergy climbing (so Chrome IS decoding real audio),
+        # media elements playing, sink-input on the right sink with
+        # non-zero buffer latency — yet the recorded WAV is pure zeros.
+        #
+        # The documented-working WebRTC pattern for remote audio is to
+        # attach each remote track to an HTMLMediaElement (`<audio autoplay
+        # srcObject=stream>`) and let Chromium's HTMLMediaElement pipeline
+        # render it. That pipeline respects PULSE_SINK so audio reaches our
+        # null-sink and ffmpeg captures it. We do this in addition to —
+        # not replacing — whatever the meeting app itself does with
+        # `<video>` elements; having our OWN hidden `<audio>` sink-of-
+        # record guarantees at least one HTMLMediaElement is playing the
+        # remote audio even if the page's own media elements fail
+        # autoplay-policy checks in headless.
         await ctx.add_init_script("""
             (function () {
                 if (window._mbRtcAudioForced) return;
                 window._mbRtcAudioForced = true;
 
-                var _AudioCtx = window.AudioContext || window.webkitAudioContext;
-                window._mbAudioCtx = null;
-                function getCtx() {
-                    if (!window._mbAudioCtx) {
-                        window._mbAudioCtx = new _AudioCtx({ latencyHint: 'playback' });
-                        window._mbAudioCtx.resume().catch(function(){});
-                    }
-                    return window._mbAudioCtx;
+                // Registry (exported for diagnostics): element-per-track so
+                // Python can enumerate and verify attachment via page.evaluate.
+                window._mbAudioSinks = [];   // [{trackId, createdAt, el}]
+                window._mbConnectedTracks = new WeakSet();
+
+                // Single hidden container off-viewport so our sinks don't
+                // affect the visible meeting UI.
+                function ensureContainer() {
+                    var c = document.getElementById('_mb_audio_sinks');
+                    if (c) return c;
+                    c = document.createElement('div');
+                    c.id = '_mb_audio_sinks';
+                    c.style.cssText = 'position:fixed;left:-9999px;top:-9999px;width:1px;height:1px;overflow:hidden;opacity:0;pointer-events:none';
+                    if (document.body) document.body.appendChild(c);
+                    else document.addEventListener('DOMContentLoaded', function(){ document.body && document.body.appendChild(c); });
+                    return c;
                 }
 
+                function attachAudioTrack(track, stream) {
+                    if (!track || track.kind !== 'audio') return false;
+                    if (window._mbConnectedTracks.has(track)) return false;
+                    try {
+                        var container = ensureContainer();
+                        if (!container) return false;
+                        var el = document.createElement('audio');
+                        el.autoplay = true;
+                        el.controls = false;
+                        el.muted = false;
+                        el.volume = 1.0;
+                        // Don't set playsInline on <audio>; it's a no-op but
+                        // setting autoplay + srcObject is the canonical pattern.
+                        var s = stream || new MediaStream([track]);
+                        el.srcObject = s;
+                        container.appendChild(el);
+                        window._mbConnectedTracks.add(track);
+                        // Also tap this track for our MediaRecorder bypass
+                        // (2.39.0). Idempotent — safe to call repeatedly.
+                        try { _mbAddTrackToRecorder(track); } catch (e) {}
+                        window._mbAudioSinks.push({
+                            trackId: track.id,
+                            trackLabel: track.label || '',
+                            trackEnabled: !!track.enabled,
+                            trackMuted: !!track.muted,
+                            readyState: track.readyState,
+                            createdAt: Date.now(),
+                            el: el
+                        });
+                        // Attempt explicit .play() in case autoplay is
+                        // blocked by policy — --autoplay-policy=no-user-gesture-required
+                        // should make this a no-op success.
+                        var p = el.play();
+                        if (p && p.catch) {
+                            p.then(function(){
+                                console.log('[mb-audio] attached track ' + track.id + ' -> <audio autoplay>, play() ok');
+                            }).catch(function(err){
+                                console.warn('[mb-audio] <audio>.play() rejected for track ' + track.id + ':', err && err.name, err && err.message);
+                            });
+                        } else {
+                            console.log('[mb-audio] attached track ' + track.id + ' -> <audio autoplay> (no promise)');
+                        }
+                        // Track.onended / onmute for diagnostics
+                        try {
+                            track.addEventListener('ended', function(){
+                                console.log('[mb-audio] track ' + track.id + ' ended');
+                            });
+                            track.addEventListener('mute', function(){
+                                console.log('[mb-audio] track ' + track.id + ' muted');
+                            });
+                            track.addEventListener('unmute', function(){
+                                console.log('[mb-audio] track ' + track.id + ' unmuted');
+                            });
+                        } catch (e) {}
+                        return true;
+                    } catch (err) {
+                        console.warn('[mb-audio] failed to attach track:', err);
+                        return false;
+                    }
+                }
+                window._mbAttachAudioTrack = attachAudioTrack;
+
+                // ── MediaRecorder bypass (2.39.0) ─────────────────────────
+                // The HTMLMediaElement / AudioContext paths both produce
+                // silence to PulseAudio in headless+Xvfb Chromium for
+                // remote WebRTC audio (confirmed in 2.38.0 prod logs:
+                // <audio> playing, currentTime advancing, total_audio_energy
+                // > 0 — yet ffmpeg records zeros). Industry-standard
+                // workaround (per Recall.ai docs): grab the MediaStream
+                // INSIDE the page using MediaRecorder and ship encoded
+                // chunks back to the Python process via expose_function.
+                // Bypasses the entire audio output device path.
+                window._mbAudioRecorder = null;
+                window._mbAudioRecorderTracks = new Set();   // track ids already in the recorder
+                window._mbAudioMixedStream = null;            // shared MediaStream all remote audio tracks join
+                window._mbAudioRecorderChunkSeq = 0;
+
+                function _mbStartOrUpdateRecorder() {
+                    try {
+                        if (!window.MediaRecorder) {
+                            console.warn('[mb-rec] MediaRecorder unavailable in this Chromium build');
+                            return;
+                        }
+                        if (window._mbAudioRecorder && window._mbAudioRecorder.state === 'recording') return;
+                        if (!window._mbAudioMixedStream || window._mbAudioMixedStream.getAudioTracks().length === 0) return;
+                        var mimeCandidates = [
+                            'audio/webm;codecs=opus',
+                            'audio/webm',
+                            'audio/ogg;codecs=opus',
+                            ''
+                        ];
+                        var chosenMime = '';
+                        for (var i = 0; i < mimeCandidates.length; i++) {
+                            var m = mimeCandidates[i];
+                            if (m === '' || (window.MediaRecorder.isTypeSupported && window.MediaRecorder.isTypeSupported(m))) {
+                                chosenMime = m;
+                                break;
+                            }
+                        }
+                        var opts = chosenMime ? { mimeType: chosenMime, audioBitsPerSecond: 64000 } : { audioBitsPerSecond: 64000 };
+                        var mr = new MediaRecorder(window._mbAudioMixedStream, opts);
+                        mr.ondataavailable = function (e) {
+                            if (!e.data || !e.data.size) return;
+                            try {
+                                var fr = new FileReader();
+                                fr.onload = function () {
+                                    try {
+                                        var s = String(fr.result || '');
+                                        var idx = s.indexOf(',');
+                                        var b64 = idx >= 0 ? s.substring(idx + 1) : s;
+                                        if (typeof window._mbOnAudioBlob === 'function') {
+                                            window._mbOnAudioBlob(b64, ++window._mbAudioRecorderChunkSeq, e.data.size);
+                                        }
+                                    } catch (err) {
+                                        console.warn('[mb-rec] callback failed:', err);
+                                    }
+                                };
+                                fr.readAsDataURL(e.data);
+                            } catch (err) {
+                                console.warn('[mb-rec] dataavailable handler failed:', err);
+                            }
+                        };
+                        mr.onerror = function (e) { console.warn('[mb-rec] recorder error:', e && e.error); };
+                        mr.onstop  = function ()  { console.log('[mb-rec] recorder stopped state=' + mr.state); };
+                        mr.start(2000);   // 2 s chunks — small enough to feed live, large enough to keep webm container valid
+                        window._mbAudioRecorder = mr;
+                        console.log('[mb-rec] MediaRecorder started mime=' + (chosenMime || '<default>') + ' tracks=' + window._mbAudioMixedStream.getAudioTracks().length);
+                    } catch (err) {
+                        console.warn('[mb-rec] start failed:', err);
+                    }
+                }
+
+                function _mbAddTrackToRecorder(track) {
+                    if (!track || track.kind !== 'audio') return;
+                    if (window._mbAudioRecorderTracks.has(track.id)) return;
+                    window._mbAudioRecorderTracks.add(track.id);
+                    try {
+                        if (!window._mbAudioMixedStream) {
+                            window._mbAudioMixedStream = new MediaStream();
+                        }
+                        window._mbAudioMixedStream.addTrack(track);
+                    } catch (e) {
+                        console.warn('[mb-rec] addTrack failed:', e);
+                    }
+                    // Note: MediaRecorder does NOT pick up tracks added after
+                    // start() across all Chromium versions. If a SECOND
+                    // remote audio track appears mid-call, restart the
+                    // recorder so the new track is included. Multi-party
+                    // mid-call new joins are rare in onepizza/Meet/Zoom
+                    // bot use-cases.
+                    if (window._mbAudioRecorder && window._mbAudioRecorder.state === 'recording') {
+                        try {
+                            console.log('[mb-rec] restarting recorder to include new track ' + track.id);
+                            window._mbAudioRecorder.stop();
+                        } catch (e) {}
+                        window._mbAudioRecorder = null;
+                    }
+                    _mbStartOrUpdateRecorder();
+                }
+
+                window._mbStopAudioRecorder = function () {
+                    try {
+                        if (window._mbAudioRecorder && window._mbAudioRecorder.state === 'recording') {
+                            window._mbAudioRecorder.stop();
+                        }
+                    } catch (e) {}
+                };
+                window._mbAddTrackToRecorder = _mbAddTrackToRecorder;
+
+                function scanReceivers(pc) {
+                    if (!pc || !pc.getReceivers) return 0;
+                    var n = 0;
+                    try {
+                        pc.getReceivers().forEach(function (r) {
+                            if (r && r.track && r.track.kind === 'audio' && attachAudioTrack(r.track, null)) n++;
+                        });
+                    } catch (e) {}
+                    return n;
+                }
+
+                // Diagnostic helper callable from Python
+                window.__mbCollectAudioSinks = function () {
+                    var out = [];
+                    (window._mbAudioSinks || []).forEach(function (s) {
+                        var el = s.el;
+                        out.push({
+                            trackId: s.trackId,
+                            trackLabel: s.trackLabel,
+                            trackEnabled: s.trackEnabled,
+                            trackMuted: s.trackMuted,
+                            createdAt: s.createdAt,
+                            paused: el ? !!el.paused : null,
+                            muted: el ? !!el.muted : null,
+                            volume: el ? el.volume : null,
+                            readyState: el ? el.readyState : null,
+                            currentTime: el ? el.currentTime : null,
+                            srcObject: el ? !!el.srcObject : null,
+                            error: el && el.error ? { code: el.error.code, msg: el.error.message } : null
+                        });
+                    });
+                    return out;
+                };
+
+                // Wrap RTCPeerConnection so every new pc gets a 'track'
+                // listener AND every setRemoteDescription sweeps receivers
+                // (more reliable across SimplePeer / PeerJS / mediasoup).
                 var _OrigRTC = window.RTCPeerConnection;
+                if (!_OrigRTC) return;
+
+                var _OrigSetRemote = _OrigRTC.prototype.setRemoteDescription;
+                _OrigRTC.prototype.setRemoteDescription = function () {
+                    var pc = this;
+                    var ret = _OrigSetRemote.apply(pc, arguments);
+                    if (ret && typeof ret.then === 'function') {
+                        ret.then(function () {
+                            var n = scanReceivers(pc);
+                            if (n > 0) console.log('[mb-audio] scanReceivers attached ' + n + ' audio track(s) after setRemoteDescription');
+                        }).catch(function(){});
+                    } else {
+                        try { scanReceivers(pc); } catch (e) {}
+                    }
+                    return ret;
+                };
+
                 function PatchedRTC() {
                     var pc = new (Function.prototype.bind.apply(
                         _OrigRTC, [null].concat(Array.prototype.slice.call(arguments))
                     ))();
                     pc.addEventListener('track', function (e) {
-                        if (e.track.kind !== 'audio') return;
-                        try {
-                            var stream = (e.streams && e.streams[0])
-                                ? e.streams[0]
-                                : new MediaStream([e.track]);
-                            var ctx = getCtx();
-                            var src = ctx.createMediaStreamSource(stream);
-                            src.connect(ctx.destination);
-                            console.log('[MeetingBot] Audio track connected to AudioContext, state=' + ctx.state);
-                        } catch (err) {
-                            console.warn('[MeetingBot] Failed to connect audio track:', err);
+                        var stream = (e.streams && e.streams[0]) ? e.streams[0] : null;
+                        if (e.track && e.track.kind === 'audio') {
+                            var ok = attachAudioTrack(e.track, stream);
+                            console.log('[mb-audio] ontrack audio id=' + e.track.id + ' enabled=' + e.track.enabled + ' muted=' + e.track.muted + ' -> attached=' + ok);
+                        } else if (e.track) {
+                            console.log('[mb-audio] ontrack ' + e.track.kind + ' id=' + e.track.id);
                         }
+                    });
+                    // Legacy addstream event (some older libs still emit it)
+                    pc.addEventListener('addstream', function (e) {
+                        if (!e.stream) return;
+                        try {
+                            e.stream.getAudioTracks().forEach(function (t) {
+                                attachAudioTrack(t, e.stream);
+                            });
+                        } catch (err) {}
                     });
                     return pc;
                 }
                 PatchedRTC.prototype = _OrigRTC.prototype;
                 Object.setPrototypeOf(PatchedRTC, _OrigRTC);
                 window.RTCPeerConnection = PatchedRTC;
+
+                // Periodically sweep existing peer-connections (via the
+                // __mbRtcPcs registry added by the stats-probe init script)
+                // for any new receivers that might have appeared via
+                // addTransceiver or after an SDP re-offer.
+                setInterval(function () {
+                    try {
+                        var pcs = window.__mbRtcPcs || [];
+                        for (var i = 0; i < pcs.length; i++) scanReceivers(pcs[i]);
+                    } catch (e) {}
+                }, 3000);
+            })();
+        """)
+
+        # ── WebRTC stats probe ──────────────────────────────────────────────
+        # Diagnostic-only. Registers every RTCPeerConnection the page creates
+        # and exposes window.__mbCollectWebrtcStats() which the Python side
+        # polls every 15 s via page.evaluate. This is the data we need to
+        # distinguish "no remote audio packets are arriving" (signalling /
+        # ICE problem) from "remote packets arrive but Chrome isn't rendering
+        # them to PulseAudio" (audio-element / autoplay problem).
+        # Runs after the forcing patch above so we wrap the PatchedRTC that
+        # already exists on window — a third layer is safe and additive.
+        await ctx.add_init_script("""
+            (function () {
+                if (window._mbRtcStatsPatched) return;
+                window._mbRtcStatsPatched = true;
+                window.__mbRtcPcs = [];
+
+                var _Orig = window.RTCPeerConnection;
+                if (!_Orig) return;
+                function Wrapped() {
+                    var pc = new (Function.prototype.bind.apply(
+                        _Orig, [null].concat(Array.prototype.slice.call(arguments))
+                    ))();
+                    try { window.__mbRtcPcs.push(pc); } catch (e) {}
+                    return pc;
+                }
+                Wrapped.prototype = _Orig.prototype;
+                Object.setPrototypeOf(Wrapped, _Orig);
+                window.RTCPeerConnection = Wrapped;
+
+                // Called from Python via page.evaluate(). Returns a compact
+                // JSON-safe snapshot of every live peer-connection and every
+                // audio/video element's play state. Kept synchronous-ish to
+                // avoid hanging: each getStats() has a 2 s bail-out.
+                window.__mbCollectWebrtcStats = async function () {
+                    var out = { pcs: [], media_elements: [], ts_js: Date.now() };
+                    // Peer connections
+                    var pcs = (window.__mbRtcPcs || []).slice();
+                    for (var i = 0; i < pcs.length; i++) {
+                        var pc = pcs[i];
+                        var entry = {
+                            index: i,
+                            connection_state: null,
+                            ice_connection_state: null,
+                            ice_gathering_state: null,
+                            signaling_state: null,
+                            inbound_audio: null,
+                            inbound_video: null,
+                            outbound_audio: null,
+                            outbound_video: null,
+                            receivers: 0,
+                            senders: 0,
+                            error: null
+                        };
+                        try {
+                            entry.connection_state = pc.connectionState || null;
+                            entry.ice_connection_state = pc.iceConnectionState || null;
+                            entry.ice_gathering_state = pc.iceGatheringState || null;
+                            entry.signaling_state = pc.signalingState || null;
+                            try { entry.receivers = (pc.getReceivers && pc.getReceivers().length) || 0; } catch(e){}
+                            try { entry.senders = (pc.getSenders && pc.getSenders().length) || 0; } catch(e){}
+                            var statsP = pc.getStats();
+                            var statsReport = await Promise.race([
+                                statsP,
+                                new Promise(function (_, rj) { setTimeout(function(){ rj(new Error('stats-timeout')); }, 2000); })
+                            ]);
+                            statsReport.forEach(function (r) {
+                                if (!r || !r.type) return;
+                                if (r.type === 'inbound-rtp' && r.kind === 'audio') {
+                                    entry.inbound_audio = {
+                                        packets: r.packetsReceived || 0,
+                                        bytes: r.bytesReceived || 0,
+                                        packets_lost: r.packetsLost || 0,
+                                        jitter: r.jitter || 0,
+                                        total_audio_energy: r.totalAudioEnergy || 0,
+                                        total_samples_duration: r.totalSamplesDuration || 0
+                                    };
+                                } else if (r.type === 'inbound-rtp' && r.kind === 'video') {
+                                    entry.inbound_video = {
+                                        packets: r.packetsReceived || 0,
+                                        bytes: r.bytesReceived || 0,
+                                        frames_decoded: r.framesDecoded || 0
+                                    };
+                                } else if (r.type === 'outbound-rtp' && r.kind === 'audio') {
+                                    entry.outbound_audio = {
+                                        packets: r.packetsSent || 0,
+                                        bytes: r.bytesSent || 0
+                                    };
+                                } else if (r.type === 'outbound-rtp' && r.kind === 'video') {
+                                    entry.outbound_video = {
+                                        packets: r.packetsSent || 0,
+                                        bytes: r.bytesSent || 0
+                                    };
+                                }
+                            });
+                        } catch (e) {
+                            entry.error = String(e && e.message || e);
+                        }
+                        out.pcs.push(entry);
+                    }
+                    // Audio/video elements — are remote tracks actually being played?
+                    try {
+                        var els = document.querySelectorAll('audio,video');
+                        els.forEach(function (el) {
+                            var audioTracks = 0, videoTracks = 0;
+                            try {
+                                if (el.srcObject && el.srcObject.getAudioTracks) audioTracks = el.srcObject.getAudioTracks().length;
+                                if (el.srcObject && el.srcObject.getVideoTracks) videoTracks = el.srcObject.getVideoTracks().length;
+                            } catch(e){}
+                            out.media_elements.push({
+                                tag: el.tagName.toLowerCase(),
+                                paused: !!el.paused,
+                                muted: !!el.muted,
+                                volume: typeof el.volume === 'number' ? el.volume : null,
+                                autoplay: !!el.autoplay,
+                                ready_state: el.readyState,
+                                audio_tracks: audioTracks,
+                                video_tracks: videoTracks,
+                                has_srcobject: !!el.srcObject,
+                                current_time: el.currentTime || 0
+                            });
+                        });
+                    } catch (e) {}
+                    // Also include the state of our own hidden <audio>
+                    // elements created by the audio-attach shim (2.38.0).
+                    // This tells us whether each remote audio track was
+                    // successfully bound to an HTMLMediaElement and is
+                    // playing — separately from the meeting app's own
+                    // <video> elements which may or may not render audio.
+                    try {
+                        out.audio_sinks = (typeof window.__mbCollectAudioSinks === 'function')
+                            ? window.__mbCollectAudioSinks() : [];
+                    } catch (e) { out.audio_sinks = []; }
+                    return out;
+                };
+            })();
+        """)
+
+        # ── getUserMedia fallback shim ──────────────────────────────────────
+        # The bot container has no camera — only the PulseAudio virtual mic.
+        # Meeting platforms that request `getUserMedia({video:true, audio:true})`
+        # (notably onepizza.io) throw NotFoundError for the whole call when the
+        # camera is missing, which bails out their WebRTC setup and means no
+        # remote audio is ever rendered — the null-sink monitor then records
+        # 3+ minutes of pure silence (sink_inputs_total stays at 0 for the
+        # entire call — confirmed via /bot/{id}/debug on 2026-04-17).
+        #
+        # This shim retries a failed getUserMedia call with a synthetic
+        # canvas-captured video track + whatever audio the real device can
+        # produce, so meeting JS sees a working MediaStream and proceeds
+        # through its join flow. The synthetic video track is 640x480 black
+        # at 15 fps — invisible to other participants who see it as an
+        # off-camera tile, exactly what we want for a listen-only bot.
+        await ctx.add_init_script("""
+            (function () {
+                if (window._mbGumPatched) return;
+                if (!navigator || !navigator.mediaDevices) return;
+                window._mbGumPatched = true;
+
+                function _mbSyntheticVideoTrack() {
+                    try {
+                        var canvas = document.createElement('canvas');
+                        canvas.width = 640; canvas.height = 480;
+                        var ctx2d = canvas.getContext('2d');
+                        // Draw once so captureStream has a frame to emit.
+                        ctx2d.fillStyle = '#000';
+                        ctx2d.fillRect(0, 0, canvas.width, canvas.height);
+                        // Nudge the canvas every second so captureStream keeps
+                        // emitting frames even on implementations that stop
+                        // when the content is static.
+                        var i = 0;
+                        setInterval(function () {
+                            i = (i + 1) % 2;
+                            ctx2d.fillStyle = i ? '#000' : '#010101';
+                            ctx2d.fillRect(0, 0, 1, 1);
+                        }, 1000);
+                        var stream = canvas.captureStream ? canvas.captureStream(15) : null;
+                        if (!stream) return null;
+                        var tracks = stream.getVideoTracks();
+                        return tracks && tracks.length ? tracks[0] : null;
+                    } catch (e) {
+                        return null;
+                    }
+                }
+
+                function _mbSilentAudioTrack() {
+                    try {
+                        var AC = window.AudioContext || window.webkitAudioContext;
+                        if (!AC) return null;
+                        var ac = new AC();
+                        var dest = ac.createMediaStreamDestination();
+                        // Near-zero-amplitude oscillator keeps the track live
+                        // without producing audible sound to other peers.
+                        var osc = ac.createOscillator();
+                        var gain = ac.createGain();
+                        gain.gain.value = 0.0001;
+                        osc.frequency.value = 440;
+                        osc.connect(gain); gain.connect(dest);
+                        osc.start();
+                        var tracks = dest.stream.getAudioTracks();
+                        return tracks && tracks.length ? tracks[0] : null;
+                    } catch (e) {
+                        return null;
+                    }
+                }
+
+                var _origGum = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+                navigator.mediaDevices.getUserMedia = async function (constraints) {
+                    try {
+                        return await _origGum(constraints);
+                    } catch (err) {
+                        var name = err && err.name;
+                        if (name !== 'NotFoundError' && name !== 'NotReadableError' && name !== 'OverconstrainedError') {
+                            throw err;
+                        }
+                        console.warn('[mb-gum] original getUserMedia failed with', name, '— retrying with synthetic fallback');
+                        var want = constraints || {};
+                        var tracks = [];
+
+                        // Try real audio first (via PulseAudio virtual source).
+                        if (want.audio) {
+                            try {
+                                var aOnly = await _origGum({ audio: want.audio });
+                                aOnly.getAudioTracks().forEach(function(t){ tracks.push(t); });
+                            } catch (e2) {
+                                var fake = _mbSilentAudioTrack();
+                                if (fake) tracks.push(fake);
+                            }
+                        }
+
+                        // Try real video, otherwise synthetic canvas track.
+                        if (want.video) {
+                            try {
+                                var vOnly = await _origGum({ video: want.video });
+                                vOnly.getVideoTracks().forEach(function(t){ tracks.push(t); });
+                            } catch (e3) {
+                                var fv = _mbSyntheticVideoTrack();
+                                if (fv) tracks.push(fv);
+                            }
+                        }
+
+                        if (tracks.length === 0) {
+                            // Nothing we could synthesise — rethrow so the app
+                            // knows it truly has no media.
+                            throw err;
+                        }
+                        return new MediaStream(tracks);
+                    }
+                };
+
+                // Some apps probe enumerateDevices() and bail out before even
+                // calling getUserMedia. Ensure at least one videoinput /
+                // audioinput entry is always reported so that path works too.
+                var _origEnum = navigator.mediaDevices.enumerateDevices
+                    ? navigator.mediaDevices.enumerateDevices.bind(navigator.mediaDevices)
+                    : null;
+                if (_origEnum) {
+                    navigator.mediaDevices.enumerateDevices = async function () {
+                        var devs = [];
+                        try { devs = await _origEnum(); } catch (e) { devs = []; }
+                        var hasVideo = devs.some(function (d) { return d.kind === 'videoinput'; });
+                        var hasAudio = devs.some(function (d) { return d.kind === 'audioinput'; });
+                        if (!hasVideo) {
+                            devs.push({ kind: 'videoinput', deviceId: 'mb-fake-cam', groupId: 'mb', label: 'MeetingBot Virtual Camera', toJSON: function(){ return this; } });
+                        }
+                        if (!hasAudio) {
+                            devs.push({ kind: 'audioinput', deviceId: 'mb-fake-mic', groupId: 'mb', label: 'MeetingBot Virtual Mic', toJSON: function(){ return this; } });
+                        }
+                        return devs;
+                    };
+                }
             })();
         """)
 
         page = await ctx.new_page()
         await _apply_stealth(page)
 
+        # Capture browser-side diagnostics so post-mortems can see what the
+        # meeting's JS was complaining about. Writes to {debug_dir}/console.jsonl
+        # and mirrors the last 200 entries onto the BotSession.
+        try:
+            _diag_id = bot_id or diag_id
+            page.on(
+                "console",
+                lambda m: _ring_push(_diag_id, debug_dir, "console", f"[{m.type}] {m.text}"),
+            )
+            page.on(
+                "pageerror",
+                lambda e: _ring_push(_diag_id, debug_dir, "pageerror", str(e)),
+            )
+            page.on(
+                "requestfailed",
+                lambda r: _ring_push(_diag_id, debug_dir, "reqfail", f"{r.method} {r.url} :: {r.failure}"),
+            )
+        except Exception:
+            pass
+
         transcription_task: asyncio.Task | None = None   # VAD streaming transcription
         voice_task:         asyncio.Task | None = None   # Gemini Live voice responses
         monitor_task:       asyncio.Task | None = None
+        chat_capture_task:  asyncio.Task | None = None   # Structured chat capture
+        webrtc_stats_task:  asyncio.Task | None = None   # WebRTC stats probe (diagnostic)
+        webrtc_stats_stop_event = asyncio.Event()
 
         try:
             logger.info(
@@ -3875,109 +5058,17 @@ async def run_browser_bot(
                 None, functools.partial(_sync_chrome_audio_routing, pulse_sink, pulse_mic, pulse_source_name)
             )
 
-            # Unmute all audio/video elements in the page.  In headless/automated
-            # Chrome, Google Meet may leave its WebRTC audio output element muted
-            # (or at zero volume), causing the PulseAudio sink-input to carry
-            # silence even though WebRTC packets are received.  Force-playing with
-            # volume=1 ensures Chrome actually pushes PCM samples to PulseAudio.
-            try:
-                _audio_ctx_state = await page.evaluate("""
-                    async () => {
-                        document.querySelectorAll('audio, video').forEach(el => {
-                            el.muted  = false;
-                            el.volume = 1.0;
-                            el.play().catch(() => {});
-                        });
-                        // Explicitly resume the RTCPeerConnection audio context so
-                        // incoming WebRTC audio is rendered to PulseAudio.  Chrome
-                        // may suspend AudioContexts until a user gesture; the flag
-                        // --autoplay-policy=no-user-gesture-required helps but an
-                        // explicit resume() here is belt-and-suspenders.
-                        if (window._mbAudioCtx) {
-                            try { await window._mbAudioCtx.resume(); } catch(e) {}
-                            return window._mbAudioCtx.state;
-                        }
-                        return 'no-audio-ctx-yet';
-                    }
-                """)
-                logger.info("Audio elements unmuted in page (AudioContext state: %s)", _audio_ctx_state)
-
-                # If our init script patch didn't fire (AudioContext not created),
-                # force-connect all existing RTCPeerConnection remote streams.
-                # This handles platforms like onepizza that may use PeerJS/SimplePeer
-                # or other WebRTC wrappers that store RTCPeerConnection references
-                # before our init script runs.
-                if _audio_ctx_state == "no-audio-ctx-yet":
-                    try:
-                        _force_state = await page.evaluate("""
-                            async () => {
-                                const AudioCtx = window.AudioContext || window.webkitAudioContext;
-                                if (!AudioCtx) return 'no-AudioContext-API';
-                                const ctx = new AudioCtx({ latencyHint: 'playback' });
-                                await ctx.resume().catch(() => {});
-                                window._mbAudioCtx = ctx;
-
-                                // Find all audio/video elements and connect their streams
-                                let connected = 0;
-                                document.querySelectorAll('audio, video').forEach(el => {
-                                    try {
-                                        if (el.srcObject) {
-                                            const src = ctx.createMediaStreamSource(el.srcObject);
-                                            src.connect(ctx.destination);
-                                            connected++;
-                                        }
-                                    } catch(e) {}
-                                });
-
-                                // Scan for RTCPeerConnection instances stored on
-                                // common library globals (PeerJS, SimplePeer, socket.io, etc.)
-                                const pcScan = [];
-                                try {
-                                    for (const k of Object.keys(window)) {
-                                        try {
-                                            const v = window[k];
-                                            if (!v || typeof v !== 'object') continue;
-                                            // PeerJS: peer.connections → {id: [conn]} where conn.peerConnection is RTCPeerConnection
-                                            if (v.connections && typeof v.connections === 'object') {
-                                                for (const conns of Object.values(v.connections)) {
-                                                    for (const c of (Array.isArray(conns) ? conns : [conns])) {
-                                                        if (c && c.peerConnection) pcScan.push(c.peerConnection);
-                                                    }
-                                                }
-                                            }
-                                            // SimplePeer / generic: object with _pc or peerConnection property
-                                            if (v._pc && v._pc.getReceivers) pcScan.push(v._pc);
-                                            if (v.peerConnection && v.peerConnection.getReceivers) pcScan.push(v.peerConnection);
-                                            // Direct RTCPeerConnection stored on window
-                                            if (v instanceof RTCPeerConnection) pcScan.push(v);
-                                        } catch(e) {} // skip inaccessible cross-origin frames etc.
-                                    }
-                                } catch(e) {}
-
-                                // Scan RTCPeerConnections for remote audio tracks
-                                for (const pc of pcScan) {
-                                    try {
-                                        const receivers = pc.getReceivers ? pc.getReceivers() : [];
-                                        for (const r of receivers) {
-                                            if (r.track && r.track.kind === 'audio') {
-                                                const stream = new MediaStream([r.track]);
-                                                const src = ctx.createMediaStreamSource(stream);
-                                                src.connect(ctx.destination);
-                                                connected++;
-                                            }
-                                        }
-                                    } catch(e) {}
-                                }
-
-                                return ctx.state + ':connected=' + connected;
-                            }
-                        """)
-                        logger.info("Audio force-connect fallback: %s", _force_state)
-                    except Exception as exc:
-                        logger.debug("Audio force-connect failed: %s", exc)
-
-            except Exception as exc:
-                logger.debug("Audio unmute injection failed: %s", exc)
+            # Force-connect any WebRTC remote audio tracks already received into
+            # the page's Web Audio destination, so Chrome actually renders PCM
+            # to PulseAudio (otherwise sink-input routing is moot — the sink
+            # records pure silence). This runs again at 8/15/30 s in
+            # _late_routing_syncs to catch peers that initialise late.
+            _wc = await _force_connect_webrtc_audio(page)
+            if _wc:
+                logger.info(
+                    "WebRTC connect (post-admit): state=%s newly=%s",
+                    _wc.get("state"), _wc.get("newly"),
+                )
 
             # Diagnostic: check ffmpeg and PulseAudio state
             logger.info(
@@ -4009,28 +5100,164 @@ async def run_browser_bot(
                 logger.info("PulseAudio sink-inputs (post-sync-2):\n%s", _si2.stdout.strip() or "(none)")
             except Exception:
                 pass
+            # Re-attempt WebRTC audio connect after the 3s sink-input sweep —
+            # onepizza's PeerJS connections often appear in this window.
+            _wc2 = await _force_connect_webrtc_audio(page)
+            if _wc2:
+                logger.info(
+                    "WebRTC connect (~3s): state=%s newly=%s",
+                    _wc2.get("state"), _wc2.get("newly"),
+                )
 
             # Third and fourth routing syncs at ~8s and ~15s after join — onepizza
             # and other WebRTC platforms may create sink-inputs late.  These extra
             # syncs dramatically improve the chance of capturing user audio from
-            # the very start of the meeting.
+            # the very start of the meeting.  At each step we also re-run the
+            # WebRTC track force-connect (idempotent via window._mbConnectedTracks
+            # WeakSet) so newly-established peers get wired into Chrome's audio
+            # output pipeline.
+            #
+            # After the initial ramp (3/8/15/30/60 s) we drop into a continuous
+            # loop that keeps re-running routing + force-connect every 15 s for
+            # the rest of the meeting — WebRTC peers can renegotiate or join at
+            # any point and silent-sink regressions have been observed well past
+            # the 60 s mark on onepizza.  Repeat passes log at DEBUG unless they
+            # actually moved sink-inputs or connected new tracks.
             async def _late_routing_syncs():
-                await asyncio.sleep(5)   # ~8s after join (0.8 + 3 + 5)
-                await asyncio.get_event_loop().run_in_executor(
-                    None, functools.partial(_sync_chrome_audio_routing, pulse_sink, pulse_mic, pulse_source_name)
-                )
-                logger.info("PulseAudio routing sync 3 (~8s) complete")
-                await asyncio.sleep(7)   # ~15s after join
-                await asyncio.get_event_loop().run_in_executor(
-                    None, functools.partial(_sync_chrome_audio_routing, pulse_sink, pulse_mic, pulse_source_name)
-                )
-                logger.info("PulseAudio routing sync 4 (~15s) complete")
-                await asyncio.sleep(15)  # ~30s after join
-                await asyncio.get_event_loop().run_in_executor(
-                    None, functools.partial(_sync_chrome_audio_routing, pulse_sink, pulse_mic, pulse_source_name)
-                )
-                logger.info("PulseAudio routing sync 5 (~30s) complete")
+                async def _step(label: str, sleep_s: float, always_info: bool = True) -> None:
+                    await asyncio.sleep(sleep_s)
+                    await asyncio.get_event_loop().run_in_executor(
+                        None,
+                        functools.partial(
+                            _sync_chrome_audio_routing,
+                            pulse_sink, pulse_mic, pulse_source_name,
+                        ),
+                    )
+                    if always_info:
+                        logger.info("PulseAudio routing sync %s complete", label)
+                    else:
+                        logger.debug("PulseAudio routing sync %s complete", label)
+                    _wc = await _force_connect_webrtc_audio(page)
+                    if _wc:
+                        newly = _wc.get("newly") or 0
+                        if always_info or newly:
+                            logger.info(
+                                "WebRTC connect (%s): state=%s newly=%s",
+                                label, _wc.get("state"), newly,
+                            )
+
+                await _step("3 (~8s)", 5)
+                await _step("4 (~15s)", 7)
+                await _step("5 (~30s)", 15)
+                # One more pass at ~60s catches very-late peers (e.g. participants
+                # joining after the bot, or onepizza renegotiations).
+                await _step("6 (~60s)", 30)
+                # Continuous safety loop — keeps routing + force-connect running
+                # every 15 s for the rest of the meeting.  Cancelled when the
+                # surrounding task group tears down the browser context.
+                _tick = 0
+                while True:
+                    _tick += 1
+                    await _step(f"cont#{_tick}", 15, always_info=False)
             asyncio.create_task(_late_routing_syncs())
+
+            # ── Audio-health watchdog ──────────────────────────────────────────
+            # Periodically sample the tail of the growing WAV file; if Chrome
+            # isn't actually rendering audio to PulseAudio the recording will be
+            # pure silence even though sink-input routing "looks" correct.  When
+            # we detect sustained silence we redo routing + force-connect out of
+            # band (i.e. without waiting for the next 15 s tick).  Also acts as
+            # a one-shot restart for a dead ffmpeg process.
+            from app.services.transcription_service import (
+                _check_audio_has_speech,
+                _SILENCE_PEAK_THRESHOLD,
+            )
+
+            async def _audio_health_watchdog():
+                nonlocal ffmpeg_proc
+                silence_streak = 0
+                ffmpeg_restarted = False
+                # Grace period — first seconds of a call are routinely silent
+                # while people dial in.
+                await asyncio.sleep(15)
+                while True:
+                    try:
+                        # 1) ffmpeg liveness — restart once if it has died.
+                        if (
+                            ffmpeg_proc is not None
+                            and ffmpeg_proc.poll() is not None
+                            and not ffmpeg_restarted
+                        ):
+                            logger.error(
+                                "ffmpeg died mid-recording (pid=%s exit=%s); restarting once",
+                                ffmpeg_proc.pid, ffmpeg_proc.returncode,
+                            )
+                            new_proc = _start_ffmpeg(audio_path, pulse_sink, stderr_log_path=ffmpeg_stderr_path)
+                            if new_proc is not None:
+                                ffmpeg_proc = new_proc
+                                logger.info("ffmpeg restarted (pid=%s)", new_proc.pid)
+                            else:
+                                logger.error("ffmpeg restart failed; leaving recording as-is")
+                            ffmpeg_restarted = True
+
+                        # 2) Silence detection on the tail of the growing WAV.
+                        has_speech, peak = await asyncio.get_event_loop().run_in_executor(
+                            None, _check_audio_has_speech, audio_path,
+                        )
+                        if not has_speech and peak >= 0:
+                            silence_streak += 1
+                            logger.debug(
+                                "Audio watchdog: silent sample %d (peak=%.0f/%d)",
+                                silence_streak, peak, _SILENCE_PEAK_THRESHOLD,
+                            )
+                        else:
+                            if silence_streak:
+                                logger.info(
+                                    "Audio watchdog: speech detected (peak=%.0f) — streak reset",
+                                    peak,
+                                )
+                            silence_streak = 0
+
+                        # 3) After ~60 s of continuous silence, remediate.
+                        if silence_streak >= 3:
+                            try:
+                                _si = subprocess.run(
+                                    ["pactl", "list", "short", "sink-inputs"],
+                                    capture_output=True, text=True, timeout=5,
+                                )
+                                _si_count = len([l for l in _si.stdout.splitlines() if l.strip()])
+                            except Exception:
+                                _si_count = -1
+                            logger.warning(
+                                "Audio silence watchdog: no speech for ~%d s "
+                                "(peak=%.0f, sink=%s, mic=%s, ffmpeg_pid=%s alive=%s, "
+                                "sink-inputs=%d) — forcing routing + WebRTC re-connect",
+                                silence_streak * 20, peak, pulse_sink, pulse_mic,
+                                ffmpeg_proc.pid if ffmpeg_proc else None,
+                                (ffmpeg_proc.poll() is None) if ffmpeg_proc else False,
+                                _si_count,
+                            )
+                            await asyncio.get_event_loop().run_in_executor(
+                                None,
+                                functools.partial(
+                                    _sync_chrome_audio_routing,
+                                    pulse_sink, pulse_mic, pulse_source_name,
+                                ),
+                            )
+                            _wc = await _force_connect_webrtc_audio(page)
+                            if _wc:
+                                logger.info(
+                                    "Audio watchdog remediation: state=%s newly=%s",
+                                    _wc.get("state"), _wc.get("newly"),
+                                )
+                            # Reset streak so we don't remediate every tick.
+                            silence_streak = 0
+                    except Exception as exc:
+                        logger.debug("Audio health watchdog tick failed: %s", exc)
+
+                    await asyncio.sleep(20)
+
+            asyncio.create_task(_audio_health_watchdog())
 
             # Enable live captions so the mention monitor can read them
             if respond_on_mention:
@@ -4148,6 +5375,62 @@ async def run_browser_bot(
                     )
                 )
 
+            # ── Structured chat capture (voice + chat unified transcript) ─────
+            # Polls the chat panel at 4 Hz, dedups by per-line hash, and emits
+            # every new chat message into structured_transcript with
+            # source="chat". Uses the same on_live_transcript_entry callback as
+            # the VAD loop so WS / SSE / webhook delivery is unified.
+            _chat_seen_ids: set = seen_chat_ids if seen_chat_ids is not None else set()
+            try:
+                chat_capture_task = asyncio.create_task(
+                    _chat_capture_loop(
+                        page=page,
+                        platform=platform,
+                        bot_name=bot_name,
+                        structured_transcript=structured_transcript,
+                        seen_chat_ids=_chat_seen_ids,
+                        on_transcript_entry=on_live_transcript_entry,
+                        recording_t0=t0,
+                    )
+                )
+            except Exception as exc:
+                logger.warning("Failed to start chat capture loop: %s", exc)
+
+            # ── WebRTC stats probe (diagnostic) ───────────────────────────────
+            # Appends a snapshot to bot.webrtc_stats_samples every 15 s so we
+            # can see in /api/v1/bot/{id}/debug whether remote audio packets
+            # arrived (inbound_audio.packets/bytes) and whether any <audio>
+            # element actually played them. Safe no-op if bot_id is empty.
+            if bot_id:
+                try:
+                    webrtc_stats_task = asyncio.create_task(
+                        _webrtc_stats_loop(
+                            bot_id, page, debug_dir, webrtc_stats_stop_event,
+                        )
+                    )
+                except Exception as exc:
+                    logger.debug("Failed to start webrtc stats loop: %s", exc)
+
+            # ── Register live-interaction runtime handle ──────────────────────
+            # Makes the Playwright page + audio routing accessible to the /say
+            # and /chat API endpoints via the BotSession.runtime dict.
+            if on_runtime_ready is not None:
+                try:
+                    await on_runtime_ready({
+                        "page": page,
+                        "platform": platform,
+                        "pulse_mic": pulse_mic,
+                        "tts_provider": tts_provider,
+                        "gemini_api_key": _key,
+                        "start_muted": start_muted,
+                        "speak_lock": asyncio.Lock(),
+                        "chat_lock": asyncio.Lock(),
+                        "speak_task": None,
+                        "recording_t0": t0,
+                    })
+                except Exception as exc:
+                    logger.warning("on_runtime_ready callback failed: %s", exc)
+
             # Run mention monitor concurrently with the meeting-end watcher.
             # When Gemini Live is active, the monitor also checks live_transcript
             # as a fallback (in case Gemini Live doesn't respond to a mention).
@@ -4210,6 +5493,20 @@ async def run_browser_bot(
                 monitor_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await monitor_task
+            if chat_capture_task is not None:
+                chat_capture_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await chat_capture_task
+            if webrtc_stats_task is not None:
+                webrtc_stats_stop_event.set()
+                webrtc_stats_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await webrtc_stats_task
+
+            # Clear the runtime handle so /say and /chat stop accepting calls
+            if on_runtime_ready is not None:
+                with contextlib.suppress(Exception):
+                    await on_runtime_ready(None)
 
             # Gracefully leave the call (best-effort, bot may already be removed)
             if exit_reason not in ("ended",):
@@ -4261,6 +5558,12 @@ async def run_browser_bot(
             }
 
         finally:
+            # Snapshot PulseAudio state before we tear anything down, so
+            # post-mortems show the end state.
+            try:
+                await _save_pactl("pre_leave")
+            except Exception:
+                pass
             # Always cancel background tasks (handles external cancellation of run_browser_bot)
             if transcription_task is not None and not transcription_task.done():
                 transcription_task.cancel()
@@ -4274,7 +5577,94 @@ async def run_browser_bot(
                 monitor_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError, Exception):
                     await monitor_task
+            # Stop the audio health loop.
+            if health_task is not None:
+                health_stop_event.set()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await asyncio.wait_for(health_task, timeout=5)
+            # ── Flush MediaRecorder so the last 2 s chunk lands before
+            # browser.close() kills the page. The expose_function callback
+            # is invoked synchronously by Chromium → Playwright → us, so
+            # giving it ~1.5 s after stop() is enough for the final
+            # ondataavailable to flush.
+            try:
+                await page.evaluate("() => { try { window._mbStopAudioRecorder && window._mbStopAudioRecorder(); } catch(e){} }")
+                await asyncio.sleep(1.5)
+            except Exception as _e:
+                logger.debug("MediaRecorder stop call failed: %s", _e)
             await browser.close()
+            # Close the webm sink (after browser close so any in-flight
+            # callbacks have already returned).
+            try:
+                if webm_state["fh"]:
+                    webm_state["fh"].close()
+                    webm_state["fh"] = None
+            except Exception:
+                pass
+            # ── Decode browser-captured WebM → 16 kHz mono WAV and use it
+            # as the source-of-truth recording. Only swap if the decoded
+            # file actually has signal — otherwise leave the PulseAudio
+            # WAV in place so platforms where PulseAudio works (Meet/Zoom
+            # historically) aren't disturbed.
+            try:
+                webm_size = os.path.getsize(webm_path) if os.path.exists(webm_path) else 0
+                if webm_size > 4096:
+                    webm_wav_path = audio_path + ".remote.wav"
+                    logger.info(
+                        "remote-audio: decoding %d-byte webm → wav (%s)",
+                        webm_size, webm_wav_path,
+                    )
+                    decode = subprocess.run(
+                        [
+                            "ffmpeg", "-y",
+                            "-i", webm_path,
+                            "-ac", "1",
+                            "-ar", "16000",
+                            "-acodec", "pcm_s16le",
+                            webm_wav_path,
+                        ],
+                        capture_output=True, text=True, timeout=120,
+                    )
+                    if decode.returncode == 0 and os.path.exists(webm_wav_path) and os.path.getsize(webm_wav_path) > 1024:
+                        # Peak-amplitude probe on decoded wav.
+                        peak = 0
+                        try:
+                            with open(webm_wav_path, "rb") as _f:
+                                _f.seek(44)   # skip header
+                                _data = _f.read()
+                            if _data:
+                                import array as _array
+                                _a = _array.array('h')
+                                _a.frombytes(_data[: (len(_data) // 2) * 2])
+                                peak = max((abs(x) for x in _a), default=0)
+                        except Exception as _pe:
+                            logger.debug("decoded-wav peak probe failed: %s", _pe)
+                        if peak >= 200:
+                            try:
+                                os.replace(webm_wav_path, audio_path)
+                                logger.info(
+                                    "remote-audio: ✓ MediaRecorder WAV adopted as recording (peak=%d/32767, replaced PulseAudio WAV)",
+                                    peak,
+                                )
+                            except Exception as _re:
+                                logger.warning("remote-audio: could not replace PulseAudio WAV: %s", _re)
+                        else:
+                            logger.warning(
+                                "remote-audio: MediaRecorder WAV has peak=%d/32767 (<200), KEEPING PulseAudio WAV — webm path may also be silent",
+                                peak,
+                            )
+                    else:
+                        logger.warning(
+                            "remote-audio: ffmpeg webm→wav decode failed (rc=%d): %s",
+                            decode.returncode, (decode.stderr or "")[-500:],
+                        )
+                else:
+                    logger.info(
+                        "remote-audio: no MediaRecorder data captured (webm size=%d) — falling back to PulseAudio WAV",
+                        webm_size,
+                    )
+            except Exception as _de:
+                logger.warning("remote-audio: post-meeting decode/swap failed: %s", _de)
             if ffmpeg_video_proc:
                 _stop_ffmpeg(ffmpeg_video_proc)
             if ffmpeg_proc:
@@ -4285,6 +5675,23 @@ async def run_browser_bot(
                 _unload_pulse_sink(pulse_mic_virt_idx)
             if pulse_mic_idx:
                 _unload_pulse_sink(pulse_mic_idx)
+            # ── Flush diagnostic bundle onto the BotSession ──────────────────
+            # This is the data /api/bots/{bot_id}/debug will surface.
+            try:
+                if bot_id:
+                    from app.store import store as _store
+                    _ring = _debug_rings.pop(bot_id or diag_id, None)
+                    await _store.update_bot(
+                        bot_id,
+                        ffmpeg_exit_code=(ffmpeg_proc.returncode if ffmpeg_proc else None),
+                        ffmpeg_stderr_tail=_tail_file(Path(ffmpeg_stderr_path), 16384),
+                        console_log_tail=list(_ring) if _ring is not None else [],
+                        debug_dir=str(debug_dir),
+                    )
+                else:
+                    _debug_rings.pop(diag_id, None)
+            except Exception:
+                pass
             if xvfb_proc:
                 _unregister_proc(xvfb_proc)
                 try:

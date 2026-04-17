@@ -1970,6 +1970,37 @@
         </form>
       </div>
 
+      <!-- Microphone Test -->
+      <div class="card card-pad mb-3">
+        <div class="section-title mb-1">Microphone Test</div>
+        <div class="section-subtitle mb-3">Check that your microphone is capturing audio before using it in a bot. Nothing leaves your browser.</div>
+
+        <div class="mb-3" style="max-width:420px">
+          <label class="form-label">Input device</label>
+          <select id="mic-device-select" class="form-select form-select-sm">
+            <option value="">Default microphone</option>
+          </select>
+        </div>
+
+        <div class="d-flex gap-2 flex-wrap align-items-center mb-3">
+          <button type="button" id="mic-test-start" class="btn btn-primary btn-sm">Start test</button>
+          <button type="button" id="mic-test-stop" class="btn btn-outline-secondary btn-sm d-none">Stop test</button>
+          <span id="mic-status" style="font-size:12.5px;color:#64748b">Idle</span>
+        </div>
+
+        <div style="max-width:420px">
+          <div style="height:14px;border:1px solid #d8cfc8;border-radius:7px;overflow:hidden;background:#f8fafc">
+            <div id="mic-level-bar" style="height:100%;width:0%;background:#94a3b8;transition:width 60ms linear,background 120ms linear"></div>
+          </div>
+          <div class="d-flex justify-content-between" style="font-size:11.5px;color:#94a3b8;margin-top:4px">
+            <span>Silent</span>
+            <span id="mic-peak">Peak: 0%</span>
+            <span>Loud</span>
+          </div>
+          <div style="font-size:11.5px;color:#94a3b8;margin-top:6px">Tip: Speak normally for a couple of seconds. You should see the bar move into the green range.</div>
+        </div>
+      </div>
+
       <!-- Account type -->
       <div class="card card-pad mb-3">
         <div class="section-title mb-1">Account Type</div>
@@ -3157,5 +3188,103 @@ async function searchTranscripts() {
     container.innerHTML = rows;
   } catch (e) { container.innerHTML = `<div style="color:#dc2626;padding:1rem">${e.message}</div>`; }
 }
+
+// ── Microphone Test (Settings) ────────────────────────────────────────────
+(function micTest() {
+  const startBtn = document.getElementById('mic-test-start');
+  const stopBtn  = document.getElementById('mic-test-stop');
+  const select   = document.getElementById('mic-device-select');
+  const bar      = document.getElementById('mic-level-bar');
+  const statusEl = document.getElementById('mic-status');
+  const peakEl   = document.getElementById('mic-peak');
+  if (!startBtn || !stopBtn || !select || !bar || !statusEl || !peakEl) return;
+
+  let stream = null, ctx = null, analyser = null, raf = null;
+
+  async function listDevices() {
+    if (!navigator.mediaDevices?.enumerateDevices) return;
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const inputs = devices.filter(d => d.kind === 'audioinput');
+      const current = select.value;
+      select.innerHTML = '<option value="">Default microphone</option>' + inputs.map((d, i) => {
+        const label = d.label || ('Microphone ' + (i + 1));
+        return `<option value="${d.deviceId}">${label.replace(/</g, '&lt;')}</option>`;
+      }).join('');
+      if (current) select.value = current;
+    } catch (_) { /* ignore */ }
+  }
+
+  function tick() {
+    const buf = new Uint8Array(analyser.fftSize);
+    let peak = 0, voicedFrames = 0;
+    const loop = () => {
+      if (!analyser) return;
+      analyser.getByteTimeDomainData(buf);
+      let sum = 0;
+      for (let i = 0; i < buf.length; i++) { const v = (buf[i] - 128) / 128; sum += v * v; }
+      const rms = Math.sqrt(sum / buf.length);
+      const pct = Math.min(100, Math.round(rms * 300));
+      peak = Math.max(peak * 0.95, pct);
+      bar.style.width = pct + '%';
+      bar.style.background = pct > 70 ? '#f59e0b' : (pct > 5 ? '#10b981' : '#94a3b8');
+      peakEl.textContent = 'Peak: ' + Math.round(peak) + '%';
+      if (pct > 8) voicedFrames++; else voicedFrames = Math.max(0, voicedFrames - 1);
+      if (voicedFrames > 5) statusEl.textContent = 'Voice detected ✓';
+      raf = requestAnimationFrame(loop);
+    };
+    loop();
+  }
+
+  async function start() {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      statusEl.textContent = 'Your browser does not support microphone access.';
+      return;
+    }
+    try {
+      const deviceId = select.value || undefined;
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          deviceId: deviceId ? { exact: deviceId } : undefined,
+          echoCancellation: true,
+          noiseSuppression: true,
+        }
+      });
+      ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const src = ctx.createMediaStreamSource(stream);
+      analyser = ctx.createAnalyser();
+      analyser.fftSize = 1024;
+      src.connect(analyser);
+      startBtn.classList.add('d-none');
+      stopBtn.classList.remove('d-none');
+      statusEl.textContent = 'Listening…';
+      tick();
+      listDevices();
+    } catch (e) {
+      if (e.name === 'NotAllowedError') statusEl.textContent = 'Permission denied — allow microphone access in your browser.';
+      else if (e.name === 'NotFoundError') statusEl.textContent = 'No microphone found.';
+      else statusEl.textContent = 'Error: ' + (e.message || e.name);
+    }
+  }
+
+  function stop() {
+    if (raf) cancelAnimationFrame(raf);
+    if (stream) stream.getTracks().forEach(t => t.stop());
+    if (ctx && ctx.state !== 'closed') ctx.close();
+    stream = ctx = analyser = null;
+    raf = null;
+    bar.style.width = '0%';
+    bar.style.background = '#94a3b8';
+    statusEl.textContent = 'Idle';
+    peakEl.textContent = 'Peak: 0%';
+    startBtn.classList.remove('d-none');
+    stopBtn.classList.add('d-none');
+  }
+
+  startBtn.addEventListener('click', start);
+  stopBtn.addEventListener('click', stop);
+  document.addEventListener('visibilitychange', () => { if (document.hidden && stream) stop(); });
+  listDevices();
+})();
 </script>
 {% endblock %}

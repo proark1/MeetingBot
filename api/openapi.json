@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "MeetingBot API",
-    "version": "2.3.0",
-    "description": "Send bots into Zoom, Google Meet, and Microsoft Teams meetings to record, transcribe, and analyse them with Claude (Anthropic) or Gemini (Google) AI.\n\nMulti-tenant: each external service registers an account and gets its own API key. Pre-fund a credit balance via Stripe (card) or USDC (ERC-20) — credits are deducted automatically per bot run.\n\n**Authentication:** Pass your `sk_live_...` API key as a Bearer token on every request:\n```\nAuthorization: Bearer sk_live_<your-key>\n```\n\n**Business accounts:** Upgrade to a business account to isolate data per end-user. Pass `X-Sub-User: <user-id>` on every request — different sub-users cannot see each other's bots.\n\n**Interactive docs:** Public Swagger UI at `/api/docs` · Admin full schema at `/api/v1/admin/docs` (admin only).\n\n**v2.3.0 changes:** Zero-reload async dashboard, admin rate limits (10/min), webhook replay protection via `X-MeetingBot-Timestamp`, bot queue wake latency near-zero via asyncio.Event, analytics caching (30 s), calendar dedup memory fix."
+    "version": "2.34.0",
+    "description": "Send bots into Zoom, Google Meet, and Microsoft Teams meetings to record, transcribe, and analyse them with Claude (Anthropic) or Gemini (Google) AI.\n\nMulti-tenant: each external service registers an account and gets its own API key. Pre-fund a credit balance via Stripe (card) or USDC (ERC-20) — credits are deducted automatically per bot run.\n\n**Authentication:** Pass your `sk_live_...` API key as a Bearer token on every request:\n```\nAuthorization: Bearer sk_live_<your-key>\n```\n\n**Business accounts:** Upgrade to a business account to isolate data per end-user. Pass `X-Sub-User: <user-id>` on every request — different sub-users cannot see each other's bots.\n\n**Interactive docs:** Public Swagger UI at `/api/docs` · Admin full schema at `/api/v1/admin/docs` (admin only).\n\n**v2.34.0 changes:** Unified live transcript (voice + chat) — every chat message is captured into the same stream as voice with `source: \"voice\" | \"chat\"`. New webhook event `bot.live_chat_message`. Two new live-interaction endpoints to drive the bot mid-meeting: `POST /api/v1/bot/{id}/say` (speak arbitrary text via TTS, Gemini-default voice) and `POST /api/v1/bot/{id}/chat` (post arbitrary text into the meeting chat). Both return 202 immediately and run the actual work behind a per-bot `asyncio.Lock` so concurrent calls serialise safely; `/say` accepts `interrupt:true` to cancel an in-flight speak."
   },
   "servers": [
     {
@@ -224,7 +224,7 @@
           "ended_at": { "type": "string", "format": "date-time", "nullable": true },
           "duration_seconds": { "type": "number", "nullable": true, "description": "Meeting duration in seconds." },
           "participants": { "type": "array", "items": { "type": "string" }, "description": "Names of meeting participants." },
-          "transcript": { "type": "array", "items": { "type": "object" }, "description": "Array of {speaker, text, timestamp} entries. Available once status is `done`." },
+          "transcript": { "type": "array", "items": { "type": "object" }, "description": "Array of `{speaker, text, timestamp, source, message_id?, bot_generated?}` entries. `source` is `voice` (spoken utterance, default) or `chat` (captured from the meeting chat panel). `message_id` is a short stable hash used to dedup chat messages. `bot_generated: true` marks entries produced by `POST /say` or `POST /chat`. Available once status is `done`." },
           "analysis": { "$ref": "#/components/schemas/MeetingAnalysis", "nullable": true, "description": "AI-generated analysis. Available once status is `done` (analysis_mode=full)." },
           "chapters": { "type": "array", "items": { "type": "object" }, "description": "Array of {title, start_time, summary} chapter segments." },
           "speaker_stats": { "type": "array", "items": { "type": "object" }, "description": "Array of {name, talk_time_s, talk_pct, turns} per speaker." },
@@ -329,6 +329,41 @@
           "body": { "type": "string" }
         }
       },
+      "SayRequest": {
+        "type": "object",
+        "required": ["text"],
+        "properties": {
+          "text":      { "type": "string", "minLength": 1, "maxLength": 2000, "description": "Text to speak aloud in the meeting." },
+          "voice":     { "type": "string", "enum": ["gemini", "edge"], "default": "gemini", "description": "TTS provider. `gemini` — natural Google Gemini TTS (~1–2 s). `edge` — Microsoft Edge TTS (~300–500 ms, slightly robotic)." },
+          "interrupt": { "type": "boolean", "default": false, "description": "When true, cancel any in-flight speak task and jump ahead. When false (default), this call queues behind the current speech." }
+        },
+        "example": { "text": "Hello everyone, sorry I'm late.", "voice": "gemini", "interrupt": false }
+      },
+      "SayResponse": {
+        "type": "object",
+        "properties": {
+          "bot_id":               { "type": "string" },
+          "task_id":              { "type": "string", "description": "Opaque id for the queued speak task — useful for log correlation." },
+          "queued":               { "type": "boolean", "default": true },
+          "interrupted_previous": { "type": "boolean", "description": "True when `interrupt:true` cancelled an already-running speak task." }
+        }
+      },
+      "ChatRequest": {
+        "type": "object",
+        "required": ["text"],
+        "properties": {
+          "text": { "type": "string", "minLength": 1, "maxLength": 2000, "description": "Text to post to the meeting chat." }
+        },
+        "example": { "text": "Sharing the link in chat: https://example.com" }
+      },
+      "ChatResponse": {
+        "type": "object",
+        "properties": {
+          "bot_id":  { "type": "string" },
+          "task_id": { "type": "string", "description": "Opaque id for the queued chat-post task." },
+          "queued":  { "type": "boolean", "default": true }
+        }
+      },
       "BalanceResponse": {
         "type": "object",
         "properties": {
@@ -380,7 +415,7 @@
         "required": ["url", "events"],
         "properties": {
           "url": { "type": "string", "format": "uri", "description": "HTTPS URL to receive webhook POST requests." },
-          "events": { "type": "array", "items": { "type": "string" }, "description": "Event types to subscribe to (e.g. `['bot.done', 'bot.error']`)." },
+          "events": { "type": "array", "items": { "type": "string" }, "description": "Event types to subscribe to. Supported: `bot.joining`, `bot.in_call`, `bot.call_ended`, `bot.transcript_ready`, `bot.analysis_ready`, `bot.done`, `bot.error`, `bot.cancelled`, `bot.keyword_alert`, `bot.live_transcript`, `bot.live_transcript_translated`, `bot.live_chat_message`, `bot.recurring_intel_ready`, `bot.test`. Use `['*']` to subscribe to all events. Example: `['bot.done', 'bot.error', 'bot.live_chat_message']`." },
           "secret": { "type": "string", "nullable": true, "description": "Optional HMAC secret for verifying webhook signatures." }
         }
       },
@@ -890,6 +925,46 @@
         "responses": {
           "200": { "description": "Follow-up email draft", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/FollowupEmailResponse" } } } },
           "425": { "description": "Too Early — no transcript or analysis yet" }
+        }
+      }
+    },
+    "/api/v1/bot/{id}/say": {
+      "post": {
+        "tags": ["Bots"],
+        "summary": "Speak text in the live meeting",
+        "description": "Make the bot speak arbitrary text aloud in the live meeting. Requires `in_call` status (otherwise HTTP 409). The endpoint returns 202 immediately; TTS synthesis and playback through the per-bot virtual microphone run in the background. Concurrent calls serialise behind a per-bot lock so audio never overlaps; pass `interrupt:true` to cancel an in-flight speak task and jump ahead. The spoken text is appended to the unified transcript with `source:\"voice\", bot_generated:true` so it shows up in `GET /transcript`, `GET /stream`, and post-meeting analysis. Rate-limited to 30 requests per minute per IP.",
+        "operationId": "bot_say",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SayRequest" } } }
+        },
+        "responses": {
+          "200": { "description": "Speak task queued", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SayResponse" } } } },
+          "409": { "description": "Conflict — bot is not in a call, or runtime not yet ready" },
+          "422": { "description": "Validation error — `text` is required" }
+        }
+      }
+    },
+    "/api/v1/bot/{id}/chat": {
+      "post": {
+        "tags": ["Bots"],
+        "summary": "Post text to the meeting chat",
+        "description": "Make the bot post arbitrary text into the live meeting's chat panel. Requires `in_call` status (otherwise HTTP 409). Returns 202 immediately; the keyboard typing runs in the background behind a per-bot lock so concurrent posts don't race the per-platform DOM selectors. The bot's own message is pre-registered in the chat-dedup set so the live capture loop does not echo it back via `bot.live_chat_message`. Works on Google Meet, Zoom, Microsoft Teams, and onepizza. Rate-limited to 30 requests per minute per IP.",
+        "operationId": "bot_chat",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ChatRequest" } } }
+        },
+        "responses": {
+          "200": { "description": "Chat-post task queued", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ChatResponse" } } } },
+          "409": { "description": "Conflict — bot is not in a call, or runtime not yet ready" },
+          "422": { "description": "Validation error — `text` is required" }
         }
       }
     },

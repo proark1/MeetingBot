@@ -5,6 +5,155 @@ All notable changes to MeetingBot are documented here.
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
 > **Latest version:** 2.33.5 — **Last updated:** 2026-04-16
+> **Latest version:** 2.39.0 — **Last updated:** 2026-04-17
+
+---
+
+## [2.39.0] - 2026-04-17
+
+### Fixed
+- **onepizza: silent recordings — definitive fix by bypassing PulseAudio entirely** (industry-standard Recall.ai pattern). The v2.38.0 swap from AudioContext → hidden `<audio autoplay>` element produced the expected page-side state (`audio_sinks: [{paused:false, readyState:4, currentTime: advancing}]`, WebRTC `total_audio_energy` climbing 0.10 → 3.55 over 60 s), but ffmpeg STILL recorded `peak_amp:0` and `audio_health` logged `SILENT` every 15 s. Both AudioContext and HTMLMediaElement output paths produce silence to PulseAudio in headless+Xvfb Chromium for remote WebRTC streams — the issue is below the JS layer, in Chrome's audio renderer / Xvfb interaction.
+- **Fix in `backend/app/services/browser_bot.py`**: capture audio inside the page using `MediaRecorder` on the remote `MediaStream`, ship encoded chunks back to Python via Playwright `expose_function`, write them to disk, then ffmpeg-decode at end-of-meeting and use the resulting WAV as the source-of-truth recording. This is the documented Recall.ai approach (*"access a MediaStream object and its audio track from the webpage running inside the bot, and get samples of the meeting audio"*) and bypasses Chrome's audio output device, the `--use-fake-device-for-media-stream` debate, the AudioContext-on-remote-stream Chromium bug, the `<audio autoplay>` autoplay-policy debate, and the entire PulseAudio routing pipeline.
+
+### Added
+- **In-page MediaRecorder**: a new `_mbStartOrUpdateRecorder()` block in the audio-attach init script. When the first remote audio track arrives, creates a shared `MediaStream`, picks the best supported mime (`audio/webm;codecs=opus` → `audio/webm` → `audio/ogg;codecs=opus` → default), starts MediaRecorder at 64 kbps with `start(2000)` (2 s chunks), and on `ondataavailable` base64-encodes the blob and calls back to Python via `window._mbOnAudioBlob(b64, seq, size)`. If a second remote audio track appears mid-call, the recorder is stopped and restarted on the combined stream. Stop entry point exposed as `window._mbStopAudioRecorder()` so Python can flush the last chunk before tearing down.
+- **`page.expose_function('_mbOnAudioBlob', ...)`** registered on the BrowserContext. Receives `(b64, seq, size)`, base64-decodes, appends to `{audio_path}.remote.webm`. Logs `remote-audio: first MediaRecorder chunk received seq=N size=M` on first chunk and a counter every 15 chunks.
+- **Post-meeting WebM → WAV decode + swap** in the cleanup `finally` block: stops the recorder via `page.evaluate(window._mbStopAudioRecorder)`, sleeps 1.5 s for the final flush, closes the file, then runs `ffmpeg -i {webm} -ac 1 -ar 16000 -acodec pcm_s16le {wav}`. Peak-amplitude probes the result; if `peak ≥ 200/32767` it `os.replace`s the silent PulseAudio WAV with the MediaRecorder-derived one. Logs:
+  - `remote-audio: ✓ MediaRecorder WAV adopted as recording (peak=NNNN/32767, replaced PulseAudio WAV)` — success
+  - `remote-audio: MediaRecorder WAV has peak=N/32767 (<200), KEEPING PulseAudio WAV` — both silent
+  - `remote-audio: no MediaRecorder data captured (webm size=N)` — recorder never produced data
+- **Safety**: the PulseAudio path is preserved as a fallback. Other platforms (Meet, Zoom, Teams) where PulseAudio capture historically worked aren't disturbed — the WAV is only swapped when the MediaRecorder-derived file actually has signal.
+
+### JS-side logs added (visible via console_log_tail)
+- `[mb-rec] MediaRecorder started mime=audio/webm;codecs=opus tracks=1`
+- `[mb-rec] restarting recorder to include new track …` (multi-party mid-call)
+- `[mb-rec] start failed: …` (MediaRecorder API problem)
+- `[mb-rec] callback failed: …` (expose_function mismatch)
+- `[mb-rec] recorder stopped state=…` (clean shutdown)
+
+---
+
+## [2.38.0] - 2026-04-17
+
+### Fixed
+- **onepizza: silent recordings were caused by a Chromium Web Audio bug, not audio routing or join logic** — confirmed by the v2.37.0 webrtc-stats diagnostic. Bot `edb8af4d…` (13:49 UTC) showed: `connection_state: "connected"`, `ice_connection_state: "connected"`, `signaling_state: "stable"` (v2.37.1 join fix is working), `inbound_audio.packets` climbing 639 → 3640 over 60 s, `inbound_audio.total_audio_energy` climbing 0.92 → 3.37 (**non-zero energy = Chrome IS decoding actual non-silent samples**), onepizza's active-speaker border flickering green (its own VAD sees incoming audio — matches user report of "frame flickering green"), the Chromium sink-input correctly attached to our null-sink with non-zero `Buffer Latency: 34058 usec`, and `<video>` elements with `paused: false muted: false volume: 1 ready_state: 4 audio_tracks: 1 current_time` advancing. And yet `peak_amp: 0.0` in the WAV and onepizza's caption UI reporting "No sound detected — check your mic".
+- **Root cause**: the init script `_mbRtcAudioForced` (added in 2.33.x) was doing `AudioContext.createMediaStreamSource(remoteStream).connect(ctx.destination)` for every remote audio track to "force" Chromium to render audio. That API path is a long-standing Chromium bug for remote WebRTC streams — Chrome silences the audio pipeline when a remote `MediaStreamTrack` is taken into Web Audio (chromium#121673, w3c/webrtc-pc#2564 and multiple community reports: *"when this code was added to the flow, Chrome stopped generating all WebRTC audio, though it worked on Firefox"*). Our own shim was the thing producing the silence.
+- **Fix in `backend/app/services/browser_bot.py`**: replaced the AudioContext-based `connectTrack()` with `attachAudioTrack()`, which creates a hidden `<audio autoplay srcObject=new MediaStream([track])>` element for each remote audio track inside a fixed-position off-viewport `<div id="_mb_audio_sinks">`. This is the WebRTC-samples canonical pattern and routes through Chrome's HTMLMediaElement pipeline, which respects `PULSE_SINK` and actually emits real samples to our null-sink. `createMediaStreamSource` is no longer called anywhere on remote tracks. Kept: the RTCPeerConnection constructor wrapping, `setRemoteDescription` receiver-sweep, `track`/`addstream` event listeners, and the periodic 3 s sweep of `window.__mbRtcPcs` for receivers added via `addTransceiver` or SDP re-offer.
+- Extended the v2.37.0 `__mbCollectWebrtcStats()` probe to also report `audio_sinks: [{trackId, paused, muted, volume, readyState, currentTime, srcObject, error, ...}]` — one entry per hidden `<audio>` element we created. Surfaced via `GET /api/v1/bot/{id}/debug` as `webrtc_stats_samples[*].snap.audio_sinks`. Lets us verify at a glance that every inbound track has a playing element.
+
+### Added
+- **Live Python-side peak-amplitude logger** (user-requested more logging). `_audio_health_loop` now reads the last ~3 s of the recording file on each iteration and logs one of:
+  - `audio_health: OK — size=… peak_recent=1234/32767 ✓`  (INFO, peak ≥ 200)
+  - `audio_health: SILENT — size=… peak_recent=0/32767 (<200 threshold)`  (WARNING)
+  - `audio_health: size=… peak_recent=n/a`  (file too small / probe failed)
+  This surfaces the silence-vs-audio distinction immediately in the Railway deploy-log tail without needing the `/debug` JSON. Loop frequency bumped 30 s → 15 s for faster feedback. `peak_recent_3s` added to each `audio_health_samples` entry.
+- **Compact webrtc-stats log line per 15 s sample**: `webrtc_stats: pc[0] state=connected ice=connected inAudio pkts=3640 bytes=267993 energy=3.372 | sinks=2 playing=2 | page_media_elems=3`. Makes the "is remote audio being received?" vs "are our sinks playing?" distinction visible in the normal log stream.
+- **Rich JS-side logging in the audio-attach shim**: `[mb-audio] attached track … -> <audio autoplay>, play() ok` / `[mb-audio] <audio>.play() rejected for track …:` / `[mb-audio] ontrack audio id=… enabled=… muted=… -> attached=true` / `[mb-audio] scanReceivers attached N audio track(s) after setRemoteDescription` / `[mb-audio] track … ended|muted|unmuted`. Captured by the v2.35.0 `console_log_tail` so the whole attach sequence is post-mortem-visible.
+
+### Context
+- The user also pointed at `github.com/proark1/meetingservice/` as a possible reference. Investigation confirmed that repo is the **onepizza platform itself** (Node.js + Express + Socket.IO, no Playwright/Puppeteer/ffmpeg/PulseAudio/Chromium), not a sibling bot implementation — nothing to borrow from it.
+
+---
+
+## [2.37.1] - 2026-04-17
+
+### Fixed
+- **onepizza: silent recordings were caused by a join-detection bug, not audio routing** — confirmed by the v2.37.0 diagnostic. `console_log_tail` of bot `1ddac2dd…` (08:54 UTC) showed `[error] Set answer error: InvalidStateError: Failed to execute 'setRemoteDescription' on 'RTCPeerConnection': Failed to set remote answer sdp: Called in wrong state: stable`. Combined with the click sequence in the API logs (5 different join-button strategies fired in 30 s on attempt 1, then a fresh Xvfb display/Chrome process for attempt 2), the root cause is that `_join_onepizza` was multi-clicking the join button and corrupting onepizza's WebRTC SDP state machine. Each click initiates a new SDP offer; by the time `setRemoteDescription` is called for the second answer, the peer is already in `stable` state → InvalidStateError → no remote audio ever rendered → null-sink records pure zeros (peak_amp=0). The user-visible symptom was the bot "blinking" / "doubling, tripling" in the meeting then disconnecting — multiple `RTCPeerConnection` instances, each one a fresh participant, before the SDP failure killed them.
+- **Why the multi-click happened**: the state-detection loop at the top of `_join_onepizza` had a catch-all selector `"button, [role='button']"` as its 4th tier. When Playwright's stricter `wait_for_selector(state="visible")` timed out on `#meetingRoom` (which IS in the DOM but hidden until joined) it fell through to the catch-all and matched `#lobbyMicBtn` (first button in document order) instead of `#lobbyJoinBtn`. The branch then ran all 5 click strategies on `#lobbyJoinBtn` back-to-back, because the post-click `wait_for_selector("#meetingRoom, #waitingRoomOverlay", state="visible", timeout=8_000)` had the same Playwright-visibility issue and kept timing out.
+- **Fix in `backend/app/services/browser_bot.py:_join_onepizza`**:
+  - Replaced the 4-tier selector list (and the brittle `wait_for_selector(state="visible")` checks) with a single JS state-probe (`state_probe_js`) that returns `'in_meeting' | 'waiting' | 'lobby' | 'unknown'` based on actual DOM visibility (offsetParent + computed display/visibility). No more catch-all that could match the wrong button
+  - Replaced the per-strategy 8-second `wait_for_selector` with a JS progress-probe (`progress_probe_js`) polled every 500 ms for up to 20 s. The probe returns `'in_meeting' | 'waiting' | 'joining' | 'connecting' | 'lobby'` and looks at: visible toolbar (`#leaveBtn` / `#micBtn` / `#camBtn`), hidden `#lobby`, `#lobbyJoinBtn.disabled`, button text containing "joining"/"connecting"/"please wait", and any `RTCPeerConnection` whose `connectionState`/`iceConnectionState` advanced past `'new'` (using the `window.__mbRtcPcs` registry from 2.37.0)
+  - The strategy loop now bails as soon as the probe returns anything other than `'lobby'`. Anything-but-`'lobby'` means the click registered with onepizza's JS — clicking again would corrupt the SDP exchange
+  - Reduced strategies from 5 → 3 (removed the JS text match and JS form submit fallbacks; if the first three real clicks on `#lobbyJoinBtn` fail to advance the page, the 4th and 5th would just queue duplicate join attempts and make things worse)
+
+---
+
+## [2.37.0] - 2026-04-17
+
+### Added
+- **WebRTC-stats diagnostic probe** — additive, diagnostic-only, no behavior change. The 2.35.1 getUserMedia shim got onepizza through the join flow, but a subsequent production run (bot `2a97d1e9…`, 2026-04-17 08:54 UTC) still ended with `peak_amp: 0.0` and `max_sink_inputs_on_target: 0` across the whole call, even though `pre_leave` pactl showed the Chromium sink-input correctly attached to the target sink, not muted, not corked. The null-sink recorded 2.8 MB of pure zeros. The distinction we couldn't make from existing diagnostics: is Chrome receiving remote audio RTP at all (signalling / ICE failure), or is it receiving packets but not playing them to PulseAudio (audio-element / autoplay failure)? This release collects the data to tell those apart.
+- **New init script** in `backend/app/services/browser_bot.py` wraps `window.RTCPeerConnection` a third time (on top of the audio-forcing + getUserMedia shims) to push every created `pc` into `window.__mbRtcPcs`, and exposes `window.__mbCollectWebrtcStats()` — a JSON-safe snapshot of every peer-connection's `connectionState` / `iceConnectionState` / `signalingState` plus `getStats()` inbound-rtp audio (packets, bytes, jitter, `totalAudioEnergy`) and outbound-rtp counters, plus every `<audio>` / `<video>` element on the page with `paused` / `muted` / `volume` / `audio_tracks` / `has_srcobject`
+- **New async loop `_webrtc_stats_loop(bot_id, page, debug_dir, stop_event)`** in `browser_bot.py` polls that function every 15 s via `page.evaluate()` (5 s timeout), appends the snapshot to `bot.webrtc_stats_samples` (capped at the last 40) and to `{debug_dir}/webrtc_stats.jsonl`. Safe no-op when `bot_id` is empty or when `window.__mbCollectWebrtcStats` isn't defined yet
+- **New `BotSession.webrtc_stats_samples: list`** in `backend/app/store.py`, persisted into `BotSnapshot.data`, restored on startup, and surfaced by `GET /api/v1/bot/{bot_id}/debug` as `webrtc_stats_samples`. No DB migration required
+- Looking for `connection_state: 'failed'` / `'disconnected'` vs. `'connected'` with `inbound_audio.packets == 0` distinguishes a handshake failure from a received-but-not-played failure; a playing `<audio>` with `paused: false` and `audio_tracks > 0` confirms remote tracks are wired; `totalAudioEnergy` remaining 0 over several samples with non-zero `packets` points at the autoplay / audio-element attach path
+
+---
+
+## [2.36.0] - 2026-04-17
+
+### Added
+- **Settings: Microphone Test** — new card in the dashboard Settings tab that lets a user verify their mic is actually picking up voice before sending a bot into a meeting. Shows a live input-level bar (silent / green / amber), a decaying peak-% readout, and a "Voice detected ✓" status once sustained audio is observed. Uses `navigator.mediaDevices.getUserMedia` + Web Audio API `AnalyserNode` in-browser; no audio ever leaves the client and no backend route is involved. Includes an input-device dropdown populated from `enumerateDevices()` (labels appear after permission is granted), handles `NotAllowedError` / `NotFoundError` inline, and auto-releases the mic on tab-hide. Lives in `backend/app/templates/dashboard.html` inside `#section-settings`
+
+---
+
+## [2.35.1] - 2026-04-17
+
+### Fixed
+- **onepizza.io: empty transcript because Chrome produced no audio at all** — root cause confirmed via `/api/v1/bot/{id}/debug` data shipped in 2.35.0. Throughout a 3 m 50 s onepizza call, `audio_health_samples` showed `sink_inputs_total: 0` at 7 of 8 samples and `pactl_dumps.pre_leave` showed the bot's null sink **SUSPENDED** with zero sink-inputs. Chrome was never emitting *any* audio to PulseAudio — previous 2.34.1/2.34.2 fixes were routing a stream that didn't exist. The `console_log_tail` captured the real reason: `"[warning] Camera/mic access: NotFoundError Requested device not found"`. onepizza's WebRTC join flow calls `getUserMedia({video: true, audio: true})`; the bot container has no camera, Chrome throws `NotFoundError` for the whole constraint, onepizza's JS aborts its peer-connection setup and never receives remote audio.
+- **Fix in `backend/app/services/browser_bot.py`** — injected a second init script that patches `navigator.mediaDevices.getUserMedia` to retry with a synthetic fallback when the original call fails with `NotFoundError` / `NotReadableError` / `OverconstrainedError`. The fallback:
+  - keeps the real audio track (via the existing PulseAudio `module-virtual-source` virtual mic) so TTS still works
+  - provides a 640×480 15 fps black `canvas.captureStream()` video track when the camera is missing, so the meeting UI sees a working MediaStream
+  - also patches `enumerateDevices()` to always report at least one `videoinput` and `audioinput` entry, so meeting clients that probe devices before calling `getUserMedia` proceed through the join path
+- Other platforms (Google Meet, Zoom, Teams) already handle the missing-camera case themselves, so the shim only activates on failure and is a no-op in the healthy path — no regression risk there
+
+---
+
+## [2.35.0] - 2026-04-17
+
+### Added
+- **Transcription-failure diagnostic bundle + `GET /api/v1/bot/{id}/debug` endpoint** — prior attempts (2.34.1, 2.34.2) tried to fix "no audio captured" blindly; this release stops guessing and captures the data needed to diagnose the root cause on every run. When a bot ends with `"Transcription returned no content / No audio was captured"` the error message now carries a `diag={...}` JSON blob with: audio file size, silence-check peak amplitude, ffmpeg exit code + last 500 chars of stderr, peak count of PulseAudio sink-inputs routed onto the null sink during the call, last audio-file size delta, and Gemini's `finish_reason` + safety ratings. All of this plus full forensics is available at `GET /api/v1/bot/{bot_id}/debug` (owner-gated), including:
+  - `ffmpeg_stderr_tail` — last 16 KB of previously-discarded ffmpeg stderr (captured to `{RECORDINGS_DIR}/debug/{bot_id}/ffmpeg.stderr.log`)
+  - `audio_health_samples` — 30 s samples over the call showing file growth, ffmpeg liveliness, sink-input total + count routed to the bot's null sink
+  - `pactl_dumps` — PulseAudio state (`list sinks/sink-inputs/sources/modules short`) snapshotted at `pre_pulse`, `post_setup`, `post_ffmpeg`, and `pre_leave`
+  - `console_log_tail` — last 200 browser console / pageerror / requestfailed entries from Playwright (was never captured before)
+  - `last_gemini_finish_reason` + `last_gemini_safety_blocks` — distinguishes a SAFETY block from a silent recording
+- New `BotSession` dataclass fields (`audio_health_samples`, `pactl_dumps`, `console_log_tail`, `ffmpeg_exit_code`, `ffmpeg_stderr_tail`, `audio_peak_amplitude`, `last_gemini_finish_reason`, `last_gemini_safety_blocks`, `debug_dir`) are persisted into the existing `BotSnapshot.data` JSON column — no DB migration needed, survives restart, retains for the usual 24 h TTL
+- Per-bot diagnostic directory at `{RECORDINGS_DIR}/debug/{bot_id}/` holds `ffmpeg.stderr.log`, `audio_health.jsonl`, `console.jsonl`, and `pactl_*.txt`
+
+### Changed
+- `_start_ffmpeg()` in `backend/app/services/browser_bot.py` now accepts `stderr_log_path=` and pipes ffmpeg's stderr there instead of `DEVNULL`; backwards-compatible default preserves old behavior for any unforeseen caller. Exit code is appended to the log on termination
+- `run_browser_bot()` accepts a new `bot_id=""` kwarg so the audio-health loop / Playwright console ring-buffer / pactl snapshots can be attributed to a specific BotSession. `bot_service.run_bot_lifecycle` now passes `bot_id=bot.id`
+- `transcribe_audio()` in `backend/app/services/transcription_service.py` accepts a new `bot_id=` kwarg; when present, peak amplitude, Gemini finish_reason, and safety ratings are recorded on the BotSession
+
+---
+
+## [2.34.2] - 2026-04-17
+
+### Fixed
+- **"Transcription returned no content / No audio was captured" on long calls** — the one-shot WebRTC force-connect ramp shipped in 2.34.1 stopped at ~60 s, so any PeerJS / RTCPeerConnection established later (late joiners, renegotiations on onepizza) was never wired into Chrome's `AudioContext.destination` and Chrome stopped rendering that peer's audio to PulseAudio, leaving the null-sink recording silent for the remainder of the meeting. Three changes in `backend/app/services/browser_bot.py`:
+  - **Continuous routing + force-connect loop** — `_late_routing_syncs()` now keeps `_sync_chrome_audio_routing()` and `_force_connect_webrtc_audio()` running every 15 s for the entire meeting, not just the first 60 s. Repeat passes log at DEBUG unless they actually moved sink-inputs or connected new tracks, so log volume is unchanged in the healthy case
+  - **Audio-health watchdog** — new `_audio_health_watchdog()` task samples the tail of the growing WAV every 20 s (reusing `transcription_service._check_audio_has_speech` / `_SILENCE_PEAK_THRESHOLD`). After ~60 s of continuous silence it logs the current PulseAudio sink-input count + ffmpeg pid/liveness and triggers an out-of-band routing + WebRTC re-connect pass. Diagnostic-only — the meeting is not failed from the watchdog
+  - **One-shot ffmpeg restart** — if the ffmpeg recorder dies mid-meeting (pipe break, PulseAudio hiccup) the watchdog restarts it exactly once against the same WAV path, so a transient failure no longer produces a zero-byte recording
+- **Chromium AudioContext occasionally stuck in 'suspended'** — the init script in `browser_bot.py` now runs a 2 s `setInterval` that calls `_mbAudioCtx.resume()` whenever the context is not `running`. A suspended AudioContext silently drops all graph output, which manifested identically to the WebRTC-not-connected bug
+
+---
+
+## [2.34.1] - 2026-04-16
+
+### Fixed
+- **onepizza.io: recorded audio was always silent (peak amplitude 0) → empty transcript** — Chrome's WebRTC remote-audio tracks were never wired into the page's Web Audio destination, so even though the PulseAudio sink-input was routed correctly to the bot's recording sink, ffmpeg captured pure zeros (`VAD: zero speech frames detected in 196 s`). The post-admission "Audio force-connect fallback" only ran once at admission+0.8 s — at that point onepizza's PeerJS connections didn't exist yet, so it found `connected=0` and never retried. Two complementary fixes in `backend/app/services/browser_bot.py`:
+  - **Periodic re-attempts** — extracted the imperative WebRTC track-connect logic into a new module-level helper `_force_connect_webrtc_audio(page)` and call it after every routing-sync step (post-admit, ~3 s, ~8 s, ~15 s, ~30 s, and a new ~60 s pass). Each call walks `<audio>` / `<video>` elements with `srcObject`, scans `window` for RTCPeerConnection wrappers (PeerJS / SimplePeer / direct), and hooks any new audio receivers into `ctx.destination`. A `window._mbConnectedTracks` `WeakSet` makes the call idempotent — previously-connected MediaStreamTracks are skipped, so repeated invocations cannot double-connect a stream
+  - **Stronger init-script patch** — `RTCPeerConnection.prototype.setRemoteDescription` is now patched in addition to the `track` event listener. After every offer/answer resolves, the patched method sweeps `pc.getReceivers()` and force-connects any new audio tracks. This is more reliable than the `track` event across PeerJS / SimplePeer / unified-plan implementations. Also added a legacy `addstream` event listener for older WebRTC libraries
+- Effect: on onepizza, the next periodic pass after a participant's PeerJS connection establishes will discover and connect the audio track, forcing Chrome to render the decoded PCM through PulseAudio. ffmpeg then captures real samples and transcription proceeds normally. No regression on Google Meet / Zoom / Teams — the idempotency guard prevents any double-connect
+
+---
+
+## [2.34.0] - 2026-04-16
+
+### Documentation
+- **`api/openapi.json`** — bumped `info.version` to 2.34.0; added `/say` and `/chat` paths and `SayRequest` / `SayResponse` / `ChatRequest` / `ChatResponse` component schemas; extended `BotResponse.transcript` description with the new `source` / `message_id` / `bot_generated` fields; expanded `WebhookCreate.events` description to enumerate all supported events including `bot.live_chat_message`
+- **`README.md`** — added the v2.34.0 entry under "Recent changes", added `/say`, `/chat`, `/stream` rows to the Bots endpoint table, added a full "Supported events" webhook table, updated the Bot response object's `transcript` field description, and the webhook payload example now includes both a voice and a chat entry
+- **`INTEGRATION_GUIDE.md`** — new "Driving the Bot Mid-Meeting" section with `curl` examples for `/say`, `/chat`, and the SSE `/stream`; added the new live events to the webhook table
+- **`sdk/python/README.md`, `sdk/js/README.md`** — added "Live interaction" sections showing how to call `/say`, `/chat`, and consume `/stream` directly until typed wrappers ship; updated webhook-create examples to include `bot.live_chat_message`
+- **`CLAUDE.md`** — bumped the webhook event count from 13 to 14 and described the source/message_id semantics
+
+### Added
+- **Unified live transcript (voice + chat)** — meeting chat messages are now captured as first-class transcript entries alongside voice. A new `_chat_capture_loop` in `browser_bot.py` polls the chat panel at 4 Hz across Google Meet / Zoom / Teams / onepizza, dedups per-line via a stable short sha1, and appends each new message to the shared `structured_transcript` with `source="chat"` and a `message_id` field. Voice entries carry `source="voice"` (default). Both flow through the existing `on_live_entry` pipeline, so WebSocket, SSE, DB persistence, and webhook fan-out come free
+- **New webhook event `bot.live_chat_message`** — fired for every captured chat message. Added to `WEBHOOK_EVENTS` in `api/webhooks.py`. `bot_service.on_live_entry` branches on `entry["source"]` to dispatch this event for chat and the existing `bot.live_transcript` for voice
+- **`POST /api/v1/bot/{id}/say`** — make the bot speak arbitrary text in a live meeting. Body: `{text, voice: "gemini"|"edge", interrupt: bool}`. Defaults to Gemini TTS for natural voice. Returns 202 immediately; synthesis + playback run in the background. Concurrent calls serialise behind an `asyncio.Lock` on the `BotSession`; `interrupt=true` cancels the in-flight speak task and jumps ahead. Requires `in_call` status, enforces ownership check, rate-limited at 30/min
+- **`POST /api/v1/bot/{id}/chat`** — post arbitrary text into the live meeting's chat panel. Body: `{text}`. Returns 202 immediately; keyboard typing runs in the background behind an `asyncio.Lock` so concurrent calls don't race the per-platform chat DOM selectors. The bot's own message id is pre-registered in `seen_chat_ids` so the capture loop doesn't re-emit the bot's own messages
+- **`BotSession.runtime`** — new in-memory handle (populated after admission, cleared on exit via `on_runtime_ready` callback) that exposes the Playwright Page, per-bot pulse-mic name, TTS config, and the two serialisation locks so the API endpoints can drive the live bot without going through `run_browser_bot`
+- **`BotSession.seen_chat_ids`** — per-bot set of chat message hashes, seeded on first successful capture poll and preserved across browser reconnects within a single bot lifecycle
 
 ---
 
@@ -13,6 +162,7 @@ Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 ### Fixed
 - **Dashboard API key row XSS (defense-in-depth)** — `_prependKeyRow()` in `dashboard.html` was interpolating the user-supplied key name directly into `innerHTML`. Exploitable only as self-XSS today (you can only set your own key name), but the name is also rendered on shared surfaces, so the pattern needed fixing. Name cell is now populated via `textContent`; the interpolated fields that remain (`key_preview`, `full_key`, `id`) are all server-generated. Also aligned the Copy button markup with the server-rendered row (`type="button"`, `title="Copy key"`, `⎘` glyph) so JS-inserted rows match their Jinja-rendered siblings exactly.
 - **Revoke API key returned 405 Method Not Allowed** — `_handleRevoke()` POSTed to `/dashboard/keys/{id}` but the backend route is `POST /dashboard/keys/{id}/revoke` (ui.py:534). Added the missing `/revoke` suffix so the button actually revokes the key.
+- **Per-bot `webhook_url` only received terminal events** — `_set_status()` and six other `dispatch_event()` callsites in `bot_service.py` (for `bot.joining`, `bot.in_call`, `bot.call_ended`, `bot.transcribing`, `bot.transcript_ready`, `bot.analysis_ready`, `bot.coaching_summary`, `bot.coaching_alert`, `bot.recurring_intel_ready`) did not pass `extra_webhook_url=bot.webhook_url`, so integrations that rely on the per-bot URL (e.g. 1tab.ai / onepizza.io) never saw non-terminal lifecycle events and their `meeting_recordings.status` appeared frozen at `joining` even when the bot had joined successfully. All ten in-lifecycle callsites now fan out to the per-bot webhook; the `BotSession.webhook_url` comment is updated to match the new contract
 
 ---
 
