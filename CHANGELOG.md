@@ -4,7 +4,6 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.33.5 — **Last updated:** 2026-04-16
 > **Latest version:** 2.39.0 — **Last updated:** 2026-04-17
 
 ---
