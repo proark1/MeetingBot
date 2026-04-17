@@ -4,7 +4,14 @@ All notable changes to MeetingBot are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.35.1 — **Last updated:** 2026-04-17
+> **Latest version:** 2.36.0 — **Last updated:** 2026-04-17
+
+---
+
+## [2.36.0] - 2026-04-17
+
+### Added
+- **Settings: Microphone Test** — new card in the dashboard Settings tab that lets a user verify their mic is actually picking up voice before sending a bot into a meeting. Shows a live input-level bar (silent / green / amber), a decaying peak-% readout, and a "Voice detected ✓" status once sustained audio is observed. Uses `navigator.mediaDevices.getUserMedia` + Web Audio API `AnalyserNode` in-browser; no audio ever leaves the client and no backend route is involved. Includes an input-device dropdown populated from `enumerateDevices()` (labels appear after permission is granted), handles `NotAllowedError` / `NotFoundError` inline, and auto-releases the mic on tab-hide. Lives in `backend/app/templates/dashboard.html` inside `#section-settings`
 
 ---
 
