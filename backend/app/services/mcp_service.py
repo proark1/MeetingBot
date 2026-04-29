@@ -220,10 +220,11 @@ async def _tool_get_meeting(args: dict, account_id: Optional[str]) -> dict:
         return {"error": f"Meeting {bot_id!r} not found"}
 
     # Ownership check
+    # Strict equality: bots with bot.account_id=None are superadmin/legacy and
+    # must not be visible to authenticated tenants.
     if (
         account_id
         and account_id != SUPERADMIN_ACCOUNT_ID
-        and bot.account_id is not None
         and bot.account_id != account_id
     ):
         return {"error": f"Meeting {bot_id!r} not found"}
@@ -427,10 +428,11 @@ async def _tool_cancel_bot(args: dict, account_id: Optional[str]) -> dict:
     bot = await store.get_bot(bot_id)
     if bot is None:
         return {"error": f"Bot {bot_id!r} not found"}
+    # Strict equality: bots with bot.account_id=None are superadmin/legacy and
+    # must not be visible to authenticated tenants.
     if (
         account_id
         and account_id != SUPERADMIN_ACCOUNT_ID
-        and bot.account_id is not None
         and bot.account_id != account_id
     ):
         return {"error": f"Bot {bot_id!r} not found"}
@@ -453,10 +455,11 @@ async def _tool_get_speaker_analytics(args: dict, account_id: Optional[str]) -> 
     bot = await store.get_bot(bot_id)
     if bot is None:
         return {"error": f"Bot {bot_id!r} not found"}
+    # Strict equality: bots with bot.account_id=None are superadmin/legacy and
+    # must not be visible to authenticated tenants.
     if (
         account_id
         and account_id != SUPERADMIN_ACCOUNT_ID
-        and bot.account_id is not None
         and bot.account_id != account_id
     ):
         return {"error": f"Bot {bot_id!r} not found"}

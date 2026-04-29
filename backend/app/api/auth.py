@@ -220,9 +220,9 @@ async def register(request: Request, payload: RegisterRequest, db: AsyncSession 
 
     logger.info("New account registered: %s (%s)", account.email, account.id)
 
-    import asyncio as _asyncio
     from app.services.audit_log_service import log_event as _audit
-    _asyncio.create_task(_audit(
+    from app.services.background_tasks import tracked_task as _tracked
+    _tracked(_audit(
         account_id=account.id,
         action="auth.register",
         ip_address=request.client.host if request.client else None,
@@ -297,9 +297,9 @@ async def login(
 
     token = _create_jwt(account.id)
 
-    import asyncio as _asyncio
     from app.services.audit_log_service import log_event as _audit
-    _asyncio.create_task(_audit(
+    from app.services.background_tasks import tracked_task as _tracked
+    _tracked(_audit(
         account_id=account.id,
         action="auth.login",
         ip_address=request.client.host if request.client else None,
@@ -352,9 +352,9 @@ async def create_api_key(
     db.add(api_key)
     await db.commit()
 
-    import asyncio as _asyncio
     from app.services.audit_log_service import log_event as _audit
-    _asyncio.create_task(_audit(
+    from app.services.background_tasks import tracked_task as _tracked
+    _tracked(_audit(
         account_id=account_id,
         action="api_key.created",
         resource_type="api_key",
@@ -421,9 +421,9 @@ async def revoke_api_key(
     key.is_active = False
     await db.commit()
 
-    import asyncio as _asyncio
     from app.services.audit_log_service import log_event as _audit
-    _asyncio.create_task(_audit(
+    from app.services.background_tasks import tracked_task as _tracked
+    _tracked(_audit(
         account_id=account_id,
         action="api_key.revoked",
         resource_type="api_key",
@@ -847,8 +847,12 @@ async def create_support_key(
 
     from app.models.account import SupportKey
 
+    from app.services.token_hash import hash_token
+
     plaintext = secrets.token_urlsafe(24)
-    key_hash = _hashlib.sha256(plaintext.encode()).hexdigest()
+    # HMAC-SHA256 keyed with JWT_SECRET — peppered so a DB-only leak can't be
+    # correlated with plaintext keys appearing in logs/headers (round-2 fix #6).
+    key_hash = hash_token(plaintext)
     expires_at = (
         datetime.now(timezone.utc) + timedelta(hours=payload.expires_in_hours)
         if payload.expires_in_hours

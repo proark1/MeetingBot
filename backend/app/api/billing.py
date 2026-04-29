@@ -307,10 +307,32 @@ async def stripe_webhook(request: Request):
     if event["type"] == "checkout.session.completed":
         session = event["data"]["object"]
         if session.get("mode") == "subscription":
-            # Subscription checkout — link Stripe customer and activate plan
+            # Subscription checkout — link Stripe customer and activate plan.
             acct_id = session.get("metadata", {}).get("account_id")
             plan = session.get("metadata", {}).get("plan", "free")
             customer_id = session.get("customer")
+            subscription_id = session.get("subscription")  # persist for later cancel/renew lookups
+            # Validate that the metadata.plan actually matches the price the customer paid for.
+            # Defends against any future code path that creates a Session with mismatched metadata.
+            expected_price = {
+                "starter": settings.STRIPE_STARTER_PRICE_ID,
+                "pro": settings.STRIPE_PRO_PRICE_ID,
+                "business": settings.STRIPE_BUSINESS_PRICE_ID,
+            }.get(plan)
+            paid_price_id = None
+            try:
+                line_items = session.get("line_items") or {}
+                items = line_items.get("data") if isinstance(line_items, dict) else None
+                if items:
+                    paid_price_id = (items[0].get("price") or {}).get("id")
+            except Exception:
+                paid_price_id = None
+            if expected_price and paid_price_id and paid_price_id != expected_price:
+                logger.error(
+                    "Stripe webhook rejected: metadata.plan=%s implies price=%s but session paid price=%s",
+                    plan, expected_price, paid_price_id,
+                )
+                return {"received": True, "ignored": "plan/price mismatch"}
             if acct_id and customer_id:
                 from app.db import AsyncSessionLocal
                 from datetime import datetime, timezone, timedelta
@@ -319,25 +341,44 @@ async def stripe_webhook(request: Request):
                     account = result.scalar_one_or_none()
                     if account:
                         account.stripe_customer_id = customer_id
+                        if subscription_id:
+                            account.stripe_subscription_id = subscription_id
                         account.plan = plan
                         account.monthly_bots_used = 0
                         account.monthly_reset_at = datetime.now(timezone.utc) + timedelta(days=30)
                         await db.commit()
-                        logger.info("Subscription activated: account %s → plan %s", acct_id, plan)
+                        logger.info(
+                            "Subscription activated: account %s → plan %s (sub %s)",
+                            acct_id, plan, subscription_id,
+                        )
         else:
             await handle_checkout_completed(session)
 
     elif event["type"] == "invoice.paid":
-        # Recurring subscription payment — keep plan active
+        # Recurring subscription payment — keep plan active and reset the
+        # monthly bot counter / reset date so paying customers don't hit
+        # their plan ceiling on day 31.
         invoice = event["data"]["object"]
         customer_id = invoice.get("customer")
         if customer_id:
             from app.db import AsyncSessionLocal
+            from datetime import datetime, timezone, timedelta
             async with AsyncSessionLocal() as db:
                 result = await db.execute(select(Account).where(Account.stripe_customer_id == customer_id))
                 account = result.scalar_one_or_none()
                 if account:
-                    logger.info("Subscription renewed: account %s, plan %s", account.id, account.plan)
+                    period_end_unix = invoice.get("lines", {}).get("data", [{}])[0].get("period", {}).get("end")
+                    if period_end_unix:
+                        next_reset = datetime.fromtimestamp(period_end_unix, tz=timezone.utc)
+                    else:
+                        next_reset = datetime.now(timezone.utc) + timedelta(days=30)
+                    account.monthly_bots_used = 0
+                    account.monthly_reset_at = next_reset
+                    await db.commit()
+                    logger.info(
+                        "Subscription renewed: account %s, plan %s, reset %s",
+                        account.id, account.plan, next_reset.isoformat(),
+                    )
 
     elif event["type"] == "customer.subscription.deleted":
         # Subscription cancelled — downgrade to free

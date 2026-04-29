@@ -38,13 +38,11 @@ async def _get_or_404(bot_id: str, account_id=None, sub_user_id=None) -> BotSess
     bot = await store.get_bot(bot_id)
     if bot is None:
         raise HTTPException(status_code=404, detail=f"Bot {bot_id!r} not found")
-    if (
-        account_id
-        and account_id != SUPERADMIN_ACCOUNT_ID
-        and bot.account_id is not None
-        and bot.account_id != account_id
-    ):
-        raise HTTPException(status_code=404, detail=f"Bot {bot_id!r} not found")
+    # Strict equality: bots with bot.account_id=None are superadmin/legacy and
+    # must not be visible to any authenticated tenant.
+    if account_id and account_id != SUPERADMIN_ACCOUNT_ID:
+        if bot.account_id != account_id:
+            raise HTTPException(status_code=404, detail=f"Bot {bot_id!r} not found")
     if sub_user_id is not None and bot.sub_user_id != sub_user_id:
         raise HTTPException(status_code=404, detail=f"Bot {bot_id!r} not found")
     return bot

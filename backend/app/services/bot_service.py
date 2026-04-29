@@ -15,25 +15,12 @@ from urllib.parse import urlparse, parse_qs, unquote
 from app.config import settings
 from app.store import store, BotSession, _now
 
-# ── Tracked background tasks (cancelled on shutdown) ─────────────────────────
-_background_tasks: set[asyncio.Task] = set()
-
-
-def _tracked_task(coro) -> asyncio.Task:
-    """Create an asyncio.Task that is tracked for graceful shutdown."""
-    task = asyncio.create_task(coro)
-    _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
-    return task
-
-
-async def cancel_all_tracked_tasks() -> None:
-    """Cancel and await all tracked background tasks (called on shutdown)."""
-    if _background_tasks:
-        logger.info("Cancelling %d tracked background task(s)…", len(_background_tasks))
-        for task in list(_background_tasks):
-            task.cancel()
-        await asyncio.gather(*list(_background_tasks), return_exceptions=True)
+# Re-exported from the shared helper so existing call sites in this module
+# keep working. The single source of truth is services.background_tasks.
+from app.services.background_tasks import (
+    tracked_task as _tracked_task,
+    cancel_all_tracked_tasks,
+)
 from app.api.ws import manager as ws_manager
 from app.services import intelligence_service, webhook_service
 from app.services.browser_bot import run_browser_bot

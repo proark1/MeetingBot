@@ -75,6 +75,12 @@ class Settings(BaseSettings):
     # Environment — set to "production" to enforce strict security defaults
     ENVIRONMENT: str = "development"
 
+    # When False (default): if any Account row exists at startup and there are
+    # no auth indicators (API_KEY unset), the auth dependency requires a Bearer
+    # token even in dev mode. Set to True to keep the legacy unauthenticated
+    # dev-mode behaviour for local prototyping (tests, demos).
+    ALLOW_UNAUTHENTICATED_DEV_MODE: bool = False
+
     # ── Cloud storage ─────────────────────────────────────────────────────────
     STORAGE_BACKEND: str = "local"          # "local" | "s3"
     S3_BUCKET: str = ""

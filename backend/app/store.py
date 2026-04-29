@@ -99,7 +99,8 @@ class BotSession:
     pii_detected: bool = False    # True if PII was found (set after transcription)
 
     # ── Shareable link ─────────────────────────────────────────────────────────
-    share_token_hash: Optional[str] = None  # SHA-256 of the plaintext share token
+    share_token_hash: Optional[str] = None  # HMAC-SHA256 (or legacy SHA-256) of the plaintext token
+    share_token_expires_at: Optional[datetime] = None  # None = never expires
 
     # ── Recurring intelligence ─────────────────────────────────────────────────
     recurring_intel: Optional[dict] = None  # set when recurring meeting pattern detected
@@ -329,6 +330,8 @@ class Store:
                 bot_meeting_url = bot.meeting_url
                 bot_created_at = bot.created_at
                 bot_expires_at = bot.expires_at
+                bot_share_token_hash = bot.share_token_hash
+                bot_share_token_expires_at = bot.share_token_expires_at
                 snapshot = {
                     "id": bot.id,
                     "meeting_url": bot.meeting_url,
@@ -372,6 +375,7 @@ class Store:
                     "pii_redaction": bot.pii_redaction,
                     "pii_detected": bot.pii_detected,
                     "share_token_hash": bot.share_token_hash,
+                    "share_token_expires_at": _dt(bot.share_token_expires_at),
                     "recurring_intel": bot.recurring_intel,
                     "summary_embedding": bot.summary_embedding,
                     "health_score": bot.health_score,
@@ -416,12 +420,16 @@ class Store:
                         meeting_url=bot_meeting_url,
                         created_at=bot_created_at,
                         expires_at=bot_expires_at,
+                        share_token_hash=bot_share_token_hash,
+                        share_token_expires_at=bot_share_token_expires_at,
                         data=data,
                     )
                     db.add(snap)
                 else:
                     snap.status = bot_status
                     snap.expires_at = bot_expires_at
+                    snap.share_token_hash = bot_share_token_hash
+                    snap.share_token_expires_at = bot_share_token_expires_at
                     snap.data = data
                 await db.commit()
         except Exception:
@@ -665,6 +673,7 @@ async def load_persisted_bots() -> int:
                     pii_redaction=d.get("pii_redaction", False),
                     pii_detected=d.get("pii_detected", False),
                     share_token_hash=d.get("share_token_hash"),
+                    share_token_expires_at=_parse_dt(d.get("share_token_expires_at")),
                     recurring_intel=d.get("recurring_intel"),
                     summary_embedding=d.get("summary_embedding"),
                     health_score=d.get("health_score"),
