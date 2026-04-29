@@ -279,11 +279,16 @@ async def saml_callback(org_slug: str, request: Request):
             db.add(account)
             await db.flush()
 
-        # Generate API key for new accounts
+        # Generate API key for new accounts (round-3 fix #6: also persist key_prefix + key_hash)
         api_key_val = ""
         if is_new:
             api_key_val = f"sk_live_{_sec.token_hex(32)}"
-            api_key = ApiKey(account_id=account.id, key=api_key_val, name="SAML SSO")
+            from app.api.auth import api_key_storage_fields as _api_key_fields
+            api_key = ApiKey(
+                account_id=account.id,
+                name="SAML SSO",
+                **_api_key_fields(api_key_val),
+            )
             db.add(api_key)
 
         await db.commit()

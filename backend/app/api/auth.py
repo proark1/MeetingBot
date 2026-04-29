@@ -50,6 +50,22 @@ def generate_api_key(mode: str = "live") -> str:
     return prefix + secrets.token_urlsafe(40)
 
 
+def api_key_storage_fields(plaintext: str) -> dict:
+    """Return ``{"key", "key_prefix", "key_hash"}`` for a fresh plaintext API key.
+
+    Round-3 fix #6: every new key writes ``key_prefix`` and ``key_hash`` so
+    auth lookups can use a peppered HMAC instead of the plaintext column.
+    The plaintext column is still populated during the migration window so
+    legacy rows + warm caches keep working.
+    """
+    from app.services.token_hash import hash_token
+    return {
+        "key": plaintext,
+        "key_prefix": plaintext[:16],
+        "key_hash": hash_token(plaintext),
+    }
+
+
 # ── Schemas ───────────────────────────────────────────────────────────────────
 
 class RegisterRequest(BaseModel):
@@ -212,8 +228,8 @@ async def register(request: Request, payload: RegisterRequest, db: AsyncSession 
     api_key = ApiKey(
         id=str(uuid.uuid4()),
         account_id=account.id,
-        key=key_value,
         name=payload.key_name,
+        **api_key_storage_fields(key_value),
     )
     db.add(api_key)
     await db.commit()
@@ -346,8 +362,8 @@ async def create_api_key(
     api_key = ApiKey(
         id=str(uuid.uuid4()),
         account_id=account_id,
-        key=key_value,
         name=payload.name,
+        **api_key_storage_fields(key_value),
     )
     db.add(api_key)
     await db.commit()
@@ -463,9 +479,9 @@ async def create_test_key(
     api_key = ApiKey(
         id=str(uuid.uuid4()),
         account_id=account_id,
-        key=key_value,
         name=payload.name or "Test Key",
         mode="test",
+        **api_key_storage_fields(key_value),
     )
     db.add(api_key)
     await db.commit()
@@ -798,10 +814,47 @@ async def delete_account(
     except Exception as exc:
         logger.warning("GDPR: cloud recording cleanup failed for %s: %s", account_id, exc)
 
+    # GDPR right-to-be-forgotten: purge tables that aren't reachable via the
+    # ORM cascade on Account (no FK relationship declared). Without this,
+    # transcripts in BotSnapshot.data + webhook secrets + action items would
+    # silently survive account deletion. AuditLog rows are intentionally
+    # retained for regulatory traceability; only the user-identifying details
+    # are scrubbed via the account row's removal (FK is null-able).
+    from sqlalchemy import delete as _sa_delete
+    from app.models.account import (
+        BotSnapshot as _BotSnapshot,
+        Webhook as _WebhookModel,
+        ActionItem as _ActionItem,
+        IdempotencyKey as _IdempotencyKey,
+        WorkspaceMember as _WorkspaceMember,
+    )
+    for _model in (_BotSnapshot, _WebhookModel, _ActionItem, _IdempotencyKey, _WorkspaceMember):
+        try:
+            await db.execute(_sa_delete(_model).where(_model.account_id == account_id))
+        except Exception as _exc:
+            logger.warning(
+                "GDPR: could not purge %s for account %s: %s",
+                _model.__tablename__, account_id, _exc,
+            )
+
     # Delete the account row — cascades to api_keys, transactions, stripe_topups,
-    # usdc_deposit, integrations, calendar_feeds (via ORM cascade="all, delete-orphan")
+    # usdc_deposit, integrations, calendar_feeds, oauth_accounts, keyword_alerts,
+    # support_keys (via ORM cascade="all, delete-orphan")
     await db.delete(account)
     await db.commit()
+
+    # Drop in-memory bots whose account_id matches so live state is cleared.
+    # Use delete_bot so the share-token index is also pruned.
+    try:
+        from app.store import store
+        async with store._lock:
+            doomed = [bid for bid, b in store._bots.items() if b.account_id == account_id]
+        for bid in doomed:
+            await store.delete_bot(bid)
+        if doomed:
+            logger.info("GDPR: dropped %d in-memory bot(s) for account %s", len(doomed), account_id)
+    except Exception as _exc:
+        logger.warning("GDPR: in-memory bot cleanup failed for %s: %s", account_id, _exc)
 
     logger.info("GDPR: account %s (%s) permanently deleted", account_id, account_email)
     return {

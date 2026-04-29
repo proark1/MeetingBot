@@ -2052,11 +2052,13 @@ async def share_meeting(token: str, request: Request):
             value = value.replace(tzinfo=_tz.utc)
         return value < _dt.now(_tz.utc)
 
-    # 1) In-memory live bots
+    # 1) In-memory live bots — O(1) lookup via the dedicated share-token index
+    # (round-3 fix #10), checking both the current HMAC hash and the legacy
+    # bare-SHA-256 hash so already-issued links keep working.
     bot: Optional[BotSession] = None
-    all_bots, _total = await store.list_bots(limit=10000)
-    for b in all_bots:
-        if verify_token(token, getattr(b, "share_token_hash", None)):
+    for candidate_hash in hash_candidates(token):
+        b = await store.get_bot_by_share_hash(candidate_hash)
+        if b is not None:
             bot = b
             break
 

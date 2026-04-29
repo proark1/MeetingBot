@@ -102,7 +102,15 @@ async def add_credits(
     reference_id: Optional[str],
     db: AsyncSession,
 ) -> Decimal:
-    """Add credits to an account and record the transaction. Returns new balance."""
+    """Add credits to an account and record the transaction. Returns new balance.
+
+    Idempotent on ``(type, reference_id)``: if the partial-unique index
+    ``ix_credit_tx_unique_ref`` rejects the insert as a duplicate (e.g. the
+    USDC monitor and an admin rescan race on the same on-chain tx), the call
+    rolls back and returns the existing balance untouched (round-3 fix #4).
+    """
+    from sqlalchemy.exc import IntegrityError
+
     # Use SELECT ... FOR UPDATE to prevent lost updates from concurrent additions
     result = await db.execute(
         select(Account).where(Account.id == account_id).with_for_update()
@@ -111,7 +119,8 @@ async def add_credits(
     if account is None:
         raise ValueError(f"Account {account_id} not found")
 
-    account.credits_usd = (account.credits_usd or Decimal("0")) + amount_usd
+    prior_balance = account.credits_usd or Decimal("0")
+    account.credits_usd = prior_balance + amount_usd
 
     tx = CreditTransaction(
         id=str(uuid.uuid4()),
@@ -122,7 +131,19 @@ async def add_credits(
         reference_id=reference_id,
     )
     db.add(tx)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        # Partial-unique violation on (type, reference_id) — already credited.
+        await db.rollback()
+        logger.info(
+            "add_credits no-op: duplicate (type=%s, ref=%s) — already credited (%s)",
+            type, reference_id, exc.orig if hasattr(exc, "orig") else exc,
+        )
+        # Re-fetch the canonical balance after rollback.
+        result = await db.execute(select(Account).where(Account.id == account_id))
+        account = result.scalar_one_or_none()
+        return (account.credits_usd if account else prior_balance)
 
     logger.info(
         "Credits added: +$%.4f to account %s (type=%s, ref=%s). New balance: $%.4f",

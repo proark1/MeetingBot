@@ -244,12 +244,10 @@ async def dispatch_crm_integrations(account_id: str, bot_data: dict) -> None:
         if not integrations:
             return
 
+        from app.services.secrets_at_rest import decrypt_json
         tasks = []
         for integration in integrations:
-            try:
-                config = json.loads(integration.config or "{}")
-            except Exception:
-                config = {}
+            config = decrypt_json(integration.config)
 
             if integration.type == "hubspot":
                 access_token = config.get("access_token", "")

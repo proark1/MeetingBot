@@ -50,12 +50,26 @@ async def _resolve_ws_account(token: Optional[str]) -> Optional[str]:
     try:
         from app.db import AsyncSessionLocal
         from app.models.account import ApiKey
+        from app.services.token_hash import hash_token
         from sqlalchemy import select
         async with AsyncSessionLocal() as db:
-            result = await db.execute(
-                select(ApiKey).where(ApiKey.key == token, ApiKey.is_active == True)  # noqa: E712
-            )
-            api_key = result.scalar_one_or_none()
+            api_key = None
+            if len(token) >= 16:
+                # Preferred: peppered-HMAC lookup (round-3 fix #6).
+                result = await db.execute(
+                    select(ApiKey).where(
+                        ApiKey.key_prefix == token[:16],
+                        ApiKey.key_hash == hash_token(token),
+                        ApiKey.is_active == True,  # noqa: E712
+                    )
+                )
+                api_key = result.scalar_one_or_none()
+            if api_key is None:
+                # Legacy plaintext fallback for un-migrated rows.
+                result = await db.execute(
+                    select(ApiKey).where(ApiKey.key == token, ApiKey.is_active == True)  # noqa: E712
+                )
+                api_key = result.scalar_one_or_none()
             if api_key:
                 return api_key.account_id
     except Exception:
