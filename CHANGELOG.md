@@ -4,11 +4,17 @@ All notable changes to JustHereToListen.io are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.43.2 — **Last updated:** 2026-04-29
+> **Latest version:** 2.43.3 — **Last updated:** 2026-04-29
 
 ---
 
-## [2.43.2] - 2026-04-29
+## [2.43.3] - 2026-04-29
+
+### Fixes
+- **Share button never returned a usable public URL.** The dashboard's "Share" button POSTs to `/dashboard/bot/{id}/share`, which proxies the call into the ASGI app via `httpx.AsyncClient(transport=ASGITransport, base_url="http://internal")`. The upstream endpoint built `share_url` from `request.base_url`, so the value handed back to the browser was `http://internal/share/<token>` — unresolvable. The proxy now rewrites the host of the returned URL using the original public request's `base_url` before responding.
+- **Share UX silently dropped the link.** The previous JS only `navigator.clipboard.writeText`'d the URL (which silently fails on non-HTTPS or without a user-gesture) and showed a "copied to clipboard" toast either way, leaving users with nothing to paste. The bot detail page now renders the generated URL inline below the Share button as a clickable link plus a Copy action, so the user always has the URL even when the clipboard API is blocked.
+
+
 
 ### Fixes
 - **Dashboard report exports (Markdown / PDF / JSON / SRT) returned 401** with `{"detail":"Missing Authorization header. Use: Authorization: Bearer <key>"}` for every logged-in browser user. The dashboard renders the export options as plain `<a href="/api/v1/bot/{id}/export/...">` links, so the browser sent only the `mb_token` session cookie — no `Authorization: Bearer` header — and `get_current_account_id` rejected the request. Fixed by extending the auth resolver to fall back to the `mb_token` JWT cookie (already `httponly` + `secure` + `samesite=lax` from the round-3 OAuth fix) when no Bearer header is present. CSRF risk is bounded: all four affected endpoints are GET-only, so a cross-site link can at most trigger a download of the user's own data on the user's own browser — the attacker origin can't read the response under the Same-Origin Policy.

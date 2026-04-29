@@ -689,8 +689,36 @@ async function shareBot() {
     const resp = await fetch(`/dashboard/bot/${_botId}/share`, { method: 'POST' });
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.detail || 'Failed to generate share link');
-    await navigator.clipboard.writeText(data.share_url).catch(() => {});
-    showToast('Share link copied to clipboard', 'success');
+    const url = data.share_url;
+    if (!url) throw new Error('Server did not return a share URL');
+
+    // Render the URL in the page so the user always has it, even if the
+    // clipboard write is blocked (non-HTTPS, missing user-gesture, etc).
+    let box = document.getElementById('share-link-box');
+    if (!box) {
+      box = document.createElement('div');
+      box.id = 'share-link-box';
+      box.style.cssText = 'margin-top:0.5rem;padding:0.6rem 0.8rem;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap';
+      btn.parentNode.insertBefore(box, btn.nextSibling);
+    }
+    box.innerHTML = '';
+    const a = document.createElement('a');
+    a.href = url; a.target = '_blank'; a.rel = 'noopener';
+    a.textContent = url;
+    a.style.cssText = 'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:monospace;font-size:12px;color:#1B2033';
+    const copyBtn = document.createElement('button');
+    copyBtn.className = 'btn btn-sm btn-outline-secondary';
+    copyBtn.textContent = 'Copy';
+    copyBtn.onclick = async () => {
+      try { await navigator.clipboard.writeText(url); showToast('Copied', 'success'); }
+      catch { showToast('Copy failed — select the link manually', 'danger'); }
+    };
+    box.appendChild(a);
+    box.appendChild(copyBtn);
+
+    let copied = false;
+    try { await navigator.clipboard.writeText(url); copied = true; } catch {}
+    showToast(copied ? 'Share link copied to clipboard' : 'Share link generated', 'success');
   } catch(e) {
     showToast(e.message, 'danger');
   } finally {
