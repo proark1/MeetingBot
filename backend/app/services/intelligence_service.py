@@ -111,13 +111,25 @@ Required JSON shape:
 
 For action_items.confidence: use 1.0 when a task was explicitly assigned ("Alice will do X by Friday"),
 0.7 for strong implicit commitment ("we need to do X"), 0.4 for vague mention ("someone should look at X").
-For topics: use the transcript timestamps to anchor each topic's start_time and end_time (seconds from start).
+For topics: start_time and end_time are SECONDS from the start of the meeting (NOT minutes).
+Read the values directly off the "[123.4s]" tags in the transcript. Examples: a topic that
+begins 5 min in → start_time: 300, a topic ending 17 min in → end_time: 1020. NEVER write
+start_time: 5 to mean "5 minutes in" — that means 5 seconds.
 For risks_blockers: include only items explicitly called out as blockers, risks, or concerns — not general topics.
 For next_meeting: extract from phrases like "let's meet Thursday", "same time next week", "I'll set up a call for the 15th"."""
 
 _CHAPTERS_PROMPT = """You are a meeting analyst. Segment the following transcript into 3–8 named chapters.
 Return ONLY a JSON array — no markdown, no prose outside the array.
 Each entry: {"title": "Short Chapter Title", "start_time": <seconds_float>, "summary": "1–2 sentence summary."}.
+
+CRITICAL — start_time is in SECONDS from the start of the meeting (NOT minutes).
+The transcript lines are tagged like "[123.4s]" — use those tag values directly.
+Examples of correct values:
+  - a chapter that begins 1 minute in     → start_time: 60
+  - a chapter that begins 5 minutes 30 s in → start_time: 330
+  - a chapter that begins 17 minutes in    → start_time: 1020
+NEVER write start_time: 17 for "17 minutes in" — that means 17 seconds.
+
 Order by start_time ascending."""
 
 _DEMO_TRANSCRIPT_PROMPT = """You generate realistic meeting transcripts.
@@ -285,6 +297,93 @@ async def _claude_fast_complete(prompt: str, max_tokens: int = 1024, operation: 
         if block.type == "text":
             return block.text
     return ""
+
+
+def _transcript_max_ts(transcript: list[dict[str, Any]]) -> float:
+    """Largest timestamp value present in the transcript, in seconds."""
+    if not transcript:
+        return 0.0
+    try:
+        return max(float(e.get("timestamp", 0) or 0) for e in transcript)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _normalise_time_anchors(
+    items: list[dict[str, Any]],
+    transcript_max_ts: float,
+    keys: tuple[str, ...] = ("start_time", "end_time"),
+    fill_end_from_next_start: bool = True,
+) -> list[dict[str, Any]]:
+    """Sanity-check and repair AI-produced start/end timestamps.
+
+    The chapter and topic prompts ask for SECONDS, but models occasionally
+    return minutes anyway (so a chapter at minute 17 comes back as
+    ``start_time: 17``).  Detect that — every value would be at most
+    ``transcript_max_ts / 30`` if the model used minutes — and rescale by 60.
+    Then clamp into the transcript range, sort by start_time, drop garbage
+    entries, and (optionally) fill missing ``end_time`` from the next item's
+    ``start_time``.
+    """
+    if not items or transcript_max_ts <= 0:
+        return items
+
+    # Coerce the listed time fields to floats; drop unparseable values.
+    cleaned: list[dict[str, Any]] = []
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        out = dict(it)
+        for k in keys:
+            v = out.get(k)
+            if v is None:
+                continue
+            try:
+                out[k] = float(v)
+            except (TypeError, ValueError):
+                out[k] = None
+        cleaned.append(out)
+
+    if not cleaned:
+        return cleaned
+
+    # Detect "model returned minutes" — every present value would have to
+    # multiply by 60 to fit within transcript duration. Use a generous
+    # margin (transcript_max_ts / 30) so legitimately short meetings
+    # (≤ 30 s of speech) don't get mis-rescaled.
+    if transcript_max_ts >= 60:
+        all_values = [out[k] for out in cleaned for k in keys
+                      if isinstance(out.get(k), (int, float))]
+        if all_values:
+            mx = max(all_values)
+            if mx > 0 and mx <= transcript_max_ts / 30 and mx * 60 <= transcript_max_ts * 1.2:
+                logger.warning(
+                    "AI returned time anchors that look like minutes (max=%.1f, "
+                    "transcript=%.0fs) — rescaling by 60", mx, transcript_max_ts,
+                )
+                for out in cleaned:
+                    for k in keys:
+                        if isinstance(out.get(k), (int, float)):
+                            out[k] = out[k] * 60.0
+
+    # Clamp into [0, transcript_max_ts] and sort by start_time.
+    for out in cleaned:
+        for k in keys:
+            v = out.get(k)
+            if isinstance(v, (int, float)):
+                out[k] = max(0.0, min(float(v), float(transcript_max_ts)))
+    cleaned.sort(key=lambda x: (x.get("start_time") or 0.0))
+
+    # Fill missing end_time from the next item's start_time (or transcript end).
+    if fill_end_from_next_start and "end_time" in keys and "start_time" in keys:
+        for i, out in enumerate(cleaned):
+            if out.get("end_time") in (None, 0, 0.0) and out.get("start_time") is not None:
+                if i + 1 < len(cleaned) and cleaned[i + 1].get("start_time") is not None:
+                    out["end_time"] = cleaned[i + 1]["start_time"]
+                else:
+                    out["end_time"] = transcript_max_ts
+
+    return cleaned
 
 
 async def _claude_analyze_transcript(
@@ -722,28 +821,38 @@ async def analyze_transcript(
     if not transcript:
         return _empty_analysis()
 
+    result: dict[str, Any] | None = None
     if _use_claude():
         try:
-            return await _with_retry(_claude_analyze_transcript, transcript, prompt_override, vocabulary)
+            result = await _with_retry(_claude_analyze_transcript, transcript, prompt_override, vocabulary)
         except json.JSONDecodeError as exc:
             logger.error("Claude returned invalid JSON for analysis: %s", exc)
         except Exception as exc:
             logger.error("Claude analysis error (all retries exhausted): %s", exc)
-        return _stub_analysis(transcript)
-
-    if _use_gemini():
+    elif _use_gemini():
         try:
-            return await _with_retry(_gemini_analyze_transcript, transcript, prompt_override, vocabulary)
+            result = await _with_retry(_gemini_analyze_transcript, transcript, prompt_override, vocabulary)
         except json.JSONDecodeError as exc:
             logger.error("Gemini returned invalid JSON for analysis: %s", exc)
         except ValueError as exc:
             logger.warning("Gemini analysis blocked by safety filter: %s", exc)
         except Exception as exc:
             logger.error("Gemini analysis error (all retries exhausted): %s", exc)
+    else:
+        logger.warning("No AI API key configured — returning stub analysis")
+
+    if result is None:
         return _stub_analysis(transcript)
 
-    logger.warning("No AI API key configured — returning stub analysis")
-    return _stub_analysis(transcript)
+    # Sanity-check topic time anchors — models occasionally return minutes when
+    # the prompt asks for seconds, which would cause topics to render as "0:17"
+    # instead of "17:00" downstream.
+    topics = result.get("topics")
+    if isinstance(topics, list) and topics:
+        result["topics"] = _normalise_time_anchors(
+            topics, _transcript_max_ts(transcript), keys=("start_time", "end_time"),
+        )
+    return result
 
 
 async def generate_chapters(transcript: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -751,27 +860,27 @@ async def generate_chapters(transcript: list[dict[str, Any]]) -> list[dict[str, 
     if not transcript:
         return []
 
+    raw: list[dict[str, Any]] = []
     if _use_claude():
         try:
-            return await _with_retry(_claude_generate_chapters, transcript)
+            raw = await _with_retry(_claude_generate_chapters, transcript)
         except json.JSONDecodeError as exc:
             logger.error("Claude chapters: invalid JSON — %s", exc)
         except Exception as exc:
             logger.warning("Claude chapter generation failed (all retries exhausted): %s", exc)
-        return []
-
-    if _use_gemini():
+    elif _use_gemini():
         try:
-            return await _with_retry(_gemini_generate_chapters, transcript)
+            raw = await _with_retry(_gemini_generate_chapters, transcript)
         except json.JSONDecodeError as exc:
             logger.error("Gemini chapters: invalid JSON — %s", exc)
         except ValueError as exc:
             logger.warning("Gemini chapters blocked by safety filter: %s", exc)
         except Exception as exc:
             logger.warning("Chapter generation failed (all retries exhausted): %s", exc)
-        return []
 
-    return []
+    return _normalise_time_anchors(
+        raw or [], _transcript_max_ts(transcript), keys=("start_time", "end_time"),
+    )
 
 
 async def generate_mention_response(

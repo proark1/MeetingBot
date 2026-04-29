@@ -4,11 +4,16 @@ All notable changes to JustHereToListen.io are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.43.0 — **Last updated:** 2026-04-29
+> **Latest version:** 2.43.1 — **Last updated:** 2026-04-29
 
 ---
 
-## [2.43.0] - 2026-04-29
+## [2.43.1] - 2026-04-29
+
+### Fixes
+- **Chapter and topic timestamps were displayed as "0:01" / "0:02" / … "0:18"** even when the topics actually spanned the whole meeting. The model was returning `start_time` in minutes (e.g. `17` for "17 minutes in") despite the prompt asking for seconds, and the dashboard's `mm:ss` formatter rendered seconds=17 as `0:17`. Fixed in three places: (1) tightened `_CHAPTERS_PROMPT` and the analysis prompt's topic instruction with explicit unit examples ("a chapter beginning 17 minutes in → start_time: 1020, NEVER 17"), (2) new `_normalise_time_anchors` post-processor in `intelligence_service.py` that detects when every returned anchor is ≤ 1/30th of the transcript duration (the unmistakable "model gave minutes" signature) and rescales by 60, then clamps into `[0, transcript_max_ts]`, sorts by `start_time`, and fills missing `end_time` values from the next item's `start_time`, (3) `generate_chapters` and `analyze_transcript` now run their output through the normaliser before returning.
+
+
 
 ### Features
 - **Real participant names locked into transcripts and reports** — the bot already scraped real display names from the Meet/Zoom/Teams/onepizza roster, but `_normalise_speakers` was canonicalising every diarized label to "Participant 1/2/3" *before* fuzzy-matching against those names, so reports lost them. The normaliser now: (1) tries direct + first-name matches against `known_participants` against the **raw** model label first, (2) falls back to round-robin assignment by order of first appearance when the count of unknown speakers ≤ count of known names, (3) only canonicalises to `Participant N` when no real name can responsibly be assigned, and (4) refuses to smear one real name across multiple distinct diarized voices. A `speaker_name_map` is now persisted on `BotSession` so chunked transcriptions and re-runs stay consistent. Live-streaming transcript entries (which previously used "Unknown" labels and bypassed normalisation) and Whisper output are now also normalised after merging in `bot_service._do_analysis_inner`.
