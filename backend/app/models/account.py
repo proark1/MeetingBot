@@ -139,11 +139,14 @@ class BotSnapshot(Base):
 
 
 class Webhook(Base):
-    """Persists global webhook registrations across server restarts."""
+    """Persists per-account webhook registrations across server restarts."""
 
     __tablename__ = "webhooks"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    # Owning account — NULL means a legacy/superadmin global webhook.
+    # Always filter by account_id in tenant-facing queries to prevent cross-tenant leaks.
+    account_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
     url: Mapped[str] = mapped_column(String(2048), nullable=False)
     events: Mapped[str] = mapped_column(Text, nullable=False)  # JSON-serialized list of event names
     # Stored in plaintext — required to compute HMAC-SHA256 signatures on outgoing deliveries

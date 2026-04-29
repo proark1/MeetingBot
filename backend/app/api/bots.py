@@ -262,14 +262,12 @@ async def _get_or_404(
     bot = await store.get_bot(bot_id)
     if bot is None:
         raise HTTPException(status_code=404, detail=f"Bot {bot_id!r} not found")
-    # Ownership check: per-user accounts can only see their own bots
-    if (
-        account_id
-        and account_id != SUPERADMIN_ACCOUNT_ID
-        and bot.account_id is not None
-        and bot.account_id != account_id
-    ):
-        raise HTTPException(status_code=404, detail=f"Bot {bot_id!r} not found")
+    # Ownership check: per-user accounts can only see their own bots.
+    # Bots with bot.account_id == None are considered superadmin/legacy and
+    # are not visible to authenticated tenants — strict equality only.
+    if account_id and account_id != SUPERADMIN_ACCOUNT_ID:
+        if bot.account_id != account_id:
+            raise HTTPException(status_code=404, detail=f"Bot {bot_id!r} not found")
     # Sub-user isolation: when sub_user_id is provided, only show matching bots
     if sub_user_id is not None and bot.sub_user_id != sub_user_id:
         raise HTTPException(status_code=404, detail=f"Bot {bot_id!r} not found")
