@@ -1714,7 +1714,13 @@ async def followup_email_ui(bot_id: str, request: Request, db: AsyncSession = De
 
 @router.post("/dashboard/bot/{bot_id}/share", include_in_schema=False)
 async def share_bot_ui(bot_id: str, request: Request, db: AsyncSession = Depends(get_db)):
-    """Proxy share link creation through cookie auth."""
+    """Proxy share link creation through cookie auth.
+
+    The upstream endpoint builds ``share_url`` from ``request.base_url``, but
+    when we proxy via ASGITransport that base_url is the internal sentinel
+    (``http://internal``), not the public host. Rewrite the URL here using
+    the original request's host so the user gets a clickable public link.
+    """
     token = _get_token_from_request(request)
     if not token:
         return JSONResponse({"detail": "Unauthenticated"}, status_code=401)
@@ -1729,7 +1735,21 @@ async def share_bot_ui(bot_id: str, request: Request, db: AsyncSession = Depends
                 f"/api/v1/bot/{bot_id}/share",
                 headers={"Authorization": f"Bearer {token}", "X-Forwarded-For": client_ip},
             )
-        return JSONResponse(resp.json(), status_code=resp.status_code)
+        try:
+            data = resp.json()
+        except Exception:
+            data = {"detail": resp.text or "Share link creation failed"}
+        # Rewrite the share URL with the public host so the user gets something
+        # they can actually visit (the upstream value is "http://internal/...").
+        if resp.status_code < 400 and isinstance(data, dict) and data.get("share_url"):
+            try:
+                from urllib.parse import urlsplit
+                public_base = str(request.base_url).rstrip("/")
+                path = urlsplit(data["share_url"]).path or f"/share/{bot_id}"
+                data["share_url"] = f"{public_base}{path}"
+            except Exception:
+                pass
+        return JSONResponse(data, status_code=resp.status_code)
     except Exception as exc:
         return JSONResponse({"detail": str(exc)}, status_code=502)
 
