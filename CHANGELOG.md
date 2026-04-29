@@ -4,11 +4,16 @@ All notable changes to JustHereToListen.io are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.43.1 — **Last updated:** 2026-04-29
+> **Latest version:** 2.43.2 — **Last updated:** 2026-04-29
 
 ---
 
-## [2.43.1] - 2026-04-29
+## [2.43.2] - 2026-04-29
+
+### Fixes
+- **Dashboard report exports (Markdown / PDF / JSON / SRT) returned 401** with `{"detail":"Missing Authorization header. Use: Authorization: Bearer <key>"}` for every logged-in browser user. The dashboard renders the export options as plain `<a href="/api/v1/bot/{id}/export/...">` links, so the browser sent only the `mb_token` session cookie — no `Authorization: Bearer` header — and `get_current_account_id` rejected the request. Fixed by extending the auth resolver to fall back to the `mb_token` JWT cookie (already `httponly` + `secure` + `samesite=lax` from the round-3 OAuth fix) when no Bearer header is present. CSRF risk is bounded: all four affected endpoints are GET-only, so a cross-site link can at most trigger a download of the user's own data on the user's own browser — the attacker origin can't read the response under the Same-Origin Policy.
+
+
 
 ### Fixes
 - **Chapter and topic timestamps were displayed as "0:01" / "0:02" / … "0:18"** even when the topics actually spanned the whole meeting. The model was returning `start_time` in minutes (e.g. `17` for "17 minutes in") despite the prompt asking for seconds, and the dashboard's `mm:ss` formatter rendered seconds=17 as `0:17`. Fixed in three places: (1) tightened `_CHAPTERS_PROMPT` and the analysis prompt's topic instruction with explicit unit examples ("a chapter beginning 17 minutes in → start_time: 1020, NEVER 17"), (2) new `_normalise_time_anchors` post-processor in `intelligence_service.py` that detects when every returned anchor is ≤ 1/30th of the transcript duration (the unmistakable "model gave minutes" signature) and rescales by 60, then clamps into `[0, transcript_max_ts]`, sorts by `start_time`, and fills missing `end_time` values from the next item's `start_time`, (3) `generate_chapters` and `analyze_transcript` now run their output through the normaliser before returning.

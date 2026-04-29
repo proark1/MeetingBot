@@ -33,17 +33,31 @@ async def get_current_account_id(
     db: AsyncSession = Depends(get_db),
 ) -> Optional[str]:
     """
-    Resolve account_id from the Authorization header.
+    Resolve account_id from the Authorization header or the mb_token cookie.
 
     Priority:
     1. Legacy API_KEY env var → SUPERADMIN_ACCOUNT_ID (no per-user account)
-    2. JWT (eyJ...) → decode and return account_id
-    3. Per-user API key (sk_live_...) → DB lookup, return account_id
+    2. JWT (eyJ…) — accepted from either ``Authorization: Bearer`` or the
+       ``mb_token`` cookie (the dashboard's session cookie). The cookie path
+       is what makes browser-driven API calls — like the report export links
+       — work for logged-in dashboard users without manually attaching a
+       Bearer header.
+    3. Per-user API key (sk_live_…) → DB lookup, return account_id
 
     If no credentials and API_KEY is unset → allow (unauthenticated dev mode).
     Sets request.state.account_id for downstream use.
     """
-    if credentials is None:
+    token: Optional[str] = credentials.credentials if credentials else None
+
+    # Fallback: the dashboard authenticates browser navigations via the
+    # mb_token cookie. Accept it here so e.g. <a href="/api/v1/bot/.../export/pdf">
+    # works for logged-in users without JS having to attach a Bearer header.
+    if token is None:
+        cookie_token = request.cookies.get("mb_token")
+        if cookie_token and cookie_token.startswith("eyJ"):
+            token = cookie_token
+
+    if token is None:
         if settings.API_KEY:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -60,8 +74,6 @@ async def get_current_account_id(
         # Unauthenticated dev mode (no accounts registered yet, or operator opt-in)
         request.state.account_id = None
         return None
-
-    token = credentials.credentials
 
     # Legacy superadmin bypass
     if settings.API_KEY and hmac.compare_digest(token, settings.API_KEY):
