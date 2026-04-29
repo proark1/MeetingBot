@@ -112,6 +112,14 @@ class BotSession:
     health_score: Optional[int] = None         # 0-100 meeting quality score
     meeting_cost_usd: Optional[float] = None   # estimated attendee cost in USD
     avg_hourly_rate_usd: Optional[float] = None  # used to compute meeting cost
+    meeting_stats: dict = field(default_factory=dict)  # aggregate meeting-level stats (duration, dominance, balance, …)
+
+    # ── Speaker resolution ─────────────────────────────────────────────────────
+    # Stable mapping from diarized labels produced by the transcription model
+    # ("speaker 1", "Participant 2", …) to real participant display names.
+    # Built incrementally by _normalise_speakers; persisted so chunked /
+    # re-run transcriptions stay consistent.
+    speaker_name_map: dict = field(default_factory=dict)
 
     # AI usage tracking
     ai_usage: list = field(default_factory=list)  # list of usage entry dicts
@@ -409,6 +417,8 @@ class Store:
                     "health_score": bot.health_score,
                     "meeting_cost_usd": bot.meeting_cost_usd,
                     "avg_hourly_rate_usd": bot.avg_hourly_rate_usd,
+                    "meeting_stats": bot.meeting_stats or {},
+                    "speaker_name_map": bot.speaker_name_map or {},
                     "ai_usage": bot.ai_usage,
                     # ── Diagnostic / forensic fields ─────────────────────────
                     "audio_health_samples": (bot.audio_health_samples or [])[-40:],
@@ -709,6 +719,8 @@ async def load_persisted_bots() -> int:
                     health_score=d.get("health_score"),
                     meeting_cost_usd=d.get("meeting_cost_usd"),
                     avg_hourly_rate_usd=d.get("avg_hourly_rate_usd"),
+                    meeting_stats=d.get("meeting_stats") or {},
+                    speaker_name_map=d.get("speaker_name_map") or {},
                     ai_usage=d.get("ai_usage") or [],
                     # ── Diagnostic / forensic fields ─────────────────────────
                     audio_health_samples=d.get("audio_health_samples") or [],

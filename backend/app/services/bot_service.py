@@ -24,7 +24,7 @@ from app.services.background_tasks import (
 from app.api.ws import manager as ws_manager
 from app.services import intelligence_service, webhook_service
 from app.services.browser_bot import run_browser_bot
-from app.services.transcription_service import transcribe_audio
+from app.services.transcription_service import transcribe_audio, _normalise_speakers
 from app.services.intelligence_service import set_usage_sink
 
 logger = logging.getLogger(__name__)
@@ -149,7 +149,26 @@ def _unwrap_safelinks(url: str) -> str:
     return url
 
 
-async def _compute_speaker_stats(transcript: list[dict]) -> list[dict]:
+_OPTED_OUT_LABEL = "[opted out]"
+
+_WORD_RE = _re.compile(r"[A-Za-z']+")
+
+
+def _mask_opted_out(name: str, opted_out: list[str] | None) -> str:
+    """Return a display-safe speaker label, masking opted-out participants."""
+    if not name or not opted_out:
+        return name
+    nlower = name.strip().lower()
+    for o in opted_out:
+        if o and o.strip().lower() == nlower:
+            return _OPTED_OUT_LABEL
+    return name
+
+
+async def _compute_speaker_stats(
+    transcript: list[dict],
+    opted_out: list[str] | None = None,
+) -> list[dict]:
     if not transcript:
         return []
     entries = sorted(transcript, key=lambda e: e.get("timestamp", 0))
@@ -159,10 +178,11 @@ async def _compute_speaker_stats(transcript: list[dict]) -> list[dict]:
     speaker_fillers: dict[str, int] = {}
     speaker_monologue: dict[str, float] = {}
     speaker_turns: dict[str, int] = {}
+    speaker_words: dict[str, int] = {}
     speaker_texts: dict[str, list[str]] = {}
 
     for i, e in enumerate(entries):
-        speaker = e.get("speaker", "Unknown")
+        speaker = _mask_opted_out(e.get("speaker", "Unknown"), opted_out)
         text = e.get("text", "")
         if i + 1 < len(entries):
             duration = entries[i + 1].get("timestamp", 0) - e.get("timestamp", 0)
@@ -175,6 +195,7 @@ async def _compute_speaker_stats(transcript: list[dict]) -> list[dict]:
         speaker_questions[speaker] = speaker_questions.get(speaker, 0) + text.count("?")
         speaker_fillers[speaker] = speaker_fillers.get(speaker, 0) + len(_FILLER_WORDS.findall(text))
         speaker_monologue[speaker] = max(speaker_monologue.get(speaker, 0.0), duration)
+        speaker_words[speaker] = speaker_words.get(speaker, 0) + len(_WORD_RE.findall(text))
         speaker_texts.setdefault(speaker, []).append(text)
 
     total = sum(speaker_time.values())
@@ -197,6 +218,8 @@ async def _compute_speaker_stats(transcript: list[dict]) -> list[dict]:
     for name, t in sorted(speaker_time.items(), key=lambda x: x[1], reverse=True):
         talk_pct = round(t / total * 100, 1)
         turns = speaker_turns.get(name, 0)
+        words = speaker_words.get(name, 0)
+        wpm = round(words / (t / 60.0), 1) if t >= 1.0 else 0.0
         # "Quiet" = present (has turns) but speaks less than 5% of total time
         is_quiet = talk_pct < 5.0 and turns > 0
         stats.append({
@@ -204,6 +227,8 @@ async def _compute_speaker_stats(transcript: list[dict]) -> list[dict]:
             "talk_time_s": round(t, 1),
             "talk_pct": talk_pct,
             "turns": turns,
+            "words": words,
+            "wpm": wpm,
             "questions": speaker_questions.get(name, 0),
             "filler_words": speaker_fillers.get(name, 0),
             "longest_monologue_s": round(speaker_monologue.get(name, 0.0), 1),
@@ -211,6 +236,78 @@ async def _compute_speaker_stats(transcript: list[dict]) -> list[dict]:
             "sentiment": speaker_sentiment.get(name, "neutral"),
         })
     return stats
+
+
+def _compute_meeting_stats(
+    transcript: list[dict],
+    speaker_stats: list[dict],
+    duration_seconds: Optional[float],
+) -> dict:
+    """Compute meeting-level aggregate statistics (separate from per-speaker).
+
+    Reported in the dashboard alongside the speaker breakdown so users can see
+    at a glance who dominated, how balanced the conversation was, and how much
+    of the meeting was actual speech vs silence.
+    """
+    if not transcript or not speaker_stats:
+        return {}
+
+    entries = sorted(transcript, key=lambda e: e.get("timestamp", 0))
+    total_talk = sum(s.get("talk_time_s", 0.0) for s in speaker_stats)
+
+    # Talk balance using a Gini-like dominance index: 0 = perfectly even,
+    # 1 = one person speaks the entire time. Reported as "balance score" =
+    # 100 - dominance, so higher is better.
+    pcts = [s.get("talk_pct", 0.0) / 100.0 for s in speaker_stats if s.get("talk_pct", 0.0) > 0]
+    n = len(pcts)
+    if n >= 2:
+        ideal = 1.0 / n
+        dominance = sum(abs(p - ideal) for p in pcts) / 2.0  # bounded 0..(1 - 1/n)
+        balance_score = round(max(0.0, 1.0 - dominance / (1.0 - ideal)) * 100, 1)
+    else:
+        balance_score = 100.0 if n == 1 else 0.0
+
+    # Interruptions: a turn that starts < 1 s after the previous turn ended,
+    # by a different speaker. Heuristic — not exact, but useful at a glance.
+    interruptions = 0
+    for prev, cur in zip(entries, entries[1:]):
+        gap = cur.get("timestamp", 0) - prev.get("timestamp", 0)
+        if gap < 1.0 and prev.get("speaker") and cur.get("speaker") and prev["speaker"] != cur["speaker"]:
+            interruptions += 1
+
+    first_speaker = entries[0].get("speaker") if entries else None
+    last_speaker = entries[-1].get("speaker") if entries else None
+
+    silence_pct = None
+    if duration_seconds and duration_seconds > 0:
+        silence_pct = round(max(0.0, (duration_seconds - total_talk) / duration_seconds) * 100, 1)
+
+    dominant = max(speaker_stats, key=lambda s: s.get("talk_pct", 0.0))
+    quietest = min(
+        (s for s in speaker_stats if s.get("turns", 0) > 0),
+        key=lambda s: s.get("talk_pct", 0.0),
+        default=None,
+    )
+
+    total_words = sum(s.get("words", 0) for s in speaker_stats)
+    overall_wpm = round(total_words / (total_talk / 60.0), 1) if total_talk >= 1.0 else 0.0
+
+    return {
+        "speaker_count": n,
+        "total_talk_time_s": round(total_talk, 1),
+        "silence_pct": silence_pct,
+        "balance_score": balance_score,
+        "dominance_pct": round(max(pcts) * 100, 1) if pcts else 0.0,
+        "interruptions": interruptions,
+        "first_speaker": first_speaker,
+        "last_speaker": last_speaker,
+        "dominant_speaker": dominant.get("name"),
+        "quietest_speaker": quietest.get("name") if quietest else None,
+        "total_words": total_words,
+        "overall_wpm": overall_wpm,
+        "total_questions": sum(s.get("questions", 0) for s in speaker_stats),
+        "total_filler_words": sum(s.get("filler_words", 0) for s in speaker_stats),
+    }
 
 
 def _compute_health_score(
@@ -448,7 +545,10 @@ async def _do_analysis_inner(bot: BotSession, audio_path: str, use_real_bot: boo
             )
 
         chapters = [] if isinstance(chapters_result, Exception) else (chapters_result or [])
-        speaker_stats = await _compute_speaker_stats(bot.transcript)
+        speaker_stats = await _compute_speaker_stats(
+            bot.transcript, opted_out=getattr(bot, "opted_out_participants", None),
+        )
+        meeting_stats = _compute_meeting_stats(bot.transcript, speaker_stats, bot.duration_seconds)
 
         # ── Meeting health score ──────────────────────────────────────────
         try:
@@ -479,6 +579,7 @@ async def _do_analysis_inner(bot: BotSession, audio_path: str, use_real_bot: boo
             analysis=analysis_result,
             chapters=chapters,
             speaker_stats=speaker_stats,
+            meeting_stats=meeting_stats,
             health_score=health_score,
         )
         bot.analysis = analysis_result
@@ -582,12 +683,20 @@ async def _do_analysis_inner(bot: BotSession, audio_path: str, use_real_bot: boo
 
     elif analysis_mode == "transcript_only":
         logger.info("Bot %s: analysis_mode=transcript_only — skipping AI analysis", bot.id)
-        speaker_stats = await _compute_speaker_stats(bot.transcript)
+        speaker_stats = await _compute_speaker_stats(
+            bot.transcript, opted_out=getattr(bot, "opted_out_participants", None),
+        )
+        meeting_stats = _compute_meeting_stats(bot.transcript, speaker_stats, bot.duration_seconds)
         if use_real_bot and os.path.exists(audio_path) and os.path.getsize(audio_path) > 0:
-            await store.update_bot(bot.id, recording_path=audio_path, speaker_stats=speaker_stats)
+            await store.update_bot(
+                bot.id, recording_path=audio_path,
+                speaker_stats=speaker_stats, meeting_stats=meeting_stats,
+            )
             bot.recording_path = audio_path
         else:
-            await store.update_bot(bot.id, speaker_stats=speaker_stats)
+            await store.update_bot(
+                bot.id, speaker_stats=speaker_stats, meeting_stats=meeting_stats,
+            )
         if video_path and os.path.exists(video_path) and os.path.getsize(video_path) > 0:
             await store.update_bot(bot.id, video_path=video_path)
             bot.video_path = video_path
@@ -1020,6 +1129,7 @@ async def run_bot_lifecycle(bot_id: str) -> None:
 
             # Route to the configured transcription provider (Whisper or Gemini)
             _provider = getattr(bot, "transcription_provider", "gemini") or "gemini"
+            _prior_map = dict(getattr(bot, "speaker_name_map", None) or {})
             if _provider == "whisper":
                 from app.services.whisper_service import transcribe_with_whisper, is_whisper_available
                 if is_whisper_available():
@@ -1035,6 +1145,7 @@ async def run_bot_lifecycle(bot_id: str) -> None:
                             known_participants=scraped_participants,
                             language=settings.TRANSCRIPTION_LANGUAGE or None,
                             bot_id=bot_id,
+                            prior_speaker_map=_prior_map,
                         )
                 else:
                     logger.warning("Bot %s: Whisper not available — using Gemini", bot_id)
@@ -1043,6 +1154,7 @@ async def run_bot_lifecycle(bot_id: str) -> None:
                         known_participants=scraped_participants,
                         language=settings.TRANSCRIPTION_LANGUAGE or None,
                         bot_id=bot_id,
+                        prior_speaker_map=_prior_map,
                     )
             else:
                 transcript = await transcribe_audio(
@@ -1050,6 +1162,7 @@ async def run_bot_lifecycle(bot_id: str) -> None:
                     known_participants=scraped_participants,
                     language=settings.TRANSCRIPTION_LANGUAGE or None,
                     bot_id=bot_id,
+                    prior_speaker_map=_prior_map,
                 )
 
             if live_transcript_entries:
@@ -1061,6 +1174,18 @@ async def run_bot_lifecycle(bot_id: str) -> None:
                     extra = [e for e in live_transcript_entries if e.get("text", "").strip().lower() not in batch_texts]
                     if extra:
                         transcript = sorted(transcript + extra, key=lambda e: e.get("timestamp", 0))
+
+            # Re-resolve speaker labels across the merged transcript (live entries
+            # and Whisper output bypass transcribe_audio's normalisation pass, so
+            # they would otherwise leak "Unknown" / "Speaker N" into the report).
+            if transcript:
+                _bot_fresh = await store.get_bot(bot_id) or bot
+                _carry_map = dict(getattr(_bot_fresh, "speaker_name_map", None) or {})
+                transcript, _final_map = _normalise_speakers(
+                    transcript, scraped_participants, prior_map=_carry_map,
+                )
+                if _final_map:
+                    await store.update_bot(bot_id, speaker_name_map=_final_map)
 
             if not transcript:
                 _fresh = await store.get_bot(bot_id) or bot

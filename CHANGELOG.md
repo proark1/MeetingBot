@@ -4,11 +4,19 @@ All notable changes to JustHereToListen.io are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.42.0 — **Last updated:** 2026-04-29
+> **Latest version:** 2.43.0 — **Last updated:** 2026-04-29
 
 ---
 
-## [2.42.0] - 2026-04-29
+## [2.43.0] - 2026-04-29
+
+### Features
+- **Real participant names locked into transcripts and reports** — the bot already scraped real display names from the Meet/Zoom/Teams/onepizza roster, but `_normalise_speakers` was canonicalising every diarized label to "Participant 1/2/3" *before* fuzzy-matching against those names, so reports lost them. The normaliser now: (1) tries direct + first-name matches against `known_participants` against the **raw** model label first, (2) falls back to round-robin assignment by order of first appearance when the count of unknown speakers ≤ count of known names, (3) only canonicalises to `Participant N` when no real name can responsibly be assigned, and (4) refuses to smear one real name across multiple distinct diarized voices. A `speaker_name_map` is now persisted on `BotSession` so chunked transcriptions and re-runs stay consistent. Live-streaming transcript entries (which previously used "Unknown" labels and bypassed normalisation) and Whisper output are now also normalised after merging in `bot_service._do_analysis_inner`.
+- **Meeting Stats card on every report** — new `bot.meeting_stats` aggregate computed by `_compute_meeting_stats`: total speech time, silence percentage, balance score (Gini-like 0–100, higher = more equal participation), dominance percentage, dominant / quietest / first / last speaker, interruption count, overall pace (wpm), question count, filler-word count. Rendered as a dedicated card in `templates/bot.html`.
+- **Per-speaker breakdown extended** — `_compute_speaker_stats` now also reports `words` and `wpm`. The Speaker Breakdown table now renders Words, Pace, Longest run, Questions, Fillers, and Sentiment alongside the existing Talk Time / Share / Turns columns. Quiet participants are flagged inline with a chip.
+- **Opt-out display masking** — speakers in `bot.opted_out_participants` are aggregated under `[opted out]` in the speaker stats and meeting stats so consent-honouring meetings still get useful aggregate numbers without leaking the opted-out person's name.
+
+
 
 ### Security
 - **GDPR right-to-be-forgotten cascade** — `delete_account` now explicitly purges `BotSnapshot` (full transcripts), `Webhook` (configs + secrets), `ActionItem`, `IdempotencyKey`, and `WorkspaceMember` rows belonging to the deleted account. Previously the ORM cascade only fired for tables declared as `Account` relationships, so transcripts and webhook configurations silently survived erasure requests. AuditLog rows are intentionally preserved per regulatory norms; the deleted account's identifying details are scrubbed via the row's removal. In-memory bots are now also dropped (via `store.delete_bot`) so live state matches DB state.

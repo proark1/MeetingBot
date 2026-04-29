@@ -229,6 +229,92 @@
 </div>
 {% endif %}
 
+{% if bot.meeting_stats %}
+<!-- ── Meeting stats ────────────────────────────────────────────────────── -->
+<div class="card card-pad mb-4">
+  <div class="section-title mb-3">Meeting Stats</div>
+  <div class="row g-3">
+    {% set ms = bot.meeting_stats %}
+    {% if ms.total_talk_time_s is not none %}
+    <div class="col-6 col-md-3">
+      <div class="stat-label">Total speech</div>
+      <div class="stat-value mt-1" style="font-size:1rem">
+        {% set tmins = (ms.total_talk_time_s // 60)|int %}
+        {% set tsecs = (ms.total_talk_time_s % 60)|int %}
+        {{ tmins }}m {{ tsecs }}s
+      </div>
+    </div>
+    {% endif %}
+    {% if ms.silence_pct is not none %}
+    <div class="col-6 col-md-3">
+      <div class="stat-label">Silence</div>
+      <div class="stat-value mt-1" style="font-size:1rem">{{ "%.0f"|format(ms.silence_pct) }}%</div>
+    </div>
+    {% endif %}
+    {% if ms.balance_score is not none %}
+    <div class="col-6 col-md-3">
+      <div class="stat-label">Balance score</div>
+      <div class="stat-value mt-1" style="font-size:1rem" title="100 = everyone spoke equally; 0 = one person dominated">{{ "%.0f"|format(ms.balance_score) }}/100</div>
+    </div>
+    {% endif %}
+    {% if ms.dominance_pct is not none %}
+    <div class="col-6 col-md-3">
+      <div class="stat-label">Dominant share</div>
+      <div class="stat-value mt-1" style="font-size:1rem">{{ "%.0f"|format(ms.dominance_pct) }}%</div>
+    </div>
+    {% endif %}
+    {% if ms.dominant_speaker %}
+    <div class="col-6 col-md-3">
+      <div class="stat-label">Most active</div>
+      <div class="stat-value mt-1" style="font-size:1rem">{{ ms.dominant_speaker }}</div>
+    </div>
+    {% endif %}
+    {% if ms.quietest_speaker and ms.quietest_speaker != ms.dominant_speaker %}
+    <div class="col-6 col-md-3">
+      <div class="stat-label">Quietest</div>
+      <div class="stat-value mt-1" style="font-size:1rem">{{ ms.quietest_speaker }}</div>
+    </div>
+    {% endif %}
+    {% if ms.first_speaker %}
+    <div class="col-6 col-md-3">
+      <div class="stat-label">First to speak</div>
+      <div class="stat-value mt-1" style="font-size:1rem">{{ ms.first_speaker }}</div>
+    </div>
+    {% endif %}
+    {% if ms.last_speaker and ms.last_speaker != ms.first_speaker %}
+    <div class="col-6 col-md-3">
+      <div class="stat-label">Last to speak</div>
+      <div class="stat-value mt-1" style="font-size:1rem">{{ ms.last_speaker }}</div>
+    </div>
+    {% endif %}
+    {% if ms.interruptions is not none %}
+    <div class="col-6 col-md-3">
+      <div class="stat-label">Interruptions</div>
+      <div class="stat-value mt-1" style="font-size:1rem">{{ ms.interruptions }}</div>
+    </div>
+    {% endif %}
+    {% if ms.overall_wpm %}
+    <div class="col-6 col-md-3">
+      <div class="stat-label">Pace</div>
+      <div class="stat-value mt-1" style="font-size:1rem">{{ "%.0f"|format(ms.overall_wpm) }} wpm</div>
+    </div>
+    {% endif %}
+    {% if ms.total_questions is not none %}
+    <div class="col-6 col-md-3">
+      <div class="stat-label">Questions asked</div>
+      <div class="stat-value mt-1" style="font-size:1rem">{{ ms.total_questions }}</div>
+    </div>
+    {% endif %}
+    {% if ms.total_filler_words is not none %}
+    <div class="col-6 col-md-3">
+      <div class="stat-label">Filler words</div>
+      <div class="stat-value mt-1" style="font-size:1rem">{{ ms.total_filler_words }}</div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
 {% if bot.speaker_stats %}
 <!-- ── Speaker stats ─────────────────────────────────────────────────────── -->
 <div class="card card-pad mb-4">
@@ -241,12 +327,21 @@
           <th>Talk Time</th>
           <th>Share</th>
           <th>Turns</th>
+          <th>Words</th>
+          <th>Pace</th>
+          <th>Longest run</th>
+          <th>Questions</th>
+          <th>Fillers</th>
+          <th>Sentiment</th>
         </tr>
       </thead>
       <tbody>
         {% for s in bot.speaker_stats %}
         <tr>
-          <td>{{ s.name }}</td>
+          <td>
+            {{ s.name }}
+            {% if s.is_quiet %}<span class="chip chip-gray" style="margin-left:0.25rem;font-size:10px">quiet</span>{% endif %}
+          </td>
           <td>
             {% set mins = (s.talk_time_s // 60)|int %}
             {% set secs = (s.talk_time_s % 60)|int %}
@@ -261,6 +356,19 @@
             </div>
           </td>
           <td>{{ s.turns }}</td>
+          <td>{{ s.words if s.words is defined else "—" }}</td>
+          <td>{{ "%.0f"|format(s.wpm) if s.wpm else "—" }}{% if s.wpm %} wpm{% endif %}</td>
+          <td>
+            {% set lm = (s.longest_monologue_s or 0)|int %}
+            {% if lm >= 60 %}{{ (lm // 60) }}m {{ (lm % 60) }}s{% else %}{{ lm }}s{% endif %}
+          </td>
+          <td>{{ s.questions if s.questions is defined else 0 }}</td>
+          <td>{{ s.filler_words if s.filler_words is defined else 0 }}</td>
+          <td>
+            {% if s.sentiment == "positive" %}<span class="chip chip-success">Positive</span>
+            {% elif s.sentiment == "negative" %}<span class="chip chip-danger">Negative</span>
+            {% else %}<span class="chip chip-gray">{{ (s.sentiment or "neutral")|title }}</span>{% endif %}
+          </td>
         </tr>
         {% endfor %}
       </tbody>
