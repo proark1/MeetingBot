@@ -175,6 +175,7 @@ async def callback(
             value=jwt_token,
             httponly=True,
             samesite="lax",
+            secure=True,  # round-3 fix #3 — match the password-login cookie flags
             max_age=settings.JWT_EXPIRE_HOURS * 3600,
         )
         return resp

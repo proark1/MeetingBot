@@ -16,7 +16,20 @@ from typing import Any, Optional
 import httpx as _httpx
 
 logger = logging.getLogger(__name__)
-_http_client = _httpx.AsyncClient(timeout=15, follow_redirects=True)
+# follow_redirects=False so a 302 from a user-supplied integration URL can't
+# silently land us on an internal address (round-3 fix #2). The handful of
+# trusted endpoints (Notion/Drive/Linear) don't redirect under normal conditions.
+_http_client = _httpx.AsyncClient(timeout=15, follow_redirects=False)
+
+
+async def _ssrf_blocked(url: str) -> "str | None":
+    """Reject obviously-internal URLs before posting to a user-supplied target.
+    Returns ``None`` if safe, or an error string to log + abort with."""
+    try:
+        from app.services.webhook_service import check_url_ssrf
+    except Exception:  # pragma: no cover — defensive: never block on import error
+        return None
+    return await check_url_ssrf(url)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -111,6 +124,11 @@ async def _post_to_slack(webhook_url: str, bot_data: dict) -> bool:
         "text": "Meeting recording complete",  # fallback text
         "blocks": blocks,
     }
+
+    blocked = await _ssrf_blocked(webhook_url)
+    if blocked is not None:
+        logger.warning("Slack integration blocked by SSRF guard  url=%s  reason=%s", webhook_url, blocked)
+        return False
 
     try:
         resp = await _http_client.post(webhook_url, json=payload)
@@ -390,6 +408,10 @@ async def _post_to_jira(base_url: str, token: str, email: str, project_key: str,
         "Accept": "application/json",
     }
     api_url = base_url.rstrip("/") + "/rest/api/3/issue"
+    blocked = await _ssrf_blocked(api_url)
+    if blocked is not None:
+        logger.warning("Jira integration blocked by SSRF guard  url=%s  reason=%s", api_url, blocked)
+        return False
     successes = 0
 
     for item in action_items:
@@ -443,12 +465,10 @@ async def dispatch_integrations(account_id: str, bot_data: dict) -> None:
         if not integrations:
             return
 
+        from app.services.secrets_at_rest import decrypt_json
         tasks = []
         for integration in integrations:
-            try:
-                config = json.loads(integration.config or "{}")
-            except Exception:
-                config = {}
+            config = decrypt_json(integration.config)
 
             if integration.type == "slack":
                 webhook_url = config.get("webhook_url", "")

@@ -204,9 +204,14 @@ async def upsert_oauth_account(
             session.add(account)
             await session.flush()  # get account.id
 
-            # Issue a new API key
+            # Issue a new API key (round-3 fix #6: also persist key_prefix + key_hash)
             new_key_plaintext = f"sk_live_{''.join(secrets.token_urlsafe(30)[:40])}"
-            api_key = ApiKey(account_id=account.id, key=new_key_plaintext, name="Default")
+            from app.api.auth import api_key_storage_fields as _api_key_fields
+            api_key = ApiKey(
+                account_id=account.id,
+                name="Default",
+                **_api_key_fields(new_key_plaintext),
+            )
             session.add(api_key)
 
         # 4. Create the OAuth link

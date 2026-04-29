@@ -85,12 +85,32 @@ async def get_current_account_id(
                 detail="Invalid or expired token",
             )
 
-    # Per-user API key (sk_live_...)
+    # Per-user API key (sk_live_... / sk_test_...). Round-3 fix #6: dual-stack
+    # — match either the peppered HMAC (key_prefix + key_hash, indexed) or the
+    # legacy plaintext column. The HMAC path is preferred so a DB leak never
+    # exposes plaintext keys; the plaintext path is the fallback for rows
+    # written before this migration.
     from app.models.account import ApiKey
-    result = await db.execute(
-        select(ApiKey).where(ApiKey.key == token, ApiKey.is_active == True)  # noqa: E712
-    )
-    api_key = result.scalar_one_or_none()
+    from app.services.token_hash import hash_token
+
+    api_key = None
+    if len(token) >= 16:
+        candidate_prefix = token[:16]
+        candidate_hash = hash_token(token)
+        result = await db.execute(
+            select(ApiKey).where(
+                ApiKey.key_prefix == candidate_prefix,
+                ApiKey.key_hash == candidate_hash,
+                ApiKey.is_active == True,  # noqa: E712
+            )
+        )
+        api_key = result.scalar_one_or_none()
+    if api_key is None:
+        # Legacy plaintext fallback for rows that haven't been backfilled yet.
+        result = await db.execute(
+            select(ApiKey).where(ApiKey.key == token, ApiKey.is_active == True)  # noqa: E712
+        )
+        api_key = result.scalar_one_or_none()
     if not api_key:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

@@ -84,6 +84,9 @@ def _migrate_schema(conn) -> None:
             f"ALTER TABLE accounts ADD COLUMN IF NOT EXISTS stripe_subscription_id VARCHAR(255)",
             f"ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS last_used_at TIMESTAMP WITH TIME ZONE",
             f"ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS mode VARCHAR(10) NOT NULL DEFAULT 'live'",
+            # round-3 fix #6 — peppered HMAC of the plaintext key + a prefix index for cheap lookup
+            f"ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS key_prefix VARCHAR(16)",
+            f"ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS key_hash VARCHAR(128)",
             f"ALTER TABLE bot_snapshots ADD COLUMN IF NOT EXISTS sub_user_id VARCHAR(255)",
             f"ALTER TABLE bot_snapshots ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP WITH TIME ZONE",
             f"ALTER TABLE bot_snapshots ADD COLUMN IF NOT EXISTS consent_given BOOLEAN NOT NULL DEFAULT FALSE",
@@ -112,6 +115,9 @@ def _migrate_schema(conn) -> None:
             "CREATE INDEX IF NOT EXISTS ix_bot_snapshots_share_token_hash ON bot_snapshots (share_token_hash)",
             "CREATE INDEX IF NOT EXISTS ix_webhook_deliveries_retry ON webhook_deliveries (status, next_retry_at)",
             "CREATE UNIQUE INDEX IF NOT EXISTS ix_idempotency_account_key ON idempotency_keys (account_id, key)",
+            # round-3 fix #4 — partial unique on (type, reference_id) so the USDC
+            # monitor + admin rescan can never double-credit the same on-chain tx
+            "CREATE UNIQUE INDEX IF NOT EXISTS ix_credit_tx_unique_ref ON credit_transactions (type, reference_id) WHERE reference_id IS NOT NULL",
         ]
         existing_tables = set(inspect(conn).get_table_names())
         for idx_sql in _pg_indexes:
@@ -147,6 +153,13 @@ def _migrate_schema(conn) -> None:
         if "mode" not in existing:
             _log.info("Adding column api_keys.mode")
             conn.execute(text("ALTER TABLE api_keys ADD COLUMN mode VARCHAR(10) NOT NULL DEFAULT 'live'"))
+        # round-3 fix #6: peppered HMAC + prefix lookup for plaintext-storage retirement
+        if "key_prefix" not in existing:
+            _log.info("Adding column api_keys.key_prefix")
+            conn.execute(text("ALTER TABLE api_keys ADD COLUMN key_prefix VARCHAR(16)"))
+        if "key_hash" not in existing:
+            _log.info("Adding column api_keys.key_hash")
+            conn.execute(text("ALTER TABLE api_keys ADD COLUMN key_hash VARCHAR(128)"))
 
     # bot_snapshots — sub_user_id added in v2.1; expires_at added in v3.x
     if "bot_snapshots" in inspector.get_table_names():
@@ -214,10 +227,15 @@ def _migrate_schema(conn) -> None:
          "CREATE INDEX IF NOT EXISTS ix_bot_snapshots_account_created ON bot_snapshots (account_id, created_at)"),
         ("ix_bot_snapshots_account_sub_user",
          "CREATE INDEX IF NOT EXISTS ix_bot_snapshots_account_sub_user ON bot_snapshots (account_id, sub_user_id)"),
+        ("ix_bot_snapshots_share_token_hash",
+         "CREATE INDEX IF NOT EXISTS ix_bot_snapshots_share_token_hash ON bot_snapshots (share_token_hash)"),
         ("ix_webhook_deliveries_retry",
          "CREATE INDEX IF NOT EXISTS ix_webhook_deliveries_retry ON webhook_deliveries (status, next_retry_at)"),
         ("ix_idempotency_account_key",
          "CREATE UNIQUE INDEX IF NOT EXISTS ix_idempotency_account_key ON idempotency_keys (account_id, key)"),
+        # round-3 fix #4 — partial unique index for USDC tx replay protection
+        ("ix_credit_tx_unique_ref",
+         "CREATE UNIQUE INDEX IF NOT EXISTS ix_credit_tx_unique_ref ON credit_transactions (type, reference_id) WHERE reference_id IS NOT NULL"),
     ]
     existing_tables = set(inspector.get_table_names())
     for _idx_name, _idx_sql in _indexes:

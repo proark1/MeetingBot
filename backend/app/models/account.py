@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, Numeric, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -63,7 +63,14 @@ class ApiKey(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     account_id: Mapped[str] = mapped_column(String(36), ForeignKey("accounts.id"), nullable=False, index=True)
-    key: Mapped[str] = mapped_column(String(80), unique=True, nullable=False, index=True)
+    # Plaintext key — kept nullable during the round-3 #6 migration so new keys
+    # can omit it. Older rows may still have a value here; auth path handles both.
+    key: Mapped[Optional[str]] = mapped_column(String(80), unique=True, nullable=True, index=True)
+    # First 16 chars of the plaintext (e.g. "sk_live_abc12345"). Indexed and
+    # used as a cheap pre-filter before the constant-time HMAC comparison.
+    key_prefix: Mapped[Optional[str]] = mapped_column(String(16), nullable=True, index=True)
+    # HMAC-SHA256 ("h2:" + 64 hex) of the plaintext key, peppered with JWT_SECRET.
+    key_hash: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(100), default="Default")
     # "live" (default) or "test" — test keys return demo data without deducting credits
     mode: Mapped[str] = mapped_column(String(10), default="live", nullable=False)
@@ -76,6 +83,19 @@ class ApiKey(Base):
 
 class CreditTransaction(Base):
     __tablename__ = "credit_transactions"
+    __table_args__ = (
+        # Round-3 fix #4: prevent double-crediting when the USDC monitor and an
+        # admin rescan race on the same on-chain tx. Partial-unique on
+        # (type, reference_id) so multiple non-tx rows (where reference_id is
+        # null) keep working; both PG and SQLite honour the WHERE clause.
+        Index(
+            "ix_credit_tx_unique_ref",
+            "type", "reference_id",
+            unique=True,
+            sqlite_where=text("reference_id IS NOT NULL"),
+            postgresql_where=text("reference_id IS NOT NULL"),
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     account_id: Mapped[str] = mapped_column(String(36), ForeignKey("accounts.id"), nullable=False, index=True)

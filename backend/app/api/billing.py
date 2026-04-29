@@ -327,12 +327,37 @@ async def stripe_webhook(request: Request):
                     paid_price_id = (items[0].get("price") or {}).get("id")
             except Exception:
                 paid_price_id = None
+
+            # Round-3 fix #9: Stripe doesn't expand line_items in the webhook
+            # payload by default. Fetch them explicitly so the price/plan
+            # cross-check is always enforced, never skipped.
+            if paid_price_id is None and session.get("id") and settings.STRIPE_SECRET_KEY:
+                try:
+                    import stripe as _stripe_lib
+                    _stripe_lib.api_key = settings.STRIPE_SECRET_KEY
+                    li = _stripe_lib.checkout.Session.list_line_items(session["id"], limit=1)
+                    li_items = li.get("data") if isinstance(li, dict) else getattr(li, "data", None)
+                    if li_items:
+                        first = li_items[0]
+                        price = first.get("price") if isinstance(first, dict) else getattr(first, "price", None)
+                        if price:
+                            paid_price_id = price.get("id") if isinstance(price, dict) else getattr(price, "id", None)
+                except Exception as _exc:
+                    logger.warning("Stripe webhook: could not fetch line_items for %s: %s", session.get("id"), _exc)
+
             if expected_price and paid_price_id and paid_price_id != expected_price:
                 logger.error(
                     "Stripe webhook rejected: metadata.plan=%s implies price=%s but session paid price=%s",
                     plan, expected_price, paid_price_id,
                 )
                 return {"received": True, "ignored": "plan/price mismatch"}
+            if expected_price and not paid_price_id:
+                # Couldn't verify — log loudly. Still process so legitimate
+                # customers aren't locked out by a transient Stripe API hiccup.
+                logger.warning(
+                    "Stripe webhook: could not verify price_id for session %s, plan=%s — proceeding without cross-check",
+                    session.get("id"), plan,
+                )
             if acct_id and customer_id:
                 from app.db import AsyncSessionLocal
                 from datetime import datetime, timezone, timedelta

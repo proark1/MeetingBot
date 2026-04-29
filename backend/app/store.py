@@ -227,6 +227,10 @@ class Store:
     def __init__(self) -> None:
         self._bots: dict[str, BotSession] = {}
         self._webhooks: dict[str, WebhookEntry] = {}
+        # Round-3 fix #10: O(1) lookup from share-token hash to bot id.
+        # Maintained alongside _bots whenever share_token_hash is set, cleared,
+        # or a bot is evicted. /share/{token} no longer scans every live bot.
+        self._share_token_index: dict[str, str] = {}
         self._lock = asyncio.Lock()
 
     # ── Bots ──────────────────────────────────────────────────────────────────
@@ -234,6 +238,10 @@ class Store:
     async def create_bot(self, session: BotSession) -> None:
         async with self._lock:
             self._bots[session.id] = session
+            # If the bot is being created with a share token already set
+            # (e.g. restored from a snapshot), index it for O(1) /share lookup.
+            if session.share_token_hash:
+                self._share_token_index[session.share_token_hash] = session.id
             # LRU eviction: if store exceeds max, evict oldest terminal bots
             max_bots = _settings.STORE_MAX_BOTS
             if len(self._bots) > max_bots:
@@ -244,6 +252,8 @@ class Store:
                 evict_count = len(self._bots) - max_bots
                 for bot in terminal[:evict_count]:
                     self._bots.pop(bot.id, None)
+                    if bot.share_token_hash and self._share_token_index.get(bot.share_token_hash) == bot.id:
+                        self._share_token_index.pop(bot.share_token_hash, None)
                 if evict_count > 0:
                     logger.info("Evicted %d terminal bot(s) from memory (store size %d > %d)",
                                 min(evict_count, len(terminal)), len(self._bots), max_bots)
@@ -270,10 +280,25 @@ class Store:
             bot = self._bots.get(bot_id)
             if bot is None:
                 return None
+            old_share_hash = bot.share_token_hash
             for k, v in kwargs.items():
                 setattr(bot, k, v)
             bot.updated_at = _now()
+            # Keep the share-token index in sync with the field (round-3 fix #10).
+            if "share_token_hash" in kwargs:
+                if old_share_hash and self._share_token_index.get(old_share_hash) == bot_id:
+                    self._share_token_index.pop(old_share_hash, None)
+                if bot.share_token_hash:
+                    self._share_token_index[bot.share_token_hash] = bot_id
             return bot
+
+    async def get_bot_by_share_hash(self, share_hash: str) -> Optional[BotSession]:
+        """O(1) lookup of a live bot by its stored share-token hash."""
+        async with self._lock:
+            bot_id = self._share_token_index.get(share_hash)
+            if not bot_id:
+                return None
+            return self._bots.get(bot_id)
 
     async def list_bots(
         self,
@@ -297,7 +322,10 @@ class Store:
 
     async def delete_bot(self, bot_id: str) -> None:
         async with self._lock:
-            self._bots.pop(bot_id, None)
+            removed = self._bots.pop(bot_id, None)
+            if removed and removed.share_token_hash:
+                if self._share_token_index.get(removed.share_token_hash) == bot_id:
+                    self._share_token_index.pop(removed.share_token_hash, None)
 
     async def mark_terminal(self, bot_id: str, status: str, **kwargs) -> Optional[BotSession]:
         """Set terminal status, schedule TTL expiry, and persist to SQLite."""
@@ -562,6 +590,8 @@ class Store:
             ]
             for bot_id in expired:
                 bot = self._bots.pop(bot_id)
+                if bot.share_token_hash and self._share_token_index.get(bot.share_token_hash) == bot_id:
+                    self._share_token_index.pop(bot.share_token_hash, None)
                 if bot.recording_path and os.path.exists(bot.recording_path):
                     try:
                         os.remove(bot.recording_path)

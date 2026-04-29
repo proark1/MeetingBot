@@ -74,10 +74,8 @@ def _redact_config(integration_type: str, config: dict) -> dict:
 
 
 def _to_response(integration: Integration) -> IntegrationResponse:
-    try:
-        config = json.loads(integration.config or "{}")
-    except Exception:
-        config = {}
+    from app.services.secrets_at_rest import decrypt_json
+    config = decrypt_json(integration.config)
     return IntegrationResponse(
         id=integration.id,
         type=integration.type,
@@ -157,12 +155,13 @@ async def create_integration(
 
     _validate_integration_config(payload.type, payload.config)
 
+    from app.services.secrets_at_rest import encrypt_json
     integration = Integration(
         id=str(uuid.uuid4()),
         account_id=account_id,
         type=payload.type,
         name=payload.name or payload.type.title(),
-        config=json.dumps(payload.config),
+        config=encrypt_json(payload.config),
         is_active=True,
     )
     db.add(integration)
@@ -200,8 +199,9 @@ async def update_integration(
     _validate_integration_config(payload.type, payload.config)
 
     integration.type = payload.type
+    from app.services.secrets_at_rest import encrypt_json
     integration.name = payload.name or integration.name
-    integration.config = json.dumps(payload.config)
+    integration.config = encrypt_json(payload.config)
     await db.commit()
     await db.refresh(integration)
     return _to_response(integration)
