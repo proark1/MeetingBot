@@ -131,6 +131,7 @@ async def _transcribe_chunked(
     known_participants: list[str] | None,
     estimated_s: float,
     language: str | None = None,
+    prior_speaker_map: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     """Split the audio into 30-min chunks and transcribe them in parallel."""
     logger.info(
@@ -145,7 +146,12 @@ async def _transcribe_chunked(
     async def _process_chunk(idx: int, chunk_path: str) -> list[dict[str, Any]]:
         offset_s = idx * _CHUNK_SIZE_S
         logger.info("Transcribing chunk %d/%d (offset %d s)…", idx + 1, len(chunks), offset_s)
-        entries = await transcribe_audio(chunk_path, known_participants, language=language)
+        entries = await transcribe_audio(
+            chunk_path,
+            known_participants,
+            language=language,
+            prior_speaker_map=prior_speaker_map,
+        )
         return [dict(e, timestamp=float(e.get("timestamp", 0)) + offset_s) for e in entries]
 
     all_entries: list[dict[str, Any]] = []
@@ -172,83 +178,142 @@ async def _transcribe_chunked(
     return all_entries
 
 
+_GENERIC_LABEL_RE = re.compile(
+    r"^(?:speaker|participant|person|voice|unknown|spk|s)\s*[-_]?\s*(\d+)?$",
+    re.IGNORECASE,
+)
+
+
+def _is_generic_label(raw: str) -> bool:
+    """True for placeholder labels like 'Speaker 1', 'unknown', 'voice 2'."""
+    return bool(_GENERIC_LABEL_RE.match((raw or "").strip()))
+
+
 def _normalise_speakers(
     entries: list[dict],
     known_participants: list[str] | None,
-) -> list[dict]:
-    """Normalise speaker labels for consistency.
+    prior_map: dict[str, str] | None = None,
+) -> tuple[list[dict], dict[str, str]]:
+    """Resolve diarized speaker labels to real participant names.
 
-    1. Map generic numeric labels (e.g. "speaker 1", "participant 2", "person 1")
-       to a canonical "Participant N" form.
-    2. If known_participants are provided, fuzzy-match model labels against real
-       names and replace generic labels where a confident match exists.
-    3. Ensure a speaker labelled with only a first name is matched to a full name
-       in known_participants where unambiguous.
+    Strategy (most specific → most general):
+      1. Use ``prior_map`` for any raw label already resolved in an earlier
+         transcription pass.
+      2. Direct/case-insensitive match: raw label equals a known participant.
+      3. First-name match: raw label is a single token that uniquely matches
+         one known participant's first name.
+      4. Round-robin fallback: when the count of remaining placeholder labels
+         equals the count of remaining known participants, assign them in
+         order of first appearance. (Imperfect but always more useful than
+         "Participant N".)
+      5. Single-participant fallback: if only one real name is known, every
+         placeholder label maps to that name.
+      6. Anything still unresolved is canonicalized to "Participant N" so the
+         downstream UI doesn't show raw model junk.
+
+    Returns ``(entries_with_resolved_speakers, full_label_map)``. The returned
+    map is suitable for persisting on the BotSession so future passes stay
+    stable.
     """
     if not entries:
-        return entries
+        return entries, dict(prior_map or {})
 
-    # Regex to recognise generic numeric speaker labels from the model
-    _generic_re = re.compile(
-        r"^(?:speaker|participant|person|voice|unknown|spk|s)\s*[-_]?\s*(\d+)$",
-        re.IGNORECASE,
-    )
-
-    # First pass: build a mapping of raw model labels → canonical "Participant N"
-    label_map: dict[str, str] = {}
-    participant_counter: dict[str, int] = {}  # raw_label → assigned number
-    _next_num = [1]
-
-    def _canonical(raw: str) -> str:
-        m = _generic_re.match(raw.strip())
-        if m:
-            # Normalise so "Speaker 1" and "speaker 1" map to same key
-            key = f"__generic_{m.group(1)}__"
-            if key not in participant_counter:
-                participant_counter[key] = _next_num[0]
-                _next_num[0] += 1
-            return f"Participant {participant_counter[key]}"
-        return raw.strip()
-
+    # Collect raw labels in order of first appearance (preserves arrival order
+    # for round-robin assignment).
+    raw_labels: list[str] = []
+    seen_raw: set[str] = set()
     for entry in entries:
-        raw = entry.get("speaker", "")
-        if raw not in label_map:
-            label_map[raw] = _canonical(raw)
+        raw = (entry.get("speaker") or "").strip()
+        if raw and raw not in seen_raw:
+            seen_raw.add(raw)
+            raw_labels.append(raw)
 
-    # Second pass: if known_participants provided, try to match canonical or raw
-    # labels to real names using partial / first-name matching.
-    if known_participants:
-        known_lower = {n.strip().lower(): n.strip() for n in known_participants if n.strip()}
-        known_firstnames: dict[str, str] = {}  # first name → full name (only when unambiguous)
-        for full_name in known_lower.values():
-            parts = full_name.split()
-            if parts:
-                fn = parts[0].lower()
-                if fn not in known_firstnames:
-                    known_firstnames[fn] = full_name
-                else:
-                    known_firstnames[fn] = ""  # ambiguous — don't use
+    label_map: dict[str, str] = dict(prior_map or {})
 
-        for raw, canonical in list(label_map.items()):
-            cl = canonical.strip().lower()
-            # Exact match against known names
-            if cl in known_lower:
-                label_map[raw] = known_lower[cl]
-                continue
-            # First-name match (unambiguous)
-            first = cl.split()[0] if cl.split() else ""
-            if first and first in known_firstnames and known_firstnames[first]:
-                label_map[raw] = known_firstnames[first]
+    # Build known-participant lookup tables.
+    known_clean: list[str] = [n.strip() for n in (known_participants or []) if n and n.strip()]
+    known_lower: dict[str, str] = {n.lower(): n for n in known_clean}
+    known_firstnames: dict[str, str] = {}
+    for full_name in known_clean:
+        parts = full_name.split()
+        if parts:
+            fn = parts[0].lower()
+            if fn not in known_firstnames:
+                known_firstnames[fn] = full_name
+            else:
+                # Ambiguous first name (two participants share it) — don't use.
+                known_firstnames[fn] = ""
+    # Names already taken by an earlier mapping — never re-assign them.
+    used_names: set[str] = set(label_map.values())
 
-    # Apply mapping
-    result = []
+    pending_generic: list[str] = []  # raw labels still needing assignment
+
+    for raw in raw_labels:
+        if raw in label_map:
+            continue
+        rl = raw.lower()
+
+        # 1. Direct match against a known participant.
+        if rl in known_lower:
+            label_map[raw] = known_lower[rl]
+            used_names.add(known_lower[rl])
+            continue
+
+        # 2. First-name match (unambiguous).
+        tokens = rl.split()
+        if len(tokens) == 1 and tokens[0] in known_firstnames and known_firstnames[tokens[0]]:
+            full = known_firstnames[tokens[0]]
+            label_map[raw] = full
+            used_names.add(full)
+            continue
+
+        # 3. Generic placeholder — defer; we may have a real name to assign.
+        if _is_generic_label(raw):
+            pending_generic.append(raw)
+            continue
+
+        # 4. Non-generic but unmatched (e.g. an unknown name spoken in the
+        #    meeting) — keep as-is rather than overwriting with "Participant N".
+        label_map[raw] = raw
+
+    # ── Assignment for the still-pending placeholder labels ──────────────────
+    remaining_known: list[str] = [n for n in known_clean if n not in used_names]
+
+    if pending_generic and remaining_known and len(pending_generic) <= len(remaining_known):
+        # Round-robin by order of first appearance. Only fires when the count
+        # of unknown speakers is ≤ count of known participants — never assigns
+        # the same real name to two distinct diarized voices.
+        for raw, name in zip(pending_generic, remaining_known):
+            label_map[raw] = name
+        pending_generic = []
+
+    # 5. Anything still pending becomes a canonical "Participant N", numbered
+    #    by order of first appearance and stable across calls (we re-use any
+    #    canonical numbers already in label_map).
+    if pending_generic:
+        existing_nums = {
+            int(m.group(1))
+            for v in label_map.values()
+            for m in [re.match(r"^Participant (\d+)$", v)]
+            if m
+        }
+        next_num = 1
+        for raw in pending_generic:
+            while next_num in existing_nums:
+                next_num += 1
+            label_map[raw] = f"Participant {next_num}"
+            existing_nums.add(next_num)
+            next_num += 1
+
+    # ── Apply mapping ────────────────────────────────────────────────────────
+    result: list[dict] = []
     for entry in entries:
         new_entry = dict(entry)
-        raw = new_entry.get("speaker", "")
+        raw = (new_entry.get("speaker") or "").strip()
         new_entry["speaker"] = label_map.get(raw, raw)
         result.append(new_entry)
 
-    return result
+    return result, label_map
 
 
 async def _set_diag(bot_id: Optional[str], **fields) -> None:
@@ -267,6 +332,7 @@ async def transcribe_audio(
     known_participants: list[str] | None = None,
     language: str | None = None,
     bot_id: Optional[str] = None,
+    prior_speaker_map: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     """
     Transcribe an audio file using the Gemini API.
@@ -317,7 +383,10 @@ async def transcribe_audio(
     # For long recordings, split into chunks and transcribe sequentially
     estimated_s = _estimate_duration_s(audio_path)
     if estimated_s > _CHUNK_THRESHOLD_S:
-        return await _transcribe_chunked(audio_path, known_participants, estimated_s, language=language)
+        return await _transcribe_chunked(
+            audio_path, known_participants, estimated_s,
+            language=language, prior_speaker_map=prior_speaker_map,
+        )
 
     try:
         import google.generativeai as genai
@@ -475,7 +544,10 @@ async def transcribe_audio(
         # Post-process: normalise speaker names against known_participants and
         # clean up inconsistent labels from the model (e.g. "speaker 1" vs "Participant 1").
         if validated:
-            validated = _normalise_speakers(validated, known_participants)
+            validated, _new_map = _normalise_speakers(
+                validated, known_participants, prior_map=prior_speaker_map,
+            )
+            await _set_diag(bot_id, speaker_name_map=_new_map)
 
         logger.info("Transcription complete: %d valid entries", len(validated))
         return validated
