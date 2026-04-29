@@ -20,10 +20,15 @@ router = APIRouter()
 async def _resolve_ws_account(token: Optional[str]) -> Optional[str]:
     """Validate a WS token and return the account_id (or None for open/superadmin)."""
     if not token:
-        # No token — allowed only when API_KEY auth is disabled (dev mode)
+        # No token — only allowed in true dev mode (no API_KEY, no real accounts).
+        # When real accounts exist, the same lockdown that protects HTTP applies
+        # here so unauthenticated WS clients can't subscribe to all events.
         from app.config import settings
+        from app import deps as _deps
         if settings.API_KEY:
             return None  # will be rejected in websocket_endpoint
+        if _deps.require_bearer_in_dev_mode:
+            return None  # rejected below
         return None  # dev mode: open access, no filtering
 
     from app.config import settings
@@ -154,6 +159,13 @@ async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = None) 
         return
     if account_id is None and settings.API_KEY:
         # No token but auth is required
+        await websocket.close(code=4001, reason="Authentication required")
+        return
+
+    # Round-2 fix #9: even when API_KEY is unset, require auth once real
+    # accounts exist (fail-closed dev mode).
+    from app import deps as _deps
+    if account_id is None and token is None and _deps.require_bearer_in_dev_mode:
         await websocket.close(code=4001, reason="Authentication required")
         return
 

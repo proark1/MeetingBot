@@ -569,9 +569,10 @@ async def create_bot(payload: BotCreate, request: Request):
 
     logger.info("Created bot %s for %s (status=%s)", bot.id, bot.meeting_url, bot.status)
 
-    # Audit log — fire-and-forget
+    # Audit log — fire-and-forget but tracked so the task isn't GC'd mid-await
     from app.services.audit_log_service import log_event as _audit
-    asyncio.create_task(_audit(
+    from app.services.background_tasks import tracked_task as _tracked
+    _tracked(_audit(
         account_id=account_id,
         action="bot.created",
         resource_type="bot",
@@ -794,9 +795,10 @@ async def delete_bot(bot_id: str, request: Request):
             # Already finished — remove from memory immediately
             await store.delete_bot(bot_id)
 
-    # Audit log — fire-and-forget
+    # Audit log — fire-and-forget but tracked so the task isn't GC'd mid-await
     from app.services.audit_log_service import log_event as _audit
-    asyncio.create_task(_audit(
+    from app.services.background_tasks import tracked_task as _tracked
+    _tracked(_audit(
         account_id=account_id,
         action="bot.deleted",
         resource_type="bot",
@@ -1140,13 +1142,28 @@ import hashlib as _hashlib
 import secrets as _secrets
 
 
+class _ShareLinkRequest(BaseModel):
+    """Optional request body for share-link creation."""
+    expires_in_hours: Optional[int] = Field(
+        default=None,
+        ge=1,
+        le=24 * 365,
+        description="Number of hours the share link should remain valid. Omit to keep the previous behaviour (no expiry).",
+    )
+
+
 @router.post("/{bot_id}/share")
-async def create_share_link(bot_id: str, request: Request):
+async def create_share_link(
+    bot_id: str,
+    request: Request,
+    payload: Optional[_ShareLinkRequest] = None,
+):
     """Generate a shareable link for this meeting's results.
 
     Returns a one-time-revealed `share_url`. The token is stored hashed.
     Anyone with the URL can view a read-only version of the meeting (no auth required).
-    Only works for bots in `done` status.
+    Only works for bots in `done` status. Pass ``expires_in_hours`` to bound the
+    link's lifetime (recommended); omit it for a non-expiring link (legacy default).
     """
     account_id: Optional[str] = getattr(request.state, "account_id", None)
     sub_user_id = _get_sub_user_from_request(request)
@@ -1154,9 +1171,19 @@ async def create_share_link(bot_id: str, request: Request):
     if bot.status != "done":
         raise HTTPException(status_code=425, detail="Meeting must be complete before sharing")
 
+    from app.services.token_hash import hash_token
+    from datetime import timedelta as _td
+
     token = _secrets.token_urlsafe(32)
-    token_hash = _hashlib.sha256(token.encode()).hexdigest()
-    await store.update_bot(bot.id, share_token_hash=token_hash)
+    token_hash = hash_token(token)
+    expires_at = None
+    if payload and payload.expires_in_hours:
+        expires_at = _now() + _td(hours=payload.expires_in_hours)
+    await store.update_bot(
+        bot.id,
+        share_token_hash=token_hash,
+        share_token_expires_at=expires_at,
+    )
 
     base_url = str(request.base_url).rstrip("/")
     return {"share_url": f"{base_url}/share/{token}", "bot_id": bot_id}
@@ -1319,7 +1346,8 @@ async def chat_in_meeting(bot_id: str, request: Request, payload: ChatRequest):
             except Exception as exc:
                 logger.warning("Bot %s: /chat task %s failed: %s", bot_id, task_id, exc)
 
-    asyncio.create_task(_run_chat())
+    from app.services.background_tasks import tracked_task as _tracked_chat
+    _tracked_chat(_run_chat())
 
     logger.info("Bot %s: queued /chat task %s (len=%d)", bot_id, task_id, len(text))
     return ChatResponse(bot_id=bot_id, task_id=task_id)

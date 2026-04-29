@@ -21,6 +21,11 @@ _bearer = HTTPBearer(auto_error=False)
 # Sentinel value for the legacy superadmin API_KEY bypass
 SUPERADMIN_ACCOUNT_ID = "__superadmin__"
 
+# Set by main.py at startup: when at least one Account exists and API_KEY is
+# unset and ALLOW_UNAUTHENTICATED_DEV_MODE is False, this flag flips to True
+# and unauthenticated requests are rejected with 401 (round-2 fix #9).
+require_bearer_in_dev_mode: bool = False
+
 
 async def get_current_account_id(
     request: Request,
@@ -44,7 +49,15 @@ async def get_current_account_id(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Missing Authorization header. Use: Authorization: Bearer <key>",
             )
-        # Unauthenticated dev mode
+        # Fail-closed: if real accounts exist and the operator hasn't explicitly
+        # opted into open dev mode, refuse missing credentials even when
+        # API_KEY is unset (round-2 fix #9).
+        if require_bearer_in_dev_mode:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Missing Authorization header. Use: Authorization: Bearer <key>",
+            )
+        # Unauthenticated dev mode (no accounts registered yet, or operator opt-in)
         request.state.account_id = None
         return None
 

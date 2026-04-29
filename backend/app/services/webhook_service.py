@@ -369,9 +369,11 @@ async def dispatch_event(
             wh.last_delivery_status = status_code
             await store._persist_webhook(wh)
 
-    # Per-bot best-effort webhook (no retry, no DB log)
+    # Per-bot best-effort webhook (no retry, no DB log) — tracked so the
+    # task isn't GC'd mid-await before the HTTP POST completes.
     if extra_webhook_url:
-        asyncio.create_task(_fire_extra_webhook(extra_webhook_url, body, headers_base, event))
+        from app.services.background_tasks import tracked_task as _tracked
+        _tracked(_fire_extra_webhook(extra_webhook_url, body, headers_base, event))
 
 
 async def _fire_extra_webhook(url: str, body: str, headers: dict, event: str) -> None:

@@ -8,6 +8,8 @@ from fastapi import APIRouter, Depends, Form, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from jose import JWTError, jwt
+from slowapi import Limiter as _Limiter
+from slowapi.util import get_remote_address as _get_remote_address
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,6 +23,7 @@ from app.models.account import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["UI"])
+_share_limiter = _Limiter(key_func=_get_remote_address)
 
 _TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
@@ -1934,7 +1937,8 @@ async def create_support_key_ui(request: Request, db: AsyncSession = Depends(get
     label = (body.get("label") or "Support Key")[:100]
     expires_in_h = body.get("expires_in_hours")
     plaintext = _sec.token_urlsafe(24)
-    key_hash = _hl.sha256(plaintext.encode()).hexdigest()
+    from app.services.token_hash import hash_token as _hash_support_key
+    key_hash = _hash_support_key(plaintext)
     expires_at = (_dt.now(_tz.utc) + _td(hours=int(expires_in_h))) if expires_in_h else None
 
     import uuid as _uuid
@@ -2014,28 +2018,98 @@ async def admin_support_lookup_ui(
 # ── GET /share/{token} — public shareable meeting view ────────────────────────
 
 @router.get("/share/{token}", response_class=HTMLResponse, include_in_schema=False)
+@_share_limiter.limit("60/minute")
 async def share_meeting(token: str, request: Request):
-    """Public, no-auth view of a shared meeting. Token must match the stored hash."""
-    import hashlib
-    from app.store import store
+    """Public, no-auth view of a shared meeting. Token must match the stored hash.
 
-    token_hash = hashlib.sha256(token.encode()).hexdigest()
-    # Search for a bot with this share token hash
-    all_bots, _ = await store.list_bots(limit=10000)
-    bot = next((b for b in all_bots if getattr(b, "share_token_hash", None) == token_hash), None)
+    Lookup order:
+      1. In-memory live bots (fast path while a meeting is still cached).
+      2. ``BotSnapshot`` rows by indexed ``share_token_hash`` (terminal bots
+         after they age out of memory — round-2 fix #4).
 
+    Token hashes are checked under both the new HMAC-SHA256 scheme and the
+    legacy plain-SHA-256 scheme so previously-issued links keep working.
+    """
+    import json as _json
+    from datetime import datetime as _dt, timezone as _tz
+    from app.store import store, BotSession
+    from app.services.token_hash import verify_token, hash_candidates
+
+    not_found = HTMLResponse(
+        "<h1>Not Found</h1><p>This share link is invalid or has expired.</p>",
+        status_code=404,
+    )
+
+    def _expired(value) -> bool:
+        if value is None:
+            return False
+        if isinstance(value, str):
+            try:
+                value = _dt.fromisoformat(value)
+            except Exception:
+                return False
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=_tz.utc)
+        return value < _dt.now(_tz.utc)
+
+    # 1) In-memory live bots
+    bot: Optional[BotSession] = None
+    all_bots, _total = await store.list_bots(limit=10000)
+    for b in all_bots:
+        if verify_token(token, getattr(b, "share_token_hash", None)):
+            bot = b
+            break
+
+    snapshot_data: Optional[dict] = None
     if bot is None:
-        return HTMLResponse("<h1>Not Found</h1><p>This share link is invalid or has expired.</p>", status_code=404)
+        # 2) Indexed DB fallback for terminal bots that aged out of RAM
+        from app.db import AsyncSessionLocal
+        from app.models.account import BotSnapshot
+        candidates = hash_candidates(token)
+        async with AsyncSessionLocal() as db:
+            res = await db.execute(
+                select(BotSnapshot).where(BotSnapshot.share_token_hash.in_(candidates)).limit(1)
+            )
+            snap = res.scalar_one_or_none()
+        if snap is None:
+            return not_found
+        if _expired(getattr(snap, "share_token_expires_at", None)):
+            return not_found
+        try:
+            snapshot_data = _json.loads(snap.data or "{}")
+        except Exception:
+            return not_found
 
-    # Build a sanitised view — strip sensitive fields
-    analysis = bot.analysis or {}
+    if bot is not None and _expired(bot.share_token_expires_at):
+        return not_found
+
+    # Build a sanitised view from either the in-memory bot or the snapshot blob
+    if bot is not None:
+        analysis = bot.analysis or {}
+        ctx_id = bot.id
+        platform = bot.meeting_platform
+        status = bot.status
+        participants = bot.participants
+        duration_seconds = bot.duration_seconds
+        transcript = bot.transcript
+        created_at = bot.created_at
+    else:
+        analysis = snapshot_data.get("analysis") or {}
+        ctx_id = snapshot_data.get("id", "")
+        platform = snapshot_data.get("meeting_platform", "")
+        status = snapshot_data.get("status", "")
+        participants = snapshot_data.get("participants") or []
+        duration_seconds = snapshot_data.get("duration_seconds")
+        transcript = snapshot_data.get("transcript") or []
+        created_at = snapshot_data.get("created_at")
+
     return templates.TemplateResponse("share.html", {
         "request": request,
-        "bot_id": bot.id[:12] + "…",
-        "platform": bot.meeting_platform,
-        "status": bot.status,
-        "participants": bot.participants,
-        "duration_seconds": bot.duration_seconds,
+        "bot_id": (ctx_id[:12] + "…") if ctx_id else "",
+        "platform": platform,
+        "status": status,
+        "participants": participants,
+        "duration_seconds": duration_seconds,
         "summary": analysis.get("summary", ""),
         "key_points": analysis.get("key_points", []),
         "action_items": analysis.get("action_items", []),
@@ -2045,6 +2119,6 @@ async def share_meeting(token: str, request: Request):
         "risks_blockers": analysis.get("risks_blockers", []),
         "unresolved_items": analysis.get("unresolved_items", []),
         "next_meeting": analysis.get("next_meeting"),
-        "transcript": bot.transcript,
-        "created_at": bot.created_at,
+        "transcript": transcript,
+        "created_at": created_at,
     })

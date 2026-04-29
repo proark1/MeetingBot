@@ -211,7 +211,10 @@ async def start_usdc_monitor() -> None:
     dynamically each cycle so it can be set via the admin panel without a restart.
     """
     logger.info("Starting USDC transfer monitor (polling every 60s)")
-    asyncio.create_task(_monitor_loop())
+    # Track the long-lived monitor loop so a stray GC pass can't drop the only
+    # reference to it (which would silently kill USDC payment detection).
+    from app.services.background_tasks import tracked_task as _tracked
+    _tracked(_monitor_loop(), name="usdc_monitor_loop")
 
 
 async def _monitor_loop() -> None:

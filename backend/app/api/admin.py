@@ -908,11 +908,14 @@ async def support_lookup(
     No transcript content is returned — only metadata.
     """
     from app.models.account import SupportKey
+    from app.services.token_hash import hash_candidates
 
-    key_hash = hashlib.sha256(key.strip().encode()).hexdigest()
+    # Match against both the new HMAC and the legacy plain-SHA-256 hashes so
+    # already-issued support keys keep working until they expire (round-2 fix #6).
+    candidates = hash_candidates(key.strip())
     sk_result = await db.execute(
         select(SupportKey).where(
-            SupportKey.key_hash == key_hash,
+            SupportKey.key_hash.in_(candidates),
             SupportKey.is_active == True,  # noqa: E712
         )
     )
@@ -920,8 +923,11 @@ async def support_lookup(
     if sk is None:
         raise HTTPException(status_code=404, detail="Support key not found, expired, or already revoked")
 
-    # Check expiry
-    if sk.expires_at and sk.expires_at < datetime.now(timezone.utc):
+    # Check expiry — coerce to UTC if SQLite returned a naive datetime
+    sk_expires_at = sk.expires_at
+    if sk_expires_at and sk_expires_at.tzinfo is None:
+        sk_expires_at = sk_expires_at.replace(tzinfo=timezone.utc)
+    if sk_expires_at and sk_expires_at < datetime.now(timezone.utc):
         raise HTTPException(status_code=410, detail="Support key has expired")
 
     # Record usage timestamp

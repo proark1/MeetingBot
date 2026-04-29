@@ -135,6 +135,10 @@ class BotSnapshot(Base):
     meeting_url: Mapped[str] = mapped_column(String(2048), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    # Hash of the public share token. Lifted out of the JSON `data` blob so
+    # /share/{token} can do an indexed lookup instead of scanning every row.
+    share_token_hash: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, index=True)
+    share_token_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     data: Mapped[str] = mapped_column(Text, nullable=False)  # JSON-serialized BotSession fields
 
 
@@ -361,7 +365,9 @@ class SupportKey(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     account_id: Mapped[str] = mapped_column(String(36), ForeignKey("accounts.id"), nullable=False, index=True)
-    key_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    # Wide enough to hold the HMAC-SHA256 ("h2:" + 64 hex = 67) and any future
+    # algorithm prefix; legacy bare-SHA-256 (64 hex) also fits.
+    key_hash: Mapped[str] = mapped_column(String(128), unique=True, nullable=False, index=True)
     label: Mapped[str] = mapped_column(String(100), default="Support Key")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)

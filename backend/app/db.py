@@ -88,6 +88,10 @@ def _migrate_schema(conn) -> None:
             f"ALTER TABLE bot_snapshots ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP WITH TIME ZONE",
             f"ALTER TABLE bot_snapshots ADD COLUMN IF NOT EXISTS consent_given BOOLEAN NOT NULL DEFAULT FALSE",
             f"ALTER TABLE bot_snapshots ADD COLUMN IF NOT EXISTS opted_out_participants TEXT",
+            f"ALTER TABLE bot_snapshots ADD COLUMN IF NOT EXISTS share_token_hash VARCHAR(128)",
+            f"ALTER TABLE bot_snapshots ADD COLUMN IF NOT EXISTS share_token_expires_at TIMESTAMP WITH TIME ZONE",
+            # Widen support_keys.key_hash to fit the new HMAC "h2:" prefix
+            f"ALTER TABLE support_keys ALTER COLUMN key_hash TYPE VARCHAR(128)",
             f"ALTER TABLE webhooks ADD COLUMN IF NOT EXISTS account_id VARCHAR(36)",
             f"ALTER TABLE webhooks ADD COLUMN IF NOT EXISTS delivery_attempts INTEGER NOT NULL DEFAULT 0",
             f"ALTER TABLE webhooks ADD COLUMN IF NOT EXISTS last_delivery_at TIMESTAMP WITH TIME ZONE",
@@ -105,6 +109,7 @@ def _migrate_schema(conn) -> None:
         _pg_indexes = [
             "CREATE INDEX IF NOT EXISTS ix_bot_snapshots_account_created ON bot_snapshots (account_id, created_at)",
             "CREATE INDEX IF NOT EXISTS ix_bot_snapshots_account_sub_user ON bot_snapshots (account_id, sub_user_id)",
+            "CREATE INDEX IF NOT EXISTS ix_bot_snapshots_share_token_hash ON bot_snapshots (share_token_hash)",
             "CREATE INDEX IF NOT EXISTS ix_webhook_deliveries_retry ON webhook_deliveries (status, next_retry_at)",
             "CREATE UNIQUE INDEX IF NOT EXISTS ix_idempotency_account_key ON idempotency_keys (account_id, key)",
         ]
@@ -189,12 +194,15 @@ def _migrate_schema(conn) -> None:
                 _log.info("Adding column webhooks.%s", col_name)
                 conn.execute(text(f"ALTER TABLE webhooks ADD COLUMN {col_name} {col_def}"))
 
-    # bot_snapshots — v5.x: add consent_opted_out, keyword_alerts_fired fields
+    # bot_snapshots — v5.x consent fields, v2.41 share-token columns
     if "bot_snapshots" in inspector.get_table_names():
         existing = {col["name"] for col in inspector.get_columns("bot_snapshots")}
         for col_name, col_def in [
             ("consent_given", f"BOOLEAN NOT NULL DEFAULT {_bool_false}"),
             ("opted_out_participants", "TEXT"),
+            # v2.41: hash + expiry lifted from JSON blob so /share/{token} can do an indexed lookup
+            ("share_token_hash", "VARCHAR(128)"),
+            ("share_token_expires_at", _dt_type),
         ]:
             if col_name not in existing:
                 _log.info("Adding column bot_snapshots.%s", col_name)

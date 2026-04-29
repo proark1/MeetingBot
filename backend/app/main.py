@@ -108,14 +108,39 @@ async def lifespan(app: FastAPI):
                 "Set a strong JWT_SECRET before starting in production:\n"
                 "  export JWT_SECRET=$(openssl rand -hex 32)"
             )
+        # Round-2 fix #10: persist the auto-generated secret next to the SQLite
+        # DB so non-prod deployments stop logging every user out on each restart.
         import secrets as _secrets
-        settings.JWT_SECRET = _secrets.token_hex(32)
-        logger.warning(
-            "⚠ JWT_SECRET is the insecure default — a random secret was generated for this "
-            "session. Web UI sessions will be invalidated on every restart. "
-            "Set JWT_SECRET to a stable value in your environment:\n"
-            "  export JWT_SECRET=$(openssl rand -hex 32)"
-        )
+        from pathlib import Path as _Path
+        secret_path = _Path("./jwt_secret.local").resolve()
+        try:
+            if secret_path.is_file():
+                file_secret = secret_path.read_text().strip()
+                if len(file_secret) >= 32:
+                    settings.JWT_SECRET = file_secret
+                    logger.info("JWT_SECRET loaded from %s", secret_path)
+                else:
+                    raise ValueError("persisted secret too short")
+            else:
+                new_secret = _secrets.token_hex(32)
+                # Best-effort: write 0600 so only the running user can read it.
+                secret_path.write_text(new_secret)
+                try:
+                    secret_path.chmod(0o600)
+                except Exception:
+                    pass
+                settings.JWT_SECRET = new_secret
+                logger.warning(
+                    "⚠ JWT_SECRET was the insecure default — generated a new one and "
+                    "persisted it at %s. Set JWT_SECRET in your environment to use a "
+                    "managed secret instead.", secret_path,
+                )
+        except Exception as exc:
+            settings.JWT_SECRET = _secrets.token_hex(32)
+            logger.warning(
+                "⚠ JWT_SECRET defaulted and could not be persisted (%s) — using a "
+                "random per-process secret; sessions will reset on restart.", exc,
+            )
 
     if settings.CORS_ORIGINS == "*":
         logger.warning(
@@ -139,6 +164,29 @@ async def lifespan(app: FastAPI):
             "⚠ API_KEY is not set — using per-user account authentication. "
             "Register at POST /api/v1/auth/register"
         )
+        # Round-2 fix #9: refuse unauthenticated requests once real accounts
+        # exist. Without this guard, a missing-Bearer request would resolve to
+        # account_id=None and silently bypass the per-tenant ownership checks.
+        if not settings.ALLOW_UNAUTHENTICATED_DEV_MODE:
+            try:
+                from app.db import AsyncSessionLocal
+                from app.models.account import Account
+                from sqlalchemy import select as _select, func as _func
+                async with AsyncSessionLocal() as _db:
+                    n = await _db.execute(_select(_func.count(Account.id)))
+                    account_count = int(n.scalar() or 0)
+            except Exception as exc:
+                logger.warning("Could not count accounts at startup: %s", exc)
+                account_count = 0
+            if account_count > 0:
+                from app import deps as _deps
+                _deps.require_bearer_in_dev_mode = True
+                logger.warning(
+                    "🔒 Found %d account(s) — dev-mode auth fail-closed: "
+                    "requests without a Bearer token will now return 401. "
+                    "Set ALLOW_UNAUTHENTICATED_DEV_MODE=true to keep the legacy behaviour.",
+                    account_count,
+                )
     if not settings.STRIPE_SECRET_KEY:
         logger.warning("⚠ STRIPE_SECRET_KEY not set — Stripe card payments disabled")
     if not settings.CRYPTO_RPC_URL:

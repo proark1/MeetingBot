@@ -4,9 +4,31 @@ All notable changes to JustHereToListen.io are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.40.0 — **Last updated:** 2026-04-29
+> **Latest version:** 2.41.0 — **Last updated:** 2026-04-29
 
 ---
+
+## [2.41.0] - 2026-04-29
+
+### Fixed (revenue / billing correctness)
+- **Stripe `customer.subscription.deleted` was a no-op** — `account.stripe_subscription_id` was never written at checkout time, so the cancellation handler's lookup always missed and customers kept their paid plan forever. The `checkout.session.completed` branch now persists `session.subscription` alongside the customer id.
+- **Stripe `invoice.paid` didn't reset usage on renewal** — paid customers hit their plan ceiling on day 31 because `monthly_bots_used` and `monthly_reset_at` were only set at initial subscription. The renewal handler now zeros the counter and advances `monthly_reset_at` to the invoice's `period.end` (or +30 days as fallback).
+
+### Security
+- **Cross-tenant export / MCP IDOR via legacy bots** — the `bot.account_id is not None` short-circuit pattern that round-1 fixed in `api/bots._get_or_404` survived in `api/exports.py:44` and `services/mcp_service.py` (3 sites). Tightened all four to strict equality so `account_id IS NULL` bots are no longer visible to authenticated tenants.
+- **Stripe webhook plan/price cross-check (defense in depth)** — `checkout.session.completed` now verifies the line-item `price_id` matches the claimed `metadata.plan` against the configured `STRIPE_<PLAN>_PRICE_ID` envs when line items are expanded. Best-effort: silently skips when Stripe didn't expand line items.
+- **Support keys + share tokens use HMAC-SHA256 instead of bare SHA-256** — new tokens are stored as `h2:<hmac-sha256>` peppered with `JWT_SECRET`, so a DB-only leak can no longer be correlated against plaintext keys appearing in headers/logs. Verification accepts both formats so already-issued tokens keep working until they expire/are revoked. `support_keys.key_hash` widened to `VARCHAR(128)`.
+- **Dev-mode auth fail-closed when accounts exist** — at startup, if `API_KEY` is unset and at least one `Account` row exists, the auth dependency now requires a Bearer token even in dev mode. Previously, a missing-Bearer request resolved to `account_id=None` and silently bypassed every per-tenant ownership check. New `ALLOW_UNAUTHENTICATED_DEV_MODE=true` setting restores the legacy behaviour for local prototyping.
+
+### Reliability
+- **`/share/{token}` survives the 24-hour memory eviction window** — added indexed `share_token_hash` + `share_token_expires_at` columns to `bot_snapshots` (migration shipped). The route now first matches in-memory bots, then falls back to a single indexed `BotSnapshot` query. Shared meeting links no longer 404 the day after the meeting.
+- **`/share/{token}` rate-limited (60/min) and supports expiry** — `POST /api/v1/bot/{id}/share` accepts an optional `expires_in_hours`; the token is rejected after that window. Hashes are peppered (see above).
+- **Untracked fire-and-forget `asyncio.create_task` calls** — audit logs in `api/auth.py` (×4) and `api/bots.py` (×3 + chat task), the per-bot extra webhook in `services/webhook_service.py`, and the long-lived USDC monitor loop in `services/crypto_service.py` now go through a shared `services.background_tasks.tracked_task` helper. Prevents CPython from garbage-collecting an in-flight task and silently dropping work. The shutdown lifespan still drains via `cancel_all_tracked_tasks()`.
+- **JWT_SECRET persists across restarts in non-prod environments** — when `JWT_SECRET` is the default and `ENVIRONMENT != production`, a generated value is now written to `./jwt_secret.local` (mode `0600`) and re-loaded on subsequent boots. Stops Railway preview deploys from logging every user out on each restart.
+
+### Migrations (idempotent)
+- `bot_snapshots`: add `share_token_hash VARCHAR(128)` + index, add `share_token_expires_at`.
+- `support_keys`: widen `key_hash` to `VARCHAR(128)` (PostgreSQL only — SQLite VARCHAR length is advisory).
 
 ## [2.40.0] - 2026-04-29
 
