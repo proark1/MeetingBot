@@ -9,7 +9,7 @@ Configure via environment variables:
   SMTP_PORT          = e.g. 587
   SMTP_USERNAME      = SMTP login
   SMTP_PASSWORD      = SMTP password / app password
-  SMTP_FROM_ADDRESS  = From address, e.g. "MeetingBot <bot@example.com>"
+  SMTP_FROM_ADDRESS  = From address, e.g. "JustHereToListen.io <bot@example.com>"
   SMTP_USE_TLS       = "true" / "false" (default: true)
   SENDGRID_API_KEY   = SendGrid API key (if EMAIL_BACKEND=sendgrid)
 """
@@ -61,7 +61,11 @@ def _render_done_email(bot_data: dict) -> tuple[str, str]:
     decisions = analysis.get("decisions") or []
 
     status_emoji = "✅" if status == "done" else "⚠️"
+    # Subject is plain text, but body fields are interpolated into HTML and must be escaped.
     subject = f"{status_emoji} Meeting recording complete — {platform}"
+    safe_platform = _he(platform)
+    safe_bot_id = _he(str(bot_id))
+    safe_url = _he(url) if url else "N/A"
 
     ai_list = ""
     if action_items:
@@ -110,7 +114,7 @@ def _render_done_email(bot_data: dict) -> tuple[str, str]:
 <div class="card">
   <h2>{status_emoji} Your meeting recording is ready</h2>
   <div class="meta">
-    <span>📅 {platform}</span>
+    <span>📅 {safe_platform}</span>
     <span>⏱ {duration}</span>
     <span>👥 {len(participants)} participant(s)</span>
   </div>
@@ -121,8 +125,8 @@ def _render_done_email(bot_data: dict) -> tuple[str, str]:
   {dec_list}
   <a class="btn" href="#">View Full Report →</a>
   <div class="footer">
-    Bot ID: {bot_id}<br>
-    Meeting: {url or "N/A"}
+    Bot ID: {safe_bot_id}<br>
+    Meeting: {safe_url}
   </div>
 </div>
 </body>
@@ -322,8 +326,11 @@ async def send_weekly_digest() -> int:
                 hours = int(total_duration // 3600)
                 minutes = int((total_duration % 3600) // 60)
                 duration_str = f"{hours}h {minutes}m" if hours else f"{minutes}m"
+                # Platform names come from bot data (originally from user-supplied URLs);
+                # escape them since they're interpolated raw into the digest HTML.
                 platform_str = ", ".join(
-                    f"{p.replace('_', ' ').title()} ({c})" for p, c in platform_counts.items()
+                    f"{_he(p.replace('_', ' ').title())} ({c})"
+                    for p, c in platform_counts.items()
                 )
                 week_range = f"{week_ago.strftime('%b %d')} – {now.strftime('%b %d, %Y')}"
 

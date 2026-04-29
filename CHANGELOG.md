@@ -1,12 +1,27 @@
 # Changelog
 
-All notable changes to MeetingBot are documented here.
+All notable changes to JustHereToListen.io are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.39.0 — **Last updated:** 2026-04-17
+> **Latest version:** 2.40.0 — **Last updated:** 2026-04-29
 
 ---
+
+## [2.40.0] - 2026-04-29
+
+### Security
+- **Webhook tenant scoping** — Webhook registrations are now scoped to the authenticated account. The `webhooks` table gained an `account_id` column (migration was already in place), and `WebhookEntry`/the API filter every read, write and delivery by the originating account. Previously, any authenticated tenant could list, modify, delete or read delivery logs for every other tenant's webhooks. Legacy webhooks with `account_id IS NULL` are treated as superadmin globals and remain visible to the legacy API_KEY only.
+- **DNS-rebinding / TOCTOU SSRF on webhook delivery** — `_attempt_delivery` now re-resolves the URL host on every send and rejects private/loopback/cloud-metadata IPs (AWS IMDS at 169.254.169.254 and friends). Registration-time validation alone allowed an attacker to register a benign domain and later flip its DNS to an internal address. The shared rule set lives in `webhook_service.check_url_ssrf` and is reused by the registration handler.
+- **`_get_or_404` ownership check** — Removed the `bot.account_id is not None` short-circuit so legacy bots whose `account_id` is `NULL` are no longer visible to authenticated tenants.
+- **Email HTML escaping** — `meeting_url`, `bot_id` and `platform` are now passed through `html.escape` before interpolation in done-emails and the weekly digest. Prevents stored-HTML payloads in user-supplied meeting URLs from rendering in recipient mailboxes.
+
+### Changed
+- **Webhook delivery retry classification (BREAKING for clients depending on prior behaviour)** — 4xx responses other than 408/425/429 are now classified as permanent receiver rejections: logged as `failed`, never retried, and counted toward the consecutive-failure auto-disable threshold. 2xx/3xx are success; 5xx, 408, 425, 429 and connection-level errors retry with the existing exponential back-off. Previously every status `< 500` was treated as success — including 429s, which silently dropped events whenever a recipient was rate-limiting.
+- **Webhook retry loop locking** — `_process_retries` now takes the per-webhook lock for the full read→deliver→update→persist iteration, mirroring the initial dispatch path. `consecutive_failures` increments on every failed attempt (initial + every retry), so a permanently-broken endpoint will now auto-disable as designed.
+- **Audit log task tracking** — Fire-and-forget `asyncio.create_task(_audit(...))` calls now keep a strong reference in a module-level set, so tasks can't be garbage-collected mid-await and exceptions/log writes aren't silently dropped.
+- **`Store.update_bot` immutable-field guard** — Raises `ValueError` if a caller tries to mutate `id`, `account_id`, `sub_user_id`, `created_at`, `meeting_url`, or `meeting_platform`. These are set at create time only.
+- **Brand consistency** — Top-of-README, top-of-CHANGELOG and the `SMTP_FROM_ADDRESS` example now read "JustHereToListen.io" instead of "MeetingBot", per CLAUDE.md project identity.
 
 ## [2.39.0] - 2026-04-17
 

@@ -33,6 +33,7 @@ class WebhookResponse(BaseModel):
     last_delivery_at: Optional[datetime] = None
     last_delivery_status: Optional[int] = None
     consecutive_failures: int = 0
+    account_id: Optional[str] = None
 
 
 # ── Webhook event payload schemas (for OpenAPI documentation) ─────────────────

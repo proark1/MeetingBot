@@ -1,21 +1,19 @@
-"""Global webhook registration API.
+"""Webhook registration API (per-account).
 
-Webhooks registered here receive events for ALL bots.
+Webhooks registered here receive events for the authenticated account's bots.
 For per-bot webhooks, pass `webhook_url` when creating a bot.
 """
 
 import asyncio
-import ipaddress
 import logging
-import socket
-from urllib.parse import urlparse
 
 from fastapi import APIRouter, HTTPException, Request as _Request
 from slowapi import Limiter as _Limiter
 from slowapi.util import get_remote_address as _get_remote_address
 
+from app.deps import SUPERADMIN_ACCOUNT_ID
 from app.schemas.webhook import WebhookCreate, WebhookResponse
-from app.store import store
+from app.store import store, WebhookEntry
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/webhook", tags=["Webhooks"])
@@ -39,72 +37,39 @@ WEBHOOK_EVENTS: list[str] = [
     "bot.test",
 ]
 
-# Private/reserved IP ranges — all traffic to these must be blocked (SSRF prevention).
-# Includes cloud-provider metadata endpoints (169.254.169.254 is AWS/GCP/Azure IMDS).
-_BLOCKED_NETS = [ipaddress.ip_network(n) for n in [
-    "127.0.0.0/8",       # loopback
-    "10.0.0.0/8",        # RFC 1918 private
-    "172.16.0.0/12",     # RFC 1918 private
-    "192.168.0.0/16",    # RFC 1918 private
-    "169.254.0.0/16",    # link-local / cloud metadata (AWS IMDS, GCP, Azure)
-    "100.64.0.0/10",     # carrier-grade NAT (RFC 6598)
-    "192.0.0.0/24",      # IETF protocol assignments
-    "198.18.0.0/15",     # benchmark testing
-    "198.51.100.0/24",   # TEST-NET-2 (documentation)
-    "203.0.113.0/24",    # TEST-NET-3 (documentation)
-    "::1/128",           # IPv6 loopback
-    "fc00::/7",          # IPv6 unique local
-    "fe80::/10",         # IPv6 link-local
-]]
-_ALLOWED_SCHEMES = {"http", "https"}
-
-
-def _is_blocked_ip(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
-    return addr.is_private or addr.is_loopback or addr.is_link_local or any(
-        addr in net for net in _BLOCKED_NETS
-    )
-
 
 async def _block_ssrf(url: str) -> None:
     """Reject webhook URLs that target internal/private infrastructure.
 
-    Defends against SSRF by:
-    1. Enforcing http/https scheme only
-    2. Blocking localhost and private IP literals directly
-    3. Resolving hostnames and blocking if any resolved IP is private
+    Delegates to :func:`webhook_service.check_url_ssrf` so registration-time
+    and delivery-time use identical rules. Returns 400 on any block reason
+    except DNS resolution failure (transient — let delivery handle naturally).
     """
-    parsed = urlparse(url)
-    if parsed.scheme not in _ALLOWED_SCHEMES:
-        raise HTTPException(status_code=400, detail=f"Webhook URL scheme must be http or https (got {parsed.scheme!r})")
-    host = parsed.hostname or ""
-    if not host or host.lower() in ("localhost", "0.0.0.0"):
-        raise HTTPException(status_code=400, detail="Webhook URL must not target localhost")
-    try:
-        addr = ipaddress.ip_address(host)
-        if _is_blocked_ip(addr):
-            raise HTTPException(status_code=400, detail="Webhook URL must not target a private/reserved address")
+    from app.services.webhook_service import check_url_ssrf
+    err = await check_url_ssrf(url)
+    if err is None:
         return
-    except ValueError:
-        pass  # not an IP literal — resolve below
-    try:
-        infos = await asyncio.wait_for(
-            asyncio.to_thread(socket.getaddrinfo, host, None),
-            timeout=5.0,
-        )
-        for *_, sockaddr in infos:
-            try:
-                addr = ipaddress.ip_address(sockaddr[0])
-                if _is_blocked_ip(addr):
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Webhook URL resolves to a private/reserved address ({sockaddr[0]})",
-                    )
-            except ValueError:
-                pass
-    except asyncio.TimeoutError:
-        raise HTTPException(status_code=400, detail="Webhook URL DNS resolution timed out")
-    except socket.gaierror:
-        pass  # hostname unresolvable — let the delivery attempt fail naturally
+    if err.startswith("DNS resolution failed"):
+        return  # hostname unresolvable now — fail at delivery time
+    raise HTTPException(status_code=400, detail=f"Webhook URL: {err}")
+
+
+# Tracks fire-and-forget audit-log tasks so they aren't garbage-collected
+# mid-await (which would silently swallow exceptions and drop log entries).
+_audit_tasks: "set[asyncio.Task]" = set()
+
+
+def _spawn_audit(coro) -> None:
+    """Schedule an audit log coroutine without losing the task reference."""
+    task = asyncio.create_task(coro)
+    _audit_tasks.add(task)
+    task.add_done_callback(_audit_tasks.discard)
+
+
+def _audit_log(**kwargs):
+    """Lazy import wrapper so audit_log_service isn't imported at module load."""
+    from app.services.audit_log_service import log_event as _le
+    return _le(**kwargs)
 
 
 def _to_response(wh) -> WebhookResponse:
@@ -118,15 +83,32 @@ def _to_response(wh) -> WebhookResponse:
         last_delivery_at=wh.last_delivery_at,
         last_delivery_status=wh.last_delivery_status,
         consecutive_failures=wh.consecutive_failures,
+        account_id=wh.account_id,
     )
+
+
+def _request_account_id(request: _Request) -> "str | None":
+    """Account_id from the auth middleware, or None for superadmin/dev mode."""
+    return getattr(request.state, "account_id", None)
+
+
+async def _get_webhook_or_404(webhook_id: str, account_id: "str | None") -> WebhookEntry:
+    """Fetch a webhook and enforce tenant ownership. 404 (not 403) on mismatch
+    to avoid leaking webhook existence to other tenants."""
+    wh = await store.get_webhook(webhook_id)
+    if wh is None:
+        raise HTTPException(status_code=404, detail=f"Webhook {webhook_id!r} not found")
+    if account_id and account_id != SUPERADMIN_ACCOUNT_ID and wh.account_id != account_id:
+        raise HTTPException(status_code=404, detail=f"Webhook {webhook_id!r} not found")
+    return wh
 
 
 @router.post("", response_model=WebhookResponse, status_code=201)
 @_limiter.limit("10/minute")
 async def create_webhook(payload: WebhookCreate, request: _Request):
-    """Register a global webhook.
+    """Register a webhook scoped to the authenticated account.
 
-    The webhook will receive events for all bots:
+    The webhook will receive events for all bots owned by this account:
     - `bot.joining`, `bot.in_call`, `bot.call_ended`
     - `bot.transcript_ready`, `bot.analysis_ready`
     - `bot.done`, `bot.error`, `bot.cancelled`
@@ -137,12 +119,15 @@ async def create_webhook(payload: WebhookCreate, request: _Request):
     creating the bot instead.
     """
     await _block_ssrf(payload.url)
-    wh = await store.new_webhook(url=payload.url, events=payload.events, secret=payload.secret)
+    account_id = _request_account_id(request)
+    # Superadmin (legacy API_KEY) creates global webhooks → account_id=None.
+    owner_id = None if account_id == SUPERADMIN_ACCOUNT_ID else account_id
+    wh = await store.new_webhook(
+        url=payload.url, events=payload.events, secret=payload.secret, account_id=owner_id
+    )
 
-    import asyncio as _asyncio
-    from app.services.audit_log_service import log_event as _audit
-    _asyncio.create_task(_audit(
-        account_id=None,
+    _spawn_audit(_audit_log(
+        account_id=account_id,
         action="webhook.created",
         resource_type="webhook",
         resource_id=wh.id,
@@ -154,12 +139,15 @@ async def create_webhook(payload: WebhookCreate, request: _Request):
 
 
 @router.get("")
-async def list_webhooks():
-    """List all registered global webhooks.
+async def list_webhooks(request: _Request):
+    """List webhooks owned by the authenticated account.
 
-    Returns a paginated envelope with `results`, `total`, and `has_more`.
+    Superadmin sees all webhooks. Returns a paginated envelope with `results`,
+    `total`, and `has_more`.
     """
-    webhooks = await store.list_webhooks()
+    account_id = _request_account_id(request)
+    filter_account = None if account_id == SUPERADMIN_ACCOUNT_ID else account_id
+    webhooks = await store.list_webhooks(account_id=filter_account)
     return {
         "results": [_to_response(wh) for wh in webhooks],
         "total": len(webhooks),
@@ -204,26 +192,37 @@ class DeliveryResponse(_BM):
 
 @router.get("/deliveries", tags=["Webhooks"])
 async def list_all_deliveries(
+    request: _Request,
     limit: int = 50,
     offset: int = 0,
 ):
-    """List the most recent webhook delivery attempts across ALL registered webhooks.
+    """List recent webhook delivery attempts across the caller's webhooks.
 
-    Useful for the webhook testing playground. Returns a paginated envelope with `results`,
-    `total`, `limit`, `offset`, and `has_more`.
+    Superadmin sees all deliveries. Returns a paginated envelope with
+    `results`, `total`, `limit`, `offset`, and `has_more`.
     """
+    account_id = _request_account_id(request)
     try:
         from app.db import AsyncSessionLocal
-        from app.models.account import WebhookDelivery
+        from app.models.account import Webhook as _WebhookModel, WebhookDelivery
         from sqlalchemy import select, func
         async with AsyncSessionLocal() as session:
-            total_result = await session.execute(select(func.count(WebhookDelivery.id)))
-            total = total_result.scalar() or 0
+            base = select(WebhookDelivery)
+            count_q = select(func.count(WebhookDelivery.id))
+            if account_id and account_id != SUPERADMIN_ACCOUNT_ID:
+                # Restrict to deliveries whose webhook is owned by the caller.
+                owned_ids = (
+                    await session.execute(
+                        select(_WebhookModel.id).where(_WebhookModel.account_id == account_id)
+                    )
+                ).scalars().all()
+                if not owned_ids:
+                    return {"results": [], "total": 0, "limit": limit, "offset": offset, "has_more": False}
+                base = base.where(WebhookDelivery.webhook_id.in_(owned_ids))
+                count_q = count_q.where(WebhookDelivery.webhook_id.in_(owned_ids))
+            total = (await session.execute(count_q)).scalar() or 0
             result = await session.execute(
-                select(WebhookDelivery)
-                .order_by(WebhookDelivery.created_at.desc())
-                .limit(limit)
-                .offset(offset)
+                base.order_by(WebhookDelivery.created_at.desc()).limit(limit).offset(offset)
             )
             rows = result.scalars().all()
     except Exception:
@@ -271,9 +270,8 @@ async def update_webhook(webhook_id: str, payload: WebhookUpdate, request: _Requ
     Use this to re-enable a webhook that was auto-disabled after consecutive failures.
     When re-enabling (`is_active: true`), `consecutive_failures` is reset to 0.
     """
-    wh = await store.get_webhook(webhook_id)
-    if wh is None:
-        raise HTTPException(status_code=404, detail=f"Webhook {webhook_id!r} not found")
+    account_id = _request_account_id(request)
+    wh = await _get_webhook_or_404(webhook_id, account_id)
 
     updates: dict = {}
     if payload.url is not None:
@@ -298,10 +296,8 @@ async def update_webhook(webhook_id: str, payload: WebhookUpdate, request: _Requ
     if wh is None:
         raise HTTPException(status_code=404, detail=f"Webhook {webhook_id!r} not found")
 
-    import asyncio as _asyncio
-    from app.services.audit_log_service import log_event as _audit
-    _asyncio.create_task(_audit(
-        account_id=None,
+    _spawn_audit(_audit_log(
+        account_id=account_id,
         action="webhook.updated",
         resource_type="webhook",
         resource_id=webhook_id,
@@ -313,22 +309,21 @@ async def update_webhook(webhook_id: str, payload: WebhookUpdate, request: _Requ
 
 
 @router.get("/{webhook_id}", response_model=WebhookResponse)
-async def get_webhook(webhook_id: str):
-    wh = await store.get_webhook(webhook_id)
-    if wh is None:
-        raise HTTPException(status_code=404, detail=f"Webhook {webhook_id!r} not found")
+async def get_webhook(webhook_id: str, request: _Request):
+    wh = await _get_webhook_or_404(webhook_id, _request_account_id(request))
     return _to_response(wh)
 
 
 @router.delete("/{webhook_id}", status_code=204)
-async def delete_webhook(webhook_id: str):
+async def delete_webhook(webhook_id: str, request: _Request):
+    account_id = _request_account_id(request)
+    # Ownership check before destructive op (raises 404 on tenant mismatch).
+    await _get_webhook_or_404(webhook_id, account_id)
     if not await store.delete_webhook(webhook_id):
         raise HTTPException(status_code=404, detail=f"Webhook {webhook_id!r} not found")
 
-    import asyncio as _asyncio
-    from app.services.audit_log_service import log_event as _audit
-    _asyncio.create_task(_audit(
-        account_id=None,
+    _spawn_audit(_audit_log(
+        account_id=account_id,
         action="webhook.deleted",
         resource_type="webhook",
         resource_id=webhook_id,
@@ -339,9 +334,7 @@ async def delete_webhook(webhook_id: str):
 @_limiter.limit("5/minute")
 async def test_webhook(webhook_id: str, request: _Request):
     """Send a test event to this webhook endpoint."""
-    wh = await store.get_webhook(webhook_id)
-    if wh is None:
-        raise HTTPException(status_code=404, detail=f"Webhook {webhook_id!r} not found")
+    wh = await _get_webhook_or_404(webhook_id, _request_account_id(request))
     await _block_ssrf(wh.url)
 
     from app.services.webhook_service import _attempt_delivery, _build_body, _sign
@@ -361,6 +354,7 @@ async def test_webhook(webhook_id: str, request: _Request):
 @router.get("/{webhook_id}/deliveries")
 async def list_deliveries(
     webhook_id: str,
+    request: _Request,
     limit: int = 50,
     offset: int = 0,
 ):
@@ -369,9 +363,7 @@ async def list_deliveries(
     Returns a paginated envelope. Entries are sorted newest-first. Each entry
     includes the attempt status, HTTP response code, error message, and next retry time.
     """
-    wh = await store.get_webhook(webhook_id)
-    if wh is None:
-        raise HTTPException(status_code=404, detail=f"Webhook {webhook_id!r} not found")
+    wh = await _get_webhook_or_404(webhook_id, _request_account_id(request))
 
     try:
         from app.db import AsyncSessionLocal

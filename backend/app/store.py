@@ -213,6 +213,9 @@ class WebhookEntry:
     last_delivery_at: Optional[datetime] = None
     last_delivery_status: Optional[int] = None
     consecutive_failures: int = 0
+    # Owning account — None means legacy/superadmin global. Always filter by this
+    # for tenant-facing reads/writes to prevent cross-tenant data leaks.
+    account_id: Optional[str] = None
 
 
 # ── Store ─────────────────────────────────────────────────────────────────────
@@ -248,7 +251,20 @@ class Store:
         async with self._lock:
             return self._bots.get(bot_id)
 
+    # Identity / ownership / lineage fields that must never be flipped via
+    # update_bot — assignment happens at create time only. Guards against a
+    # bug or refactor accidentally re-parenting a bot to a different tenant.
+    _IMMUTABLE_BOT_FIELDS = frozenset({
+        "id", "account_id", "sub_user_id", "created_at",
+        "meeting_url", "meeting_platform",
+    })
+
     async def update_bot(self, bot_id: str, **kwargs) -> Optional[BotSession]:
+        forbidden = set(kwargs) & self._IMMUTABLE_BOT_FIELDS
+        if forbidden:
+            raise ValueError(
+                f"update_bot cannot mutate immutable field(s): {sorted(forbidden)!r}"
+            )
         async with self._lock:
             bot = self._bots.get(bot_id)
             if bot is None:
@@ -413,8 +429,16 @@ class Store:
 
     # ── Webhooks ──────────────────────────────────────────────────────────────
 
-    async def new_webhook(self, url: str, events: list[str], secret: Optional[str] = None) -> WebhookEntry:
-        wh = WebhookEntry(id=str(uuid.uuid4()), url=url, events=events, secret=secret)
+    async def new_webhook(
+        self,
+        url: str,
+        events: list[str],
+        secret: Optional[str] = None,
+        account_id: Optional[str] = None,
+    ) -> WebhookEntry:
+        wh = WebhookEntry(
+            id=str(uuid.uuid4()), url=url, events=events, secret=secret, account_id=account_id
+        )
         async with self._lock:
             self._webhooks[wh.id] = wh
         await self._persist_webhook(wh)
@@ -424,9 +448,14 @@ class Store:
         async with self._lock:
             return self._webhooks.get(webhook_id)
 
-    async def list_webhooks(self) -> list[WebhookEntry]:
+    async def list_webhooks(self, account_id: Optional[str] = None) -> list[WebhookEntry]:
+        """Return webhooks. When ``account_id`` is given, only that account's
+        webhooks are returned (legacy account_id=None rows are excluded)."""
         async with self._lock:
-            webhooks = list(self._webhooks.values())
+            if account_id is None:
+                webhooks = list(self._webhooks.values())
+            else:
+                webhooks = [w for w in self._webhooks.values() if w.account_id == account_id]
         return sorted(webhooks, key=lambda w: w.created_at, reverse=True)
 
     async def update_webhook(self, webhook_id: str, **kwargs) -> Optional[WebhookEntry]:
@@ -447,9 +476,17 @@ class Store:
             await self._delete_webhook_from_db(webhook_id)
         return removed
 
-    async def active_webhooks(self) -> list[WebhookEntry]:
+    async def active_webhooks(self, account_id: Optional[str] = None) -> list[WebhookEntry]:
+        """Return active webhooks. When ``account_id`` is provided, only that
+        account's webhooks plus legacy global ones (account_id is None) are returned.
+        Pass ``account_id=None`` (default) to retrieve every active webhook."""
         async with self._lock:
-            return [w for w in self._webhooks.values() if w.is_active]
+            if account_id is None:
+                return [w for w in self._webhooks.values() if w.is_active]
+            return [
+                w for w in self._webhooks.values()
+                if w.is_active and (w.account_id == account_id or w.account_id is None)
+            ]
 
     async def _persist_webhook(self, wh: "WebhookEntry") -> None:
         """Upsert a webhook into the database (best-effort)."""
@@ -464,6 +501,7 @@ class Store:
                 if row is None:
                     row = WebhookModel(
                         id=wh.id,
+                        account_id=wh.account_id,
                         url=wh.url,
                         events=json.dumps(wh.events),
                         secret=wh.secret,
@@ -476,6 +514,7 @@ class Store:
                     )
                     db.add(row)
                 else:
+                    row.account_id = wh.account_id
                     row.url = wh.url
                     row.events = json.dumps(wh.events)
                     row.secret = wh.secret
@@ -692,6 +731,7 @@ async def load_persisted_webhooks() -> int:
                     last_delivery_at=row.last_delivery_at,
                     last_delivery_status=row.last_delivery_status,
                     consecutive_failures=row.consecutive_failures or 0,
+                    account_id=getattr(row, "account_id", None),
                 )
                 store._webhooks[wh.id] = wh
                 count += 1
