@@ -1,5 +1,6 @@
 """Stripe payment integration for credit top-ups."""
 
+import asyncio
 import logging
 from decimal import Decimal
 from typing import Optional
@@ -20,48 +21,57 @@ def _get_stripe():
     return stripe
 
 
-def create_checkout_session(
+async def create_checkout_session(
     account_id: str,
     amount_usd: int,
     success_url: str,
     cancel_url: str,
 ) -> tuple[str, str]:
-    """
-    Create a Stripe Checkout session.
+    """Create a Stripe Checkout session — runs the blocking SDK call in a thread.
+
     Returns (session_id, checkout_url).
     """
     stripe = _get_stripe()
-    session = stripe.checkout.Session.create(
-        payment_method_types=["card"],
-        line_items=[
-            {
-                "price_data": {
-                    "currency": "usd",
-                    "unit_amount": amount_usd * 100,  # Stripe uses cents
-                    "product_data": {
-                        "name": f"JustHereToListen.io Credits — ${amount_usd}",
-                        "description": f"Add ${amount_usd} to your JustHereToListen.io credit balance",
+
+    def _create():
+        return stripe.checkout.Session.create(
+            payment_method_types=["card"],
+            line_items=[
+                {
+                    "price_data": {
+                        "currency": "usd",
+                        "unit_amount": amount_usd * 100,  # Stripe uses cents
+                        "product_data": {
+                            "name": f"JustHereToListen.io Credits — ${amount_usd}",
+                            "description": f"Add ${amount_usd} to your JustHereToListen.io credit balance",
+                        },
                     },
-                },
-                "quantity": 1,
-            }
-        ],
-        mode="payment",
-        success_url=success_url,
-        cancel_url=cancel_url,
-        metadata={"account_id": account_id, "amount_usd": str(amount_usd)},
-    )
+                    "quantity": 1,
+                }
+            ],
+            mode="payment",
+            success_url=success_url,
+            cancel_url=cancel_url,
+            metadata={"account_id": account_id, "amount_usd": str(amount_usd)},
+        )
+
+    session = await asyncio.to_thread(_create)
     return session.id, session.url
 
 
-def verify_webhook(payload: bytes, sig_header: str) -> dict:
-    """Verify Stripe webhook signature and return the parsed event."""
+async def verify_webhook(payload: bytes, sig_header: str) -> dict:
+    """Verify Stripe webhook signature and return the parsed event.
+
+    Runs the (CPU-light but blocking) signature verification in a worker
+    thread so the event loop isn't held during HMAC compare and JSON parse.
+    """
     stripe = _get_stripe()
     from app.config import settings
     if not settings.STRIPE_WEBHOOK_SECRET:
         raise RuntimeError("STRIPE_WEBHOOK_SECRET is not configured")
-    event = stripe.Webhook.construct_event(
-        payload, sig_header, settings.STRIPE_WEBHOOK_SECRET
+    event = await asyncio.to_thread(
+        stripe.Webhook.construct_event,
+        payload, sig_header, settings.STRIPE_WEBHOOK_SECRET,
     )
     return event
 
@@ -101,6 +111,7 @@ async def handle_checkout_completed(session: dict) -> Optional[Decimal]:
     """
     from decimal import Decimal
     from sqlalchemy import select
+    from sqlalchemy.exc import IntegrityError
     from app.db import AsyncSessionLocal
     from app.models.account import StripeTopUp
     from app.services.credit_service import add_credits
@@ -122,9 +133,15 @@ async def handle_checkout_completed(session: dict) -> Optional[Decimal]:
         amount_usd = Decimal(metadata.get("amount_usd", "0"))
 
     async with AsyncSessionLocal() as db:
-        # Check for duplicate processing
+        # Lock the row for the entire credit transaction so concurrent webhook
+        # retries serialise here. Without ``with_for_update()``, two deliveries
+        # of the same ``checkout.session.completed`` could both observe
+        # ``status == "pending"``, both flip it to ``completed``, and both call
+        # ``add_credits`` — double-crediting the account.
         result = await db.execute(
-            select(StripeTopUp).where(StripeTopUp.stripe_session_id == stripe_session_id)
+            select(StripeTopUp)
+            .where(StripeTopUp.stripe_session_id == stripe_session_id)
+            .with_for_update()
         )
         topup = result.scalar_one_or_none()
 
@@ -133,17 +150,34 @@ async def handle_checkout_completed(session: dict) -> Optional[Decimal]:
             return None
 
         if topup is None:
+            # First time we've seen this session — insert a row to claim it.
+            # ``stripe_session_id`` carries a unique constraint, so a concurrent
+            # delivery racing past the SELECT will get IntegrityError on commit
+            # and back off without crediting.
             import uuid
             topup = StripeTopUp(
                 id=str(uuid.uuid4()),
                 account_id=account_id,
                 stripe_session_id=stripe_session_id,
                 amount_usd=amount_usd,
-                status="pending",
+                status="completed",
             )
             db.add(topup)
-
-        topup.status = "completed"
+            try:
+                await db.flush()
+            except IntegrityError as exc:
+                # Concurrent webhook delivery beat us to the insert (unique
+                # constraint on stripe_session_id). Other exceptions should
+                # propagate so the webhook retries — we want to surface real
+                # database errors, not silently no-op.
+                await db.rollback()
+                logger.info(
+                    "Stripe session %s claimed by concurrent delivery (%s) — skipping",
+                    stripe_session_id, exc.__class__.__name__,
+                )
+                return None
+        else:
+            topup.status = "completed"
 
         await add_credits(
             account_id=account_id,

@@ -137,14 +137,42 @@ def _extract_video_url(text: str) -> Optional[str]:
 
 
 import httpx as _httpx
-_http_client = _httpx.AsyncClient(timeout=15, follow_redirects=True)
+# follow_redirects must stay False so we can re-validate every redirect target
+# against the SSRF guard (a 30x to 169.254.169.254 / 127.0.0.1 would otherwise
+# leak cloud-metadata or internal HTTP into the iCal parser).
+_http_client = _httpx.AsyncClient(timeout=15, follow_redirects=False)
+
+_MAX_REDIRECTS = 5
 
 
 async def _fetch_ical(url: str) -> bytes:
-    """Fetch an iCal feed with a short timeout."""
-    resp = await _http_client.get(url, headers={"User-Agent": "JustHereToListen.io/1.0 (iCal)"})
-    resp.raise_for_status()
-    return resp.content
+    """Fetch an iCal feed with SSRF re-validation and bounded redirect handling.
+
+    Every fetch — including each redirect hop — is run through
+    ``webhook_service.check_url_ssrf`` so a registered URL can't trick us into
+    hitting RFC1918 / loopback / cloud-metadata addresses via DNS rebinding or
+    a 30x to an internal target.
+    """
+    from app.services.webhook_service import check_url_ssrf
+
+    headers = {"User-Agent": "JustHereToListen.io/1.0 (iCal)"}
+    current = url
+    for _hop in range(_MAX_REDIRECTS + 1):
+        ssrf_err = await check_url_ssrf(current)
+        if ssrf_err is not None:
+            raise RuntimeError(f"iCal SSRF blocked: {ssrf_err}")
+        resp = await _http_client.get(current, headers=headers)
+        if resp.status_code in (301, 302, 303, 307, 308):
+            target = resp.headers.get("Location")
+            if not target:
+                resp.raise_for_status()
+                return resp.content
+            from urllib.parse import urljoin
+            current = urljoin(current, target)
+            continue
+        resp.raise_for_status()
+        return resp.content
+    raise RuntimeError(f"iCal fetch exceeded {_MAX_REDIRECTS} redirects")
 
 
 async def _process_feed(feed, account_id: str) -> int:

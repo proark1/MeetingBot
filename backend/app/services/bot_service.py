@@ -563,7 +563,7 @@ async def _do_analysis_inner(bot: BotSession, audio_path: str, use_real_bot: boo
             # Upload to cloud storage asynchronously; keep local path as fallback
             try:
                 from app.services.storage_service import upload_recording
-                storage_key = await upload_recording(audio_path, bot.id)
+                storage_key = await upload_recording(audio_path, bot.id, account_id=bot.account_id)
                 if storage_key:
                     await store.update_bot(bot.id, recording_path=storage_key)
                     bot.recording_path = storage_key

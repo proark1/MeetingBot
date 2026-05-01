@@ -184,9 +184,10 @@ class WalletResponse(BaseModel):
 
 class NotifyPrefsRequest(BaseModel):
     notify_on_done: bool = Field(description="Send email when a meeting recording is ready.")
-    notify_email: Optional[str] = Field(
+    notify_email: Optional[EmailStr] = Field(
         default=None,
         description="Override email address for notifications. Defaults to account email if omitted.",
+        max_length=254,
     )
 
 
@@ -209,14 +210,25 @@ class PlanResponse(BaseModel):
 @_limiter.limit("3/minute")
 async def register(request: Request, payload: RegisterRequest, db: AsyncSession = Depends(get_db)):
     """Create a new account and return the first API key."""
-    existing = await db.execute(select(Account).where(Account.email == payload.email))
+    # Normalise email to lowercase so SSO (Google/Microsoft return lowercased
+    # email) and password login resolve to the same account row regardless
+    # of casing in the registration form.
+    normalized_email = (payload.email or "").strip().lower()
+    if not normalized_email:
+        raise HTTPException(status_code=422, detail="Email is required")
+    # All Account.email rows are stored lowercase (a one-time backfill in
+    # db.py lowercases legacy mixed-case rows on startup), so direct
+    # equality hits the email index instead of forcing a full table scan.
+    existing = await db.execute(
+        select(Account).where(Account.email == normalized_email)
+    )
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=409, detail="Email already registered")
 
     acct_type = payload.account_type if payload.account_type in ("personal", "business") else "personal"
     account = Account(
         id=str(uuid.uuid4()),
-        email=payload.email,
+        email=normalized_email,
         hashed_password=_hash_password(payload.password),
         credits_usd=Decimal("0"),
         account_type=acct_type,
@@ -277,7 +289,13 @@ async def login(
     The returned JWT is only for the browser-based web UI (`/dashboard`, `/topup`).
     For API calls, use your `sk_live_...` API key with `Authorization: Bearer <key>`.
     """
-    result = await db.execute(select(Account).where(Account.email == form.username))
+    # Email column is stored lowercase post round-2 fix #8 (with a startup
+    # backfill in db.py for legacy rows), so an indexed direct-equality
+    # lookup is correct and faster than func.lower(...).
+    normalized_username = (form.username or "").strip().lower()
+    result = await db.execute(
+        select(Account).where(Account.email == normalized_username)
+    )
     account = result.scalar_one_or_none()
 
     # Check account lockout before verifying password (prevents timing oracle)

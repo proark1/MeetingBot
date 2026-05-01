@@ -21,7 +21,7 @@ for _candidate in [
     if _candidate.exists():
         _VERSION_FILE = _candidate
         break
-_APP_VERSION = _VERSION_FILE.read_text().strip() if _VERSION_FILE else "2.44.0"
+_APP_VERSION = _VERSION_FILE.read_text().strip() if _VERSION_FILE else "2.45.0"
 
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -370,7 +370,7 @@ async def lifespan(app: FastAPI):
                     ik_deleted,
                 )
 
-    retention_task = asyncio.create_task(_supervised("retention_loop", _retention_loop))
+    retention_task = asyncio.create_task(_supervised("retention_enforcement", _retention_loop))
 
     # Monthly usage counter reset (hourly check)
     async def _monthly_reset_loop():

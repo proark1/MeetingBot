@@ -311,21 +311,31 @@ class WebhookDelivery(Base):
     response_body: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     request_body: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # round-2 fix #14: original ts_unix used to build the signed payload — must
+    # be reused on retry so receivers verifying ``X-MeetingBot-Timestamp ==
+    # data.ts`` accept the redelivery.
+    signed_ts: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, index=True)
     delivered_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class IdempotencyKey(Base):
-    """Maps an (account_id, idempotency_key) pair to the bot_id created by that request."""
+    """Maps an (account_id, sub_user_id, idempotency_key) tuple to a bot_id.
+
+    ``sub_user_id`` is part of the lookup key so business-account sub-users
+    each get their own idempotency namespace. Round-2 fix #5 added the
+    sub-user dimension; the unique index ``ix_idempotency_account_key`` is
+    rebuilt as ``ix_idempotency_account_sub_key`` in db.py migrations.
+    """
 
     __tablename__ = "idempotency_keys"
     __table_args__ = (
-        # The primary lookup: account_id + key must be unique; also speeds up the dedup check
-        Index("ix_idempotency_account_key", "account_id", "key", unique=True),
+        Index("ix_idempotency_account_sub_key", "account_id", "sub_user_id", "key", unique=True),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     account_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
+    sub_user_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
     key: Mapped[str] = mapped_column(String(255), nullable=False)
     bot_id: Mapped[str] = mapped_column(String(36), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)

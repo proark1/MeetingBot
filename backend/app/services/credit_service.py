@@ -33,65 +33,94 @@ async def check_credits(account_id: str, db: AsyncSession) -> None:
         )
 
 
-async def check_plan_limit(account_id: str) -> None:
-    """Raise HTTP 402 if account has reached its monthly bot limit.
+def _quota_diag(plan: str, limit: int) -> str:
+    plan_name = (plan or "free").capitalize()
+    plan_order = ["free", "starter", "pro", "business"]
+    try:
+        idx = plan_order.index(plan or "free")
+    except ValueError:
+        idx = 0
+    if idx < len(plan_order) - 1:
+        next_plan = plan_order[idx + 1]
+        next_limit = settings.plan_limits.get(next_plan, -1)
+        next_desc = "unlimited" if next_limit == -1 else str(next_limit)
+        upgrade = f" Upgrade to {next_plan.capitalize()} for {next_desc} bots/month."
+    else:
+        upgrade = ""
+    return f"Monthly bot limit reached ({limit}/{limit}). Current plan: {plan_name}.{upgrade}"
 
-    Uses SELECT ... FOR UPDATE to prevent race conditions when two
-    concurrent create_bot calls check the same account simultaneously.
+
+async def check_plan_limit(account_id: str) -> None:
+    """Best-effort check: raise 402 if account already at its monthly cap.
+
+    This is a fast-fail signal only — the actual race-safe enforcement happens
+    in ``increment_monthly_usage`` via an atomic conditional UPDATE. We keep
+    the check here so the caller gets an immediate, well-formed 402 instead
+    of doing the work and rolling back.
     """
     from app.db import AsyncSessionLocal
 
     async with AsyncSessionLocal() as db:
         result = await db.execute(
-            select(Account).where(Account.id == account_id).with_for_update()
+            select(Account.plan, Account.monthly_bots_used).where(Account.id == account_id)
         )
-        account = result.scalar_one_or_none()
-        if account is None:
+        row = result.first()
+        if row is None:
             return  # unknown account — let downstream handle it
-
-        limit = settings.plan_limits.get(account.plan or "free", settings.PLAN_FREE_BOTS_PER_MONTH)
-        if limit == -1:
-            return  # unlimited
-
-        used = account.monthly_bots_used or 0
-        if used < limit:
-            return  # within limit
-
-        plan_name = (account.plan or "free").capitalize()
-        plan_order = ["free", "starter", "pro", "business"]
-        try:
-            idx = plan_order.index(account.plan or "free")
-        except ValueError:
-            idx = 0
-        if idx < len(plan_order) - 1:
-            next_plan = plan_order[idx + 1]
-            next_limit = settings.plan_limits.get(next_plan, -1)
-            next_desc = "unlimited" if next_limit == -1 else str(next_limit)
-            upgrade_msg = f" Upgrade to {next_plan.capitalize()} for {next_desc} bots/month."
-        else:
-            upgrade_msg = ""
-
+        plan = row[0] or "free"
+        used = row[1] or 0
+        limit = settings.plan_limits.get(plan, settings.PLAN_FREE_BOTS_PER_MONTH)
+        if limit == -1 or used < limit:
+            return
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail=(
-                f"Monthly bot limit reached ({used}/{limit}). "
-                f"Current plan: {plan_name}.{upgrade_msg}"
-            ),
+            detail=_quota_diag(plan, limit),
         )
 
 
 async def increment_monthly_usage(account_id: str) -> None:
-    """Atomically increment the monthly bot usage counter for an account."""
+    """Atomically reserve a quota slot. Raises 402 if no slot was available.
+
+    The previous implementation ran ``SELECT ... FOR UPDATE`` in
+    ``check_plan_limit`` then released the row lock and let an unconditional
+    UPDATE bump the counter — two concurrent POST /bot callers could both
+    pass the SELECT-side check and both increment, blowing past the cap.
+    Now the UPDATE itself carries the cap predicate, so at most ``limit``
+    increments succeed regardless of contention.
+    """
     from app.db import AsyncSessionLocal
     from sqlalchemy import update
 
     async with AsyncSessionLocal() as db:
-        await db.execute(
+        plan_result = await db.execute(select(Account.plan).where(Account.id == account_id))
+        plan_row = plan_result.first()
+        if plan_row is None:
+            return  # unknown account — silently skip
+        plan = plan_row[0] or "free"
+        limit = settings.plan_limits.get(plan, settings.PLAN_FREE_BOTS_PER_MONTH)
+
+        if limit == -1:
+            await db.execute(
+                update(Account)
+                .where(Account.id == account_id)
+                .values(monthly_bots_used=Account.monthly_bots_used + 1)
+            )
+            await db.commit()
+            return
+
+        upd = await db.execute(
             update(Account)
-            .where(Account.id == account_id)
+            .where(Account.id == account_id, Account.monthly_bots_used < limit)
             .values(monthly_bots_used=Account.monthly_bots_used + 1)
         )
         await db.commit()
+        if upd.rowcount and upd.rowcount > 0:
+            return
+
+    raise HTTPException(
+        status_code=status.HTTP_402_PAYMENT_REQUIRED,
+        detail=_quota_diag(plan, limit),
+    )
 
 
 async def add_credits(
