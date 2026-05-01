@@ -60,8 +60,11 @@ class BotStatsResponse(BaseModel):
     error: int = Field(description="Number of bots that ended in an error state.")
     by_status: dict[str, int] = Field(description="Count of bots broken down by each status string.")
 
-# Running lifecycle tasks (single-process only)
-_running_tasks: dict[str, asyncio.Task] = {}
+# Running lifecycle tasks (single-process only). A value of ``None`` is a
+# placeholder reservation written by ``_queue_processor`` while it awaits
+# DB lookups between popping a queued bot and creating the lifecycle task —
+# treat reservations as occupying a slot via ``_count_active_locked``.
+_running_tasks: dict[str, Optional[asyncio.Task]] = {}
 
 # FIFO queue of bot IDs waiting for a free slot
 _bot_queue: deque[str] = deque()
@@ -96,7 +99,7 @@ async def _start_or_queue_bot(bot_id: str) -> None:
         logger.warning("Scheduled bot %s was deleted before join time", bot_id)
         return
     async with _slot_lock:
-        active = sum(1 for t in _running_tasks.values() if not t.done())
+        active = _count_active_locked()
         if active >= settings.MAX_CONCURRENT_BOTS:
             _bot_queue.append(bot_id)
             _queue_event.set()
@@ -121,6 +124,17 @@ def _on_task_done(_t: asyncio.Task, bid: str = "") -> None:
         _queue_event.set()
 
 
+def _count_active_locked() -> int:
+    """Count bots occupying a concurrency slot. MUST be called under _slot_lock.
+
+    A ``None`` value in ``_running_tasks`` is a slot reservation placeholder
+    written by ``_queue_processor`` between popping a bot off the queue and
+    creating its lifecycle task. Treat reservations as occupying a slot so
+    concurrent ``create_bot`` callers can't double-spend the same slot.
+    """
+    return sum(1 for t in _running_tasks.values() if t is None or not t.done())
+
+
 async def _queue_processor() -> None:
     """Background loop: start queued bots when a slot is free."""
     while True:
@@ -132,7 +146,7 @@ async def _queue_processor() -> None:
         if not _bot_queue:
             continue
         async with _slot_lock:
-            active = sum(1 for t in _running_tasks.values() if not t.done())
+            active = _count_active_locked()
             if active >= settings.MAX_CONCURRENT_BOTS:
                 # Re-arm: a task may finish while we were checking
                 _queue_event.set()
@@ -140,8 +154,16 @@ async def _queue_processor() -> None:
             if not _bot_queue:
                 continue
             bot_id = _bot_queue.popleft()
-        if await store.get_bot(bot_id) is None:
+            # Reserve the slot with a None placeholder while we verify the bot
+            # still exists. Without this, a concurrent create_bot caller could
+            # observe the same active count between the await below and the
+            # task creation, double-spending the slot.
+            _running_tasks[bot_id] = None  # type: ignore[assignment]
+        bot = await store.get_bot(bot_id)
+        if bot is None:
             logger.warning("Queue: bot %s was deleted — skipping", bot_id)
+            async with _slot_lock:
+                _running_tasks.pop(bot_id, None)
             if _bot_queue:
                 _queue_event.set()
             continue
@@ -599,7 +621,7 @@ async def create_bot(payload: BotCreate, request: Request):
             logger.info("Bot %s scheduled — will start in %.0f s (no slot held)", bot.id, delay)
     else:
         async with _slot_lock:
-            active = sum(1 for t in _running_tasks.values() if not t.done())
+            active = _count_active_locked()
             if active >= settings.MAX_CONCURRENT_BOTS:
                 _bot_queue.append(bot.id)
                 _queue_event.set()
@@ -683,10 +705,16 @@ async def list_bots(
     filter_account = (
         account_id if (account_id and account_id != SUPERADMIN_ACCOUNT_ID) else None
     )
-    bots, total = await store.list_bots(status=status, limit=limit, offset=offset, account_id=filter_account, sub_user_id=sub_user_id)
     if account_id is None:
-        bots = [b for b in bots if b.account_id is None]
-        total = len(bots)
+        # Unauth dev mode: store.list_bots can't filter for NULL account_id, so
+        # fetch a wide batch and slice in memory. Filtering after the store's
+        # offset+limit slice would silently drop pages and return wrong totals.
+        all_bots, _ = await store.list_bots(status=status, limit=10000, account_id=None, sub_user_id=sub_user_id)
+        bots_filtered = [b for b in all_bots if b.account_id is None]
+        total = len(bots_filtered)
+        bots = bots_filtered[offset : offset + limit]
+    else:
+        bots, total = await store.list_bots(status=status, limit=limit, offset=offset, account_id=filter_account, sub_user_id=sub_user_id)
     return BotListResponse(
         results=[_to_summary(b) for b in bots],
         total=total,
