@@ -220,9 +220,11 @@ async def upsert_oauth_account(
         normalized_email = (email or "").strip().lower()
         account: Optional[Account] = None
         if normalized_email:
-            from sqlalchemy import func
+            # Email column is stored lowercase post round-2 fix #8 (legacy
+            # rows lowercased by a one-time startup backfill in db.py), so
+            # direct equality uses the email index.
             result3 = await session.execute(
-                select(Account).where(func.lower(Account.email) == normalized_email)
+                select(Account).where(Account.email == normalized_email)
             )
             account = result3.scalar_one_or_none()
 

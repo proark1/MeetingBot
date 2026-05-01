@@ -216,9 +216,11 @@ async def register(request: Request, payload: RegisterRequest, db: AsyncSession 
     normalized_email = (payload.email or "").strip().lower()
     if not normalized_email:
         raise HTTPException(status_code=422, detail="Email is required")
-    from sqlalchemy import func
+    # All Account.email rows are stored lowercase (a one-time backfill in
+    # db.py lowercases legacy mixed-case rows on startup), so direct
+    # equality hits the email index instead of forcing a full table scan.
     existing = await db.execute(
-        select(Account).where(func.lower(Account.email) == normalized_email)
+        select(Account).where(Account.email == normalized_email)
     )
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=409, detail="Email already registered")
@@ -287,10 +289,12 @@ async def login(
     The returned JWT is only for the browser-based web UI (`/dashboard`, `/topup`).
     For API calls, use your `sk_live_...` API key with `Authorization: Bearer <key>`.
     """
-    from sqlalchemy import func
+    # Email column is stored lowercase post round-2 fix #8 (with a startup
+    # backfill in db.py for legacy rows), so an indexed direct-equality
+    # lookup is correct and faster than func.lower(...).
     normalized_username = (form.username or "").strip().lower()
     result = await db.execute(
-        select(Account).where(func.lower(Account.email) == normalized_username)
+        select(Account).where(Account.email == normalized_username)
     )
     account = result.scalar_one_or_none()
 

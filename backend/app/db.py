@@ -118,6 +118,26 @@ def _migrate_schema(conn) -> None:
             # round-2 fix #14: persist the original signed timestamp on each delivery
             f"ALTER TABLE webhook_deliveries ADD COLUMN IF NOT EXISTS signed_ts VARCHAR(20)",
         ]
+        # round-2 fix #8: backfill mixed-case emails so the application can
+        # rely on normalized lowercase data and use indexed direct-equality
+        # lookups instead of func.lower() (which bypasses the email index).
+        # On collision (two rows differing only in case), keep the casing on
+        # the *older* row so the unique constraint isn't violated; the newer
+        # row stays mixed-case and is effectively quarantined for manual
+        # cleanup. This matches PostgreSQL behaviour where the UPDATE will
+        # raise UniqueViolation otherwise.
+        _email_backfill = (
+            "UPDATE accounts SET email = LOWER(email) "
+            "WHERE email <> LOWER(email) "
+            "AND NOT EXISTS ("
+            "    SELECT 1 FROM accounts a2 "
+            "    WHERE a2.id <> accounts.id AND LOWER(a2.email) = LOWER(accounts.email)"
+            ")"
+        )
+        try:
+            conn.execute(text(_email_backfill))
+        except Exception as e:
+            _log.warning("Email lowercase backfill skipped: %s", e)
         for sql in _pg_migrations:
             try:
                 conn.execute(text(sql))
@@ -251,6 +271,21 @@ def _migrate_schema(conn) -> None:
         if "signed_ts" not in existing:
             _log.info("Adding column webhook_deliveries.signed_ts")
             conn.execute(text("ALTER TABLE webhook_deliveries ADD COLUMN signed_ts VARCHAR(20)"))
+
+    # SQLite: round-2 fix #8 — same email backfill as PG above. NULL-handling
+    # works the same; the correlated NOT EXISTS guards against unique collisions.
+    if "accounts" in inspector.get_table_names():
+        try:
+            conn.execute(text(
+                "UPDATE accounts SET email = LOWER(email) "
+                "WHERE email <> LOWER(email) "
+                "AND NOT EXISTS ("
+                "    SELECT 1 FROM accounts a2 "
+                "    WHERE a2.id <> accounts.id AND LOWER(a2.email) = LOWER(accounts.email)"
+                ")"
+            ))
+        except Exception as e:
+            _log.warning("SQLite email lowercase backfill skipped: %s", e)
 
     # v6.x: add composite performance indexes (idempotent — CREATE INDEX IF NOT EXISTS)
     _indexes = [

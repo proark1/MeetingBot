@@ -111,6 +111,7 @@ async def handle_checkout_completed(session: dict) -> Optional[Decimal]:
     """
     from decimal import Decimal
     from sqlalchemy import select
+    from sqlalchemy.exc import IntegrityError
     from app.db import AsyncSessionLocal
     from app.models.account import StripeTopUp
     from app.services.credit_service import add_credits
@@ -164,8 +165,11 @@ async def handle_checkout_completed(session: dict) -> Optional[Decimal]:
             db.add(topup)
             try:
                 await db.flush()
-            except Exception as exc:
-                # Concurrent webhook delivery beat us to the insert.
+            except IntegrityError as exc:
+                # Concurrent webhook delivery beat us to the insert (unique
+                # constraint on stripe_session_id). Other exceptions should
+                # propagate so the webhook retries — we want to surface real
+                # database errors, not silently no-op.
                 await db.rollback()
                 logger.info(
                     "Stripe session %s claimed by concurrent delivery (%s) — skipping",

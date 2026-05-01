@@ -197,13 +197,11 @@ async def delete_all_recordings_for_account(account_id: str) -> int:
         for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
             for obj in page.get("Contents", []):
                 keys.append({"Key": obj["Key"]})
-        # Add any legacy flat-layout keys that actually exist (HEAD probe).
+        # Add legacy flat-layout keys directly to the batch — S3's
+        # DeleteObjects silently ignores keys that don't exist, so a HEAD
+        # probe per key would only add round-trips with no benefit.
         for legacy_key in legacy_keys:
-            try:
-                client.head_object(Bucket=bucket, Key=legacy_key)
-                keys.append({"Key": legacy_key})
-            except Exception:
-                continue  # not present — skip
+            keys.append({"Key": legacy_key})
         if not keys:
             return 0
         # S3 batch delete (max 1000 per call)
