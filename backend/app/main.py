@@ -21,7 +21,7 @@ for _candidate in [
     if _candidate.exists():
         _VERSION_FILE = _candidate
         break
-_APP_VERSION = _VERSION_FILE.read_text().strip() if _VERSION_FILE else "2.19.0"
+_APP_VERSION = _VERSION_FILE.read_text().strip() if _VERSION_FILE else "2.44.0"
 
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -966,11 +966,15 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 _origins = [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
 _wildcard = _origins == ["*"]
-if _wildcard and settings.API_KEY:
-    # Production (API_KEY set): restrict CORS to same-origin only.
+_is_production = settings.ENVIRONMENT.lower() == "production" or bool(settings.API_KEY)
+if _wildcard and _is_production:
+    # Production: restrict CORS to same-origin only. The legacy gate was only
+    # API_KEY, but most production deployments use JWT/per-user keys without
+    # setting the legacy API_KEY env var, which left them with allow_origins=["*"]
+    # and credentialed cookies. Trigger lockdown whenever ENVIRONMENT=production.
     # Override with an explicit CORS_ORIGINS env var to allow specific origins.
     logger.warning(
-        "CORS_ORIGINS is '*' but API_KEY is set — restricting CORS to same-origin. "
+        "CORS_ORIGINS is '*' in production — restricting CORS to same-origin. "
         "Set CORS_ORIGINS explicitly to allow cross-origin requests."
     )
     _origins = []
@@ -1048,9 +1052,15 @@ _public_openapi_cache: dict[str, Any] = {}
 
 
 def _make_public_openapi() -> dict[str, Any]:
-    """Return a filtered OpenAPI schema for the public docs."""
+    """Return a filtered OpenAPI schema for the public docs.
+
+    Returns a deep copy so callers (or FastAPI internals) that mutate the
+    returned dict don't poison the cached schema for subsequent requests.
+    """
+    import copy
+
     if _public_openapi_cache:
-        return _public_openapi_cache
+        return copy.deepcopy(_public_openapi_cache)
 
     from fastapi.openapi.utils import get_openapi as _get_openapi_util
 
@@ -1075,7 +1085,7 @@ def _make_public_openapi() -> dict[str, Any]:
         comp_schemas.pop(_name, None)
 
     _public_openapi_cache.update(schema)
-    return _public_openapi_cache
+    return copy.deepcopy(_public_openapi_cache)
 
 
 app.openapi = _make_public_openapi

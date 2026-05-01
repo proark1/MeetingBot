@@ -42,6 +42,7 @@ from .exceptions import (
     ServerError,
     ValidationError,
 )
+from .webhooks import WebhookVerificationError, verify_webhook
 from .models import (
     AccountInfo,
     ActionItemListResponse,
@@ -112,6 +113,9 @@ __all__ = [
     "RateLimitError",
     "ServerError",
     "ValidationError",
+    # Webhook verification
+    "verify_webhook",
+    "WebhookVerificationError",
     # Bot models
     "BotResponse",
     "BotSummary",

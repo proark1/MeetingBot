@@ -505,14 +505,23 @@ class Store:
         return sorted(webhooks, key=lambda w: w.created_at, reverse=True)
 
     async def update_webhook(self, webhook_id: str, **kwargs) -> Optional[WebhookEntry]:
-        """Update webhook fields in memory and persist to DB."""
+        """Update webhook fields in memory and persist to DB.
+
+        Persistence runs against a *snapshot* taken under the lock. Persisting
+        the live ``wh`` reference allowed concurrent mutators (e.g. a webhook
+        delivery updating ``delivery_attempts`` / ``last_delivery_at``) to
+        change fields between unlock and DB write, producing torn DB rows.
+        """
+        from dataclasses import replace as _dc_replace
         async with self._lock:
             wh = self._webhooks.get(webhook_id)
             if wh is None:
                 return None
             for k, v in kwargs.items():
                 setattr(wh, k, v)
-        await self._persist_webhook(wh)
+            # Snapshot every persisted field while still holding the lock.
+            snapshot = _dc_replace(wh)
+        await self._persist_webhook(snapshot)
         return wh
 
     async def delete_webhook(self, webhook_id: str) -> bool:

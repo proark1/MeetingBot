@@ -28,6 +28,10 @@ export {
   ValidationError,
 } from "./errors.js";
 
+// Webhook signature verification
+export { verifyWebhook, WebhookVerificationError } from "./webhooks.js";
+export type { VerifyWebhookOptions } from "./webhooks.js";
+
 // All TypeScript types/interfaces
 export type {
   // Bot types

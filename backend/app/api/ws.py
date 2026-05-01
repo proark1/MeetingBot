@@ -13,6 +13,8 @@ from typing import Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from app.deps import SUPERADMIN_ACCOUNT_ID
+
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
@@ -35,7 +37,7 @@ async def _resolve_ws_account(token: Optional[str]) -> Optional[str]:
 
     # Legacy superadmin API_KEY bypass
     if settings.API_KEY and hmac.compare_digest(token, settings.API_KEY):
-        return "__superadmin__"
+        return SUPERADMIN_ACCOUNT_ID
 
     # JWT (web UI sessions)
     if token.startswith("eyJ"):
@@ -98,7 +100,7 @@ class ConnectionManager:
 
         Filtering rules:
         - Connections with account_id=None (dev mode) receive everything.
-        - Connections with account_id="__superadmin__" receive everything.
+        - Connections with account_id=SUPERADMIN_ACCOUNT_ID receive everything.
         - Connections with a specific account_id only receive events whose
           ``data["account_id"]`` matches — or events that carry no account_id.
         """
@@ -108,7 +110,7 @@ class ConnectionManager:
 
         async def _send(ws: WebSocket, conn_account: Optional[str]) -> WebSocket | None:
             # Decide whether this connection should receive this event
-            if conn_account not in (None, "__superadmin__"):
+            if conn_account not in (None, SUPERADMIN_ACCOUNT_ID):
                 # Per-user connection: only deliver events that belong to the same account
                 event_account = data.get("account_id") or account_id
                 if event_account and event_account != conn_account:

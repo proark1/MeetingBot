@@ -39,8 +39,19 @@ class Base(DeclarativeBase):
 
 
 async def get_db():
+    """FastAPI dependency: yield an async session, rolling back on errors.
+
+    Without an explicit rollback, an exception raised by a downstream route
+    after the session ran statements would leave the session in a half-open
+    transactional state on close, occasionally returning corrupt connections
+    to the pool.
+    """
     async with AsyncSessionLocal() as session:
-        yield session
+        try:
+            yield session
+        except Exception:
+            await session.rollback()
+            raise
 
 
 async def create_all_tables() -> None:

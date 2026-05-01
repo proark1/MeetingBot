@@ -4,9 +4,35 @@ All notable changes to JustHereToListen.io are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.43.3 — **Last updated:** 2026-04-29
+> **Latest version:** 2.44.0 — **Last updated:** 2026-05-01
 
 ---
+
+## [2.44.0] - 2026-05-01
+
+### Security
+- **Closed an unauthenticated bot-access path.** When `ALLOW_UNAUTHENTICATED_DEV_MODE` was on (or during the boot window before `require_bearer_in_dev_mode` was set), `_get_or_404`, `GET /bot`, `GET /bot/stats` skipped the ownership filter entirely for callers with `account_id is None`, which could expose bots belonging to real tenants. Unauthenticated callers now only see bots where `bot.account_id is None` (legacy/anonymous), matching their own scope.
+- **Idempotency keys are now scoped per authenticated tenant.** Previously all anonymous callers shared a single `"__anon__"` namespace, so one anonymous client could replay another's `Idempotency-Key` and receive that caller's bot record. `Idempotency-Key` now requires an authenticated `account_id` and returns `401` otherwise.
+- **CORS lockdown now triggers on `ENVIRONMENT=production`.** Previously the lockdown was gated on the legacy `API_KEY` env var, so production deployments using JWT/per-user keys without setting `API_KEY` got `allow_origins=["*"]` despite handling cookies. Set `CORS_ORIGINS` explicitly to allow specific cross-origin clients.
+- **Hardened rate-limit IP resolution.** `X-Forwarded-For` is now consulted only when the new `TRUST_PROXY_HEADERS=true` setting is on. Without it, client-supplied `X-Forwarded-For` is ignored — preventing spoofed rate-limit identities even when the dashboard proxies into the ASGI app via `ASGITransport`.
+- **Rebranded leaked device labels.** Playwright's fake camera / mic identifiers in `browser_bot.py` are now `JustHereToListen.io Virtual Camera` / `Virtual Mic` instead of `MeetingBot …`, which were visible to remote meeting participants.
+
+### Webhook delivery
+- **`verify_webhook` helpers shipped in both SDKs.** The signed-timestamp design has always required receivers to reject deliveries older than 300 s for replay protection, but no helper was provided. Python: `from meetingbot import verify_webhook`. JS/TS: `import { verifyWebhook } from "meetingbot-sdk"`. Both do constant-time compare and freshness check, and raise/throw `WebhookVerificationError` on failure.
+- **`200 ≤ status_code < 300` is now the only "success" classification.** `_classify_status` previously returned `success` for 3xx as well, but `httpx.AsyncClient` is configured with `follow_redirects=False`, so a 3xx response means the body never reached the receiver. 3xx responses are now treated as permanent client errors.
+- **Webhook lock LRU no longer leaks under sustained load.** The eviction loop used `break` on the first held lock, so a single stuck delivery could prevent any eviction and let `_webhook_locks` grow unbounded. Now scans past held locks until size is under the cap.
+- **`store.update_webhook` snapshots the webhook under the lock before persisting.** Previously the persist step ran after releasing the lock, so concurrent mutators (delivery counters, `is_active`) could change fields between unlock and DB write, producing torn rows.
+
+### Concurrency
+- **Bot queue / running-tasks state is now protected by `_slot_lock`.** The "count active → spawn or queue" sequence in `create_bot`, `_start_or_queue_bot`, and `_queue_processor` could read a stale count under burst load and exceed `MAX_CONCURRENT_BOTS`. All three paths now serialise the count→commit step on a single `asyncio.Lock`.
+- **`get_db` rolls back on exception.** Without an explicit rollback, an exception raised by a downstream route after the session ran statements left the session in a half-open transactional state on close, occasionally returning corrupt connections to the pool.
+- **`api_key.last_used_at` updates run on a separate session.** Previously we committed inside the request-scoped `get_db` session and silently swallowed errors with `except: pass`, which masked pool starvation and could corrupt the request's transaction state.
+
+### Cleanup
+- **`api/ws.py` imports `SUPERADMIN_ACCOUNT_ID` instead of duplicating the literal.** Three duplicated `"__superadmin__"` strings would have silently desynced if the sentinel ever changed.
+- **`_check_workspace_role` only catches `SQLAlchemyError`.** The previous `except Exception` masked programming bugs (NameError, etc.) as transient `500 "Authorization check temporarily unavailable"` responses; DB errors now correctly surface as `503`.
+- **Public OpenAPI cache returns a deep copy.** Previously the cache held the same dict reference returned to callers, so any in-place mutation (FastAPI internals or test code) leaked into subsequent requests.
+- **VERSION fallback in `main.py` follows the current minor.** The hardcoded `_APP_VERSION = "2.19.0"` fallback when the `VERSION` file is missing has been bumped to the current `2.44.0`.
 
 ## [2.43.3] - 2026-04-29
 

@@ -129,16 +129,27 @@ async def get_current_account_id(
             detail="Invalid API key",
         )
 
-    # Update last_used_at (best-effort, don't fail auth if this fails)
+    # Update last_used_at on a separate short-lived session so we don't commit
+    # inside the request-scoped session yielded by ``get_db``. Sharing the
+    # session caused two issues: (1) if the downstream route raised, the
+    # transaction state from this commit could leave the session in an
+    # inconsistent state; (2) silent except: pass swallowed connection errors
+    # and could starve the connection pool over time.
     try:
-        await db.execute(
-            update(ApiKey)
-            .where(ApiKey.id == api_key.id)
-            .values(last_used_at=datetime.now(timezone.utc))
-        )
-        await db.commit()
-    except Exception:
-        pass
+        from app.db import AsyncSessionLocal as _AKSession
+        async with _AKSession() as _aksess:
+            try:
+                await _aksess.execute(
+                    update(ApiKey)
+                    .where(ApiKey.id == api_key.id)
+                    .values(last_used_at=datetime.now(timezone.utc))
+                )
+                await _aksess.commit()
+            except Exception as _exc:
+                await _aksess.rollback()
+                logger.debug("api_key.last_used_at update failed: %s", _exc)
+    except Exception as _exc:
+        logger.debug("api_key.last_used_at update session error: %s", _exc)
 
     request.state.account_id = api_key.account_id
     request.state.sandbox = token.startswith("sk_test_")
