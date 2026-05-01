@@ -51,6 +51,161 @@ async def _extract_and_broadcast_action_items(
         logger.debug("Bot %s: live action items failed: %s", bot_id, exc)
 
 
+async def _handle_chat_qa(bot_id: str, account_id: Optional[str], entry: dict) -> None:
+    """In-meeting @bot Q&A. Generates a reply and posts it back to the chat."""
+    from app.services import chat_qa_service
+    bot = await store.get_bot(bot_id)
+    if bot is None:
+        return
+    try:
+        reply = await chat_qa_service.handle_chat_entry(bot, entry)
+        if not reply:
+            return
+        await chat_qa_service.deliver_reply(bot, reply)
+        await ws_manager.broadcast(
+            "bot.chat_qa_reply",
+            {"bot_id": bot_id, "account_id": account_id, "reply": reply},
+            account_id=account_id,
+        )
+    except Exception as exc:
+        logger.debug("Bot %s: chat_qa handler failed: %s", bot_id, exc)
+
+
+async def _handle_decision_detection(
+    bot_id: str, account_id: Optional[str], entry: dict
+) -> None:
+    """Detect decisions/actions in a single entry and emit events."""
+    from app.services import decision_detector
+    try:
+        records = decision_detector.detect(entry)
+        if not records:
+            return
+        bot = await store.get_bot(bot_id)
+        if bot is None:
+            return
+        existing = list(getattr(bot, "detected_decisions", []) or [])
+        existing.extend(records)
+        # Cap stored history to prevent unbounded growth
+        existing = existing[-500:]
+        await store.update_bot(bot_id, detected_decisions=existing)
+        for rec in records:
+            await ws_manager.broadcast(
+                "bot.decision_detected",
+                {"bot_id": bot_id, "account_id": account_id, "decision": rec},
+                account_id=account_id,
+            )
+            try:
+                await webhook_service.dispatch_event(
+                    "bot.decision_detected",
+                    {"bot_id": bot_id, "account_id": account_id, "decision": rec},
+                    extra_webhook_url=bot.webhook_url,
+                    account_id=account_id,
+                )
+            except Exception as wexc:
+                logger.debug("decision_detected webhook dispatch failed: %s", wexc)
+    except Exception as exc:
+        logger.debug("Bot %s: decision detection failed: %s", bot_id, exc)
+
+
+async def _handle_speaker_analytics(
+    bot_id: str, account_id: Optional[str], entry: dict, aggregator
+) -> None:
+    """Feed an entry into the speaker analytics aggregator and emit snapshots."""
+    from app.services import sse_manager
+    try:
+        snapshot = await aggregator.feed(entry)
+        if not snapshot:
+            return
+        # Persist a rolling tail
+        bot = await store.get_bot(bot_id)
+        if bot is not None:
+            snaps = list(getattr(bot, "speaker_analytics_snapshots", []) or [])
+            snaps.append(snapshot)
+            snaps = snaps[-50:]
+            await store.update_bot(bot_id, speaker_analytics_snapshots=snaps)
+        await sse_manager.push_channel("analytics", bot_id, snapshot)
+        await ws_manager.broadcast(
+            "bot.speaker_analytics",
+            {"bot_id": bot_id, "account_id": account_id, "snapshot": snapshot},
+            account_id=account_id,
+        )
+    except Exception as exc:
+        logger.debug("Bot %s: speaker analytics failed: %s", bot_id, exc)
+
+
+async def _handle_coaching(
+    bot_id: str, account_id: Optional[str], entry: dict, engine
+) -> None:
+    """Feed an entry into the coaching engine and deliver tips."""
+    from app.services import sse_manager
+    bot = await store.get_bot(bot_id)
+    if bot is None:
+        return
+    try:
+        tips = await engine.feed(entry, participants=list(bot.participants or []))
+        if not tips:
+            return
+        cfg = getattr(bot, "coaching_config", {}) or {}
+        deliver_via = cfg.get("deliver_via", "sse")
+        # Persist a rolling tail
+        history = list(getattr(bot, "coaching_tips", []) or [])
+        for tip in tips:
+            tip = {**tip, "ts": time.time()}
+            history.append(tip)
+            if deliver_via in ("sse", "both"):
+                await sse_manager.push_channel("coaching", bot_id, tip)
+            if deliver_via in ("webhook", "both"):
+                try:
+                    await webhook_service.dispatch_event(
+                        "bot.coaching_tip",
+                        {"bot_id": bot_id, "account_id": account_id, "tip": tip},
+                        extra_webhook_url=bot.webhook_url,
+                        account_id=account_id,
+                    )
+                except Exception as wexc:
+                    logger.debug("coaching_tip webhook dispatch failed: %s", wexc)
+        history = history[-200:]
+        await store.update_bot(bot_id, coaching_tips=history)
+    except Exception as exc:
+        logger.debug("Bot %s: coaching engine failed: %s", bot_id, exc)
+
+
+async def _handle_agentic(
+    bot_id: str, account_id: Optional[str], entry: dict, engine
+) -> None:
+    """Run the agentic engine against the latest entry; deliver any actions."""
+    from app.services import agentic_service
+    bot = await store.get_bot(bot_id)
+    if bot is None:
+        return
+    try:
+        actions = await engine.feed(entry)
+        for action in actions or []:
+            ok = await agentic_service.deliver_action(bot, action)
+            await ws_manager.broadcast(
+                "bot.agentic_action",
+                {
+                    "bot_id": bot_id, "account_id": account_id,
+                    "action": action, "delivered": ok,
+                },
+                account_id=account_id,
+            )
+            try:
+                await webhook_service.dispatch_event(
+                    "bot.agentic_action",
+                    {"bot_id": bot_id, "account_id": account_id, "action": action, "delivered": ok},
+                    extra_webhook_url=bot.webhook_url,
+                    account_id=account_id,
+                )
+            except Exception as wexc:
+                logger.debug("agentic_action webhook dispatch failed: %s", wexc)
+        # Persist invocation counter
+        if actions:
+            await store.update_bot(bot_id, agentic_invocations=dict(getattr(bot, "agentic_invocations", {}) or {}))
+    except Exception as exc:
+        logger.debug("Bot %s: agentic engine failed: %s", bot_id, exc)
+
+
 async def _translate_and_broadcast(
     bot_id: str, account_id: Optional[str], entry: dict, target_lang: str
 ) -> None:
@@ -520,11 +675,33 @@ async def _do_analysis_inner(bot: BotSession, audio_path: str, use_real_bot: boo
     analysis_mode = bot.analysis_mode or "full"
     if not bot.analysis and bot.transcript and analysis_mode != "transcript_only":
         prompt_override = _resolve_prompt(bot)
+
+        # ── Cross-meeting memory retrieval (#11) ──────────────────────────
+        related_summaries: list[str] = []
+        if getattr(bot, "enable_cross_meeting_memory", False):
+            try:
+                from app.services.memory_service import retrieve_related
+                cm_cfg = getattr(bot, "cross_meeting_memory_config", {}) or {}
+                related = await retrieve_related(
+                    bot,
+                    lookback_days=int(cm_cfg.get("lookback_days", 30)),
+                    max_meetings=int(cm_cfg.get("max_meetings", 5)),
+                    workspace_scope=cm_cfg.get("workspace_scope", "account"),
+                )
+                if related:
+                    await store.update_bot(bot.id, related_meetings=related)
+                    bot.related_meetings = related
+                    if cm_cfg.get("inject_into_analysis", True):
+                        related_summaries = [r.get("summary", "") for r in related if r.get("summary")]
+            except Exception as exc:
+                logger.warning("Bot %s: cross-meeting memory retrieval failed: %s", bot.id, exc)
+
         analysis_result, chapters_result = await asyncio.gather(
             intelligence_service.analyze_transcript(
                 bot.transcript,
                 prompt_override=prompt_override,
                 vocabulary=bot.vocabulary or [],
+                previous_summaries=related_summaries or None,
             ),
             intelligence_service.generate_chapters(bot.transcript),
             return_exceptions=True,
@@ -920,6 +1097,39 @@ async def run_bot_lifecycle(bot_id: str) -> None:
             _live_coaching_last_fired: dict[str, float] = {}
             _live_fired_alert_keys: set[str] = set()
 
+            # ── Opt-in feature engines (constructed only when enabled) ────────
+            _speaker_aggregator = None
+            if getattr(bot, "enable_speaker_analytics", False):
+                from app.services.speaker_analytics_service import SpeakerAnalyticsAggregator
+                _sa_cfg = getattr(bot, "speaker_analytics_config", {}) or {}
+                _speaker_aggregator = SpeakerAnalyticsAggregator(
+                    bot_id=bot_id,
+                    account_id=bot.account_id,
+                    interval_seconds=int(_sa_cfg.get("interval_seconds", 30)),
+                    include_sentiment=bool(_sa_cfg.get("include_sentiment", False)),
+                    include_interruptions=bool(_sa_cfg.get("include_interruptions", True)),
+                )
+
+            _coaching_engine = None
+            if getattr(bot, "enable_coaching", False):
+                from app.services.coaching_service import CoachingEngine
+                _co_cfg = getattr(bot, "coaching_config", {}) or {}
+                _coaching_engine = CoachingEngine(
+                    bot_id=bot_id,
+                    account_id=bot.account_id,
+                    host_speaker_name=_co_cfg.get("host_speaker_name"),
+                    metrics=_co_cfg.get("metrics"),
+                    nudge_interval_seconds=int(_co_cfg.get("nudge_interval_seconds", 120)),
+                )
+
+            _agentic_engine = None
+            if (
+                getattr(bot, "agentic_autonomy", "off") != "off"
+                and getattr(bot, "agentic_instructions", [])
+            ):
+                from app.services.agentic_service import AgenticEngine
+                _agentic_engine = AgenticEngine(bot)
+
             async def on_live_entry(entry: dict) -> None:
                 nonlocal _last_flush
                 async with _live_lock:
@@ -1044,6 +1254,31 @@ async def run_bot_lifecycle(bot_id: str) -> None:
                     await _scan_live_entry(bot, entry, _live_fired_alert_keys)
                 except Exception as exc:
                     logger.debug("Bot %s: live keyword scan failed: %s", bot_id, exc)
+
+                # ── Opt-in features ────────────────────────────────────────────
+                # #5 — In-meeting @bot chat Q&A
+                if _is_chat and getattr(bot, "enable_chat_qa", False):
+                    _tracked_task(_handle_chat_qa(bot_id, bot.account_id, entry))
+
+                # #8 — Decision / action detection
+                if getattr(bot, "enable_decision_detection", False) and not _is_chat:
+                    _tracked_task(_handle_decision_detection(bot_id, bot.account_id, entry))
+
+                # #7 — Live speaker analytics
+                if _speaker_aggregator is not None and not _is_chat:
+                    _tracked_task(
+                        _handle_speaker_analytics(bot_id, bot.account_id, entry, _speaker_aggregator)
+                    )
+
+                # #13 — Host coaching
+                if _coaching_engine is not None and not _is_chat:
+                    _tracked_task(
+                        _handle_coaching(bot_id, bot.account_id, entry, _coaching_engine)
+                    )
+
+                # #15 — Agentic delegation (per-entry on_topic eval)
+                if _agentic_engine is not None and not _is_chat:
+                    _tracked_task(_handle_agentic(bot_id, bot.account_id, entry, _agentic_engine))
 
             max_retries = settings.BOT_JOIN_MAX_RETRIES
             retry_delay = settings.BOT_JOIN_RETRY_DELAY_S

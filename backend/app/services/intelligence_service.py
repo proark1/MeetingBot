@@ -809,6 +809,7 @@ async def analyze_transcript(
     transcript: list[dict[str, Any]],
     prompt_override: str | None = None,
     vocabulary: list[str] | None = None,
+    previous_summaries: list[str] | None = None,
 ) -> dict[str, Any]:
     """Analyze the transcript and return structured meeting intelligence.
 
@@ -817,9 +818,22 @@ async def analyze_transcript(
     Args:
         prompt_override: Replaces the default analysis prompt (e.g. from a meeting template).
         vocabulary: Domain-specific terms to prepend as spelling hints.
+        previous_summaries: Optional list of past-meeting summaries to inject as
+            cross-meeting context. The model is told these are from related
+            past meetings and to highlight contradictions / continuity.
     """
     if not transcript:
         return _empty_analysis()
+
+    # Inject cross-meeting memory (#11) by prepending to prompt_override.
+    if previous_summaries:
+        memory_block = "\n".join(f"- {s}" for s in previous_summaries[:5] if s)
+        memory_preamble = (
+            "Context from related past meetings (use to highlight continuity, "
+            "contradictions, or unresolved items, but do not summarise them):\n"
+            f"{memory_block}\n\n"
+        )
+        prompt_override = memory_preamble + (prompt_override or "")
 
     result: dict[str, Any] | None = None
     if _use_claude():

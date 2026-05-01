@@ -4,9 +4,117 @@ All notable changes to JustHereToListen.io are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.45.0 — **Last updated:** 2026-05-01
+> **Latest version:** 2.46.0 — **Last updated:** 2026-05-01
 
 ---
+
+## [2.46.0] - 2026-05-01
+
+### Added — Opt-in advanced features (all default OFF)
+
+Every new capability below is gated by a per-bot `enable_*` flag plus an
+optional nested config block. None of them activate unless the caller asks
+for them at bot-creation time, so existing API consumers see zero
+behaviour change.
+
+- **#5 — In-meeting `@bot` chat Q&A.** When `enable_chat_qa=true`, every
+  chat message is scanned for the configured trigger (default `@bot`).
+  Matching messages are answered using the live transcript as context and
+  the reply is posted back to the meeting chat (or spoken via TTS,
+  configurable). New `ChatQaConfig` schema controls trigger string,
+  reply medium, and rate-limit. Manual REST trigger via
+  `POST /api/v1/bot/{id}/chat-qa/ask` (works regardless of the flag).
+- **#7 — Live speaker analytics.** When `enable_speaker_analytics=true`,
+  a per-bot aggregator computes talk-time %, interruption count, and
+  filler-word count per speaker. Snapshots are emitted on the configured
+  interval (default 30 s) over a new SSE channel
+  `/api/v1/bot/{id}/analytics/stream`, broadcast as
+  `bot.speaker_analytics` over the WebSocket, and persisted in
+  `BotSession.speaker_analytics_snapshots`. Optional sentiment scoring
+  via Gemini Flash / Claude Haiku.
+- **#8 — Smart decision/action detection.** When
+  `enable_decision_detection=true`, every transcript entry is scanned by
+  a regex-first heuristic engine. Matches are persisted to
+  `BotSession.detected_decisions`, broadcast as `bot.decision_detected`
+  webhook + WebSocket events, and exposed via
+  `GET /api/v1/bot/{id}/decisions`. Designed to be cheap (no AI call
+  required) with optional AI confirmation pass.
+- **#11 — Cross-meeting memory.** When `enable_cross_meeting_memory=true`,
+  semantically related past meetings are retrieved at analysis time
+  using the existing summary embeddings. When
+  `inject_into_analysis=true` (default), the related summaries are
+  injected into the post-meeting analysis prompt via a new
+  `previous_summaries` argument on `intelligence_service.analyze_transcript`.
+  Related meetings are exposed via
+  `GET /api/v1/bot/{id}/memory/related` and a force-refresh endpoint
+  `POST /api/v1/bot/{id}/memory/refresh`.
+- **#13 — Host coaching.** When `enable_coaching=true`, a private
+  coaching engine watches the live transcript and emits actionable tips
+  to the host (talk-time dominance, monologue length, filler-word ratio,
+  silence). Tips are streamed over a private SSE channel
+  `/api/v1/bot/{id}/coaching/stream` and (optionally) fanned out via
+  `bot.coaching_tip` webhook. Configurable metric set, nudge interval,
+  delivery medium.
+- **#15 — Agentic delegation (bot-to-bot meetings).** New
+  `agentic_instructions` array on `BotCreate` accepts up to 20
+  natural-language directives ("ask about Q2 timeline", "push back if
+  scope creeps"). The `agentic_autonomy` master switch (`off`/`low`/
+  `medium`/`high`) gates which trigger types are honoured. The bot
+  evaluates each instruction in real time and either speaks via TTS or
+  posts in chat. Manual fire endpoint
+  `POST /api/v1/bot/{id}/agentic/trigger` and CRUD endpoints for
+  instructions.
+
+### Added — API surface
+
+New endpoints under `/api/v1/bot/{id}/`:
+
+- `GET /analytics/live`, `GET /analytics/history`, `GET /analytics/stream`
+- `GET /coaching/tips`, `GET /coaching/stream`
+- `GET /decisions`
+- `GET /memory/related`, `POST /memory/refresh`
+- `GET /agentic/instructions`, `PUT /agentic/instructions`,
+  `POST /agentic/trigger?index=N`
+- `POST /chat-qa/ask`
+
+Each endpoint that requires its feature flag returns **409 Conflict**
+(not 404) when the bot was created without the flag, so callers get a
+clear "feature not enabled" error rather than an existence check.
+
+### Added — MCP tools
+
+Seven new MCP tools so agents can drive every capability:
+`get_decisions`, `get_live_analytics`, `get_coaching_tips`,
+`get_related_meetings`, `set_agentic_instructions`,
+`trigger_agentic_instruction`, `ask_chat_qa`.
+
+### Added — Webhook events
+
+Four new event types registered in `WEBHOOK_EVENTS`:
+`bot.decision_detected`, `bot.coaching_tip`, `bot.speaker_analytics`,
+`bot.agentic_action`. All HMAC-signed using the existing
+`X-MeetingBot-Signature` header — no SDK changes required.
+
+### Added — SSE auxiliary channels
+
+`sse_manager` gained a parallel `subscribe_channel` / `push_channel`
+API so the new coaching, analytics, decisions, and agentic streams
+don't pollute the existing transcript SSE channel.
+
+### Added — Tests
+
+New `backend/tests/test_advanced_features.py` covers schema defaults,
+schema activation, decision detector heuristics, chat-QA trigger
+parser, speaker-analytics aggregation (incl. interruption + filler
+counts), coaching engine emission gating, agentic autonomy gating, and
+the new HTTP/MCP/webhook surface area.
+
+### Persistence
+
+Every new field on `BotSession` is round-tripped through the
+`BotSnapshot` JSON blob in `Store._persist_bot` and rebuilt by
+`load_persisted_bots`, so an in-flight feature configuration survives a
+process restart.
 
 ## [2.45.0] - 2026-05-01
 

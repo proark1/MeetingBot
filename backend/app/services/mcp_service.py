@@ -170,6 +170,89 @@ MCP_SERVER_MANIFEST = {
                 },
             },
         },
+        {
+            "name": "get_decisions",
+            "description": "List decision and action moments detected during a meeting (requires enable_decision_detection).",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "bot_id": {"type": "string", "description": "The bot/meeting ID."},
+                    "kind": {"type": "string", "description": "Optional filter: 'decision' or 'action'."},
+                },
+                "required": ["bot_id"],
+            },
+        },
+        {
+            "name": "get_live_analytics",
+            "description": "Get the latest live speaker-analytics snapshot (requires enable_speaker_analytics).",
+            "input_schema": {
+                "type": "object",
+                "properties": {"bot_id": {"type": "string"}},
+                "required": ["bot_id"],
+            },
+        },
+        {
+            "name": "get_coaching_tips",
+            "description": "Get the most recent coaching tips emitted for a bot (requires enable_coaching).",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "bot_id": {"type": "string"},
+                    "limit": {"type": "integer", "description": "Max tips (1-200, default 50).", "default": 50},
+                },
+                "required": ["bot_id"],
+            },
+        },
+        {
+            "name": "get_related_meetings",
+            "description": "List semantically related past meetings retrieved for this bot (requires enable_cross_meeting_memory).",
+            "input_schema": {
+                "type": "object",
+                "properties": {"bot_id": {"type": "string"}},
+                "required": ["bot_id"],
+            },
+        },
+        {
+            "name": "set_agentic_instructions",
+            "description": "Replace the agentic delegation instructions and (optionally) autonomy level for a bot.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "bot_id": {"type": "string"},
+                    "instructions": {
+                        "type": "array",
+                        "description": "Replacement list of instructions. Each: {instruction, trigger, interval_seconds?, speak?, max_invocations?}",
+                        "items": {"type": "object"},
+                    },
+                    "autonomy": {"type": "string", "description": "off | low | medium | high"},
+                },
+                "required": ["bot_id"],
+            },
+        },
+        {
+            "name": "trigger_agentic_instruction",
+            "description": "Manually fire a single agentic instruction by index.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "bot_id": {"type": "string"},
+                    "index": {"type": "integer", "description": "Zero-based instruction index."},
+                },
+                "required": ["bot_id", "index"],
+            },
+        },
+        {
+            "name": "ask_chat_qa",
+            "description": "Ask a transcript-grounded question. The answer is generated from the bot's transcript.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "bot_id": {"type": "string"},
+                    "question": {"type": "string"},
+                },
+                "required": ["bot_id", "question"],
+            },
+        },
     ],
 }
 
@@ -507,6 +590,140 @@ async def _tool_get_meeting_cost_summary(args: dict, account_id: Optional[str]) 
     }
 
 
+async def _resolve_owned_bot(bot_id: str, account_id: Optional[str]):
+    """Look up a bot, returning None when missing or not owned by the caller."""
+    from app.store import store
+    from app.deps import SUPERADMIN_ACCOUNT_ID
+    bot = await store.get_bot(bot_id)
+    if bot is None:
+        return None
+    if (
+        account_id
+        and account_id != SUPERADMIN_ACCOUNT_ID
+        and bot.account_id != account_id
+    ):
+        return None
+    return bot
+
+
+async def _tool_get_decisions(args: dict, account_id: Optional[str]) -> dict:
+    bot_id = (args.get("bot_id") or "").strip()
+    if not bot_id:
+        return {"error": "bot_id is required"}
+    bot = await _resolve_owned_bot(bot_id, account_id)
+    if bot is None:
+        return {"error": f"Bot {bot_id!r} not found"}
+    if not getattr(bot, "enable_decision_detection", False):
+        return {"error": "Decision detection is not enabled for this bot"}
+    decisions = list(getattr(bot, "detected_decisions", []) or [])
+    kind = (args.get("kind") or "").strip()
+    if kind in ("decision", "action"):
+        decisions = [d for d in decisions if d.get("kind") == kind]
+    return {"bot_id": bot_id, "decisions": decisions, "total": len(decisions)}
+
+
+async def _tool_get_live_analytics(args: dict, account_id: Optional[str]) -> dict:
+    bot_id = (args.get("bot_id") or "").strip()
+    if not bot_id:
+        return {"error": "bot_id is required"}
+    bot = await _resolve_owned_bot(bot_id, account_id)
+    if bot is None:
+        return {"error": f"Bot {bot_id!r} not found"}
+    if not getattr(bot, "enable_speaker_analytics", False):
+        return {"error": "Live speaker analytics is not enabled for this bot"}
+    snaps = list(getattr(bot, "speaker_analytics_snapshots", []) or [])
+    return {
+        "bot_id": bot_id,
+        "latest": snaps[-1] if snaps else None,
+        "history_count": len(snaps),
+    }
+
+
+async def _tool_get_coaching_tips(args: dict, account_id: Optional[str]) -> dict:
+    bot_id = (args.get("bot_id") or "").strip()
+    if not bot_id:
+        return {"error": "bot_id is required"}
+    bot = await _resolve_owned_bot(bot_id, account_id)
+    if bot is None:
+        return {"error": f"Bot {bot_id!r} not found"}
+    if not getattr(bot, "enable_coaching", False):
+        return {"error": "Host coaching is not enabled for this bot"}
+    limit = min(max(int(args.get("limit", 50)), 1), 200)
+    tips = list(getattr(bot, "coaching_tips", []) or [])
+    return {"bot_id": bot_id, "tips": tips[-limit:], "total": len(tips)}
+
+
+async def _tool_get_related_meetings(args: dict, account_id: Optional[str]) -> dict:
+    bot_id = (args.get("bot_id") or "").strip()
+    if not bot_id:
+        return {"error": "bot_id is required"}
+    bot = await _resolve_owned_bot(bot_id, account_id)
+    if bot is None:
+        return {"error": f"Bot {bot_id!r} not found"}
+    if not getattr(bot, "enable_cross_meeting_memory", False):
+        return {"error": "Cross-meeting memory is not enabled for this bot"}
+    return {
+        "bot_id": bot_id,
+        "related_meetings": list(getattr(bot, "related_meetings", []) or []),
+    }
+
+
+async def _tool_set_agentic_instructions(args: dict, account_id: Optional[str]) -> dict:
+    from app.store import store
+    bot_id = (args.get("bot_id") or "").strip()
+    if not bot_id:
+        return {"error": "bot_id is required"}
+    bot = await _resolve_owned_bot(bot_id, account_id)
+    if bot is None:
+        return {"error": f"Bot {bot_id!r} not found"}
+    instructions = args.get("instructions") or []
+    if not isinstance(instructions, list) or len(instructions) > 20:
+        return {"error": "instructions must be a list of at most 20 items"}
+    update: dict = {"agentic_instructions": instructions}
+    autonomy = args.get("autonomy")
+    if autonomy is not None:
+        if autonomy not in ("off", "low", "medium", "high"):
+            return {"error": "autonomy must be off|low|medium|high"}
+        update["agentic_autonomy"] = autonomy
+    await store.update_bot(bot_id, **update)
+    return {"bot_id": bot_id, **update}
+
+
+async def _tool_trigger_agentic_instruction(args: dict, account_id: Optional[str]) -> dict:
+    bot_id = (args.get("bot_id") or "").strip()
+    index = args.get("index")
+    if not bot_id or not isinstance(index, int):
+        return {"error": "bot_id and integer index are required"}
+    bot = await _resolve_owned_bot(bot_id, account_id)
+    if bot is None:
+        return {"error": f"Bot {bot_id!r} not found"}
+    if (getattr(bot, "agentic_autonomy", "off") or "off") == "off":
+        return {"error": "Agentic autonomy is off for this bot"}
+    instructions = list(getattr(bot, "agentic_instructions", []) or [])
+    if not (0 <= index < len(instructions)):
+        return {"error": f"No instruction at index {index}"}
+    from app.services.agentic_service import AgenticEngine, deliver_action
+    engine = AgenticEngine(bot)
+    action = await engine.trigger_manual(index)
+    if not action:
+        return {"bot_id": bot_id, "delivered": False, "reason": "engine declined to act"}
+    delivered = await deliver_action(bot, action)
+    return {"bot_id": bot_id, "action": action, "delivered": delivered}
+
+
+async def _tool_ask_chat_qa(args: dict, account_id: Optional[str]) -> dict:
+    from app.services import intelligence_service as _is
+    bot_id = (args.get("bot_id") or "").strip()
+    question = (args.get("question") or "").strip()
+    if not bot_id or not question:
+        return {"error": "bot_id and question are required"}
+    bot = await _resolve_owned_bot(bot_id, account_id)
+    if bot is None:
+        return {"error": f"Bot {bot_id!r} not found"}
+    answer = await _is.ask_about_transcript(list(bot.transcript or []), question)
+    return {"bot_id": bot_id, "question": question, "answer": answer}
+
+
 # ── Dispatch ──────────────────────────────────────────────────────────────────
 
 _TOOL_HANDLERS = {
@@ -519,6 +736,13 @@ _TOOL_HANDLERS = {
     "cancel_bot": _tool_cancel_bot,
     "get_speaker_analytics": _tool_get_speaker_analytics,
     "get_meeting_cost_summary": _tool_get_meeting_cost_summary,
+    "get_decisions": _tool_get_decisions,
+    "get_live_analytics": _tool_get_live_analytics,
+    "get_coaching_tips": _tool_get_coaching_tips,
+    "get_related_meetings": _tool_get_related_meetings,
+    "set_agentic_instructions": _tool_set_agentic_instructions,
+    "trigger_agentic_instruction": _tool_trigger_agentic_instruction,
+    "ask_chat_qa": _tool_ask_chat_qa,
 }
 
 
