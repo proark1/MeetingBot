@@ -135,12 +135,27 @@ def _render_done_email(bot_data: dict) -> tuple[str, str]:
     return subject, html_body
 
 
+_EMAIL_RE = __import__("re").compile(r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$")
+
+
+def _safe_recipient(addr: str) -> str:
+    """Validate an email recipient, rejecting any CR/LF that could inject MIME headers."""
+    addr = (addr or "").strip()
+    if not addr or "\r" in addr or "\n" in addr:
+        raise ValueError(f"Invalid email recipient: {addr!r}")
+    if len(addr) > 254 or not _EMAIL_RE.match(addr):
+        raise ValueError(f"Invalid email recipient: {addr!r}")
+    return addr
+
+
 async def _send_smtp(to_address: str, subject: str, html_body: str) -> None:
     """Send email via SMTP."""
     import smtplib
     import ssl
     from email.mime.multipart import MIMEMultipart
     from email.mime.text import MIMEText
+
+    to_address = _safe_recipient(to_address)
 
     s = _get_settings()
     host = getattr(s, "SMTP_HOST", "")
@@ -175,6 +190,7 @@ async def _send_smtp(to_address: str, subject: str, html_body: str) -> None:
 
 async def _send_sendgrid(to_address: str, subject: str, html_body: str) -> None:
     """Send email via SendGrid."""
+    to_address = _safe_recipient(to_address)
     try:
         import sendgrid
         from sendgrid.helpers.mail import Mail

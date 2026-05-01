@@ -2258,10 +2258,11 @@ document.querySelectorAll('[data-revoke-key]').forEach(btn => {
       const tbody = document.querySelector('#webhooks-table tbody');
       if (tbody) {
         const tr = document.createElement('tr');
-        tr.innerHTML = `<td style="font-size:12px;word-break:break-all">${data.url}</td>
-          <td><code style="font-size:11px">${(data.events||[]).join(', ')}</code></td>
+        const _eventsStr = (data.events||[]).map(_esc).join(', ');
+        tr.innerHTML = `<td style="font-size:12px;word-break:break-all">${_esc(data.url)}</td>
+          <td><code style="font-size:11px">${_eventsStr}</code></td>
           <td><span class="chip chip-success">Active</span></td>
-          <td style="color:#94a3b8;font-size:12px">${new Date(data.created_at||Date.now()).toLocaleDateString()}</td>`;
+          <td style="color:#94a3b8;font-size:12px">${_esc(new Date(data.created_at||Date.now()).toLocaleDateString())}</td>`;
         tbody.prepend(tr);
       }
     } catch(e) { showToast(e.message, 'danger'); }
@@ -2294,13 +2295,13 @@ document.querySelectorAll('[data-revoke-key]').forEach(btn => {
       if (tbody) {
         const tr = document.createElement('tr');
         tr.dataset.integId = data.id;
-        tr.innerHTML = `<td style="font-weight:500">${data.name}</td>
-          <td><span class="chip chip-gray">${data.type}</span></td>
+        tr.innerHTML = `<td style="font-weight:500">${_esc(data.name)}</td>
+          <td><span class="chip chip-gray">${_esc(data.type)}</span></td>
           <td><span class="chip chip-success">Active</span></td>
           <td>
             <div class="d-flex gap-1">
-              <button type="button" class="btn btn-xs btn-outline-secondary" data-toggle-integ="${data.id}">Pause</button>
-              <button type="button" class="btn btn-xs btn-outline-danger" data-delete-integ="${data.id}">Delete</button>
+              <button type="button" class="btn btn-xs btn-outline-secondary" data-toggle-integ="${_esc(data.id)}">Pause</button>
+              <button type="button" class="btn btn-xs btn-outline-danger" data-delete-integ="${_esc(data.id)}">Delete</button>
             </div>
           </td>`;
         tbody.prepend(tr);
@@ -2365,15 +2366,15 @@ document.getElementById('cal-add-btn')?.addEventListener('click', async () => {
     if (tbody) {
       const tr = document.createElement('tr');
       tr.dataset.calId = data.id;
-      tr.innerHTML = `<td style="font-weight:500">${data.name}</td>
+      tr.innerHTML = `<td style="font-weight:500">${_esc(data.name)}</td>
         <td><span class="chip chip-success">Active</span></td>
         <td><span class="chip chip-info">On</span></td>
-        <td style="color:#64748b;font-size:13px">${botName || 'JustHereToListen.io'}</td>
+        <td style="color:#64748b;font-size:13px">${_esc(botName || 'JustHereToListen.io')}</td>
         <td style="color:#94a3b8;font-size:12.5px">Never</td>
         <td>
           <div class="d-flex gap-1">
-            <button type="button" class="btn btn-xs btn-outline-secondary" data-toggle-cal="${data.id}">Pause</button>
-            <button type="button" class="btn btn-xs btn-outline-danger" data-delete-cal="${data.id}">Remove</button>
+            <button type="button" class="btn btn-xs btn-outline-secondary" data-toggle-cal="${_esc(data.id)}">Pause</button>
+            <button type="button" class="btn btn-xs btn-outline-danger" data-delete-cal="${_esc(data.id)}">Remove</button>
           </div>
         </td>`;
       tbody.prepend(tr);

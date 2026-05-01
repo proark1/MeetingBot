@@ -886,7 +886,8 @@ async def admin_page(request: Request, db: AsyncSession = Depends(get_db)):
     # Bot activity stats (platform-wide from in-memory store)
     try:
         from app.store import store as _store
-        all_bots, total_bots_mem = await _store.list_bots(limit=10000)
+        from app.config import settings as _cfg_ui
+        all_bots, total_bots_mem = await _store.list_bots(limit=_cfg_ui.ANALYTICS_BOT_SCAN_LIMIT)
         bot_status_counts: dict[str, int] = {}
         bot_platform_counts: dict[str, int] = {}
         total_ai_cost = 0.0

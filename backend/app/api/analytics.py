@@ -42,18 +42,29 @@ def _cache_set(cache: dict, key: str, value: dict) -> None:
         del cache[oldest]
 
 
-async def _get_bots(filter_account: Optional[str]) -> list:
-    """Fetch (or return cached) bot list for analytics — shared across all endpoints."""
-    key = filter_account or "__all__"
+async def _get_bots(filter_account: Optional[str], sub_user_id: Optional[str] = None) -> list:
+    """Fetch (or return cached) bot list for analytics — shared across all endpoints.
+
+    ``sub_user_id`` participates in the cache key so a business account's
+    sub-user doesn't see another sub-user's aggregated stats.
+    """
+    key = f"{filter_account or '__all__'}::{sub_user_id or '__all_sub__'}"
     ts, bots = _bots_list_cache.get(key, (0.0, None))
     if bots is not None and (_time.monotonic() - ts) < _BOTS_LIST_TTL:
         return bots
-    all_bots, _ = await store.list_bots(limit=10000, account_id=filter_account)
+    from app.config import settings as _cfg
+    all_bots, _ = await store.list_bots(
+        limit=_cfg.ANALYTICS_BOT_SCAN_LIMIT, account_id=filter_account, sub_user_id=sub_user_id
+    )
     _bots_list_cache[key] = (_time.monotonic(), all_bots)
     if len(_bots_list_cache) > 200:
         oldest = min(_bots_list_cache, key=lambda k: _bots_list_cache[k][0])
         del _bots_list_cache[oldest]
     return all_bots
+
+
+def _sub_user_from_request(request: Request) -> Optional[str]:
+    return (request.headers.get("X-Sub-User", "").strip()[:255]) or None
 
 
 def _now() -> datetime:
@@ -65,13 +76,14 @@ async def get_analytics(request: Request):
     """Aggregate analytics across all bots currently in memory (24-hour window)."""
     account_id = getattr(request.state, "account_id", None)
     filter_account = account_id if (account_id and account_id != SUPERADMIN_ACCOUNT_ID) else None
+    sub_user_id = _sub_user_from_request(request)
 
-    cache_key = f"analytics:{filter_account}"
+    cache_key = f"analytics:{filter_account}:{sub_user_id or ''}"
     cached = _cache_get(_analytics_cache, cache_key, _ANALYTICS_TTL)
     if cached is not None:
         return cached
 
-    all_bots = await _get_bots(filter_account)
+    all_bots = await _get_bots(filter_account, sub_user_id)
     total = len(all_bots)
 
     by_status: dict[str, int] = {}
@@ -149,7 +161,8 @@ async def get_action_items_stats(request: Request):
     """Aggregate action-item statistics across all bots in memory."""
     account_id = getattr(request.state, "account_id", None)
     filter_account = account_id if (account_id and account_id != SUPERADMIN_ACCOUNT_ID) else None
-    all_bots = await _get_bots(filter_account)
+    sub_user_id = _sub_user_from_request(request)
+    all_bots = await _get_bots(filter_account, sub_user_id)
 
     items: list[dict] = []
     for bot in all_bots:
@@ -186,12 +199,13 @@ async def get_recurring_insights(
     """
     account_id = getattr(request.state, "account_id", None)
     filter_account = account_id if (account_id and account_id != SUPERADMIN_ACCOUNT_ID) else None
+    sub_user_id = _sub_user_from_request(request)
 
     target_names: set[str] | None = None
     if attendees:
         target_names = {n.strip().lower() for n in attendees.split(",") if n.strip()}
 
-    all_bots = await _get_bots(filter_account)
+    all_bots = await _get_bots(filter_account, sub_user_id)
     done_bots = [b for b in all_bots if b.status in ("done", "cancelled") and b.transcript]
 
     # Filter by attendees if provided
@@ -251,13 +265,14 @@ async def get_api_usage(request: Request):
     """
     account_id = getattr(request.state, "account_id", None)
     filter_account = account_id if (account_id and account_id != SUPERADMIN_ACCOUNT_ID) else None
+    sub_user_id = _sub_user_from_request(request)
 
-    cache_key = f"api_usage:{filter_account}"
+    cache_key = f"api_usage:{filter_account}:{sub_user_id or ''}"
     cached = _cache_get(_api_usage_cache, cache_key, _API_USAGE_TTL)
     if cached is not None:
         return cached
 
-    all_bots = await _get_bots(filter_account)
+    all_bots = await _get_bots(filter_account, sub_user_id)
 
     now = _now()
     seven_days_ago = now - timedelta(days=7)
@@ -340,7 +355,8 @@ async def search_transcripts(
     """
     account_id = getattr(request.state, "account_id", None)
     filter_account = account_id if (account_id and account_id != SUPERADMIN_ACCOUNT_ID) else None
-    all_bots, _ = await store.list_bots(limit=500, account_id=filter_account)
+    sub_user_id = _sub_user_from_request(request)
+    all_bots, _ = await store.list_bots(limit=500, account_id=filter_account, sub_user_id=sub_user_id)
 
     # ── Semantic (embedding) search ──────────────────────────────────────────
     if semantic:
@@ -555,7 +571,10 @@ async def get_my_analytics(request: Request):
     week_starts = [now - timedelta(weeks=i+1) for i in range(4)]
 
     # Use account-scoped store (never superadmin expanded)
-    all_bots, _ = await store.list_bots(limit=10000, account_id=account_id, sub_user_id=sub_user_id)
+    from app.config import settings as _cfg
+    all_bots, _ = await store.list_bots(
+        limit=_cfg.ANALYTICS_BOT_SCAN_LIMIT, account_id=account_id, sub_user_id=sub_user_id
+    )
 
     meetings_this_month = 0
     ai_cost_this_month = 0.0

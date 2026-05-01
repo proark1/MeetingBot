@@ -58,23 +58,47 @@ def _state_secret() -> bytes:
     return settings.JWT_SECRET.encode()[:32].ljust(32, b"0")
 
 
+_STATE_MAX_AGE_S = 600  # 10 minutes
+
+
 def generate_state(extra: Optional[str] = None) -> str:
-    """Return a signed state token.  ``extra`` is embedded in the payload."""
-    payload = json.dumps({"nonce": secrets.token_urlsafe(16), "extra": extra or ""})
+    """Return a signed state token.  ``extra`` is embedded in the payload.
+
+    The payload now carries an ``iat`` (issued-at) timestamp so a captured
+    state can't be replayed indefinitely. ``verify_state`` rejects tokens
+    older than ``_STATE_MAX_AGE_S``.
+    """
+    import time
+    payload = json.dumps({
+        "nonce": secrets.token_urlsafe(16),
+        "extra": extra or "",
+        "iat": int(time.time()),
+    })
     sig = hmac.new(_state_secret(), payload.encode(), hashlib.sha256).hexdigest()[:16]
     token = base64.urlsafe_b64encode(f"{payload}||{sig}".encode()).decode()
     return token
 
 
 def verify_state(token: str) -> Optional[str]:
-    """Verify and decode a state token.  Returns the ``extra`` field or None on failure."""
+    """Verify and decode a state token.  Returns the ``extra`` field or None on failure.
+
+    Rejects tokens whose ``iat`` is missing, malformed, or older than 10 min
+    (defends against replay of captured state values).
+    """
+    import time
     try:
         decoded = base64.urlsafe_b64decode(token.encode()).decode()
         payload, sig = decoded.rsplit("||", 1)
         expected = hmac.new(_state_secret(), payload.encode(), hashlib.sha256).hexdigest()[:16]
         if not hmac.compare_digest(sig, expected):
             return None
-        return json.loads(payload).get("extra", "")
+        data = json.loads(payload)
+        iat = data.get("iat")
+        if not isinstance(iat, int):
+            return None  # legacy tokens without iat — reject as well
+        if abs(time.time() - iat) > _STATE_MAX_AGE_S:
+            return None
+        return data.get("extra", "")
     except Exception:
         return None
 
@@ -190,17 +214,23 @@ async def upsert_oauth_account(
             key_row = result2.scalars().first()
             return account_id, key_row.key if key_row else ""
 
-        # 2. No existing OAuth link — check if an account with this email already exists
+        # 2. No existing OAuth link — check if an account with this email already exists.
+        # Email is matched case-insensitively so a user who registered as
+        # ``Foo@Bar.com`` is recognised by SSO that returns ``foo@bar.com``.
+        normalized_email = (email or "").strip().lower()
         account: Optional[Account] = None
-        if email:
-            result3 = await session.execute(select(Account).where(Account.email == email))
+        if normalized_email:
+            from sqlalchemy import func
+            result3 = await session.execute(
+                select(Account).where(func.lower(Account.email) == normalized_email)
+            )
             account = result3.scalar_one_or_none()
 
         # 3. Create account if needed
         new_key_plaintext = ""
         if account is None:
             dummy_pw = bcrypt.hashpw(secrets.token_hex(32).encode(), bcrypt.gensalt()).decode()
-            account = Account(email=email or f"{provider}:{provider_user_id}", hashed_password=dummy_pw)
+            account = Account(email=normalized_email or f"{provider}:{provider_user_id}", hashed_password=dummy_pw)
             session.add(account)
             await session.flush()  # get account.id
 

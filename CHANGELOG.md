@@ -4,9 +4,36 @@ All notable changes to JustHereToListen.io are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.44.0 — **Last updated:** 2026-05-01
+> **Latest version:** 2.45.0 — **Last updated:** 2026-05-01
 
 ---
+
+## [2.45.0] - 2026-05-01
+
+### Security — Critical
+- **GDPR cloud-erasure was silently a no-op.** `upload_recording` wrote keys as `recordings/{bot_id}.wav` while `delete_all_recordings_for_account` listed prefix `recordings/{account_id}/`, so account deletion always logged "deleted 0 recordings" and left every audio file in the bucket. Uploads now write `recordings/{account_id}/{bot_id}.wav`, and the GDPR sweep additionally HEAD-checks legacy flat keys joined from `bot_snapshots` so recordings written before this fix are also erased.
+- **Stripe webhook double-credit race.** Two concurrent deliveries of the same `checkout.session.completed` could both pass the `topup.status == "completed"` guard and both call `add_credits`; the partial-unique on `(type, reference_id)` doesn't cover `stripe_topup`. The handler now selects with `with_for_update()` and uses an INSERT-claim pattern keyed on the unique `stripe_session_id`; concurrent retries fall back to the no-op path.
+- **Calendar iCal SSRF.** `_http_client = AsyncClient(follow_redirects=True)` performed no fetch-time SSRF check, letting a registered iCal URL hop to `169.254.169.254` / `127.0.0.1`. `_fetch_ical` now disables auto-redirects and re-runs `webhook_service.check_url_ssrf` on every hop, with a 5-redirect cap.
+
+### Security — High
+- **Sub-user data leak in analytics.** `/analytics`, `/analytics/trends`, `/analytics/usage`, `/api-usage`, and `/search` ignored `X-Sub-User`, so a business account's sub-user A received aggregated cost/sentiment/topics for sub-user B's meetings. All five endpoints now read the header, pass `sub_user_id` to `store.list_bots`, and namespace the result-cache key by sub-user.
+- **Idempotency-Key cross-sub-user replay (round-1 fix #2 reopened for sub-users).** Lookup keyed only on `(account_id, key)`, so sub-user A's key K returned A's bot to sub-user B in the same business account. The `IdempotencyKey` model now carries `sub_user_id`, the unique index is rebuilt as `(account_id, sub_user_id, key)`, and both lookup and insert pass the sub-user id.
+- **Plan-limit race.** `check_plan_limit`'s `SELECT … FOR UPDATE` released the row lock before `increment_monthly_usage` ran in a separate session, so two concurrent POST /bot calls could both pass `used < limit`. `increment_monthly_usage` is now an atomic conditional UPDATE (`WHERE monthly_bots_used < limit`) that raises 402 when no row matches; on 402 the bot row is rolled back.
+- **Sync Stripe SDK calls inside async route handlers.** `stripe.checkout.Session.create`, `stripe.checkout.Session.list_line_items`, and `stripe.Webhook.construct_event` are blocking I/O (1–3 s round-trip) and stalled the event loop. All three sites now run via `asyncio.to_thread`; `create_checkout_session` and `verify_webhook` are now async.
+- **Case-sensitive email lookup.** A user who registered as `Foo@Bar.com` and signed in via Google (lowercased email) became a duplicate identity; password login then failed for the registered casing. `register`, `login`, and `oauth_service.upsert_oauth_account` now normalise to `.strip().lower()` and look up via `func.lower(Account.email)`.
+- **Email-header injection in `notify_email`.** The field accepted any `Optional[str]` and was copied straight into `msg["To"]` and `RCPT TO`. It's now `Optional[EmailStr]` (Pydantic-validated, max 254 chars), and both `_send_smtp` and `_send_sendgrid` defensively reject any address containing CR/LF or that doesn't match an RFC-5321-shaped pattern.
+- **OAuth state replay.** `generate_state` had no `iat`, no expiry, and no single-use store, so a captured state was valid forever. Now embeds an `iat` Unix timestamp; `verify_state` rejects tokens whose `iat` is missing/malformed or older than 600 s.
+- **Retention task health-probe key mismatch.** Heartbeats were recorded under `retention_loop` while `/health` watched `retention_enforcement`, so the probe always reported the task as missing. Renamed the supervised task name to `retention_enforcement` so both strings agree.
+
+### Security — Medium
+- **Dashboard stored XSS.** Webhook, integration, and calendar-feed table cells interpolated `data.url` / `data.name` / `data.events` into `tr.innerHTML` without `_esc()`. With CSP `'unsafe-inline'` enabled, a name like `<img src=x onerror=…>` would have run in the user's own session. Every interpolation in those three forms now goes through the existing `_esc()` helper.
+- **Workspace "not a member" returned 403.** CLAUDE.md mandates 404 for ownership/access mismatches to avoid leaking resource existence; the workspace endpoint now returns 404 on non-membership.
+
+### Webhook delivery
+- **Retry signature drift.** `_process_retries` re-signed with a fresh `ts` while the persisted body still carried the original `ts` baked into the JSON envelope, so any receiver verifying `X-MeetingBot-Timestamp == data.ts` rejected every retry. `WebhookDelivery` now stores `signed_ts`; retries reuse that value when calling `_sign(...)`.
+
+### Performance
+- **Unbounded analytics scans.** `/analytics`, `/analytics/usage`, `/search`, `/admin/stats`, and the dashboard summary materialised up to 10 000 in-memory `BotSession` dataclasses per request. New `ANALYTICS_BOT_SCAN_LIMIT` setting (default 2000) bounds the scan; the in-memory window stays at `STORE_MAX_BOTS=10000` for stats endpoints that need full visibility.
 
 ## [2.44.0] - 2026-05-01
 

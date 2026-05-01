@@ -113,6 +113,10 @@ def _migrate_schema(conn) -> None:
             f"ALTER TABLE webhooks ADD COLUMN IF NOT EXISTS consecutive_failures INTEGER NOT NULL DEFAULT 0",
             # action_items columns added after initial deployment
             f"ALTER TABLE action_items ADD COLUMN IF NOT EXISTS sub_user_id VARCHAR(255)",
+            # round-2 fix #5: idempotency keys are now scoped per sub-user
+            f"ALTER TABLE idempotency_keys ADD COLUMN IF NOT EXISTS sub_user_id VARCHAR(255)",
+            # round-2 fix #14: persist the original signed timestamp on each delivery
+            f"ALTER TABLE webhook_deliveries ADD COLUMN IF NOT EXISTS signed_ts VARCHAR(20)",
         ]
         for sql in _pg_migrations:
             try:
@@ -125,7 +129,9 @@ def _migrate_schema(conn) -> None:
             "CREATE INDEX IF NOT EXISTS ix_bot_snapshots_account_sub_user ON bot_snapshots (account_id, sub_user_id)",
             "CREATE INDEX IF NOT EXISTS ix_bot_snapshots_share_token_hash ON bot_snapshots (share_token_hash)",
             "CREATE INDEX IF NOT EXISTS ix_webhook_deliveries_retry ON webhook_deliveries (status, next_retry_at)",
-            "CREATE UNIQUE INDEX IF NOT EXISTS ix_idempotency_account_key ON idempotency_keys (account_id, key)",
+            # round-2 fix #5 — drop the old (account_id, key) unique and replace with (account_id, sub_user_id, key)
+            "DROP INDEX IF EXISTS ix_idempotency_account_key",
+            "CREATE UNIQUE INDEX IF NOT EXISTS ix_idempotency_account_sub_key ON idempotency_keys (account_id, sub_user_id, key)",
             # round-3 fix #4 — partial unique on (type, reference_id) so the USDC
             # monitor + admin rescan can never double-credit the same on-chain tx
             "CREATE UNIQUE INDEX IF NOT EXISTS ix_credit_tx_unique_ref ON credit_transactions (type, reference_id) WHERE reference_id IS NOT NULL",
@@ -232,6 +238,20 @@ def _migrate_schema(conn) -> None:
                 _log.info("Adding column bot_snapshots.%s", col_name)
                 conn.execute(text(f"ALTER TABLE bot_snapshots ADD COLUMN {col_name} {col_def}"))
 
+    # SQLite: add idempotency_keys.sub_user_id for round-2 fix #5
+    if "idempotency_keys" in inspector.get_table_names():
+        existing = {col["name"] for col in inspector.get_columns("idempotency_keys")}
+        if "sub_user_id" not in existing:
+            _log.info("Adding column idempotency_keys.sub_user_id")
+            conn.execute(text("ALTER TABLE idempotency_keys ADD COLUMN sub_user_id VARCHAR(255)"))
+
+    # SQLite: round-2 fix #14 — webhook_deliveries.signed_ts
+    if "webhook_deliveries" in inspector.get_table_names():
+        existing = {col["name"] for col in inspector.get_columns("webhook_deliveries")}
+        if "signed_ts" not in existing:
+            _log.info("Adding column webhook_deliveries.signed_ts")
+            conn.execute(text("ALTER TABLE webhook_deliveries ADD COLUMN signed_ts VARCHAR(20)"))
+
     # v6.x: add composite performance indexes (idempotent — CREATE INDEX IF NOT EXISTS)
     _indexes = [
         ("ix_bot_snapshots_account_created",
@@ -242,8 +262,11 @@ def _migrate_schema(conn) -> None:
          "CREATE INDEX IF NOT EXISTS ix_bot_snapshots_share_token_hash ON bot_snapshots (share_token_hash)"),
         ("ix_webhook_deliveries_retry",
          "CREATE INDEX IF NOT EXISTS ix_webhook_deliveries_retry ON webhook_deliveries (status, next_retry_at)"),
+        # round-2 fix #5: drop legacy (account_id, key) and add (account_id, sub_user_id, key)
         ("ix_idempotency_account_key",
-         "CREATE UNIQUE INDEX IF NOT EXISTS ix_idempotency_account_key ON idempotency_keys (account_id, key)"),
+         "DROP INDEX IF EXISTS ix_idempotency_account_key"),
+        ("ix_idempotency_account_sub_key",
+         "CREATE UNIQUE INDEX IF NOT EXISTS ix_idempotency_account_sub_key ON idempotency_keys (account_id, sub_user_id, key)"),
         # round-3 fix #4 — partial unique index for USDC tx replay protection
         ("ix_credit_tx_unique_ref",
          "CREATE UNIQUE INDEX IF NOT EXISTS ix_credit_tx_unique_ref ON credit_transactions (type, reference_id) WHERE reference_id IS NOT NULL"),
@@ -251,10 +274,13 @@ def _migrate_schema(conn) -> None:
     existing_tables = set(inspector.get_table_names())
     for _idx_name, _idx_sql in _indexes:
         # SQLite supports IF NOT EXISTS on CREATE INDEX; PostgreSQL also supports it
-        # Only run if the table the index references actually exists
-        _tbl = _idx_sql.split(" ON ")[1].split(" ")[0]
-        if _tbl in existing_tables:
-            try:
-                conn.execute(text(_idx_sql))
-            except Exception as _idx_exc:
-                _log.debug("Index migration skipped (already exists or schema mismatch): %s", _idx_exc)
+        # Only run if the table the index references actually exists.
+        # DROP INDEX statements have no "ON" clause — execute unconditionally.
+        if " ON " in _idx_sql:
+            _tbl = _idx_sql.split(" ON ")[1].split(" ")[0]
+            if _tbl not in existing_tables:
+                continue
+        try:
+            conn.execute(text(_idx_sql))
+        except Exception as _idx_exc:
+            _log.debug("Index migration skipped (already exists or schema mismatch): %s", _idx_exc)

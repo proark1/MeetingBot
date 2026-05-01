@@ -530,7 +530,8 @@ async def platform_analytics(
     snaps = snaps_q.all()
 
     # Active / live bots from in-memory store
-    active_bots, _ = await _store.list_bots(limit=10000)
+    from app.config import settings as _cfg_admin
+    active_bots, _ = await _store.list_bots(limit=_cfg_admin.ANALYTICS_BOT_SCAN_LIMIT)
 
     # ── Aggregate ──────────────────────────────────────────────────────────────
     status_counts: dict[str, int] = {}

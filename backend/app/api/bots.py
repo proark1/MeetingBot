@@ -455,6 +455,7 @@ async def create_bot(payload: BotCreate, request: Request):
                 ik_result = await db.execute(
                     _iselect(IKModel).where(
                         IKModel.account_id == account_id,
+                        IKModel.sub_user_id == sub_user_id,
                         IKModel.key == idempotency_key_raw,
                     )
                 )
@@ -561,11 +562,16 @@ async def create_bot(payload: BotCreate, request: Request):
     )
     await store.create_bot(bot)
 
-    # Increment monthly usage counter (non-sandbox, per-user accounts only)
+    # Atomically reserve a quota slot (race-safe enforcement of plan limits).
+    # increment_monthly_usage now raises 402 if the cap was reached between
+    # the earlier check_plan_limit and this point — never swallow that.
     if account_id and account_id != SUPERADMIN_ACCOUNT_ID and not is_sandbox:
         from app.services.credit_service import increment_monthly_usage
         try:
             await increment_monthly_usage(account_id)
+        except HTTPException:
+            await store.delete_bot(bot.id)  # roll back the bot we just stored
+            raise
         except Exception:
             logger.warning("Failed to increment monthly usage for %s", account_id)
 
@@ -596,6 +602,7 @@ async def create_bot(payload: BotCreate, request: Request):
             async with AsyncSessionLocal() as db:
                 ik = IKModel(
                     account_id=account_id,
+                    sub_user_id=sub_user_id,
                     key=idempotency_key_raw,
                     bot_id=bot.id,
                     expires_at=_now() + timedelta(hours=settings.IDEMPOTENCY_TTL_HOURS),

@@ -205,7 +205,7 @@ async def create_stripe_checkout(
     cancel_url = payload.cancel_url or f"{base_url}/topup?payment=cancelled"
 
     from app.services.stripe_service import create_checkout_session, record_stripe_session
-    session_id, checkout_url = create_checkout_session(
+    session_id, checkout_url = await create_checkout_session(
         account_id=account_id,
         amount_usd=payload.amount_usd,
         success_url=success_url,
@@ -270,7 +270,8 @@ async def create_subscription(
     else:
         params["customer_email"] = account.email
 
-    session = _stripe.checkout.Session.create(**params)
+    import asyncio as _asyncio_billing
+    session = await _asyncio_billing.to_thread(_stripe.checkout.Session.create, **params)
 
     # Persist Stripe customer ID if newly created
     if session.get("customer") and not account.stripe_customer_id:
@@ -299,7 +300,7 @@ async def stripe_webhook(request: Request):
 
     try:
         from app.services.stripe_service import verify_webhook, handle_checkout_completed
-        event = verify_webhook(payload, sig_header)
+        event = await verify_webhook(payload, sig_header)
     except Exception as exc:
         logger.warning("Stripe webhook signature verification failed: %s", exc)
         raise HTTPException(status_code=400, detail="Invalid webhook signature")
@@ -334,8 +335,9 @@ async def stripe_webhook(request: Request):
             if paid_price_id is None and session.get("id") and settings.STRIPE_SECRET_KEY:
                 try:
                     import stripe as _stripe_lib
+                    import asyncio as _asyncio_li
                     _stripe_lib.api_key = settings.STRIPE_SECRET_KEY
-                    li = _stripe_lib.checkout.Session.list_line_items(session["id"], limit=1)
+                    li = await _asyncio_li.to_thread(_stripe_lib.checkout.Session.list_line_items, session["id"], limit=1)
                     li_items = li.get("data") if isinstance(li, dict) else getattr(li, "data", None)
                     if li_items:
                         first = li_items[0]

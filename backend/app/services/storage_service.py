@@ -51,11 +51,15 @@ def _get_s3_client():
     return boto3.client("s3", **kwargs)
 
 
-async def upload_recording(local_path: str, bot_id: str) -> Optional[str]:
+async def upload_recording(local_path: str, bot_id: str, account_id: Optional[str] = None) -> Optional[str]:
     """Upload a recording to cloud storage.
 
     Returns the storage key/URL if successful, None if cloud storage is
     disabled or if upload fails (local file is kept in both cases).
+
+    The key layout is ``recordings/{account_id}/{bot_id}.wav`` so GDPR
+    erasure (``delete_all_recordings_for_account``) can list by prefix.
+    Bots without an owning account fall back to ``recordings/_legacy/...``.
     """
     if not is_cloud_storage_enabled():
         return None
@@ -67,7 +71,10 @@ async def upload_recording(local_path: str, bot_id: str) -> Optional[str]:
     import asyncio
     s = _get_settings()
     bucket = getattr(s, "S3_BUCKET", "")
-    key = f"recordings/{bot_id}.wav"
+    # account_id is required for GDPR erasure to work; bots without an owner
+    # are filed under a sentinel prefix.
+    _acct_segment = account_id if account_id else "_legacy"
+    key = f"recordings/{_acct_segment}/{bot_id}.wav"
 
     def _upload():
         client = _get_s3_client()
@@ -154,7 +161,11 @@ async def delete_recording(storage_key: str) -> bool:
 async def delete_all_recordings_for_account(account_id: str) -> int:
     """Delete all recordings belonging to an account (GDPR erasure).
 
-    Returns the number of objects deleted.
+    Returns the number of objects deleted. Sweeps both the canonical
+    ``recordings/{account_id}/`` prefix and any legacy
+    ``recordings/{bot_id}.wav`` keys whose ``BotSnapshot.account_id``
+    matches — older recordings (from before round-2 fix #1) were filed
+    flat without the account segment.
     """
     if not is_cloud_storage_enabled():
         return 0
@@ -164,13 +175,35 @@ async def delete_all_recordings_for_account(account_id: str) -> int:
     bucket = getattr(s, "S3_BUCKET", "")
     prefix = f"recordings/{account_id}/"
 
+    # Collect legacy keys (flat layout) by joining the bot_snapshots table.
+    legacy_keys: list[str] = []
+    try:
+        from app.db import AsyncSessionLocal
+        from app.models.account import BotSnapshot
+        from sqlalchemy import select
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(BotSnapshot.id).where(BotSnapshot.account_id == account_id)
+            )
+            for (bot_id,) in result.all():
+                legacy_keys.append(f"recordings/{bot_id}.wav")
+    except Exception as exc:
+        logger.warning("GDPR: legacy-key enumeration failed for %s: %s", account_id, exc)
+
     def _list_and_delete():
         client = _get_s3_client()
         paginator = client.get_paginator("list_objects_v2")
-        keys = []
+        keys: list[dict] = []
         for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
             for obj in page.get("Contents", []):
                 keys.append({"Key": obj["Key"]})
+        # Add any legacy flat-layout keys that actually exist (HEAD probe).
+        for legacy_key in legacy_keys:
+            try:
+                client.head_object(Bucket=bucket, Key=legacy_key)
+                keys.append({"Key": legacy_key})
+            except Exception:
+                continue  # not present — skip
         if not keys:
             return 0
         # S3 batch delete (max 1000 per call)

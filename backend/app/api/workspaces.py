@@ -125,7 +125,8 @@ async def _get_workspace_with_access(workspace_id: str, account_id: str, db, req
     )
     member = m_result.scalar_one_or_none()
     if member is None:
-        raise HTTPException(status_code=403, detail="You are not a member of this workspace")
+        # 404 (not 403) so we don't leak existence of the workspace per CLAUDE.md
+        raise HTTPException(status_code=404, detail=f"Workspace {workspace_id!r} not found")
 
     role_order = {"viewer": 0, "member": 1, "admin": 2}
     if role_order.get(member.role, 0) < role_order.get(require_role, 0):

@@ -139,8 +139,15 @@ async def _log_delivery(
     next_retry_at: "datetime | None" = None,
     delivered_at: "datetime | None" = None,
     delivery_id: "str | None" = None,
+    signed_ts: "str | None" = None,
 ) -> str:
-    """Insert or update a WebhookDelivery row.  Returns the delivery id."""
+    """Insert or update a WebhookDelivery row.  Returns the delivery id.
+
+    ``signed_ts`` is the original Unix-seconds timestamp baked into the body
+    envelope and the HMAC payload. It MUST be persisted on the first attempt
+    so retries reuse the same value — otherwise the X-MeetingBot-Timestamp
+    header drifts apart from ``data.ts`` and receivers reject the redelivery.
+    """
     try:
         from app.db import AsyncSessionLocal
         from app.models.account import WebhookDelivery
@@ -159,6 +166,8 @@ async def _log_delivery(
                     row.error_message        = error_message
                     row.next_retry_at        = next_retry_at
                     row.delivered_at         = delivered_at
+                    if signed_ts is not None and not row.signed_ts:
+                        row.signed_ts = signed_ts
                     await session.commit()
                     return delivery_id
             row = WebhookDelivery(
@@ -173,6 +182,7 @@ async def _log_delivery(
                 error_message=error_message,
                 next_retry_at=next_retry_at,
                 delivered_at=delivered_at,
+                signed_ts=signed_ts,
             )
             session.add(row)
             await session.commit()
@@ -313,6 +323,7 @@ async def dispatch_event(
             delivery_id = await _log_delivery(
                 webhook_id=wh.id, bot_id=bot_id, event=event,
                 request_body=body, status="pending",
+                signed_ts=_ts_unix,
             )
 
             status_code, resp_text = await _attempt_delivery(wh.url, body, hdrs)
@@ -450,7 +461,10 @@ async def _process_retries() -> None:
 
             hdrs: dict = {"Content-Type": "application/json", "User-Agent": "JustHereToListen.io/1.0"}
             if wh.secret:
-                sig, ts = _sign(delivery.request_body, wh.secret)
+                # Reuse the original ``signed_ts`` so the X-MeetingBot-Timestamp
+                # header on each retry matches the ``ts`` field that was baked
+                # into the persisted body when the delivery was first created.
+                sig, ts = _sign(delivery.request_body, wh.secret, ts_unix=delivery.signed_ts)
                 hdrs["X-MeetingBot-Signature"] = sig
                 hdrs["X-MeetingBot-Timestamp"] = ts
 

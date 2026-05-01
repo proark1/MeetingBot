@@ -81,6 +81,13 @@ class Settings(BaseSettings):
     # ignored and the TCP peer address is used instead.
     TRUST_PROXY_HEADERS: bool = False
 
+    # Cap on how many in-memory BotSession rows analytics endpoints will scan
+    # in a single request. Larger tenants should keep their analytics in the
+    # ``bot_snapshots`` table (queried separately) rather than the 24-h RAM
+    # window. Round-2 fix #15 lowers the default from 10000 to 2000 to bound
+    # worst-case latency on the /analytics endpoints.
+    ANALYTICS_BOT_SCAN_LIMIT: int = 2000
+
     # When False (default): if any Account row exists at startup and there are
     # no auth indicators (API_KEY unset), the auth dependency requires a Bearer
     # token even in dev mode. Set to True to keep the legacy unauthenticated
