@@ -11,6 +11,121 @@ class KeywordAlertConfig(BaseModel):
     webhook_url: Optional[str] = Field(default=None, max_length=2048, description="Optional webhook URL to notify in addition to global webhooks.")
 
 
+class AgenticInstruction(BaseModel):
+    """A single delegated instruction the bot should attempt to act on during a meeting."""
+    instruction: str = Field(
+        max_length=500,
+        description=(
+            "Natural-language directive, e.g. 'Ask about Q2 timeline', "
+            "'Push back if scope creeps', 'Summarise every 10 minutes'."
+        ),
+    )
+    trigger: Literal["on_topic", "on_silence", "on_interval", "manual"] = Field(
+        default="on_topic",
+        description=(
+            "When the bot should evaluate this instruction. "
+            "`on_topic` — when the relevant topic comes up. "
+            "`on_silence` — after N seconds of silence. "
+            "`on_interval` — every N seconds. "
+            "`manual` — only when triggered via the API."
+        ),
+    )
+    interval_seconds: Optional[int] = Field(
+        default=None,
+        ge=15,
+        le=3600,
+        description="For trigger=on_interval / on_silence — seconds between evaluations.",
+    )
+    speak: bool = Field(
+        default=False,
+        description="When true, the bot uses TTS to speak the response. When false, it posts in chat only.",
+    )
+    max_invocations: Optional[int] = Field(
+        default=3,
+        ge=1,
+        le=50,
+        description="Cap on how many times this single instruction can fire during the meeting.",
+    )
+
+
+class CoachingConfig(BaseModel):
+    """Per-bot host-coaching configuration."""
+    metrics: list[Literal[
+        "talk_time", "interruptions", "filler_words", "silence", "sentiment", "monologue", "pace"
+    ]] = Field(
+        default=["talk_time", "filler_words", "monologue"],
+        description="Which signals the coaching engine should track and emit tips for.",
+    )
+    nudge_interval_seconds: int = Field(
+        default=120, ge=30, le=600,
+        description="Minimum seconds between coaching tips per metric.",
+    )
+    host_speaker_name: Optional[str] = Field(
+        default=None, max_length=255,
+        description=(
+            "Display name of the participant being coached. "
+            "When omitted, the first non-bot participant is treated as the host."
+        ),
+    )
+    deliver_via: Literal["sse", "webhook", "both"] = Field(
+        default="sse",
+        description="Where to push coaching tips. `sse` is private to the host UI; `webhook` fans out to subscribers.",
+    )
+
+
+class SpeakerAnalyticsConfig(BaseModel):
+    """Per-bot live speaker analytics configuration."""
+    interval_seconds: int = Field(
+        default=30, ge=5, le=300,
+        description="Seconds between aggregated analytics snapshots.",
+    )
+    include_sentiment: bool = Field(
+        default=False,
+        description="When true, run a lightweight sentiment pass on each window (extra AI cost).",
+    )
+    include_interruptions: bool = Field(
+        default=True,
+        description="Detect interruption events (speaker A starts within 1.5s of speaker B finishing).",
+    )
+
+
+class CrossMeetingMemoryConfig(BaseModel):
+    """Per-bot cross-meeting memory retrieval configuration."""
+    lookback_days: int = Field(
+        default=30, ge=1, le=365,
+        description="How far back to search for related past meetings.",
+    )
+    max_meetings: int = Field(
+        default=5, ge=1, le=20,
+        description="Maximum number of past meetings to surface as context.",
+    )
+    workspace_scope: Literal["account", "workspace", "sub_user"] = Field(
+        default="account",
+        description="Scope of the memory pool. `workspace` requires `workspace_id` to be set on the bot.",
+    )
+    inject_into_analysis: bool = Field(
+        default=True,
+        description="When true, related-meeting summaries are injected into the post-meeting analysis prompt.",
+    )
+
+
+class ChatQaConfig(BaseModel):
+    """Per-bot in-meeting @bot chat Q&A configuration."""
+    trigger: str = Field(
+        default="@bot",
+        max_length=64,
+        description="Case-insensitive prefix that activates a Q&A reply (e.g. '@bot', '/ask').",
+    )
+    reply_via: Literal["chat", "voice", "both"] = Field(
+        default="chat",
+        description="How the bot should deliver answers.",
+    )
+    rate_limit_seconds: int = Field(
+        default=10, ge=0, le=300,
+        description="Minimum seconds between Q&A replies (0 disables the throttle).",
+    )
+
+
 def _reject_private_url(v: Any) -> str:
     """Reject meeting URLs that target localhost or private IP addresses."""
     from urllib.parse import urlparse
@@ -217,6 +332,93 @@ class BotCreate(BaseModel):
         ),
     )
 
+    # ── Opt-in advanced features (all default OFF) ─────────────────────────────
+    # Each block below activates a distinct capability. Leave them off to get
+    # the lightweight bot behaviour; turn them on selectively per bot.
+
+    # #5 — In-meeting @bot chat Q&A
+    enable_chat_qa: bool = Field(
+        default=False,
+        description=(
+            "When true, the bot watches the in-meeting chat for messages "
+            "starting with the configured trigger (default `@bot`) and replies "
+            "inline using the live transcript as context. Off by default."
+        ),
+    )
+    chat_qa: Optional[ChatQaConfig] = Field(
+        default=None,
+        description="Fine-tunes how chat-Q&A is triggered and answered. Ignored when `enable_chat_qa` is false.",
+    )
+
+    # #7 — Live speaker analytics
+    enable_speaker_analytics: bool = Field(
+        default=False,
+        description=(
+            "When true, periodically compute and emit per-speaker talk-time, "
+            "interruption count, and (optionally) sentiment via SSE/WS. Off by default."
+        ),
+    )
+    speaker_analytics: Optional[SpeakerAnalyticsConfig] = Field(
+        default=None,
+        description="Snapshot interval and which signals to compute. Ignored when `enable_speaker_analytics` is false.",
+    )
+
+    # #8 — Smart decision/action detection
+    enable_decision_detection: bool = Field(
+        default=False,
+        description=(
+            "When true, detect decision and action moments in real time and "
+            "fire `bot.decision_detected` webhook events with timestamp + speaker. "
+            "Off by default."
+        ),
+    )
+
+    # #11 — Cross-meeting memory
+    enable_cross_meeting_memory: bool = Field(
+        default=False,
+        description=(
+            "When true, retrieve summaries of semantically related past meetings "
+            "and (optionally) inject them into this meeting's analysis prompt. "
+            "Off by default."
+        ),
+    )
+    cross_meeting_memory: Optional[CrossMeetingMemoryConfig] = Field(
+        default=None,
+        description="Lookback window, scope, and injection toggle. Ignored when `enable_cross_meeting_memory` is false.",
+    )
+
+    # #13 — Host coaching mode
+    enable_coaching: bool = Field(
+        default=False,
+        description=(
+            "When true, run a private coaching engine that emits tips to the host "
+            "(talk-time dominance, filler words, monologue length, etc.). "
+            "Tips are streamed over a private SSE channel by default. Off by default."
+        ),
+    )
+    coaching: Optional[CoachingConfig] = Field(
+        default=None,
+        description="Which signals to track and how to deliver tips. Ignored when `enable_coaching` is false.",
+    )
+
+    # #15 — Agentic delegation (bot-to-bot meetings)
+    agentic_instructions: list[AgenticInstruction] = Field(
+        default=[],
+        max_length=20,
+        description=(
+            "Natural-language directives for the bot to act on during the meeting. "
+            "Empty list = standard listener-only behaviour. Max 20 instructions."
+        ),
+    )
+    agentic_autonomy: Literal["off", "low", "medium", "high"] = Field(
+        default="off",
+        description=(
+            "Master autonomy switch. `off` ignores `agentic_instructions`. "
+            "`low` only acts on `manual` triggers, `medium` adds `on_topic`, "
+            "`high` allows `on_silence` and `on_interval` triggers too."
+        ),
+    )
+
     # Pass-through metadata — returned as-is in bot responses and webhook payloads
     metadata: dict[str, Any] = Field(
         default={},
@@ -369,6 +571,29 @@ class BotResponse(BaseModel):
     pii_detected: bool = Field(
         default=False,
         description="True if PII was detected in the transcript (only relevant when `pii_redaction=true`).",
+    )
+
+    # ── Opt-in advanced features (echoed when enabled) ─────────────────────────
+    enable_chat_qa: bool = False
+    enable_speaker_analytics: bool = False
+    enable_decision_detection: bool = False
+    enable_cross_meeting_memory: bool = False
+    enable_coaching: bool = False
+    agentic_autonomy: str = "off"
+    detected_decisions: list[dict[str, Any]] = Field(
+        default=[],
+        description=(
+            "Decision and action moments detected during the meeting "
+            "(only populated when `enable_decision_detection=true`). "
+            "Each item: {kind: 'decision'|'action', text, speaker, timestamp}."
+        ),
+    )
+    related_meetings: list[dict[str, Any]] = Field(
+        default=[],
+        description=(
+            "Semantically related past meetings retrieved for this bot "
+            "(only populated when `enable_cross_meeting_memory=true`)."
+        ),
     )
 
     ai_usage: Optional[AIUsageSummary] = None

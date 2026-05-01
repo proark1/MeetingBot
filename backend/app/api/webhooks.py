@@ -34,6 +34,10 @@ WEBHOOK_EVENTS: list[str] = [
     "bot.live_transcript_translated",
     "bot.live_chat_message",
     "bot.recurring_intel_ready",
+    "bot.decision_detected",
+    "bot.coaching_tip",
+    "bot.speaker_analytics",
+    "bot.agentic_action",
     "bot.test",
 ]
 

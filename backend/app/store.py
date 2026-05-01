@@ -114,6 +114,38 @@ class BotSession:
     avg_hourly_rate_usd: Optional[float] = None  # used to compute meeting cost
     meeting_stats: dict = field(default_factory=dict)  # aggregate meeting-level stats (duration, dominance, balance, …)
 
+    # ── Opt-in advanced features (defaults all OFF) ────────────────────────────
+    # See app/schemas/bot.py BotCreate for the user-facing configuration.
+
+    # #5 chat Q&A
+    enable_chat_qa: bool = False
+    chat_qa_config: dict = field(default_factory=dict)
+    chat_qa_last_reply_ts: float = 0.0  # monotonic timestamp of last reply (rate limiting)
+
+    # #7 speaker analytics
+    enable_speaker_analytics: bool = False
+    speaker_analytics_config: dict = field(default_factory=dict)
+    speaker_analytics_snapshots: list = field(default_factory=list)  # rolling list of analytics snapshots
+
+    # #8 decision detection
+    enable_decision_detection: bool = False
+    detected_decisions: list = field(default_factory=list)  # [{kind, text, speaker, timestamp}]
+
+    # #11 cross-meeting memory
+    enable_cross_meeting_memory: bool = False
+    cross_meeting_memory_config: dict = field(default_factory=dict)
+    related_meetings: list = field(default_factory=list)  # [{bot_id, summary, score, created_at}]
+
+    # #13 host coaching
+    enable_coaching: bool = False
+    coaching_config: dict = field(default_factory=dict)
+    coaching_tips: list = field(default_factory=list)  # [{ts, metric, message}]
+
+    # #15 agentic delegation
+    agentic_autonomy: str = "off"  # off | low | medium | high
+    agentic_instructions: list = field(default_factory=list)  # [{instruction, trigger, interval_seconds, speak, max_invocations}]
+    agentic_invocations: dict = field(default_factory=dict)  # instruction_index -> count
+
     # ── Speaker resolution ─────────────────────────────────────────────────────
     # Stable mapping from diarized labels produced by the transcription model
     # ("speaker 1", "Participant 2", …) to real participant display names.
@@ -420,6 +452,23 @@ class Store:
                     "meeting_stats": bot.meeting_stats or {},
                     "speaker_name_map": bot.speaker_name_map or {},
                     "ai_usage": bot.ai_usage,
+                    # ── Opt-in advanced features ─────────────────────────────
+                    "enable_chat_qa": bot.enable_chat_qa,
+                    "chat_qa_config": bot.chat_qa_config or {},
+                    "enable_speaker_analytics": bot.enable_speaker_analytics,
+                    "speaker_analytics_config": bot.speaker_analytics_config or {},
+                    "speaker_analytics_snapshots": (bot.speaker_analytics_snapshots or [])[-50:],
+                    "enable_decision_detection": bot.enable_decision_detection,
+                    "detected_decisions": bot.detected_decisions or [],
+                    "enable_cross_meeting_memory": bot.enable_cross_meeting_memory,
+                    "cross_meeting_memory_config": bot.cross_meeting_memory_config or {},
+                    "related_meetings": bot.related_meetings or [],
+                    "enable_coaching": bot.enable_coaching,
+                    "coaching_config": bot.coaching_config or {},
+                    "coaching_tips": (bot.coaching_tips or [])[-100:],
+                    "agentic_autonomy": bot.agentic_autonomy,
+                    "agentic_instructions": bot.agentic_instructions or [],
+                    "agentic_invocations": bot.agentic_invocations or {},
                     # ── Diagnostic / forensic fields ─────────────────────────
                     "audio_health_samples": (bot.audio_health_samples or [])[-40:],
                     "webrtc_stats_samples": (bot.webrtc_stats_samples or [])[-40:],
@@ -731,6 +780,23 @@ async def load_persisted_bots() -> int:
                     meeting_stats=d.get("meeting_stats") or {},
                     speaker_name_map=d.get("speaker_name_map") or {},
                     ai_usage=d.get("ai_usage") or [],
+                    # ── Opt-in advanced features ─────────────────────────────
+                    enable_chat_qa=d.get("enable_chat_qa", False),
+                    chat_qa_config=d.get("chat_qa_config") or {},
+                    enable_speaker_analytics=d.get("enable_speaker_analytics", False),
+                    speaker_analytics_config=d.get("speaker_analytics_config") or {},
+                    speaker_analytics_snapshots=d.get("speaker_analytics_snapshots") or [],
+                    enable_decision_detection=d.get("enable_decision_detection", False),
+                    detected_decisions=d.get("detected_decisions") or [],
+                    enable_cross_meeting_memory=d.get("enable_cross_meeting_memory", False),
+                    cross_meeting_memory_config=d.get("cross_meeting_memory_config") or {},
+                    related_meetings=d.get("related_meetings") or [],
+                    enable_coaching=d.get("enable_coaching", False),
+                    coaching_config=d.get("coaching_config") or {},
+                    coaching_tips=d.get("coaching_tips") or [],
+                    agentic_autonomy=d.get("agentic_autonomy", "off"),
+                    agentic_instructions=d.get("agentic_instructions") or [],
+                    agentic_invocations=d.get("agentic_invocations") or {},
                     # ── Diagnostic / forensic fields ─────────────────────────
                     audio_health_samples=d.get("audio_health_samples") or [],
                     webrtc_stats_samples=d.get("webrtc_stats_samples") or [],

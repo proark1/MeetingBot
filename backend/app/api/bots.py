@@ -294,6 +294,14 @@ def _to_response(bot: BotSession) -> BotResponse:
         health_score=getattr(bot, "health_score", None),
         meeting_cost_usd=getattr(bot, "meeting_cost_usd", None),
         pii_detected=getattr(bot, "pii_detected", False),
+        enable_chat_qa=getattr(bot, "enable_chat_qa", False),
+        enable_speaker_analytics=getattr(bot, "enable_speaker_analytics", False),
+        enable_decision_detection=getattr(bot, "enable_decision_detection", False),
+        enable_cross_meeting_memory=getattr(bot, "enable_cross_meeting_memory", False),
+        enable_coaching=getattr(bot, "enable_coaching", False),
+        agentic_autonomy=getattr(bot, "agentic_autonomy", "off"),
+        detected_decisions=getattr(bot, "detected_decisions", []) or [],
+        related_meetings=getattr(bot, "related_meetings", []) or [],
         ai_usage=AIUsageSummary(
             total_tokens=bot.ai_total_tokens,
             total_cost_usd=bot.ai_total_cost_usd,
@@ -559,6 +567,18 @@ async def create_bot(payload: BotCreate, request: Request):
         translation_language=payload.translation_language,
         pii_redaction=payload.pii_redaction,
         avg_hourly_rate_usd=payload.avg_hourly_rate_usd,
+        # ── Opt-in advanced features ──────────────────────────────────────────
+        enable_chat_qa=payload.enable_chat_qa,
+        chat_qa_config=(payload.chat_qa.model_dump() if payload.chat_qa else {}),
+        enable_speaker_analytics=payload.enable_speaker_analytics,
+        speaker_analytics_config=(payload.speaker_analytics.model_dump() if payload.speaker_analytics else {}),
+        enable_decision_detection=payload.enable_decision_detection,
+        enable_cross_meeting_memory=payload.enable_cross_meeting_memory,
+        cross_meeting_memory_config=(payload.cross_meeting_memory.model_dump() if payload.cross_meeting_memory else {}),
+        enable_coaching=payload.enable_coaching,
+        coaching_config=(payload.coaching.model_dump() if payload.coaching else {}),
+        agentic_autonomy=payload.agentic_autonomy,
+        agentic_instructions=[ai.model_dump() for ai in (payload.agentic_instructions or [])],
     )
     await store.create_bot(bot)
 
@@ -1444,3 +1464,250 @@ async def chat_in_meeting(bot_id: str, request: Request, payload: ChatRequest):
 
     logger.info("Bot %s: queued /chat task %s (len=%d)", bot_id, task_id, len(text))
     return ChatResponse(bot_id=bot_id, task_id=task_id)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Opt-in advanced features (#5 chat-QA, #7 analytics, #8 decisions,
+# #11 memory, #13 coaching, #15 agentic). All endpoints below require the
+# corresponding feature flag to be enabled on the bot at creation time.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _require_feature(bot: BotSession, attr: str, label: str) -> None:
+    if not getattr(bot, attr, False):
+        raise HTTPException(
+            status_code=409,
+            detail=f"{label} is not enabled for this bot. Set `{attr}=true` at bot creation time.",
+        )
+
+
+# ── #7 — Live speaker analytics ─────────────────────────────────────────────
+
+@router.get("/{bot_id}/analytics/live")
+async def get_live_analytics(bot_id: str, request: Request):
+    """Return the latest live speaker analytics snapshot for the bot."""
+    account_id = getattr(request.state, "account_id", None)
+    sub_user_id = _get_sub_user_from_request(request)
+    bot = await _get_or_404(bot_id, account_id, sub_user_id)
+    _require_feature(bot, "enable_speaker_analytics", "Live speaker analytics")
+    snaps = list(getattr(bot, "speaker_analytics_snapshots", []) or [])
+    return {
+        "bot_id": bot_id,
+        "latest": snaps[-1] if snaps else None,
+        "history_count": len(snaps),
+    }
+
+
+@router.get("/{bot_id}/analytics/history")
+async def get_analytics_history(bot_id: str, request: Request, limit: int = Query(20, ge=1, le=200)):
+    """Return the last N speaker-analytics snapshots."""
+    account_id = getattr(request.state, "account_id", None)
+    sub_user_id = _get_sub_user_from_request(request)
+    bot = await _get_or_404(bot_id, account_id, sub_user_id)
+    _require_feature(bot, "enable_speaker_analytics", "Live speaker analytics")
+    snaps = list(getattr(bot, "speaker_analytics_snapshots", []) or [])
+    return {"bot_id": bot_id, "snapshots": snaps[-limit:], "total": len(snaps)}
+
+
+@router.get("/{bot_id}/analytics/stream")
+async def stream_analytics(bot_id: str, request: Request):
+    """SSE stream of live speaker-analytics snapshots."""
+    account_id = getattr(request.state, "account_id", None)
+    sub_user_id = _get_sub_user_from_request(request)
+    bot = await _get_or_404(bot_id, account_id, sub_user_id)
+    _require_feature(bot, "enable_speaker_analytics", "Live speaker analytics")
+    return await _aux_sse_stream("analytics", bot_id, request)
+
+
+# ── #13 — Host coaching ─────────────────────────────────────────────────────
+
+@router.get("/{bot_id}/coaching/tips")
+async def get_coaching_tips(bot_id: str, request: Request, limit: int = Query(50, ge=1, le=200)):
+    """Return the most recent coaching tips emitted for this bot."""
+    account_id = getattr(request.state, "account_id", None)
+    sub_user_id = _get_sub_user_from_request(request)
+    bot = await _get_or_404(bot_id, account_id, sub_user_id)
+    _require_feature(bot, "enable_coaching", "Host coaching")
+    tips = list(getattr(bot, "coaching_tips", []) or [])
+    return {"bot_id": bot_id, "tips": tips[-limit:], "total": len(tips)}
+
+
+@router.get("/{bot_id}/coaching/stream")
+async def stream_coaching(bot_id: str, request: Request):
+    """Private SSE stream of coaching tips for the host UI."""
+    account_id = getattr(request.state, "account_id", None)
+    sub_user_id = _get_sub_user_from_request(request)
+    bot = await _get_or_404(bot_id, account_id, sub_user_id)
+    _require_feature(bot, "enable_coaching", "Host coaching")
+    return await _aux_sse_stream("coaching", bot_id, request)
+
+
+# ── #8 — Decision detection ─────────────────────────────────────────────────
+
+@router.get("/{bot_id}/decisions")
+async def list_decisions(
+    bot_id: str,
+    request: Request,
+    kind: Optional[str] = Query(None, description="Filter by 'decision' or 'action'."),
+    limit: int = Query(100, ge=1, le=500),
+):
+    """List decisions/actions detected during the meeting."""
+    account_id = getattr(request.state, "account_id", None)
+    sub_user_id = _get_sub_user_from_request(request)
+    bot = await _get_or_404(bot_id, account_id, sub_user_id)
+    _require_feature(bot, "enable_decision_detection", "Decision detection")
+    decisions = list(getattr(bot, "detected_decisions", []) or [])
+    if kind in ("decision", "action"):
+        decisions = [d for d in decisions if d.get("kind") == kind]
+    return {"bot_id": bot_id, "decisions": decisions[-limit:], "total": len(decisions)}
+
+
+# ── #11 — Cross-meeting memory ──────────────────────────────────────────────
+
+@router.get("/{bot_id}/memory/related")
+async def list_related_meetings(bot_id: str, request: Request):
+    """Return semantically related past meetings retrieved for this bot."""
+    account_id = getattr(request.state, "account_id", None)
+    sub_user_id = _get_sub_user_from_request(request)
+    bot = await _get_or_404(bot_id, account_id, sub_user_id)
+    _require_feature(bot, "enable_cross_meeting_memory", "Cross-meeting memory")
+    return {"bot_id": bot_id, "related_meetings": list(getattr(bot, "related_meetings", []) or [])}
+
+
+@router.post("/{bot_id}/memory/refresh")
+async def refresh_related_meetings(bot_id: str, request: Request):
+    """Force-refresh the cross-meeting memory pool for this bot."""
+    account_id = getattr(request.state, "account_id", None)
+    sub_user_id = _get_sub_user_from_request(request)
+    bot = await _get_or_404(bot_id, account_id, sub_user_id)
+    _require_feature(bot, "enable_cross_meeting_memory", "Cross-meeting memory")
+    from app.services.memory_service import retrieve_related
+    cm_cfg = getattr(bot, "cross_meeting_memory_config", {}) or {}
+    related = await retrieve_related(
+        bot,
+        lookback_days=int(cm_cfg.get("lookback_days", 30)),
+        max_meetings=int(cm_cfg.get("max_meetings", 5)),
+        workspace_scope=cm_cfg.get("workspace_scope", "account"),
+    )
+    await store.update_bot(bot_id, related_meetings=related)
+    return {"bot_id": bot_id, "related_meetings": related, "count": len(related)}
+
+
+# ── #15 — Agentic delegation ────────────────────────────────────────────────
+
+class _AgenticInstructionsUpdate(BaseModel):
+    instructions: list[dict] = Field(
+        default=[],
+        description=(
+            "Replacement list of agentic instructions. Each item: "
+            "{instruction, trigger, interval_seconds?, speak?, max_invocations?}"
+        ),
+    )
+    autonomy: Optional[str] = Field(
+        default=None,
+        description="Optional autonomy level: off | low | medium | high.",
+    )
+
+
+@router.get("/{bot_id}/agentic/instructions")
+async def get_agentic_instructions(bot_id: str, request: Request):
+    account_id = getattr(request.state, "account_id", None)
+    sub_user_id = _get_sub_user_from_request(request)
+    bot = await _get_or_404(bot_id, account_id, sub_user_id)
+    return {
+        "bot_id": bot_id,
+        "autonomy": getattr(bot, "agentic_autonomy", "off"),
+        "instructions": list(getattr(bot, "agentic_instructions", []) or []),
+        "invocations": dict(getattr(bot, "agentic_invocations", {}) or {}),
+    }
+
+
+@router.put("/{bot_id}/agentic/instructions")
+async def update_agentic_instructions(
+    bot_id: str, request: Request, payload: _AgenticInstructionsUpdate
+):
+    account_id = getattr(request.state, "account_id", None)
+    sub_user_id = _get_sub_user_from_request(request)
+    bot = await _get_or_404(bot_id, account_id, sub_user_id)
+    if len(payload.instructions) > 20:
+        raise HTTPException(status_code=422, detail="At most 20 instructions allowed.")
+    update = {"agentic_instructions": payload.instructions}
+    if payload.autonomy is not None:
+        if payload.autonomy not in ("off", "low", "medium", "high"):
+            raise HTTPException(status_code=422, detail="autonomy must be off|low|medium|high")
+        update["agentic_autonomy"] = payload.autonomy
+    await store.update_bot(bot_id, **update)
+    return {"bot_id": bot_id, **update}
+
+
+@router.post("/{bot_id}/agentic/trigger")
+async def trigger_agentic_instruction(
+    bot_id: str, request: Request, index: int = Query(..., ge=0, description="Zero-based instruction index.")
+):
+    account_id = getattr(request.state, "account_id", None)
+    sub_user_id = _get_sub_user_from_request(request)
+    bot = await _get_or_404(bot_id, account_id, sub_user_id)
+    if (getattr(bot, "agentic_autonomy", "off") or "off") == "off":
+        raise HTTPException(status_code=409, detail="Agentic autonomy is off for this bot.")
+    if not (0 <= index < len(getattr(bot, "agentic_instructions", []) or [])):
+        raise HTTPException(status_code=404, detail=f"No instruction at index {index}")
+    from app.services.agentic_service import AgenticEngine, deliver_action
+    engine = AgenticEngine(bot)
+    action = await engine.trigger_manual(index)
+    if not action:
+        return {"bot_id": bot_id, "delivered": False, "reason": "engine declined to act"}
+    delivered = await deliver_action(bot, action)
+    await store.update_bot(bot_id, agentic_invocations=dict(getattr(bot, "agentic_invocations", {}) or {}))
+    return {"bot_id": bot_id, "action": action, "delivered": delivered}
+
+
+# ── #5 — Chat-QA endpoint (manual / API) ────────────────────────────────────
+
+class _ChatQaRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=2000)
+    reply_via: Optional[str] = Field(default=None, description="chat | voice | both. Defaults to bot config.")
+
+
+@router.post("/{bot_id}/chat-qa/ask")
+async def chat_qa_ask(bot_id: str, request: Request, payload: _ChatQaRequest):
+    """Ask a transcript-grounded question. Always available — does NOT require
+    `enable_chat_qa` (that flag controls auto-trigger from in-meeting chat)."""
+    account_id = getattr(request.state, "account_id", None)
+    sub_user_id = _get_sub_user_from_request(request)
+    bot = await _get_or_404(bot_id, account_id, sub_user_id)
+    answer = await intelligence_service.ask_about_transcript(
+        list(bot.transcript or []), payload.question
+    )
+    delivered = False
+    if payload.reply_via and bot.status == "in_call":
+        from app.services.chat_qa_service import deliver_reply
+        reply = {"answer": answer, "reply_via": payload.reply_via}
+        delivered = await deliver_reply(bot, reply)
+    return {"bot_id": bot_id, "question": payload.question, "answer": answer, "delivered": delivered}
+
+
+# ── Shared SSE helper for auxiliary channels ────────────────────────────────
+
+async def _aux_sse_stream(channel: str, bot_id: str, request: Request) -> StreamingResponse:
+    from app.services.sse_manager import subscribe_channel, unsubscribe_channel
+    import json as _json
+
+    q = await subscribe_channel(channel, bot_id)
+
+    async def _event_gen():
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    payload = await asyncio.wait_for(q.get(), timeout=30.0)
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+                    continue
+                yield f"data: {_json.dumps(payload)}\n\n"
+                if payload.get("__terminal__"):
+                    break
+        finally:
+            await unsubscribe_channel(channel, bot_id, q)
+
+    return StreamingResponse(_event_gen(), media_type="text/event-stream")
