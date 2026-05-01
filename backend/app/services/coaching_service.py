@@ -22,9 +22,14 @@ import asyncio
 import logging
 import re
 import time
+from collections import deque
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+# Sliding window length (seconds) over which talk_time dominance is computed.
+# Larger = more stable; smaller = more reactive to recent shifts.
+_TALK_WINDOW_SECONDS = 300.0
 
 _FILLER_RE = re.compile(
     r"\b(um+|uh+|like|you know|so|basically|literally|actually|right)\b",
@@ -53,8 +58,11 @@ class CoachingEngine:
         self.nudge_interval = max(30, int(nudge_interval_seconds))
 
         self._last_fired: dict[str, float] = {}  # metric -> monotonic ts
-        self._talk_window: dict[str, float] = {}  # speaker -> seconds (rolling 5min)
-        self._window_start = time.monotonic()
+        # Sliding window: each entry is (mono_ts_added, speaker, duration_s).
+        # Older entries are evicted in _trim_window so the talk-time tally
+        # always reflects only the last _TALK_WINDOW_SECONDS, regardless of
+        # whether activity straddles a tumbling boundary.
+        self._talk_events: deque[tuple[float, str, float]] = deque()
         self._monologue_run_start: Optional[float] = None  # ts when host started current monologue
         self._last_speaker: Optional[str] = None
         self._last_entry_mono: float = time.monotonic()
@@ -82,11 +90,12 @@ class CoachingEngine:
         self._prev_entry_ts = ts
         now_mono = time.monotonic()
 
-        # Roll 5-minute window
-        if now_mono - self._window_start > 300:
-            self._talk_window.clear()
-            self._window_start = now_mono
-        self._talk_window[speaker] = self._talk_window.get(speaker, 0.0) + duration
+        # Sliding window: append the new utterance and evict anything older
+        # than _TALK_WINDOW_SECONDS. This avoids the tumbling-window blind
+        # spot where 4 min of speech at the end of one window plus 4 min at
+        # the start of the next would never trigger a dominance alert.
+        self._talk_events.append((now_mono, speaker, duration))
+        self._trim_window(now_mono)
 
         # Filler ratio (host only)
         if self.host_speaker_name and speaker == self.host_speaker_name:
@@ -107,6 +116,20 @@ class CoachingEngine:
 
         return self._maybe_emit(now_mono)
 
+    def _trim_window(self, now_mono: float) -> None:
+        """Evict talk events older than the sliding window."""
+        cutoff = now_mono - _TALK_WINDOW_SECONDS
+        while self._talk_events and self._talk_events[0][0] < cutoff:
+            self._talk_events.popleft()
+
+    def _window_totals(self, now_mono: float) -> tuple[dict[str, float], float]:
+        """Return (per-speaker seconds, total seconds) over the sliding window."""
+        self._trim_window(now_mono)
+        per_speaker: dict[str, float] = {}
+        for _, spkr, dur in self._talk_events:
+            per_speaker[spkr] = per_speaker.get(spkr, 0.0) + dur
+        return per_speaker, sum(per_speaker.values())
+
     def _maybe_emit(self, now_mono: float) -> list[dict]:
         tips: list[dict] = []
         if not self.host_speaker_name:
@@ -118,8 +141,8 @@ class CoachingEngine:
             return now_mono - self._last_fired.get(metric, 0.0) >= self.nudge_interval
 
         host = self.host_speaker_name
-        host_secs = self._talk_window.get(host, 0.0)
-        total = sum(self._talk_window.values())
+        per_speaker, total = self._window_totals(now_mono)
+        host_secs = per_speaker.get(host, 0.0)
 
         # ── talk_time ──
         if total >= 60 and _can_fire("talk_time"):

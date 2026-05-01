@@ -826,6 +826,10 @@ async def analyze_transcript(
         return _empty_analysis()
 
     # Inject cross-meeting memory (#11) by prepending to prompt_override.
+    # When prompt_override is None we fall back to _ANALYSIS_PROMPT so the
+    # downstream analyzer still receives the JSON-shape instructions it
+    # needs — otherwise the model would only see the memory preamble and
+    # produce free-form prose instead of the schema-shaped JSON.
     if previous_summaries:
         memory_block = "\n".join(f"- {s}" for s in previous_summaries[:5] if s)
         memory_preamble = (
@@ -833,7 +837,7 @@ async def analyze_transcript(
             "contradictions, or unresolved items, but do not summarise them):\n"
             f"{memory_block}\n\n"
         )
-        prompt_override = memory_preamble + (prompt_override or "")
+        prompt_override = memory_preamble + (prompt_override or _ANALYSIS_PROMPT)
 
     result: dict[str, Any] | None = None
     if _use_claude():

@@ -109,7 +109,10 @@ class AgenticEngine:
             if not response:
                 continue
             self._invocations[idx] = self._invocations.get(idx, 0) + 1
-            self._next_eval[idx] = now_mono + max(30, interval or 60)
+            # Floor matches AgenticInstruction.interval_seconds (ge=15) in
+            # backend/app/schemas/bot.py — using 30 here would silently
+            # suppress user-configured intervals between 15 and 30 s.
+            self._next_eval[idx] = now_mono + max(15, interval or 60)
             actions.append({
                 "index": idx,
                 "instruction": instr.get("instruction", ""),
