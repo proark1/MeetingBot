@@ -75,6 +75,12 @@ class Settings(BaseSettings):
     # Environment — set to "production" to enforce strict security defaults
     ENVIRONMENT: str = "development"
 
+    # When True, the rate-limit/IP resolver may consult X-Forwarded-For. Only
+    # enable behind a trusted reverse proxy that overwrites or appends this
+    # header. With this off (default), client-supplied X-Forwarded-For is
+    # ignored and the TCP peer address is used instead.
+    TRUST_PROXY_HEADERS: bool = False
+
     # When False (default): if any Account row exists at startup and there are
     # no auth indicators (API_KEY unset), the auth dependency requires a Bearer
     # token even in dev mode. Set to True to keep the legacy unauthenticated

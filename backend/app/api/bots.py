@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from slowapi import Limiter
 from slowapi.util import get_remote_address
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.config import settings
 from app.deps import get_current_account_id, get_sub_user_id, SUPERADMIN_ACCOUNT_ID
@@ -29,10 +30,23 @@ router = APIRouter(prefix="/bot", tags=["Bots"])
 
 
 def _safe_get_remote_address(request: Request) -> str:
-    """Rate-limiter key function that handles missing client (internal ASGI calls)."""
+    """Rate-limiter key function that handles missing client (internal ASGI calls).
+
+    X-Forwarded-For is honoured ONLY when ``TRUST_PROXY_HEADERS`` is enabled
+    in settings — otherwise a client could spoof their rate-limit identity by
+    setting the header. Internal ASGI calls (where ``request.client`` is None)
+    fall back to a constant key so the rate limiter still functions but cannot
+    be tricked into bucketing by attacker-controlled values.
+    """
     if request.client:
+        if settings.TRUST_PROXY_HEADERS:
+            xff = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+            if xff:
+                return xff
         return get_remote_address(request)
-    return request.headers.get("X-Forwarded-For", "127.0.0.1").split(",")[0].strip()
+    if settings.TRUST_PROXY_HEADERS:
+        return request.headers.get("X-Forwarded-For", "127.0.0.1").split(",")[0].strip() or "127.0.0.1"
+    return "127.0.0.1"
 
 
 _limiter = Limiter(key_func=_safe_get_remote_address)
@@ -58,6 +72,10 @@ _scheduled_timers: dict[str, asyncio.TimerHandle] = {}
 _ACTIVE_STATUSES = ("ready", "scheduled", "queued", "joining", "in_call", "call_ended")
 _queue_event = asyncio.Event()
 
+# Serialises the "count active bots → spawn or queue" sequence so concurrent
+# create_bot calls can never read a stale count and exceed MAX_CONCURRENT_BOTS.
+_slot_lock = asyncio.Lock()
+
 
 def _get_sub_user_from_request(request: Request) -> Optional[str]:
     """Extract sub_user_id from X-Sub-User header."""
@@ -77,17 +95,22 @@ async def _start_or_queue_bot(bot_id: str) -> None:
     if bot is None:
         logger.warning("Scheduled bot %s was deleted before join time", bot_id)
         return
-    active = sum(1 for t in _running_tasks.values() if not t.done())
-    if active >= settings.MAX_CONCURRENT_BOTS:
-        _bot_queue.append(bot_id)
-        _queue_event.set()
+    async with _slot_lock:
+        active = sum(1 for t in _running_tasks.values() if not t.done())
+        if active >= settings.MAX_CONCURRENT_BOTS:
+            _bot_queue.append(bot_id)
+            _queue_event.set()
+            queued = True
+        else:
+            task = asyncio.create_task(bot_service.run_bot_lifecycle(bot_id))
+            _running_tasks[bot_id] = task
+            task.add_done_callback(lambda _t, bid=bot_id: _on_task_done(_t, bid))
+            queued = False
+    if queued:
         await store.update_bot(bot_id, status="queued")
         logger.info("Scheduled bot %s queued (position %d)", bot_id, len(_bot_queue))
     else:
         await store.update_bot(bot_id, status="joining")
-        task = asyncio.create_task(bot_service.run_bot_lifecycle(bot_id))
-        _running_tasks[bot_id] = task
-        task.add_done_callback(lambda _t, bid=bot_id: _on_task_done(_t, bid))
         logger.info("Scheduled bot %s starting now", bot_id)
 
 
@@ -108,21 +131,25 @@ async def _queue_processor() -> None:
         _queue_event.clear()
         if not _bot_queue:
             continue
-        active = sum(1 for t in _running_tasks.values() if not t.done())
-        if active >= settings.MAX_CONCURRENT_BOTS:
-            # Re-arm: a task may finish while we were checking
-            _queue_event.set()
-            continue
-        bot_id = _bot_queue.popleft()
+        async with _slot_lock:
+            active = sum(1 for t in _running_tasks.values() if not t.done())
+            if active >= settings.MAX_CONCURRENT_BOTS:
+                # Re-arm: a task may finish while we were checking
+                _queue_event.set()
+                continue
+            if not _bot_queue:
+                continue
+            bot_id = _bot_queue.popleft()
         if await store.get_bot(bot_id) is None:
             logger.warning("Queue: bot %s was deleted — skipping", bot_id)
             if _bot_queue:
                 _queue_event.set()
             continue
+        async with _slot_lock:
+            task = asyncio.create_task(bot_service.run_bot_lifecycle(bot_id))
+            _running_tasks[bot_id] = task
+            task.add_done_callback(lambda _t, bid=bot_id: _on_task_done(_t, bid))
         await store.update_bot(bot_id, status="joining")
-        task = asyncio.create_task(bot_service.run_bot_lifecycle(bot_id))
-        _running_tasks[bot_id] = task
-        task.add_done_callback(lambda _t, bid=bot_id: _on_task_done(_t, bid))
         logger.info("Queue: started bot %s (%d remaining in queue)", bot_id, len(_bot_queue))
         if _bot_queue:
             _queue_event.set()
@@ -203,9 +230,9 @@ async def _check_workspace_role(bot: BotSession, account_id: Optional[str], min_
             )
     except HTTPException:
         raise
-    except Exception as exc:
-        logger.error("Workspace RBAC check failed: %s", exc)
-        raise HTTPException(status_code=500, detail="Authorization check temporarily unavailable")
+    except SQLAlchemyError as exc:
+        logger.error("Workspace RBAC check failed (DB error): %s", exc)
+        raise HTTPException(status_code=503, detail="Authorization check temporarily unavailable")
 
 
 def _to_response(bot: BotSession) -> BotResponse:
@@ -265,8 +292,17 @@ async def _get_or_404(
     # Ownership check: per-user accounts can only see their own bots.
     # Bots with bot.account_id == None are considered superadmin/legacy and
     # are not visible to authenticated tenants — strict equality only.
-    if account_id and account_id != SUPERADMIN_ACCOUNT_ID:
+    if account_id == SUPERADMIN_ACCOUNT_ID:
+        pass  # superadmin sees all
+    elif account_id:
         if bot.account_id != account_id:
+            raise HTTPException(status_code=404, detail=f"Bot {bot_id!r} not found")
+    else:
+        # Unauthenticated dev-mode caller — only legacy unowned bots are visible.
+        # Prevents tenant data exposure if ALLOW_UNAUTHENTICATED_DEV_MODE is left
+        # on after real accounts exist, or during the boot window before
+        # require_bearer_in_dev_mode is set.
+        if bot.account_id is not None:
             raise HTTPException(status_code=404, detail=f"Bot {bot_id!r} not found")
     # Sub-user isolation: when sub_user_id is provided, only show matching bots
     if sub_user_id is not None and bot.sub_user_id != sub_user_id:
@@ -379,7 +415,15 @@ async def create_bot(payload: BotCreate, request: Request):
         sub_user_id = header_val or None
 
     # ── Idempotency key check ─────────────────────────────────────────────────
+    # Idempotency requires an authenticated tenant — anonymous callers would
+    # otherwise share a single "__anon__" namespace, which lets one anonymous
+    # caller replay another's key and receive their bot record.
     idempotency_key_raw = request.headers.get("Idempotency-Key", "").strip()[:255]
+    if idempotency_key_raw and not account_id:
+        raise HTTPException(
+            status_code=401,
+            detail="Idempotency-Key requires authentication",
+        )
     if idempotency_key_raw:
         try:
             from app.db import AsyncSessionLocal
@@ -388,7 +432,7 @@ async def create_bot(payload: BotCreate, request: Request):
             async with AsyncSessionLocal() as db:
                 ik_result = await db.execute(
                     _iselect(IKModel).where(
-                        IKModel.account_id == (account_id or "__anon__"),
+                        IKModel.account_id == account_id,
                         IKModel.key == idempotency_key_raw,
                     )
                 )
@@ -404,6 +448,8 @@ async def create_bot(payload: BotCreate, request: Request):
                             status_code=200,
                             headers={"X-Idempotency-Replayed": "true"},
                         )
+        except HTTPException:
+            raise
         except Exception:
             logger.exception("Idempotency key lookup failed")
 
@@ -527,7 +573,7 @@ async def create_bot(payload: BotCreate, request: Request):
             from datetime import timedelta
             async with AsyncSessionLocal() as db:
                 ik = IKModel(
-                    account_id=account_id or "__anon__",
+                    account_id=account_id,
                     key=idempotency_key_raw,
                     bot_id=bot.id,
                     expires_at=_now() + timedelta(hours=settings.IDEMPOTENCY_TTL_HOURS),
@@ -552,20 +598,25 @@ async def create_bot(payload: BotCreate, request: Request):
             _scheduled_timers[bot.id] = handle
             logger.info("Bot %s scheduled — will start in %.0f s (no slot held)", bot.id, delay)
     else:
-        active = sum(1 for t in _running_tasks.values() if not t.done())
-        if active >= settings.MAX_CONCURRENT_BOTS:
-            _bot_queue.append(bot.id)
-            _queue_event.set()
-            await store.update_bot(bot.id, status="queued")
-            bot.status = "queued"
-            queue_pos = _bot_queue.index(bot.id) + 1
-            logger.info("Bot %s queued (position %d)", bot.id, queue_pos)
-        else:
+        async with _slot_lock:
+            active = sum(1 for t in _running_tasks.values() if not t.done())
+            if active >= settings.MAX_CONCURRENT_BOTS:
+                _bot_queue.append(bot.id)
+                _queue_event.set()
+                bot.status = "queued"
+                queue_pos = _bot_queue.index(bot.id) + 1
+                _spawned = False
+            else:
+                task = asyncio.create_task(bot_service.run_bot_lifecycle(bot.id))
+                _running_tasks[bot.id] = task
+                task.add_done_callback(lambda _t, bid=bot.id: _on_task_done(_t, bid))
+                bot.status = "joining"
+                _spawned = True
+        if _spawned:
             await store.update_bot(bot.id, status="joining")
-            bot.status = "joining"
-            task = asyncio.create_task(bot_service.run_bot_lifecycle(bot.id))
-            _running_tasks[bot.id] = task
-            task.add_done_callback(lambda _t, bid=bot.id: _on_task_done(_t, bid))
+        else:
+            await store.update_bot(bot.id, status="queued")
+            logger.info("Bot %s queued (position %d)", bot.id, queue_pos)
 
     logger.info("Created bot %s for %s (status=%s)", bot.id, bot.meeting_url, bot.status)
 
@@ -598,6 +649,9 @@ async def get_stats(request: Request):
     sub_user_id = _get_sub_user_from_request(request)
     filter_account = account_id if (account_id and account_id != SUPERADMIN_ACCOUNT_ID) else None
     all_bots, _ = await store.list_bots(limit=10000, account_id=filter_account, sub_user_id=sub_user_id)
+    if account_id is None:
+        # Unauth dev mode — only show legacy anonymous bots (bot.account_id is None)
+        all_bots = [b for b in all_bots if b.account_id is None]
     counts: dict[str, int] = {}
     for b in all_bots:
         counts[b.status] = counts.get(b.status, 0) + 1
@@ -624,11 +678,15 @@ async def list_bots(
     """List bots (lightweight summaries, no transcript/analysis)."""
     account_id: Optional[str] = getattr(request.state, "account_id", None)
     sub_user_id = _get_sub_user_from_request(request)
-    # Superadmin and unauthenticated see all bots; per-user accounts see only their own
+    # Superadmin sees all bots; per-user accounts see only their own;
+    # unauthenticated dev-mode callers see only legacy anonymous bots.
     filter_account = (
         account_id if (account_id and account_id != SUPERADMIN_ACCOUNT_ID) else None
     )
     bots, total = await store.list_bots(status=status, limit=limit, offset=offset, account_id=filter_account, sub_user_id=sub_user_id)
+    if account_id is None:
+        bots = [b for b in bots if b.account_id is None]
+        total = len(bots)
     return BotListResponse(
         results=[_to_summary(b) for b in bots],
         total=total,

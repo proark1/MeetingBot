@@ -4893,10 +4893,10 @@ async def run_browser_bot(
                         var hasVideo = devs.some(function (d) { return d.kind === 'videoinput'; });
                         var hasAudio = devs.some(function (d) { return d.kind === 'audioinput'; });
                         if (!hasVideo) {
-                            devs.push({ kind: 'videoinput', deviceId: 'mb-fake-cam', groupId: 'mb', label: 'MeetingBot Virtual Camera', toJSON: function(){ return this; } });
+                            devs.push({ kind: 'videoinput', deviceId: 'mb-fake-cam', groupId: 'mb', label: 'JustHereToListen.io Virtual Camera', toJSON: function(){ return this; } });
                         }
                         if (!hasAudio) {
-                            devs.push({ kind: 'audioinput', deviceId: 'mb-fake-mic', groupId: 'mb', label: 'MeetingBot Virtual Mic', toJSON: function(){ return this; } });
+                            devs.push({ kind: 'audioinput', deviceId: 'mb-fake-mic', groupId: 'mb', label: 'JustHereToListen.io Virtual Mic', toJSON: function(){ return this; } });
                         }
                         return devs;
                     };

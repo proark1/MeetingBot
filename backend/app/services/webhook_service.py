@@ -42,13 +42,22 @@ def _get_webhook_lock(wh_id: str) -> asyncio.Lock:
         return _webhook_locks[wh_id]
     lock = asyncio.Lock()
     _webhook_locks[wh_id] = lock
-    # Evict oldest if over limit — skip locks that are currently held
-    while len(_webhook_locks) > _WEBHOOK_LOCK_MAX:
-        oldest_key = next(iter(_webhook_locks))
-        oldest_lock = _webhook_locks[oldest_key]
-        if oldest_lock.locked():
-            break  # don't evict a lock that's in use
-        _webhook_locks.pop(oldest_key)
+    # Evict oldest if over limit — scan past held locks instead of stopping at
+    # the first one. A `break` here let a single stuck delivery prevent any
+    # eviction, allowing the dict to grow unbounded under sustained load.
+    if len(_webhook_locks) > _WEBHOOK_LOCK_MAX:
+        scanned = 0
+        max_scan = len(_webhook_locks)  # bound by current size to avoid a tight loop
+        for oldest_key in list(_webhook_locks.keys()):
+            if len(_webhook_locks) <= _WEBHOOK_LOCK_MAX:
+                break
+            scanned += 1
+            if scanned > max_scan:
+                break
+            oldest_lock = _webhook_locks[oldest_key]
+            if oldest_lock.locked() or oldest_key == wh_id:
+                continue  # skip held locks and the one we just inserted
+            _webhook_locks.pop(oldest_key, None)
     return lock
 
 
@@ -83,13 +92,14 @@ def _classify_status(status_code: "int | None") -> str:
     """Classify an HTTP delivery result.
 
     Returns one of:
-      ``"success"``  — 2xx/3xx, mark delivered, reset failure counter
+      ``"success"``  — 2xx, mark delivered, reset failure counter
       ``"retry"``    — transient error (timeout, 5xx, 408, 429); retry later
-      ``"fail"``     — permanent client error (other 4xx); don't retry, count toward auto-disable
+      ``"fail"``     — permanent client error (other 4xx, 3xx with redirects
+                       disabled); don't retry, count toward auto-disable
     """
     if status_code is None:
         return "retry"  # connection/timeout/SSRF — retry later
-    if 200 <= status_code < 400:
+    if 200 <= status_code < 300:
         return "success"
     if status_code >= 500 or status_code in (408, 425, 429):
         return "retry"

@@ -1,8 +1,8 @@
 # JustHereToListen.io API
 
-**Version 2.43.3** — A stateless meeting bot API service with multi-tenant billing, business account support, Google/Microsoft SSO, Python & JS SDKs, webhook retry/delivery logs, bot persona customization, video recording, Prometheus metrics, idempotency keys, cloud storage, email notifications, calendar auto-join, Slack/Notion integrations, and GDPR compliance.
+**Version 2.44.0** — A stateless meeting bot API service with multi-tenant billing, business account support, Google/Microsoft SSO, Python & JS SDKs, webhook retry/delivery logs, bot persona customization, video recording, Prometheus metrics, idempotency keys, cloud storage, email notifications, calendar auto-join, Slack/Notion integrations, and GDPR compliance.
 
-> **Last updated:** 2026-04-29 · **API version in Swagger UI:** 2.43.3 · **Build:** Share button now returns a working public URL — proxy used to leak the internal ASGI sentinel (`http://internal/share/…`); URL is now displayed inline next to the button with a Copy action so it isn't lost when the clipboard write is blocked <!-- auto-updated on each release -->
+> **Last updated:** 2026-05-01 · **API version in Swagger UI:** 2.44.0 · **Build:** Round-4 security & correctness pass — closed an unauthenticated bot-access path, scoped idempotency keys to the authenticated tenant, hardened CORS lockdown to trigger on `ENVIRONMENT=production`, shipped `verify_webhook` helpers in both SDKs, and fixed several concurrency races in the bot queue and webhook lock LRU. <!-- auto-updated on each release -->
 
 
 Send bots into **Zoom**, **Google Meet**, **Microsoft Teams**, and **onepizza.io** meetings to record, transcribe, and analyse them with **Claude** (Anthropic) or **Gemini** (Google) AI.
