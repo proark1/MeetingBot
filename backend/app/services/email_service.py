@@ -199,7 +199,7 @@ async def _send_sendgrid(to_address: str, subject: str, html_body: str) -> None:
 
     s = _get_settings()
     api_key = getattr(s, "SENDGRID_API_KEY", "")
-    from_addr = getattr(s, "SMTP_FROM_ADDRESS", "noreply@meetingbot.io")
+    from_addr = getattr(s, "SMTP_FROM_ADDRESS", "") or "noreply@justheretolisten.io"
 
     message = Mail(
         from_email=from_addr,

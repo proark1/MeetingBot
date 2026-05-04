@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from slowapi import Limiter
 from slowapi.util import get_remote_address
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.config import settings
@@ -378,7 +379,8 @@ async def validate_meeting_url(payload: ValidateMeetingUrlRequest, request: Requ
                 error_code="invalid_url",
                 message="URL must start with http:// or https:// and include a hostname.",
             )
-    except Exception:
+    except Exception as exc:
+        logger.warning("URL validation parse error for %r: %s", url, exc)
         return ValidateMeetingUrlResponse(
             valid=False,
             error_code="invalid_url",
@@ -489,9 +491,18 @@ async def create_bot(payload: BotCreate, request: Request):
     if account_id and account_id != SUPERADMIN_ACCOUNT_ID and not is_sandbox:
         from app.db import AsyncSessionLocal
         from app.services.credit_service import check_credits, check_plan_limit
-        async with AsyncSessionLocal() as db:
-            await check_credits(account_id, db)
-        await check_plan_limit(account_id)
+        # Bound DB latency so a slow query can't wedge connection-pool slots.
+        try:
+            async with asyncio.timeout(5):
+                async with AsyncSessionLocal() as db:
+                    await check_credits(account_id, db)
+                await check_plan_limit(account_id)
+        except asyncio.TimeoutError:
+            logger.warning("Plan/credit check timed out for account %s", account_id)
+            raise HTTPException(
+                status_code=503,
+                detail="Plan/credit check timed out — please retry shortly.",
+            )
 
     # Feature gating for premium bot options
     if account_id and account_id != SUPERADMIN_ACCOUNT_ID and not is_sandbox:
@@ -615,10 +626,11 @@ async def create_bot(payload: BotCreate, request: Request):
 
     # ── Store idempotency key ─────────────────────────────────────────────────
     if idempotency_key_raw:
+        from app.db import AsyncSessionLocal
+        from app.models.account import IdempotencyKey as IKModel
+        from datetime import timedelta
+        from sqlalchemy.exc import IntegrityError
         try:
-            from app.db import AsyncSessionLocal
-            from app.models.account import IdempotencyKey as IKModel
-            from datetime import timedelta
             async with AsyncSessionLocal() as db:
                 ik = IKModel(
                     account_id=account_id,
@@ -628,7 +640,36 @@ async def create_bot(payload: BotCreate, request: Request):
                     expires_at=_now() + timedelta(hours=settings.IDEMPOTENCY_TTL_HOURS),
                 )
                 db.add(ik)
-                await db.commit()
+                try:
+                    await db.commit()
+                except IntegrityError:
+                    # Concurrent request with the same key won the race — replay
+                    # its bot record instead of creating a duplicate.
+                    await db.rollback()
+                    await store.delete_bot(bot.id)
+                    ik_result = await db.execute(
+                        select(IKModel).where(
+                            IKModel.account_id == account_id,
+                            IKModel.sub_user_id == sub_user_id,
+                            IKModel.key == idempotency_key_raw,
+                        )
+                    )
+                    ik_row = ik_result.scalar_one_or_none()
+                    if ik_row:
+                        existing = await store.get_bot(ik_row.bot_id)
+                        if existing:
+                            from fastapi.responses import JSONResponse
+                            return JSONResponse(
+                                content=_to_response(existing).model_dump(mode="json"),
+                                status_code=200,
+                                headers={"X-Idempotency-Replayed": "true"},
+                            )
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Idempotency-Key conflict — concurrent request in flight",
+                    )
+        except HTTPException:
+            raise
         except Exception as _ik_exc:
             logger.exception("Failed to store idempotency key — rolling back bot %s", bot.id)
             await store.delete_bot(bot.id)

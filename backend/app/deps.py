@@ -2,6 +2,7 @@
 
 import hmac
 import logging
+from collections import OrderedDict
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -17,6 +18,15 @@ from app.db import get_db
 logger = logging.getLogger(__name__)
 
 _bearer = HTTPBearer(auto_error=False)
+
+# Debounce ApiKey.last_used_at writes: at most one DB update per key per
+# _LAST_USED_DEBOUNCE_S. Without this, every authed request opens a fresh
+# session purely to bump a timestamp, which under load starves the pool.
+_LAST_USED_DEBOUNCE_S = 60.0
+_LAST_USED_CACHE_MAX = 5000
+# OrderedDict gives us O(1) LRU eviction (popitem(last=False)) so we don't
+# pay an O(N) scan on every request once the cache is full.
+_last_used_at_seen: "OrderedDict[str, float]" = OrderedDict()
 
 # Sentinel value for the legacy superadmin API_KEY bypass
 SUPERADMIN_ACCOUNT_ID = "__superadmin__"
@@ -129,27 +139,44 @@ async def get_current_account_id(
             detail="Invalid API key",
         )
 
-    # Update last_used_at on a separate short-lived session so we don't commit
-    # inside the request-scoped session yielded by ``get_db``. Sharing the
-    # session caused two issues: (1) if the downstream route raised, the
-    # transaction state from this commit could leave the session in an
-    # inconsistent state; (2) silent except: pass swallowed connection errors
-    # and could starve the connection pool over time.
-    try:
-        from app.db import AsyncSessionLocal as _AKSession
-        async with _AKSession() as _aksess:
+    # Update last_used_at at most once per _LAST_USED_DEBOUNCE_S per key, off
+    # the request critical path. Spawning a fresh session per authed request
+    # to bump a timestamp was starving the connection pool under load.
+    import time as _time
+    _now_mono = _time.monotonic()
+    _last_seen = _last_used_at_seen.get(api_key.id, 0.0)
+    if _now_mono - _last_seen >= _LAST_USED_DEBOUNCE_S:
+        # move_to_end keeps the most-recently-bumped key at the tail; eviction
+        # below pops from the head (oldest) — both O(1).
+        _last_used_at_seen[api_key.id] = _now_mono
+        _last_used_at_seen.move_to_end(api_key.id)
+        while len(_last_used_at_seen) > _LAST_USED_CACHE_MAX:
+            _last_used_at_seen.popitem(last=False)
+
+        async def _bump_last_used(_key_id: str) -> None:
             try:
-                await _aksess.execute(
-                    update(ApiKey)
-                    .where(ApiKey.id == api_key.id)
-                    .values(last_used_at=datetime.now(timezone.utc))
-                )
-                await _aksess.commit()
+                from app.db import AsyncSessionLocal as _AKSession
+                async with _AKSession() as _aksess:
+                    try:
+                        await _aksess.execute(
+                            update(ApiKey)
+                            .where(ApiKey.id == _key_id)
+                            .values(last_used_at=datetime.now(timezone.utc))
+                        )
+                        await _aksess.commit()
+                    except Exception as _exc:
+                        await _aksess.rollback()
+                        logger.warning("api_key.last_used_at update failed: %s", _exc)
             except Exception as _exc:
-                await _aksess.rollback()
-                logger.debug("api_key.last_used_at update failed: %s", _exc)
-    except Exception as _exc:
-        logger.debug("api_key.last_used_at update session error: %s", _exc)
+                logger.warning("api_key.last_used_at session error: %s", _exc)
+
+        try:
+            from app.services.background_tasks import tracked_task as _tracked
+            _tracked(_bump_last_used(api_key.id), name="api_key.last_used_at")
+        except Exception:
+            # If we can't even schedule the bump, drop the seen-marker so the
+            # next request is allowed to retry.
+            _last_used_at_seen.pop(api_key.id, None)
 
     request.state.account_id = api_key.account_id
     request.state.sandbox = token.startswith("sk_test_")

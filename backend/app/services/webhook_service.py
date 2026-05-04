@@ -398,7 +398,14 @@ async def dispatch_event(
 
 
 async def _fire_extra_webhook(url: str, body: str, headers: dict, event: str) -> None:
-    status_code, _ = await _attempt_delivery(url, body, headers)
+    try:
+        status_code, _ = await _attempt_delivery(url, body, headers)
+    except Exception as exc:
+        # Never let a per-bot webhook failure escape this background task — it
+        # would surface as an asyncio "Task exception was never retrieved"
+        # warning with no audit trail and no operator-visible diagnostic.
+        logger.warning("Per-bot webhook crashed  url=%s  event=%s  exc=%s", url, event, exc)
+        return
     if status_code and status_code < 500:
         logger.info("Per-bot webhook ok  url=%s  event=%s  status=%d", url, event, status_code)
     else:
