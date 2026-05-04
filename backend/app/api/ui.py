@@ -28,6 +28,36 @@ _share_limiter = _Limiter(key_func=_get_remote_address)
 _TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 
+
+# ── Custom Jinja filters ──────────────────────────────────────────────────
+# Canonical, user-facing labels for every bot status. Centralising the
+# mapping prevents the inconsistent "_replace + title" output ("Call Ended"
+# vs "In Call") from leaking into the dashboard.
+_BOT_STATUS_LABELS = {
+    "ready": "Ready",
+    "scheduled": "Scheduled",
+    "queued": "Queued",
+    "joining": "Joining meeting",
+    "in_call": "In meeting",
+    "call_ended": "Call ended",
+    "transcribing": "Transcribing",
+    "analysing": "Analysing",
+    "analyzing": "Analysing",
+    "done": "Completed",
+    "error": "Error",
+    "cancelled": "Cancelled",
+}
+
+
+def _format_status(value: str) -> str:
+    """Render a bot status with a stable, human-friendly label."""
+    if not value:
+        return "—"
+    return _BOT_STATUS_LABELS.get(str(value).strip().lower(), str(value).replace("_", " ").capitalize())
+
+
+templates.env.filters["format_status"] = _format_status
+
 _COOKIE = "mb_token"
 
 

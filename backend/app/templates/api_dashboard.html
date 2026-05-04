@@ -68,6 +68,23 @@
     .btn-sm { padding: .3rem .65rem; font-size: .78rem; }
 
     .empty-state { text-align: center; padding: 2rem 1rem; color: var(--gray); font-size: .85rem; }
+    .empty-state .btn { margin-top: .75rem; }
+
+    /* Skeleton placeholder + retry block. */
+    @keyframes skShimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+    .skel {
+      background: linear-gradient(90deg, #E5DDD7 25%, #f5efeb 50%, #E5DDD7 75%);
+      background-size: 200% 100%;
+      animation: skShimmer 1.5s infinite;
+      border-radius: 6px; color: transparent !important; pointer-events: none; user-select: none;
+    }
+    .skel-line { height: 14px; margin: 6px 0; }
+    .skel-line.lg { height: 24px; }
+    .retry-block { text-align: center; padding: 1.5rem 1rem; color: var(--gray); }
+    .retry-block .retry-msg { font-size: .85rem; margin-bottom: .75rem; }
+
+    :focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 4px; }
+    :focus:not(:focus-visible) { outline: none; }
 
     /* Simple sparkline via canvas */
     canvas.sparkline { height: 50px; width: 100%; }
@@ -98,7 +115,11 @@
 
   <!-- KPI row -->
   <div class="stat-grid" id="kpiGrid">
-    <div class="stat-card"><div class="stat-label">Loading…</div><div class="stat-value">—</div></div>
+    <div class="stat-card"><div class="stat-label skel">Loading</div><div class="stat-value skel skel-line lg">—</div></div>
+    <div class="stat-card"><div class="stat-label skel">Loading</div><div class="stat-value skel skel-line lg">—</div></div>
+    <div class="stat-card"><div class="stat-label skel">Loading</div><div class="stat-value skel skel-line lg">—</div></div>
+    <div class="stat-card"><div class="stat-label skel">Loading</div><div class="stat-value skel skel-line lg">—</div></div>
+    <div class="stat-card"><div class="stat-label skel">Loading</div><div class="stat-value skel skel-line lg">—</div></div>
   </div>
 
   <div class="row g-3">
@@ -110,7 +131,11 @@
         <div class="card-body" style="padding:.5rem 0;">
           <table>
             <thead><tr><th>Platform</th><th>Bots</th><th>Share</th></tr></thead>
-            <tbody id="platformBody"><tr><td colspan="3" class="text-center text-muted">Loading…</td></tr></tbody>
+            <tbody id="platformBody">
+              <tr><td colspan="3"><div class="skel skel-line"></div></td></tr>
+              <tr><td colspan="3"><div class="skel skel-line"></div></td></tr>
+              <tr><td colspan="3"><div class="skel skel-line"></div></td></tr>
+            </tbody>
           </table>
         </div>
       </div>
@@ -123,7 +148,11 @@
         <div class="card-body" style="padding:.5rem 0;">
           <table>
             <thead><tr><th>Operation</th><th>Tokens</th><th>Cost (USD)</th></tr></thead>
-            <tbody id="opBody"><tr><td colspan="3" class="text-center text-muted">Loading…</td></tr></tbody>
+            <tbody id="opBody">
+              <tr><td colspan="3"><div class="skel skel-line"></div></td></tr>
+              <tr><td colspan="3"><div class="skel skel-line"></div></td></tr>
+              <tr><td colspan="3"><div class="skel skel-line"></div></td></tr>
+            </tbody>
           </table>
         </div>
       </div>
@@ -134,11 +163,16 @@
       <div class="card">
         <div class="card-header">
           Platform Overview
-          <button class="btn btn-outline btn-sm" onclick="loadAll()">↻ Refresh</button>
+          <button class="btn btn-outline btn-sm" id="refreshBtn" onclick="loadAll()" aria-label="Refresh dashboard data">↻ Refresh</button>
         </div>
         <div class="card-body">
           <div class="row g-3" id="analyticsGrid">
-            <div class="col-12 text-muted" style="font-size:.83rem;">Loading…</div>
+            <div class="col-6 col-md-4 col-lg-2"><div class="skel skel-line lg"></div></div>
+            <div class="col-6 col-md-4 col-lg-2"><div class="skel skel-line lg"></div></div>
+            <div class="col-6 col-md-4 col-lg-2"><div class="skel skel-line lg"></div></div>
+            <div class="col-6 col-md-4 col-lg-2"><div class="skel skel-line lg"></div></div>
+            <div class="col-6 col-md-4 col-lg-2"><div class="skel skel-line lg"></div></div>
+            <div class="col-6 col-md-4 col-lg-2"><div class="skel skel-line lg"></div></div>
           </div>
         </div>
       </div>
@@ -175,11 +209,27 @@ function fmtUsd(v) {
   return '$' + Number(v).toFixed(4);
 }
 
+function renderRetryRow(tbodyId, colspan, msg) {
+  const el = document.getElementById(tbodyId);
+  if (!el) return;
+  el.innerHTML = `<tr><td colspan="${colspan}"><div class="retry-block"><div class="retry-msg">${msg}</div><button class="btn btn-outline btn-sm" onclick="loadAll()">↻ Retry</button></div></td></tr>`;
+}
+
 // ── Load API usage ─────────────────────────────────────────────────────────────
 async function loadApiUsage() {
   try {
     const res = await fetch(API + '/analytics/api-usage', { headers: authHeaders() });
-    if (!res.ok) { console.warn('api-usage:', res.status); return; }
+    if (!res.ok) {
+      console.warn('api-usage:', res.status);
+      const msg = res.status === 401
+        ? 'Sign in again to view your usage.'
+        : `Couldn't load usage (HTTP ${res.status}).`;
+      renderRetryRow('platformBody', 3, msg);
+      renderRetryRow('opBody', 3, msg);
+      document.getElementById('kpiGrid').innerHTML =
+        `<div class="stat-card" style="grid-column:1/-1"><div class="retry-block"><div class="retry-msg">${msg}</div><button class="btn btn-outline btn-sm" onclick="loadAll()">↻ Retry</button></div></div>`;
+      return;
+    }
     const d = await res.json();
 
     // KPI cards
@@ -230,6 +280,11 @@ async function loadApiUsage() {
 
   } catch (e) {
     console.error('loadApiUsage:', e);
+    const msg = 'Network error — check your connection.';
+    renderRetryRow('platformBody', 3, msg);
+    renderRetryRow('opBody', 3, msg);
+    document.getElementById('kpiGrid').innerHTML =
+      `<div class="stat-card" style="grid-column:1/-1"><div class="retry-block"><div class="retry-msg">${msg}</div><button class="btn btn-outline btn-sm" onclick="loadAll()">↻ Retry</button></div></div>`;
     toast('Failed to load API usage', 'error');
   }
 }
@@ -271,12 +326,28 @@ async function loadAnalytics() {
     }
   } catch (e) {
     console.error('loadAnalytics:', e);
+    const grid = document.getElementById('analyticsGrid');
+    if (grid) grid.innerHTML =
+      `<div class="col-12"><div class="retry-block"><div class="retry-msg">Network error loading platform overview.</div><button class="btn btn-outline btn-sm" onclick="loadAll()">↻ Retry</button></div></div>`;
   }
 }
 
-function loadAll() {
-  loadApiUsage();
-  loadAnalytics();
+async function loadAll() {
+  const refreshBtn = document.getElementById('refreshBtn');
+  if (refreshBtn) {
+    refreshBtn.disabled = true;
+    refreshBtn.style.opacity = '0.6';
+    refreshBtn.style.cursor = 'progress';
+  }
+  try {
+    await Promise.all([loadApiUsage(), loadAnalytics()]);
+  } finally {
+    if (refreshBtn) {
+      refreshBtn.disabled = false;
+      refreshBtn.style.opacity = '';
+      refreshBtn.style.cursor = '';
+    }
+  }
 }
 
 loadAll();

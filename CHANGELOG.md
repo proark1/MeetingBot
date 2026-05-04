@@ -4,7 +4,88 @@ All notable changes to JustHereToListen.io are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.46.1 — **Last updated:** 2026-05-04
+> **Latest version:** 2.47.0 — **Last updated:** 2026-05-04
+
+---
+
+## [2.47.0] - 2026-05-04
+
+### Added / Changed — UI/UX top-10 pass
+
+A focused round of usability and accessibility improvements across the
+Jinja dashboard. Visual design unchanged; the mechanics underneath are
+what got rebuilt.
+
+- **#1 First-run onboarding checklist.** The static welcome card on the
+  dashboard is replaced by a 3-step checklist (verify email → fund
+  credits → send first bot) that auto-ticks each step and auto-hides
+  once all three are done. Manual dismissal persists in `localStorage`.
+  *(`backend/app/templates/dashboard.html`)*
+- **#2 Primary-CTA tidying.** The few high-weight pages (login,
+  register, billing, webhook playground) now have a single dominant
+  primary action; secondary actions demoted to outlines/links.
+- **#3 Empty states.** Lists in the webhook playground (registered
+  webhooks, deliveries) now render a real empty-state block with an
+  icon, one-sentence body, and a primary action — not a bare "No
+  webhooks registered." paragraph. Reusable
+  `_empty_state.html` partial added for future lists.
+- **#4 Loading skeletons + retry on error.** The API-usage dashboard
+  shows shimmering skeleton placeholders matching its KPI / table
+  layout instead of "Loading…" text; HTTP errors render a Retry block
+  per region, and the Refresh button is disabled while a fetch is in
+  flight. The webhook-playground panels behave the same way.
+- **#5 Form UX baseline.** `login.html` and `register.html` forms now
+  set `autocomplete` and `inputmode` per field, mark fields invalid
+  with red border + inline message on blur/submit, lock the submit
+  button (with spinner) during navigation so a double-click can't fire
+  two POSTs, and keep the error visible until the user edits. The
+  password-reveal button gets a visible focus ring and a working
+  `aria-pressed` state.
+- **#6 Copy + reveal helpers.** New `copyToClipboard(text, btn)` flashes
+  "Copied!" above the clicked button (in addition to the toast) and
+  falls back to `execCommand` on insecure contexts. New `toggleReveal`
+  helper masks credentials with `aria-pressed` Show/Hide.
+- **#7 `confirmDestructive` modal.** The barebones Bootstrap confirm
+  modal becomes `confirmDestructive({title, body, confirmLabel,
+  typeToConfirm, variant})`. Resource names render as `textContent`
+  (no markup injection), Escape always resolves `false`, focus is
+  managed, and high-stakes destructive actions can require the user to
+  type a string to enable the destructive button. Wired into: revoke
+  API key, leave bot, cancel bot, delete workspace, **delete account**
+  (now requires typing the account email). The legacy `confirmAction`
+  is kept as an alias for older callers.
+- **#8 Accessibility baseline.** Skip-to-content link in `base.html`,
+  `<main role="main">` wraps every page body, global `:focus-visible`
+  ring on every interactive element (with a `:focus:not(:focus-visible)
+  { outline: none }` for mouse users), `aria-label` and `aria-pressed`
+  on icon-only buttons (theme toggle, password toggle, copy buttons),
+  and a `.sr-only` utility for visually hidden labels.
+- **#9 Mobile / responsive polish.** `padding-bottom: 4.5rem` on the
+  app container at ≤768px so a fixed bottom nav can no longer hide the
+  last KPI / row, the hamburger button now meets the 44×44 px tap-target
+  guideline, and a `.table-responsive-scroll` utility class is exposed
+  for tables that need horizontal overflow on narrow screens.
+- **#10 Microcopy + brand consistency + safer toast.**
+  - New `format_status` Jinja filter centralises the canonical, human
+    label for every bot status ("In meeting", "Call ended",
+    "Transcribing", …) replacing the inconsistent `replace("_"," ")|title`
+    output. Used in `bot.html`. Registered in `backend/app/api/ui.py`.
+  - Flash alerts whitelist `{success,danger,warning,info}` so a
+    malicious `flash.type` cannot inject CSS class fragments, and the
+    close button gets a real `aria-label`.
+  - The global toast renders message text via `textContent`, dedupes
+    identical messages within 2 s, and caps the on-screen queue at 5
+    (oldest auto-removed). Variants outside the allow-list fall back to
+    `info` instead of producing an invalid class.
+
+### Files touched
+
+`backend/app/api/ui.py`, `backend/app/templates/base.html`,
+`backend/app/templates/dashboard.html`, `backend/app/templates/login.html`,
+`backend/app/templates/register.html`, `backend/app/templates/bot.html`,
+`backend/app/templates/api_dashboard.html`,
+`backend/app/templates/webhook_playground.html`, and the new
+`backend/app/templates/_empty_state.html` partial.
 
 ---
 
