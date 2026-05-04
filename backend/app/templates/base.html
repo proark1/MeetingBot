@@ -996,9 +996,10 @@
 {% if account %}
 {# ════════════════════════════════════════════════════════════════════
    Logged-in users see the app shell: persistent sidebar + content area.
+   _path is scoped to the sidebar with {% with %} so it doesn't leak.
    ════════════════════════════════════════════════════════════════════ #}
-{% set _path = request.url.path %}
 <div class="app-shell">
+{% with _path = request.url.path %}
 
   <div class="sidebar-overlay" id="sidebarOverlay" onclick="closeAppSidebar()"></div>
 
@@ -1079,6 +1080,7 @@
       <a href="/logout" class="btn-out">Out</a>
     </div>
   </aside>
+{% endwith %}
 
   <div class="app-main">
     <header class="app-topbar" role="banner">

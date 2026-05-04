@@ -2191,8 +2191,11 @@ function _activateSection(name) {
 function switchSection(name) {
   _activateSection(name);
   // Use #section- prefix so back/forward and the global sidebar links agree.
+  // Stay on whatever path the page was loaded under — this script only runs
+  // on the dashboard route, but reading window.location.pathname avoids
+  // hardcoding the URL and keeps any prefix (e.g. mounted under /app).
   const hash = name === 'overview' ? '' : '#section-' + name;
-  window.history.pushState({ section: name }, '', '/dashboard' + hash);
+  window.history.pushState({ section: name }, '', window.location.pathname + hash);
 }
 
 // Wire global app-shell sidebar links into the SPA section switcher.
