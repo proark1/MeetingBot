@@ -993,9 +993,12 @@
 
 <a href="#main-content" class="skip-link">Skip to main content</a>
 
-{% if account %}
 {# ════════════════════════════════════════════════════════════════════
-   Logged-in users see the app shell: persistent sidebar + content area.
+   App shell: persistent sidebar + content area. Every page that
+   extends base.html requires authentication (the route handlers
+   redirect to /login when the cookie is missing), so the sidebar is
+   unconditionally rendered here. Public pages (login, register,
+   landing, share) define their own <body> and don't extend this file.
    _path is scoped to the sidebar with {% with %} so it doesn't leak.
    ════════════════════════════════════════════════════════════════════ #}
 <div class="app-shell">
@@ -1112,40 +1115,6 @@
     </main>
   </div>
 </div>
-
-{% else %}
-{# ════════════════════════════════════════════════════════════════════
-   Guest users keep the lightweight top nav (used by /, /login, /register).
-   ════════════════════════════════════════════════════════════════════ #}
-<nav class="app-nav">
-  <div class="d-flex align-items-center">
-    <a class="app-nav-brand" href="/">
-      <div class="brand-icon">🎧</div>
-      <span class="brand-text">JustHereToListen.io</span>
-    </a>
-  </div>
-
-  <div class="nav-right">
-    <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle dark mode" title="Toggle dark mode">
-      <svg class="icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-      <svg class="icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-    </button>
-    <a href="/login" class="btn-nav-logout">Login</a>
-    <a href="/register" class="btn-nav-cta">Get started</a>
-  </div>
-</nav>
-
-<main id="main-content" class="app-container" role="main">
-  {% if flash %}
-  {% set _flash_type = flash.type if flash.type in ['success','danger','warning','info'] else 'info' %}
-  <div class="alert alert-{{ _flash_type }} alert-dismissible fade show mb-4" role="alert">
-    {{ flash.message }}
-    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Dismiss notification"></button>
-  </div>
-  {% endif %}
-  {% block content %}{% endblock %}
-</main>
-{% endif %}
 
 <!-- Toast container (used for inline interactions like "Copied" feedback) -->
 <div id="toast-container" class="position-fixed bottom-0 end-0 p-3" style="z-index: 1100;">

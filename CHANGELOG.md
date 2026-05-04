@@ -4,7 +4,35 @@ All notable changes to JustHereToListen.io are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.48.0 — **Last updated:** 2026-05-04
+> **Latest version:** 2.48.1 — **Last updated:** 2026-05-04
+
+---
+
+## [2.48.1] - 2026-05-04
+
+### Fixed — base.html duplicate `content` block (regression from 2.48.0)
+
+The 2.48.0 app-shell refactor wrapped the body in a
+`{% if account %}` … `{% else %}` … `{% endif %}` block and put a
+`{% block content %}{% endblock %}` inside *each* branch. Jinja
+forbids defining the same block twice in one template, so every page
+that extends `base.html` (`/dashboard`, `/topup`, `/bot/{id}`, `/admin`)
+raised `TemplateAssertionError` at render time and returned a generic
+500.
+
+The guest branch was unreachable in practice — every route that
+extends `base.html` already redirects to `/login` when there's no
+account, and the four guest pages (`/`, `/login`, `/register`,
+`/share/...`) ship their own `<body>` and don't extend `base.html`.
+We dropped the dead branch entirely so there's a single
+`{% block content %}` and the dashboard renders again.
+
+Caught locally with `env.get_template("dashboard.html").render(…)`,
+which now succeeds (alongside `topup.html`, `bot.html`, `admin.html`).
+
+### Files touched
+
+`backend/app/templates/base.html`.
 
 ---
 
