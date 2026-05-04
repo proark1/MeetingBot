@@ -364,23 +364,58 @@
         </a>
       </div>
 
-      {% if not recent_bots %}
-      <!-- Welcome card for new users -->
-      <div class="card mb-3" id="welcome-card" style="background:linear-gradient(135deg,#1B2033 0%,#2A3048 100%);color:white;border:none;border-radius:14px;padding:1.5rem 2rem;position:relative;overflow:hidden">
-        <div style="position:absolute;top:-20px;right:-20px;width:120px;height:120px;border-radius:50%;background:rgba(255,255,255,0.04)"></div>
-        <div style="position:absolute;bottom:-30px;right:40px;width:80px;height:80px;border-radius:50%;background:rgba(255,255,255,0.03)"></div>
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;position:relative">
+      {# ── First-run onboarding checklist (Theme 1) ───────────────────────
+         Three concrete steps every new account has to complete before the
+         product becomes useful: verify email → fund credits → send a bot.
+         The card auto-hides once all three are done, and each user can
+         dismiss it manually (persisted in localStorage). #}
+      {% set _step_email = account.email_verified if account.email_verified is defined else true %}
+      {% set _step_credits = (balance is defined and balance >= 0.10) %}
+      {% set _step_bot = (recent_bots|length > 0) if recent_bots is defined else false %}
+      {% set _onboarding_done = _step_email and _step_credits and _step_bot %}
+      {% if not _onboarding_done %}
+      <div class="card mb-3" id="onboarding-card" data-account-id="{{ account.id }}" style="background:linear-gradient(135deg,#1B2033 0%,#2A3048 100%);color:white;border:none;border-radius:14px;padding:1.5rem 2rem;position:relative;overflow:hidden">
+        <div style="position:absolute;top:-20px;right:-20px;width:120px;height:120px;border-radius:50%;background:rgba(255,255,255,0.04)" aria-hidden="true"></div>
+        <div style="position:absolute;bottom:-30px;right:40px;width:80px;height:80px;border-radius:50%;background:rgba(255,255,255,0.03)" aria-hidden="true"></div>
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;position:relative;gap:1rem">
           <div>
             <div style="font-size:1.2rem;font-weight:700;margin-bottom:0.4rem">Welcome to JustHereToListen.io</div>
-            <div style="opacity:0.85;font-size:0.9rem;line-height:1.5;max-width:500px">Send your first bot to a meeting — it will record, transcribe, and analyse everything with AI. Just paste a meeting URL below.</div>
+            <div style="opacity:0.85;font-size:0.9rem;line-height:1.5;max-width:500px">Three quick steps and you're recording your first meeting.</div>
           </div>
-          <button onclick="this.closest('#welcome-card').remove()" style="background:none;border:none;color:white;opacity:0.5;cursor:pointer;font-size:1.2rem;padding:0;line-height:1">×</button>
+          <button type="button" onclick="dismissOnboarding(this)" aria-label="Dismiss welcome checklist" style="background:none;border:none;color:white;opacity:0.5;cursor:pointer;font-size:1.4rem;padding:0;line-height:1;min-width:32px;min-height:32px">×</button>
         </div>
-        <div class="d-flex gap-2 mt-3">
-          <a href="#section-bots" onclick="_activateSection('bots')" class="btn btn-light btn-sm" style="font-weight:600;border-radius:8px">Send your first bot</a>
-          <a href="/api/docs" target="_blank" class="btn btn-outline-light btn-sm" style="border-radius:8px;opacity:0.8">API docs</a>
-        </div>
+        <ol class="onboarding-steps" style="list-style:none;padding:0;margin:1.1rem 0 0;display:flex;flex-direction:column;gap:0.55rem">
+          <li class="onboarding-step {% if _step_email %}done{% endif %}" style="display:flex;align-items:center;gap:0.7rem;font-size:0.9rem">
+            <span aria-hidden="true" style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:{% if _step_email %}#10b981{% else %}rgba(255,255,255,0.15){% endif %};color:#fff;font-size:0.75rem;font-weight:700">{% if _step_email %}✓{% else %}1{% endif %}</span>
+            <span style="opacity:{% if _step_email %}0.7{% else %}1{% endif %};text-decoration:{% if _step_email %}line-through{% else %}none{% endif %}">Verify your email{% if not _step_email %} <a href="/account/verify-email" style="color:#a7c0ff;margin-left:0.5rem;font-weight:600;text-decoration:underline">Resend →</a>{% endif %}</span>
+          </li>
+          <li class="onboarding-step {% if _step_credits %}done{% endif %}" style="display:flex;align-items:center;gap:0.7rem;font-size:0.9rem">
+            <span aria-hidden="true" style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:{% if _step_credits %}#10b981{% else %}rgba(255,255,255,0.15){% endif %};color:#fff;font-size:0.75rem;font-weight:700">{% if _step_credits %}✓{% else %}2{% endif %}</span>
+            <span style="opacity:{% if _step_credits %}0.7{% else %}1{% endif %};text-decoration:{% if _step_credits %}line-through{% else %}none{% endif %}">Fund credits{% if not _step_credits %} <a href="/topup" style="color:#a7c0ff;margin-left:0.5rem;font-weight:600;text-decoration:underline">Top up →</a>{% endif %}</span>
+          </li>
+          <li class="onboarding-step {% if _step_bot %}done{% endif %}" style="display:flex;align-items:center;gap:0.7rem;font-size:0.9rem">
+            <span aria-hidden="true" style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:{% if _step_bot %}#10b981{% else %}rgba(255,255,255,0.15){% endif %};color:#fff;font-size:0.75rem;font-weight:700">{% if _step_bot %}✓{% else %}3{% endif %}</span>
+            <span style="opacity:{% if _step_bot %}0.7{% else %}1{% endif %};text-decoration:{% if _step_bot %}line-through{% else %}none{% endif %}">Send your first bot{% if not _step_bot %} <a href="#section-bots" onclick="_activateSection('bots')" style="color:#a7c0ff;margin-left:0.5rem;font-weight:600;text-decoration:underline">Try it →</a>{% endif %}</span>
+          </li>
+        </ol>
       </div>
+      <script>
+        // Restore dismissed state if the user explicitly hid this checklist
+        // earlier. Once all three steps are done it auto-hides server-side.
+        (function () {
+          const card = document.getElementById('onboarding-card');
+          if (!card) return;
+          const key = 'jhtl.onboarding-dismissed.' + (card.dataset.accountId || 'anon');
+          if (localStorage.getItem(key) === '1') card.style.display = 'none';
+        })();
+        function dismissOnboarding(btn) {
+          const card = btn.closest('#onboarding-card');
+          if (!card) return;
+          const key = 'jhtl.onboarding-dismissed.' + (card.dataset.accountId || 'anon');
+          localStorage.setItem(key, '1');
+          card.style.display = 'none';
+        }
+      </script>
       {% endif %}
 
       <!-- KPI row -->
@@ -1689,7 +1724,14 @@
 
   // ── Delete workspace ──
   async function deleteWorkspace(id, name) {
-    if (!confirm(`Delete workspace "${name}"? This action cannot be undone.`)) return;
+    const ok = await confirmDestructive({
+      title: `Delete workspace "${name}"?`,
+      body: 'This removes every member, deletes all bots associated with the workspace, and revokes shared API access. It cannot be undone.',
+      confirmLabel: 'Delete workspace',
+      typeToConfirm: name,
+      variant: 'danger',
+    });
+    if (!ok) return;
     try {
       await apiFetch(`/api/v1/workspaces/${id}`, { method: 'DELETE' });
       showToast('Workspace deleted', 'success');
@@ -2201,7 +2243,13 @@ function _prependKeyRow(data, mode) {
 }
 
 async function _handleRevoke() {
-  if (!confirm('Revoke this key?')) return;
+  const ok = await confirmDestructive({
+    title: 'Revoke this API key?',
+    body: 'Any service still using it will start getting 401 Unauthorized immediately. This cannot be undone — you can issue a new key, but the revoked one will never work again.',
+    confirmLabel: 'Revoke key',
+    variant: 'danger',
+  });
+  if (!ok) return;
   const btn = this;
   btn.disabled = true;
   try {
@@ -2972,7 +3020,13 @@ async function _loadDashMyUsage() {
 
 // ── Leave bot gracefully from dashboard ──────────────────────────────────────
 async function leaveBot(botId, btn) {
-  if (!confirm('Tell the bot to leave the meeting? It will still transcribe and analyse the recording.')) return;
+  const ok = await confirmDestructive({
+    title: 'Have the bot leave now?',
+    body: 'The bot will leave the meeting immediately. The recording so far is kept and will still be transcribed and analysed.',
+    confirmLabel: 'Leave meeting',
+    variant: 'warning',
+  });
+  if (!ok) return;
   btn.disabled = true;
   try {
     await apiFetch(`/dashboard/bot/${botId}/leave`, { method: 'POST' });
@@ -2986,7 +3040,13 @@ async function leaveBot(botId, btn) {
 
 // ── Cancel bot from dashboard ────────────────────────────────────────────────
 async function cancelBot(botId, btn) {
-  if (!confirm('Cancel this bot?')) return;
+  const ok = await confirmDestructive({
+    title: 'Cancel this bot?',
+    body: 'The bot will stop joining or recording. Any transcript captured so far is discarded.',
+    confirmLabel: 'Cancel bot',
+    variant: 'danger',
+  });
+  if (!ok) return;
   btn.disabled = true;
   try {
     await apiFetch(`/dashboard/bot/${botId}/cancel`, { method: 'POST' });
@@ -3126,8 +3186,15 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // ── GDPR account deletion ────────────────────────────────────────────────────
 async function deleteAccount() {
-  if (!confirm('Are you sure you want to permanently delete your account and ALL data? This cannot be undone.')) return;
-  if (!confirm('FINAL WARNING: This will delete all bots, transcripts, recordings, API keys, and billing history. Type your email to confirm.')) return;
+  const email = "{{ account.email|e }}";
+  const ok = await confirmDestructive({
+    title: 'Permanently delete your account?',
+    body: 'This deletes every bot, transcript, recording, API key, integration, webhook, and billing record on this account. It cannot be undone — even by support. To confirm, type your email below.',
+    confirmLabel: 'Delete my account',
+    typeToConfirm: email,
+    variant: 'danger',
+  });
+  if (!ok) return;
   try {
     await apiFetch('/dashboard/delete-account', { method: 'POST' });
     showToast('Account deleted. Redirecting...', 'success');

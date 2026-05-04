@@ -83,7 +83,7 @@
         {% elif bot.status == "cancelled" %}
         <span class="chip chip-gray">Cancelled</span>
         {% elif bot.status in ["joining", "in_call", "call_ended", "transcribing"] %}
-        <span class="chip chip-info">{{ bot.status|replace("_"," ")|title }}</span>
+        <span class="chip chip-info">{{ bot.status|format_status }}</span>
         <div class="status-progress"><div class="status-progress-bar"></div></div>
         {% elif bot.status == "scheduled" %}
         <span class="chip chip-info">Scheduled</span>
@@ -563,7 +563,7 @@
 <div class="card card-pad mb-4">
   <div class="section-title mb-2">Transcript</div>
   <div style="color:#64748b">
-    Session is currently <strong>{{ bot.status|replace("_"," ") }}</strong>. Transcript will be available once the bot completes.
+    Session is currently <strong>{{ bot.status|format_status }}</strong>. Transcript will be available once the bot completes.
     <br><small style="color:#94a3b8">Refresh the page to check for updates.</small>
   </div>
 </div>

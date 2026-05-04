@@ -1,0 +1,47 @@
+{# Reusable empty-state partial.
+
+Usage:
+    {% include "_empty_state.html" with context %}
+
+The caller sets these variables before include:
+    es_icon          — emoji or short SVG snippet (default 📭)
+    es_title         — short headline ("No webhooks yet")
+    es_body          — one sentence explaining what this list will show
+    es_cta_label     — text for the primary action button
+    es_cta_href      — link target for the primary action
+    es_cta_onclick   — optional onclick handler (instead of href)
+    es_doc_label     — optional secondary "Learn more" link label
+    es_doc_href      — optional secondary link target
+
+Anything not set falls back to a sane default. Pure markup — no JS.
+#}
+<div class="empty-state-block" role="status" style="
+    text-align:center;
+    padding:2.25rem 1rem;
+    background:var(--white,#fff);
+    border:1px dashed var(--border,#D8CFC8);
+    border-radius:14px;
+    color:var(--gray,#6B7280);
+">
+  <div aria-hidden="true" style="font-size:2.25rem;line-height:1;margin-bottom:0.5rem">{{ es_icon|default('📭') }}</div>
+  <div style="font-size:1rem;font-weight:600;color:var(--dark,#1B2033);margin-bottom:0.25rem">
+    {{ es_title|default('Nothing here yet') }}
+  </div>
+  {% if es_body %}
+  <div style="font-size:0.85rem;max-width:420px;margin:0 auto 1rem;line-height:1.5">{{ es_body }}</div>
+  {% else %}
+  <div style="margin-bottom:1rem"></div>
+  {% endif %}
+  {% if es_cta_label %}
+  <div class="d-inline-flex gap-2 align-items-center">
+    {% if es_cta_onclick %}
+    <button type="button" class="btn btn-primary btn-sm" onclick="{{ es_cta_onclick }}">{{ es_cta_label }}</button>
+    {% else %}
+    <a class="btn btn-primary btn-sm" href="{{ es_cta_href|default('#') }}">{{ es_cta_label }}</a>
+    {% endif %}
+    {% if es_doc_label and es_doc_href %}
+    <a href="{{ es_doc_href }}" target="_blank" rel="noopener" class="btn btn-link btn-sm" style="text-decoration:none;font-size:0.8rem">{{ es_doc_label }} ↗</a>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>

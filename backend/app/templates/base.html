@@ -170,6 +170,46 @@
     .card:hover, .stat-card:hover { transform: translateY(-1px); }
 
     :focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 4px; }
+    :focus:not(:focus-visible) { outline: none; }
+
+    /* Skip-to-content link — only visible when keyboard-focused. */
+    .skip-link {
+      position: absolute; top: -100px; left: 12px; z-index: 2000;
+      background: var(--primary); color: #fff; padding: 8px 14px;
+      border-radius: 8px; font-size: 13px; font-weight: 600;
+      text-decoration: none; transition: top 0.15s;
+    }
+    .skip-link:focus { top: 12px; color: #fff; }
+
+    /* Visually hidden but available to screen readers. */
+    .sr-only {
+      position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+      overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+    }
+
+    /* Inline form error block (used by setFieldError). */
+    .field-error {
+      color: var(--danger); font-size: 12px; margin-top: 4px;
+      display: flex; align-items: center; gap: 4px;
+    }
+    .form-control.is-invalid, .form-select.is-invalid { border-color: var(--danger); }
+    .form-control.is-invalid:focus, .form-select.is-invalid:focus {
+      box-shadow: 0 0 0 3px rgba(239,68,68,0.15);
+    }
+
+    /* Copy-button momentary "Copied!" feedback. */
+    .copy-btn { position: relative; }
+    .copy-btn[data-copied="true"]::after {
+      content: 'Copied!'; position: absolute; top: -28px; left: 50%;
+      transform: translateX(-50%); background: var(--dark); color: #fff;
+      padding: 3px 8px; border-radius: 5px; font-size: 11px; white-space: nowrap;
+      pointer-events: none; animation: copyFade 1.4s ease-out;
+    }
+    @keyframes copyFade {
+      0% { opacity: 0; transform: translate(-50%, 4px); }
+      15%, 70% { opacity: 1; transform: translate(-50%, 0); }
+      100% { opacity: 0; }
+    }
 
     .btn-loading { position: relative; color: transparent !important; pointer-events: none; }
     .btn-loading::after {
@@ -583,12 +623,13 @@
 
     /* ── Responsive ──────────────────────────────────────────────────────── */
     @media (max-width: 768px) {
-      .app-container { padding: 1rem; }
+      .app-container { padding: 1rem; padding-bottom: 4.5rem; }
       .user-email-text { display: none !important; }
       .nav-links { display: none !important; }
-      .nav-toggle { display: inline-flex; }
+      .nav-toggle { display: inline-flex; min-width: 44px; min-height: 44px; padding: 8px 10px; }
       .nav-right { gap: 0.35rem; }
       .btn-nav-logout { font-size: 11px; padding: 3px 8px; }
+      .table-responsive-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
     }
     @media (max-width: 480px) {
       .app-nav { padding: 0 0.75rem; }
@@ -683,6 +724,8 @@
 </head>
 <body>
 
+<a href="#main-content" class="skip-link">Skip to main content</a>
+
 <!-- ── Navbar ──────────────────────────────────────────────────────────── -->
 <nav class="app-nav">
   <div class="d-flex align-items-center">
@@ -741,15 +784,17 @@
 {% endif %}
 
 <!-- ── Main ────────────────────────────────────────────────────────────── -->
-<div class="app-container">
+<main id="main-content" class="app-container" role="main">
   {% if flash %}
-  <div class="alert alert-{{ flash.type }} alert-dismissible fade show mb-4" role="alert">
+  {# Whitelist alert variants so a malicious flash.type cannot inject classes. #}
+  {% set _flash_type = flash.type if flash.type in ['success','danger','warning','info'] else 'info' %}
+  <div class="alert alert-{{ _flash_type }} alert-dismissible fade show mb-4" role="alert">
     {{ flash.message }}
-    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Dismiss notification"></button>
   </div>
   {% endif %}
   {% block content %}{% endblock %}
-</div>
+</main>
 
 <!-- Toast container (used for inline interactions like "Copied" feedback) -->
 <div id="toast-container" class="position-fixed bottom-0 end-0 p-3" style="z-index: 1100;">
@@ -773,29 +818,66 @@
     return body;
   }
 
+  // Whitelist of allowed toast variants — anything else falls back to "info"
+  // so a stray showToast("ok", "<script>") can't inject a class fragment.
+  const _TOAST_VARIANTS = new Set(['success', 'danger', 'warning', 'info', 'primary', 'secondary']);
+  // Dedupe identical toasts within this window (ms) and cap the on-screen
+  // queue so rapid actions can't spam the UI.
+  const _TOAST_DEDUPE_MS = 2000;
+  const _TOAST_MAX_VISIBLE = 5;
+  const _toastSeen = new Map();      // key → expiry timestamp
+  const _toastQueue = [];            // currently-rendered DOM elements
+
   function showToast(message, variant = 'success', duration = 2500) {
     const container = document.getElementById('toast-container');
-    if (!container) return;
+    if (!container) return null;
+
+    const safeVariant = _TOAST_VARIANTS.has(variant) ? variant : 'info';
+    const key = `${safeVariant}::${message}`;
+    const now = Date.now();
+    // Dedupe identical messages.
+    const expiry = _toastSeen.get(key);
+    if (expiry && expiry > now) return null;
+    _toastSeen.set(key, now + _TOAST_DEDUPE_MS);
+
+    // Cap on-screen toasts: drop the oldest if over capacity.
+    while (_toastQueue.length >= _TOAST_MAX_VISIBLE) {
+      const oldest = _toastQueue.shift();
+      if (oldest && oldest.parentNode) oldest.remove();
+    }
 
     const toastEl = document.createElement('div');
-    toastEl.className = `toast align-items-center text-bg-${variant} border-0`;
-    toastEl.role = 'alert';
-    toastEl.ariaLive = 'assertive';
-    toastEl.ariaAtomic = 'true';
+    toastEl.className = `toast align-items-center text-bg-${safeVariant} border-0`;
+    toastEl.setAttribute('role', safeVariant === 'danger' ? 'alert' : 'status');
+    toastEl.setAttribute('aria-live', safeVariant === 'danger' ? 'assertive' : 'polite');
+    toastEl.setAttribute('aria-atomic', 'true');
 
-    toastEl.innerHTML = `
-      <div class="d-flex">
-        <div class="toast-body" style="font-size:0.9rem;">
-          ${message}
-        </div>
-        <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
-      </div>
-    `;
+    // textContent on the body, not innerHTML — never trust the message.
+    const flex = document.createElement('div');
+    flex.className = 'd-flex';
+    const body = document.createElement('div');
+    body.className = 'toast-body';
+    body.style.fontSize = '0.9rem';
+    body.textContent = message;
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'btn-close btn-close-white me-2 m-auto';
+    close.setAttribute('data-bs-dismiss', 'toast');
+    close.setAttribute('aria-label', 'Close notification');
+    flex.appendChild(body);
+    flex.appendChild(close);
+    toastEl.appendChild(flex);
 
     container.appendChild(toastEl);
+    _toastQueue.push(toastEl);
+
     const toast = new bootstrap.Toast(toastEl, { delay: duration });
     toast.show();
-    toastEl.addEventListener('hidden.bs.toast', () => toastEl.remove());
+    toastEl.addEventListener('hidden.bs.toast', () => {
+      const idx = _toastQueue.indexOf(toastEl);
+      if (idx >= 0) _toastQueue.splice(idx, 1);
+      toastEl.remove();
+    });
     return toast;
   }
 
@@ -811,29 +893,200 @@
     localStorage.setItem('theme', next);
   }
 
-  function confirmAction(message, actionLabel = 'Confirm') {
+  /**
+   * confirmDestructive — Bootstrap-modal confirmation for destructive actions.
+   *
+   *   const ok = await confirmDestructive({
+   *     title: 'Delete bot?',
+   *     body: 'This permanently deletes the transcript, analysis, and any recordings.',
+   *     confirmLabel: 'Delete bot',     // optional, default "Confirm"
+   *     typeToConfirm: 'q3-board-sync', // optional; if set, button enables only when input matches
+   *     variant: 'danger',              // 'danger' | 'warning' | 'primary'
+   *   });
+   *
+   * Returns a Promise<boolean>. Cancel / Escape / outside-click → false.
+   * Any string in title/body/confirmLabel/typeToConfirm is rendered as
+   * textContent — never innerHTML — so user-supplied resource names cannot
+   * inject markup.
+   */
+  function confirmDestructive(opts = {}) {
+    const {
+      title = 'Are you sure?',
+      body = '',
+      confirmLabel = 'Confirm',
+      cancelLabel = 'Cancel',
+      typeToConfirm = '',
+      variant = 'danger',
+    } = (typeof opts === 'string' ? { body: opts } : opts);
+
+    const safeVariant = ['danger', 'warning', 'primary'].includes(variant) ? variant : 'danger';
+
     return new Promise(resolve => {
-      const id = 'confirm-' + Date.now();
-      const modal = document.createElement('div');
-      modal.innerHTML = `
-        <div class="modal fade" id="${id}" tabindex="-1">
-          <div class="modal-dialog modal-sm modal-dialog-centered">
+      const id = 'confirm-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+      const wrap = document.createElement('div');
+      wrap.innerHTML = `
+        <div class="modal fade" id="${id}" tabindex="-1" aria-labelledby="${id}-title" aria-modal="true" role="dialog">
+          <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content" style="border-radius:14px">
-              <div class="modal-body p-4 text-center">
-                <p style="font-size:14px;margin:0 0 1.25rem">${message}</p>
-                <div class="d-flex gap-2 justify-content-center">
-                  <button class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
-                  <button class="btn btn-danger btn-sm" id="${id}-ok">${actionLabel}</button>
+              <div class="modal-body p-4">
+                <h2 id="${id}-title" class="h6 fw-bold mb-2"></h2>
+                <p class="text-muted mb-3" style="font-size:13.5px;line-height:1.55"></p>
+                <div class="confirm-type-block d-none mb-3">
+                  <label class="form-label" for="${id}-input"></label>
+                  <input id="${id}-input" type="text" class="form-control form-control-sm" autocomplete="off" autocapitalize="off" spellcheck="false">
+                </div>
+                <div class="d-flex gap-2 justify-content-end">
+                  <button class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">${cancelLabel}</button>
+                  <button class="btn btn-${safeVariant} btn-sm" id="${id}-ok">${confirmLabel}</button>
                 </div>
               </div>
             </div>
           </div>
         </div>`;
-      document.body.appendChild(modal);
-      const bsModal = new bootstrap.Modal(document.getElementById(id));
-      document.getElementById(id + '-ok').onclick = () => { bsModal.hide(); resolve(true); };
-      document.getElementById(id).addEventListener('hidden.bs.modal', () => { modal.remove(); resolve(false); });
+      document.body.appendChild(wrap);
+
+      const root = document.getElementById(id);
+      // Render text via textContent so resource names can't inject markup.
+      root.querySelector('h2').textContent = title;
+      root.querySelector('p').textContent = body;
+      const okBtn = document.getElementById(id + '-ok');
+
+      let resolved = false;
+      const finish = (val) => { if (resolved) return; resolved = true; bsModal.hide(); resolve(val); };
+
+      if (typeToConfirm) {
+        const block = root.querySelector('.confirm-type-block');
+        const inp = root.querySelector(`#${id}-input`);
+        const lbl = block.querySelector('label');
+        block.classList.remove('d-none');
+        lbl.textContent = `Type "${typeToConfirm}" to confirm:`;
+        okBtn.disabled = true;
+        inp.addEventListener('input', () => {
+          okBtn.disabled = inp.value.trim() !== typeToConfirm;
+        });
+      }
+
+      okBtn.addEventListener('click', () => finish(true));
+      const bsModal = new bootstrap.Modal(root);
+      root.addEventListener('shown.bs.modal', () => {
+        const inp = root.querySelector('input');
+        if (inp) inp.focus(); else okBtn.focus();
+      });
+      root.addEventListener('hidden.bs.modal', () => { wrap.remove(); finish(false); });
       bsModal.show();
+    });
+  }
+
+  // Back-compat alias for older callers.
+  function confirmAction(message, actionLabel = 'Confirm') {
+    return confirmDestructive({ body: message, confirmLabel: actionLabel });
+  }
+
+  /**
+   * copyToClipboard — copy text and (optionally) flash "Copied!" on a button.
+   * Falls back to a hidden textarea + execCommand on insecure contexts.
+   */
+  async function copyToClipboard(text, btn) {
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'absolute';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        ta.remove();
+      }
+      if (btn) {
+        btn.setAttribute('data-copied', 'true');
+        setTimeout(() => btn.removeAttribute('data-copied'), 1400);
+      }
+      showToast('Copied to clipboard', 'success', 1500);
+      return true;
+    } catch (err) {
+      showToast('Could not copy — please copy manually', 'danger', 3000);
+      return false;
+    }
+  }
+
+  /**
+   * Mask / reveal helper for credential fields.
+   *   <input id="api-key" value="sk_live_..." readonly>
+   *   <button onclick="toggleReveal('api-key', this)">Show</button>
+   */
+  function toggleReveal(inputId, btn) {
+    const inp = document.getElementById(inputId);
+    if (!inp) return;
+    const showing = inp.type === 'text';
+    inp.type = showing ? 'password' : 'text';
+    if (btn) {
+      btn.setAttribute('aria-pressed', String(!showing));
+      btn.textContent = showing ? 'Show' : 'Hide';
+    }
+  }
+
+  /**
+   * setFieldError / clearFieldErrors — inline form validation feedback.
+   * Errors render under the input, not in a toast or alert at the top.
+   */
+  function setFieldError(inputEl, message) {
+    if (!inputEl) return;
+    clearFieldErrors(inputEl);
+    inputEl.classList.add('is-invalid');
+    inputEl.setAttribute('aria-invalid', 'true');
+    const err = document.createElement('div');
+    err.className = 'field-error';
+    err.setAttribute('role', 'alert');
+    err.textContent = message;
+    inputEl.insertAdjacentElement('afterend', err);
+    inputEl.addEventListener('input', () => clearFieldErrors(inputEl), { once: true });
+  }
+
+  function clearFieldErrors(scope) {
+    if (!scope) return;
+    if (scope instanceof HTMLInputElement || scope instanceof HTMLSelectElement || scope instanceof HTMLTextAreaElement) {
+      scope.classList.remove('is-invalid');
+      scope.removeAttribute('aria-invalid');
+      const next = scope.nextElementSibling;
+      if (next && next.classList && next.classList.contains('field-error')) next.remove();
+      return;
+    }
+    scope.querySelectorAll('.is-invalid').forEach(el => el.classList.remove('is-invalid'));
+    scope.querySelectorAll('.field-error').forEach(el => el.remove());
+    scope.querySelectorAll('[aria-invalid]').forEach(el => el.removeAttribute('aria-invalid'));
+  }
+
+  /**
+   * bindForm — disable submit button + show inline spinner during submit;
+   * route the response through onSubmit({form, data, setFieldError}). The
+   * handler is async; throwing surfaces the error as a toast.
+   */
+  function bindForm(form, onSubmit) {
+    if (!form || form.dataset.bound === '1') return;
+    form.dataset.bound = '1';
+    form.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const submit = form.querySelector('button[type="submit"], input[type="submit"]');
+      clearFieldErrors(form);
+      if (submit) {
+        submit.disabled = true;
+        submit.classList.add('btn-loading');
+      }
+      try {
+        const data = Object.fromEntries(new FormData(form).entries());
+        await onSubmit({ form, data, setFieldError });
+      } catch (err) {
+        showToast(err && err.message ? err.message : 'Something went wrong', 'danger', 4000);
+      } finally {
+        if (submit) {
+          submit.disabled = false;
+          submit.classList.remove('btn-loading');
+        }
+      }
     });
   }
 

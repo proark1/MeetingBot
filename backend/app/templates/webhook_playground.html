@@ -184,40 +184,142 @@ function fmtTime(iso) {
 }
 
 function statusBadge(status) {
-  const m = { delivered:'badge-success', failed:'badge-danger', pending:'badge-warning', retrying:'badge-info' };
-  return `<span class="badge ${m[status]||'badge-info'}">${status}</span>`;
+  const m = {
+    delivered: 'badge-success', active: 'badge-success',
+    failed: 'badge-danger', inactive: 'badge-warning',
+    pending: 'badge-warning', retrying: 'badge-info',
+  };
+  // Defensive: render as text only (status comes from the API).
+  const safe = String(status || '');
+  const cls = m[safe] || 'badge-info';
+  const span = document.createElement('span');
+  span.className = `badge ${cls}`;
+  span.textContent = safe;
+  return span.outerHTML;
 }
 
 // ── Load webhooks ──────────────────────────────────────────────────────────────
 async function loadWebhooks() {
-  const res = await fetch(API + '/webhook', { headers: authHeaders() });
-  const list = await res.json();
   const el = document.getElementById('webhookList');
-  if (!list.length) { el.innerHTML = '<p class="text-muted" style="font-size:.82rem;padding:.5rem 0;">No webhooks registered.</p>'; return; }
-  el.innerHTML = list.map(wh => `
-    <div style="border:1px solid var(--border);border-radius:6px;padding:.6rem .75rem;margin-bottom:.5rem;cursor:pointer;" onclick="selectWebhook('${wh.id}')">
-      <div style="font-size:.78rem;color:var(--gray);margin-bottom:.15rem;">${wh.id.slice(0,12)}…</div>
-      <div style="font-weight:500;font-size:.82rem;word-break:break-all;">${wh.url}</div>
-      <div style="display:flex;gap:.5rem;margin-top:.3rem;font-size:.72rem;color:var(--gray);">
-        <span>${wh.events.join(', ')}</span>
-        <span style="margin-left:auto;">${statusBadge(wh.is_active ? 'delivered' : 'pending')}</span>
-      </div>
-    </div>`).join('');
+  let res, list;
+  try {
+    res = await fetch(API + '/webhook', { headers: authHeaders() });
+  } catch (err) {
+    el.innerHTML = `<div class="empty-state"><div>Couldn't reach the API.</div><button class="btn btn-outline btn-sm" style="margin-top:.5rem" onclick="loadWebhooks()">↻ Retry</button></div>`;
+    return;
+  }
+  if (!res.ok) {
+    const msg = res.status === 401 ? 'Sign in again to view webhooks.' : `Couldn't load webhooks (HTTP ${res.status}).`;
+    el.innerHTML = `<div class="empty-state"><div>${msg}</div><button class="btn btn-outline btn-sm" style="margin-top:.5rem" onclick="loadWebhooks()">↻ Retry</button></div>`;
+    return;
+  }
+  list = await res.json();
+  if (!list.length) {
+    el.innerHTML = `
+      <div class="empty-state" style="padding:1.5rem 0.5rem">
+        <div style="font-size:1.6rem;line-height:1;margin-bottom:0.5rem" aria-hidden="true">🔔</div>
+        <div style="font-size:0.95rem;font-weight:600;color:var(--dark);margin-bottom:0.25rem">No webhooks yet</div>
+        <div style="font-size:0.8rem;line-height:1.45;max-width:280px;margin:0 auto 0.75rem">
+          Get notified the moment a bot finishes recording, transcribing, or detects a keyword.
+        </div>
+        <a href="/api/docs#tag/webhook" target="_blank" rel="noopener" class="btn btn-primary btn-sm">Add your first webhook</a>
+      </div>`;
+    return;
+  }
+  // Render real list. Use textContent for url so we can't inject HTML if a
+  // malicious server-side row leaked through, and label icon-only buttons.
+  el.innerHTML = '';
+  list.forEach(wh => {
+    const card = document.createElement('div');
+    card.style.cssText = 'border:1px solid var(--border);border-radius:6px;padding:.6rem .75rem;margin-bottom:.5rem;cursor:pointer;';
+    card.setAttribute('role', 'button');
+    card.setAttribute('tabindex', '0');
+    card.onclick = () => selectWebhook(wh.id);
+    card.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectWebhook(wh.id); } };
+
+    const idRow = document.createElement('div');
+    idRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:.5rem;font-size:.78rem;color:var(--gray);margin-bottom:.15rem';
+    const idText = document.createElement('span');
+    idText.textContent = wh.id.slice(0, 12) + '…';
+    const copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.className = 'btn btn-outline btn-sm copy-btn';
+    copyBtn.style.cssText = 'padding:1px 7px;font-size:.7rem;line-height:1.4';
+    copyBtn.setAttribute('aria-label', 'Copy webhook ID');
+    copyBtn.textContent = '📋';
+    copyBtn.onclick = (e) => { e.stopPropagation(); copyWebhookId(wh.id, copyBtn); };
+    idRow.appendChild(idText);
+    idRow.appendChild(copyBtn);
+
+    const url = document.createElement('div');
+    url.style.cssText = 'font-weight:500;font-size:.82rem;word-break:break-all';
+    url.textContent = wh.url;
+
+    const meta = document.createElement('div');
+    meta.style.cssText = 'display:flex;gap:.5rem;margin-top:.3rem;font-size:.72rem;color:var(--gray)';
+    const ev = document.createElement('span');
+    ev.textContent = (wh.events || []).join(', ');
+    const status = document.createElement('span');
+    status.style.cssText = 'margin-left:auto';
+    status.innerHTML = statusBadge(wh.is_active ? 'active' : 'inactive');
+    meta.appendChild(ev);
+    meta.appendChild(status);
+
+    card.appendChild(idRow);
+    card.appendChild(url);
+    card.appendChild(meta);
+    el.appendChild(card);
+  });
 }
 
 function selectWebhook(id) {
-  document.getElementById('testWebhookId').value = id;
+  const inp = document.getElementById('testWebhookId');
+  if (inp) { inp.value = id; inp.focus(); }
+}
+
+async function copyWebhookId(id, btn) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(id);
+    } else {
+      const ta = document.createElement('textarea');
+      ta.value = id; document.body.appendChild(ta); ta.select();
+      document.execCommand('copy'); ta.remove();
+    }
+    if (btn) {
+      const orig = btn.textContent;
+      btn.textContent = '✓';
+      setTimeout(() => { btn.textContent = orig; }, 1400);
+    }
+    toast('Webhook ID copied');
+  } catch (err) {
+    toast('Could not copy', 'error');
+  }
 }
 
 // ── Load deliveries ────────────────────────────────────────────────────────────
 async function loadDeliveries() {
-  const res = await fetch(API + '/webhook/deliveries?limit=50', { headers: authHeaders() });
-  const rows = await res.json();
   const body = document.getElementById('deliveriesBody');
+  let res, rows;
+  try {
+    res = await fetch(API + '/webhook/deliveries?limit=50', { headers: authHeaders() });
+  } catch (err) {
+    body.innerHTML = `<tr><td colspan="6"><div class="empty-state"><div>Couldn't reach the API.</div><button class="btn btn-outline btn-sm" style="margin-top:.5rem" onclick="loadDeliveries()">↻ Retry</button></div></td></tr>`;
+    return;
+  }
+  if (!res.ok) {
+    const msg = res.status === 401 ? 'Sign in again to view deliveries.' : `Couldn't load deliveries (HTTP ${res.status}).`;
+    body.innerHTML = `<tr><td colspan="6"><div class="empty-state"><div>${msg}</div><button class="btn btn-outline btn-sm" style="margin-top:.5rem" onclick="loadDeliveries()">↻ Retry</button></div></td></tr>`;
+    return;
+  }
+  rows = await res.json();
   if (!rows.length) {
-    body.innerHTML = `<tr><td colspan="6"><div class="empty-state">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="M9 9h.01M15 9h.01M9 13a3 3 0 006 0"/></svg>
-      <div>No deliveries yet</div>
+    body.innerHTML = `<tr><td colspan="6"><div class="empty-state" style="padding:2rem 1rem">
+      <div style="font-size:1.6rem;line-height:1;margin-bottom:0.5rem" aria-hidden="true">📬</div>
+      <div style="font-weight:600;color:var(--dark);margin-bottom:0.25rem">No deliveries yet</div>
+      <div style="font-size:0.8rem;max-width:320px;margin:0 auto">
+        Once a bot completes a meeting, every webhook delivery (including retries) will show up here.
+      </div>
     </div></td></tr>`;
     return;
   }
