@@ -23,8 +23,29 @@ class McpToolCall(BaseModel):
     tool: str = Field(description="Name of the tool to execute.")
     arguments: dict[str, Any] = Field(default={}, description="Tool input arguments.")
 
+    model_config = {"json_schema_extra": {"examples": [
+        {"tool": "list_meetings", "arguments": {"limit": 5}},
+        {"tool": "search_meetings", "arguments": {"query": "v2 onboarding"}},
+        {"tool": "get_meeting", "arguments": {"bot_id": "bot_8a72c5e1"}},
+    ]}}
 
-@router.get("/schema", summary="MCP server manifest")
+
+@router.get(
+    "/schema",
+    summary="MCP server manifest",
+    responses={200: {"content": {"application/json": {"example": {
+        "name": "justheretolisten.io",
+        "version": "2.51.0",
+        "description": "MCP server for JustHereToListen.io meeting bots.",
+        "tools": [
+            {"name": "list_meetings", "description": "List recent meetings."},
+            {"name": "get_meeting", "description": "Fetch a single meeting by id."},
+            {"name": "search_meetings", "description": "Semantic search across past meetings."},
+            {"name": "get_action_items", "description": "List open action items."},
+            {"name": "get_meeting_brief", "description": "Generate a pre-meeting brief."},
+        ],
+    }}}}},
+)
 async def get_mcp_schema():
     """Return the MCP server manifest with tool definitions.
 
@@ -39,7 +60,19 @@ async def get_mcp_schema():
     return MCP_SERVER_MANIFEST
 
 
-@router.post("/call", summary="Execute MCP tool")
+@router.post(
+    "/call",
+    summary="Execute MCP tool",
+    responses={200: {"content": {"application/json": {"example": {
+        "tool": "list_meetings",
+        "result": {
+            "meetings": [
+                {"id": "bot_8a72c5e1", "title": "Sales sync", "date": "2026-05-04", "summary": "Team agreed to ship v2."},
+            ],
+            "total": 1,
+        },
+    }}}}},
+)
 async def call_mcp_tool(payload: McpToolCall, request: Request):
     """Execute an MCP tool and return the result.
 

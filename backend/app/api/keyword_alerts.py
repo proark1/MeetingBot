@@ -61,6 +61,18 @@ class KeywordAlertResponse(BaseModel):
     last_triggered_at: Optional[str] = None
     created_at: str
 
+    model_config = {"json_schema_extra": {"example": {
+        "id": "kwa_2bc741ee",
+        "account_id": "550e8400-e29b-41d4-a716-446655440000",
+        "name": "Competitor mentions",
+        "keywords": ["acme corp", "competitor x", "we are switching"],
+        "webhook_url": "https://your-app.example.com/competitor-webhook",
+        "is_active": True,
+        "trigger_count": 3,
+        "last_triggered_at": "2026-05-04T15:32:08Z",
+        "created_at": "2026-04-22T11:00:00Z",
+    }}}
+
 
 def _to_response(row) -> dict:
     try:
@@ -80,7 +92,21 @@ def _to_response(row) -> dict:
     }
 
 
-@router.get("", response_model=list[KeywordAlertResponse])
+@router.get(
+    "",
+    response_model=list[KeywordAlertResponse],
+    responses={200: {"content": {"application/json": {"example": [{
+        "id": "kwa_2bc741ee",
+        "account_id": "550e8400-e29b-41d4-a716-446655440000",
+        "name": "Competitor mentions",
+        "keywords": ["acme corp", "competitor x"],
+        "webhook_url": "https://your-app.example.com/competitor-webhook",
+        "is_active": True,
+        "trigger_count": 3,
+        "last_triggered_at": "2026-05-04T15:32:08Z",
+        "created_at": "2026-04-22T11:00:00Z",
+    }]}}}},
+)
 async def list_keyword_alerts(request: Request):
     """List all keyword alerts for your account."""
     account_id = _account_id(request)

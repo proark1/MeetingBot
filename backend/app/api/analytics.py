@@ -71,7 +71,26 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-@router.get("/analytics", tags=["Analytics"])
+@router.get(
+    "/analytics",
+    tags=["Analytics"],
+    responses={200: {"content": {"application/json": {"example": {
+        "total_bots": 42,
+        "active_bots": 3,
+        "by_status": {"done": 36, "error": 3, "in_call": 1, "joining": 1, "scheduled": 1},
+        "by_platform": {"google_meet": 22, "zoom": 14, "microsoft_teams": 6},
+        "success_rate": 0.923,
+        "avg_duration_seconds": 1842.0,
+        "total_transcript_entries": 6712,
+        "total_ai_tokens": 184321,
+        "total_ai_cost_usd": 1.87,
+        "avg_health_score": 78.4,
+        "total_meeting_cost_usd": 412.50,
+        "meetings_per_week": 9.5,
+        "quiet_participant_rate": 0.18,
+        "top_workspaces": [{"workspace_id": "ws_8c1234ab", "count": 14}],
+    }}}}},
+)
 async def get_analytics(request: Request):
     """Aggregate analytics across all bots currently in memory (24-hour window)."""
     account_id = getattr(request.state, "account_id", None)
@@ -156,7 +175,18 @@ async def get_analytics(request: Request):
     return result
 
 
-@router.get("/action-items/stats", tags=["Analytics"])
+@router.get(
+    "/action-items/stats",
+    tags=["Analytics"],
+    responses={200: {"content": {"application/json": {"example": {
+        "total": 247,
+        "by_status": {"open": 84, "done": 163},
+        "by_assignee": {"Alice": 32, "Bob": 28, "Carol": 41, "Unassigned": 14},
+        "with_due_date": 198,
+        "overdue": 12,
+        "completion_rate": 0.66,
+    }}}}},
+)
 async def get_action_items_stats(request: Request):
     """Aggregate action-item statistics across all bots in memory."""
     account_id = getattr(request.state, "account_id", None)
@@ -183,7 +213,23 @@ async def get_action_items_stats(request: Request):
     }
 
 
-@router.get("/analytics/recurring", tags=["Analytics"])
+@router.get(
+    "/analytics/recurring",
+    tags=["Analytics"],
+    responses={200: {"content": {"application/json": {"example": {
+        "recurring_meetings": [
+            {
+                "title": "Sales sync",
+                "occurrences": 8,
+                "first_seen": "2026-03-09T15:00:00Z",
+                "last_seen": "2026-04-27T15:00:00Z",
+                "avg_duration_seconds": 1820.0,
+                "trends": {"talk_time_share": 0.62, "decisions_per_meeting": 1.4},
+            }
+        ],
+        "total": 1,
+    }}}}},
+)
 async def get_recurring_insights(
     attendees: str = Query(None, description="Comma-separated attendee names (e.g. 'Alice,Bob'). Used to group recurring meetings by participant set."),
     limit: int = Query(10, ge=1, le=50, description="Maximum number of past meetings to include in the trend."),
@@ -256,7 +302,19 @@ async def get_recurring_insights(
     }
 
 
-@router.get("/analytics/api-usage", tags=["Analytics"])
+@router.get(
+    "/analytics/api-usage",
+    tags=["Analytics"],
+    responses={200: {"content": {"application/json": {"example": {
+        "requests_24h": 4382,
+        "requests_7d": 28741,
+        "by_endpoint": {"POST /api/v1/bot": 142, "GET /api/v1/bot/{id}": 1208},
+        "errors_24h": 47,
+        "p95_latency_ms": 312,
+        "tokens_7d": 184321,
+        "cost_by_operation_7d": {"analyze_transcript": 0.974, "transcription": 0.523},
+    }}}}},
+)
 async def get_api_usage(request: Request):
     """Account-level API usage summary for the current 24-hour window.
 
@@ -318,7 +376,23 @@ async def get_api_usage(request: Request):
     return result
 
 
-@router.get("/search", tags=["Search"])
+@router.get(
+    "/search",
+    tags=["Search"],
+    responses={200: {"content": {"application/json": {"example": {
+        "query": "v2 onboarding",
+        "results": [{
+            "bot_id": "bot_8a72c5e1",
+            "meeting_url": "https://meet.google.com/abc-defg-hij",
+            "bot_name": "Acme Notes Bot",
+            "started_at": "2026-05-04T15:00:02Z",
+            "snippet": "Bob: Let's start with the v2 onboarding rollout.",
+            "score": 0.92,
+        }],
+        "total": 1,
+        "limit": 50,
+    }}}}},
+)
 async def search_transcripts(
     q: str = Query(..., min_length=1, description="Search query — matched case-insensitively against transcript text."),
     limit: int = Query(50, ge=1, le=200, description="Maximum number of matching snippets to return."),
@@ -493,8 +567,33 @@ class AuditLogEntryResponse(BaseModel):
     details: Optional[str] = None
     created_at: datetime
 
+    model_config = {"json_schema_extra": {"example": {
+        "id": "al_5fb732c1",
+        "account_id": "550e8400-e29b-41d4-a716-446655440000",
+        "action": "bot.created",
+        "resource_type": "bot",
+        "resource_id": "bot_8a72c5e1",
+        "ip_address": "203.0.113.42",
+        "details": "{\"meeting_url\": \"https://meet.google.com/abc-defg-hij\"}",
+        "created_at": "2026-05-04T14:58:00Z",
+    }}}
 
-@router.get("/audit-log", response_model=list[AuditLogEntryResponse], tags=["Audit"])
+
+@router.get(
+    "/audit-log",
+    response_model=list[AuditLogEntryResponse],
+    tags=["Audit"],
+    responses={200: {"content": {"application/json": {"example": [{
+        "id": "al_5fb732c1",
+        "account_id": "550e8400-e29b-41d4-a716-446655440000",
+        "action": "bot.created",
+        "resource_type": "bot",
+        "resource_id": "bot_8a72c5e1",
+        "ip_address": "203.0.113.42",
+        "details": "{\"meeting_url\": \"https://meet.google.com/abc-defg-hij\"}",
+        "created_at": "2026-05-04T14:58:00Z",
+    }]}}}},
+)
 async def get_audit_log(
     request: Request,
     limit: int = Query(50, ge=1, le=200),
@@ -553,7 +652,19 @@ async def get_audit_log(
 
 # ── GET /api/v1/analytics/me — personal usage dashboard ─────────────────────
 
-@router.get("/analytics/me", tags=["Analytics"])
+@router.get(
+    "/analytics/me",
+    tags=["Analytics"],
+    responses={200: {"content": {"application/json": {"example": {
+        "account_id": "550e8400-e29b-41d4-a716-446655440000",
+        "total_meetings": 124,
+        "total_minutes": 3812,
+        "credits_remaining_usd": 24.50,
+        "credits_consumed_30d": 12.40,
+        "favorite_template": "sales",
+        "longest_streak_days": 9,
+    }}}}},
+)
 async def get_my_analytics(request: Request):
     """Personal usage statistics scoped strictly to the authenticated account.
 
@@ -648,7 +759,20 @@ async def get_my_analytics(request: Request):
 # ── Usage breakdown ────────────────────────────────────────────────────────────
 
 
-@router.get("/analytics/usage", tags=["Analytics"])
+@router.get(
+    "/analytics/usage",
+    tags=["Analytics"],
+    responses={200: {"content": {"application/json": {"example": {
+        "by_day": [
+            {"date": "2026-04-28", "meetings": 4, "minutes": 124, "tokens": 6120, "cost_usd": 0.31},
+            {"date": "2026-04-29", "meetings": 3, "minutes": 98, "tokens": 4810, "cost_usd": 0.24},
+        ],
+        "total_meetings": 7,
+        "total_minutes": 222,
+        "total_tokens": 10930,
+        "total_cost_usd": 0.55,
+    }}}}},
+)
 async def get_usage(request: Request):
     """Monthly usage breakdown for the authenticated account: bots used, limit, cost, daily chart."""
     account_id = getattr(request.state, "account_id", None)
@@ -713,7 +837,16 @@ async def get_usage(request: Request):
 # ── Longitudinal Trends ───────────────────────────────────────────────────────
 
 
-@router.get("/analytics/trends", tags=["Analytics"])
+@router.get(
+    "/analytics/trends",
+    tags=["Analytics"],
+    responses={200: {"content": {"application/json": {"example": {
+        "weekly": {"meetings": [4, 6, 5, 9], "minutes": [120, 220, 180, 320]},
+        "month_over_month": {"meetings": "+18%", "minutes": "+22%", "cost_usd": "+8%"},
+        "top_topics": ["onboarding redesign", "TOS update", "Q3 planning"],
+        "top_action_owners": [{"name": "Alice", "count": 32}, {"name": "Bob", "count": 28}],
+    }}}}},
+)
 async def get_trends(
     request: Request,
     days: int = Query(30, ge=7, le=365, description="Number of days to look back"),

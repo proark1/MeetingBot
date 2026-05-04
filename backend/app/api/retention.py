@@ -32,6 +32,15 @@ class RetentionPolicyResponse(BaseModel):
     anonymize_speakers: bool
     is_global: bool = False
 
+    model_config = {"json_schema_extra": {"example": {
+        "account_id": "550e8400-e29b-41d4-a716-446655440000",
+        "bot_retention_days": 30,
+        "recording_retention_days": 14,
+        "transcript_retention_days": 365,
+        "anonymize_speakers": False,
+        "is_global": False,
+    }}}
+
 
 class RetentionPolicyUpdate(BaseModel):
     bot_retention_days: Optional[int] = None

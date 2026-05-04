@@ -59,6 +59,17 @@ class CalendarFeedResponse(BaseModel):
     last_synced_at: Optional[str]
     created_at: str
 
+    model_config = {"json_schema_extra": {"example": {
+        "id": "feed_2bc741ee",
+        "name": "Work Calendar",
+        "ical_url": "https://calendar.google.com/calendar/ical/you%40gmail.com/private-abc/basic.ics",
+        "bot_name": "Recorder",
+        "auto_record": True,
+        "is_active": True,
+        "last_synced_at": "2026-05-04T15:00:00Z",
+        "created_at": "2026-04-15T08:00:00Z",
+    }}}
+
 
 def _to_response(feed: CalendarFeed) -> CalendarFeedResponse:
     return CalendarFeedResponse(
@@ -75,7 +86,20 @@ def _to_response(feed: CalendarFeed) -> CalendarFeedResponse:
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
-@router.get("", response_model=list[CalendarFeedResponse])
+@router.get(
+    "",
+    response_model=list[CalendarFeedResponse],
+    responses={200: {"content": {"application/json": {"example": [{
+        "id": "feed_2bc741ee",
+        "name": "Work Calendar",
+        "ical_url": "https://calendar.google.com/calendar/ical/you%40gmail.com/private-abc/basic.ics",
+        "bot_name": "Recorder",
+        "auto_record": True,
+        "is_active": True,
+        "last_synced_at": "2026-05-04T15:00:00Z",
+        "created_at": "2026-04-15T08:00:00Z",
+    }]}}}},
+)
 async def list_feeds(
     account_id: Optional[str] = Depends(get_current_account_id),
     db: AsyncSession = Depends(get_db),
@@ -180,7 +204,14 @@ async def delete_feed(
     await db.commit()
 
 
-@router.post("/{feed_id}/sync", status_code=200)
+@router.post(
+    "/{feed_id}/sync",
+    status_code=200,
+    responses={200: {"content": {"application/json": {"example": {
+        "dispatched": 2,
+        "message": "Dispatched 2 bot(s) from this feed",
+    }}}}},
+)
 async def sync_feed(
     feed_id: str,
     account_id: Optional[str] = Depends(get_current_account_id),

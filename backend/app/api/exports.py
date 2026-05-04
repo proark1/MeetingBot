@@ -72,7 +72,11 @@ async def export_markdown(bot_id: str, request: Request):
 
 # ── PDF export ────────────────────────────────────────────────────────────────
 
-@router.get("/{bot_id}/export/pdf")
+@router.get(
+    "/{bot_id}/export/pdf",
+    response_class=Response,
+    responses={200: {"content": {"application/pdf": {"example": "<binary PDF document>"}}, "description": "Multi-page PDF report containing the meeting summary, transcript, and action items."}},
+)
 @_limiter.limit("5/minute")
 async def export_pdf(bot_id: str, request: Request):
     """Export the meeting report as a PDF document."""
@@ -376,6 +380,29 @@ class _ExportJsonResponse(BaseModel):
     metadata: Optional[Dict[str, Any]] = None
     sub_user_id: Optional[str] = None
 
+    model_config = {"json_schema_extra": {"example": {
+        "id": "bot_8a72c5e1",
+        "meeting_url": "https://meet.google.com/abc-defg-hij",
+        "meeting_platform": "google_meet",
+        "bot_name": "Acme Notes Bot",
+        "status": "done",
+        "transcript": [
+            {"speaker": "Alice", "text": "Welcome everyone.", "timestamp": 0.4, "source": "voice"},
+        ],
+        "analysis": {
+            "summary": "Team agreed to ship v2 onboarding by end of Q3.",
+            "key_points": ["Onboarding completion is currently 71%."],
+        },
+        "chapters": [],
+        "speaker_stats": [{"speaker": "Alice", "talk_time_s": 612.4}],
+        "participants": ["Alice", "Bob", "Acme Notes Bot"],
+        "started_at": "2026-05-04T15:00:02Z",
+        "ended_at": "2026-05-04T15:32:48Z",
+        "duration_seconds": 1966.0,
+        "metadata": {"crm_id": "deal_42"},
+        "sub_user_id": None,
+    }}}
+
 
 @router.get("/{bot_id}/export/json", response_model=_ExportJsonResponse)
 @_limiter.limit("10/minute")
@@ -444,7 +471,11 @@ def _build_srt(bot: BotSession) -> str:
     return "\n".join(lines)
 
 
-@router.get("/{bot_id}/export/srt")
+@router.get(
+    "/{bot_id}/export/srt",
+    response_class=PlainTextResponse,
+    responses={200: {"content": {"text/plain": {"example": "1\n00:00:00,400 --> 00:00:04,200\nAlice: Welcome everyone.\n\n2\n00:00:04,200 --> 00:00:08,100\nBob: Let's start with the roadmap.\n"}}, "description": "SRT subtitle file derived from the transcript."}},
+)
 @_limiter.limit("10/minute")
 async def export_srt(bot_id: str, request: Request):
     """Export the meeting transcript as an SRT subtitle file."""
@@ -465,11 +496,23 @@ class DriveExportRequest(BaseModel):
     folder_id: Optional[str] = None
     format: str = "markdown"  # "markdown" | "pdf"
 
+    model_config = {"json_schema_extra": {"example": {
+        "access_token": "ya29.a0AfH6...",
+        "folder_id": "1AbCdEfGhIjKlMnOpQrStUvWxYz",
+        "format": "markdown",
+    }}}
+
 
 class DriveExportResponse(BaseModel):
     file_id: str
     file_name: str
     web_view_link: str
+
+    model_config = {"json_schema_extra": {"example": {
+        "file_id": "1XyZaB2CdEfGhIjKlMnOpQrStUv",
+        "file_name": "Acme Notes Bot — 2026-05-04.md",
+        "web_view_link": "https://drive.google.com/file/d/1XyZaB2CdEfGhIjKlMnOpQrStUv/view",
+    }}}
 
 
 @router.post("/{bot_id}/export/drive", response_model=DriveExportResponse)

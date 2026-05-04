@@ -484,7 +484,19 @@ class AIUsageEntry(BaseModel):
     cost_usd: float = 0.0
     duration_s: float = 0.0
 
-    model_config = {"extra": "allow"}
+    model_config = {
+        "extra": "allow",
+        "json_schema_extra": {"example": {
+            "operation": "analyze_transcript",
+            "provider": "anthropic",
+            "model": "claude-sonnet-4-6",
+            "input_tokens": 4123,
+            "output_tokens": 812,
+            "total_tokens": 4935,
+            "cost_usd": 0.0214,
+            "duration_s": 6.31,
+        }},
+    }
 
 
 class AIUsageSummary(BaseModel):
@@ -493,7 +505,36 @@ class AIUsageSummary(BaseModel):
     primary_model: Optional[str] = None
     operations: list[AIUsageEntry] = []
 
-    model_config = {"extra": "allow"}
+    model_config = {
+        "extra": "allow",
+        "json_schema_extra": {"example": {
+            "total_tokens": 6112,
+            "total_cost_usd": 0.0287,
+            "primary_model": "claude-sonnet-4-6",
+            "operations": [
+                {
+                    "operation": "transcription",
+                    "provider": "google",
+                    "model": "gemini-1.5-flash",
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "total_tokens": 0,
+                    "cost_usd": 0.0073,
+                    "duration_s": 14.2,
+                },
+                {
+                    "operation": "analyze_transcript",
+                    "provider": "anthropic",
+                    "model": "claude-sonnet-4-6",
+                    "input_tokens": 4123,
+                    "output_tokens": 812,
+                    "total_tokens": 4935,
+                    "cost_usd": 0.0214,
+                    "duration_s": 6.31,
+                },
+            ],
+        }},
+    }
 
 
 class MeetingAnalysis(BaseModel):
@@ -645,6 +686,66 @@ class BotResponse(BaseModel):
 
     ai_usage: Optional[AIUsageSummary] = None
 
+    model_config = {"json_schema_extra": {"example": {
+        "id": "bot_8a72c5e1",
+        "meeting_url": "https://meet.google.com/abc-defg-hij",
+        "meeting_platform": "google_meet",
+        "bot_name": "Acme Notes Bot",
+        "status": "done",
+        "error_message": None,
+        "created_at": "2026-05-04T14:58:00Z",
+        "updated_at": "2026-05-04T15:34:12Z",
+        "started_at": "2026-05-04T15:00:02Z",
+        "ended_at": "2026-05-04T15:32:48Z",
+        "duration_seconds": 1966.0,
+        "participants": ["Alice", "Bob", "Acme Notes Bot"],
+        "transcript": [
+            {"speaker": "Alice", "text": "Welcome everyone.", "timestamp": 0.4, "source": "voice"},
+            {"speaker": "Bob", "text": "Let's start with the roadmap.", "timestamp": 4.2, "source": "voice"},
+        ],
+        "analysis": {
+            "summary": "Team agreed to ship v2 onboarding by end of Q3.",
+            "key_points": ["Onboarding completion is currently 71%."],
+            "action_items": [
+                {"owner": "Alice", "task": "Wire up the v2 onboarding A/B test", "due_date": "2026-05-18", "confidence": 0.93}
+            ],
+            "decisions": ["Ship v2 onboarding to 10% of new accounts on May 20."],
+            "next_steps": ["Schedule design review for May 13."],
+            "sentiment": "positive",
+            "topics": [{"label": "Onboarding redesign", "start_time": "00:02:14", "end_time": "00:18:42"}],
+            "risks_blockers": [],
+            "next_meeting": "2026-05-13T15:00:00Z",
+            "unresolved_items": [],
+        },
+        "chapters": [],
+        "speaker_stats": [],
+        "recording_available": True,
+        "video_available": False,
+        "bot_avatar_url": None,
+        "analysis_mode": "full",
+        "is_demo_transcript": False,
+        "sub_user_id": None,
+        "translation_language": None,
+        "metadata": {"crm_id": "deal_42"},
+        "health_score": 84,
+        "meeting_cost_usd": None,
+        "pii_detected": False,
+        "enable_chat_qa": False,
+        "enable_speaker_analytics": False,
+        "enable_decision_detection": False,
+        "enable_cross_meeting_memory": False,
+        "enable_coaching": False,
+        "agentic_autonomy": "off",
+        "detected_decisions": [],
+        "related_meetings": [],
+        "ai_usage": {
+            "total_tokens": 6112,
+            "total_cost_usd": 0.0287,
+            "primary_model": "claude-sonnet-4-6",
+            "operations": [],
+        },
+    }}}
+
 
 class BotSummary(BaseModel):
     """Lightweight representation returned by the list endpoint (no transcript/analysis)."""
@@ -674,6 +775,29 @@ class BotSummary(BaseModel):
     ai_total_cost_usd: float = 0.0
     ai_primary_model: Optional[str] = None
 
+    model_config = {"json_schema_extra": {"example": {
+        "id": "bot_8a72c5e1",
+        "meeting_url": "https://meet.google.com/abc-defg-hij",
+        "meeting_platform": "google_meet",
+        "bot_name": "Acme Notes Bot",
+        "status": "done",
+        "error_message": None,
+        "created_at": "2026-05-04T14:58:00Z",
+        "updated_at": "2026-05-04T15:34:12Z",
+        "started_at": "2026-05-04T15:00:02Z",
+        "ended_at": "2026-05-04T15:32:48Z",
+        "duration_seconds": 1966.0,
+        "participants": ["Alice", "Bob", "Acme Notes Bot"],
+        "recording_available": True,
+        "analysis_mode": "full",
+        "is_demo_transcript": False,
+        "sub_user_id": None,
+        "metadata": {"crm_id": "deal_42"},
+        "ai_total_tokens": 6112,
+        "ai_total_cost_usd": 0.0287,
+        "ai_primary_model": "claude-sonnet-4-6",
+    }}}
+
 
 class PaginatedResponse(BaseModel):
     """Generic paginated response envelope."""
@@ -690,6 +814,33 @@ class BotListResponse(BaseModel):
     limit: int
     offset: int
 
+    model_config = {"json_schema_extra": {"example": {
+        "results": [{
+            "id": "bot_8a72c5e1",
+            "meeting_url": "https://meet.google.com/abc-defg-hij",
+            "meeting_platform": "google_meet",
+            "bot_name": "Acme Notes Bot",
+            "status": "done",
+            "error_message": None,
+            "created_at": "2026-05-04T14:58:00Z",
+            "updated_at": "2026-05-04T15:34:12Z",
+            "started_at": "2026-05-04T15:00:02Z",
+            "ended_at": "2026-05-04T15:32:48Z",
+            "duration_seconds": 1966.0,
+            "participants": ["Alice", "Bob", "Acme Notes Bot"],
+            "recording_available": True,
+            "analysis_mode": "full",
+            "is_demo_transcript": False,
+            "metadata": {"crm_id": "deal_42"},
+            "ai_total_tokens": 6112,
+            "ai_total_cost_usd": 0.0287,
+            "ai_primary_model": "claude-sonnet-4-6",
+        }],
+        "total": 1,
+        "limit": 50,
+        "offset": 0,
+    }}}
+
 
 class Highlight(BaseModel):
     type: str
@@ -700,6 +851,16 @@ class Highlight(BaseModel):
 class HighlightResponse(BaseModel):
     bot_id: str
     highlights: list[Highlight]
+
+    model_config = {"json_schema_extra": {"example": {
+        "bot_id": "bot_8a72c5e1",
+        "highlights": [
+            {"type": "key_point", "text": "Onboarding completion is currently 71%."},
+            {"type": "action_item", "text": "Wire up the v2 onboarding A/B test",
+             "detail": {"owner": "Alice", "due_date": "2026-05-18", "confidence": 0.93}},
+            {"type": "decision", "text": "Ship v2 onboarding to 10% of new accounts on May 20."},
+        ],
+    }}}
 
 
 # ── Live interaction (POST /say and /chat) ────────────────────────────────────
@@ -722,6 +883,12 @@ class SayRequest(BaseModel):
         ),
     )
 
+    model_config = {"json_schema_extra": {"example": {
+        "text": "Hi everyone — quick reminder that this meeting is being recorded.",
+        "voice": "gemini",
+        "interrupt": False,
+    }}}
+
 
 class SayResponse(BaseModel):
     """Acknowledgement returned by POST /say."""
@@ -733,10 +900,21 @@ class SayResponse(BaseModel):
         description="True when interrupt=true cancelled an already-running speak task.",
     )
 
+    model_config = {"json_schema_extra": {"example": {
+        "bot_id": "bot_8a72c5e1",
+        "task_id": "f1c0a2c3a44d4d2cb6df7c6f3e6f1a2b",
+        "queued": True,
+        "interrupted_previous": False,
+    }}}
+
 
 class ChatRequest(BaseModel):
     """Post a message into the live meeting's chat panel."""
     text: str = Field(min_length=1, max_length=2000, description="Text to post to the meeting chat.")
+
+    model_config = {"json_schema_extra": {"example": {
+        "text": "Heads up — recording started. Reply STOP if you'd like to opt out.",
+    }}}
 
 
 class ChatResponse(BaseModel):
@@ -744,3 +922,9 @@ class ChatResponse(BaseModel):
     bot_id: str
     task_id: str = Field(description="Opaque id for the queued chat-post task.")
     queued: bool = True
+
+    model_config = {"json_schema_extra": {"example": {
+        "bot_id": "bot_8a72c5e1",
+        "task_id": "ba4e3b1aafbf4c6395f8c2f06d8f5e21",
+        "queued": True,
+    }}}

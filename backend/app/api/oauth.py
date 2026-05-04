@@ -54,7 +54,13 @@ def _provider_or_404(provider: str) -> None:
 
 # ── GET /auth/oauth/{provider}/authorize ──────────────────────────────────────
 
-@router.get("/{provider}/authorize", include_in_schema=True)
+@router.get(
+    "/{provider}/authorize",
+    include_in_schema=True,
+    response_class=RedirectResponse,
+    status_code=302,
+    responses={302: {"description": "Redirect to the provider's OAuth2 consent page."}},
+)
 async def authorize(
     provider: str,
     redirect: Optional[str] = Query(
@@ -77,7 +83,22 @@ async def authorize(
 
 # ── GET /auth/oauth/{provider}/callback ───────────────────────────────────────
 
-@router.get("/{provider}/callback", include_in_schema=True)
+@router.get(
+    "/{provider}/callback",
+    include_in_schema=True,
+    responses={
+        200: {"content": {"application/json": {"example": {
+            "account_id": "550e8400-e29b-41d4-a716-446655440000",
+            "email": "you@example.com",
+            "provider": "google",
+            "api_key": "sk_live_EXAMPLE_KEY_NOT_REAL",
+            "access_token": "eyJhbGciOiJIUzI1NiJ9.example",
+            "token_type": "bearer",
+            "is_new_account": True,
+        }}}},
+        302: {"description": "Redirect to the web UI with a session cookie (when ?redirect=1 was passed)."},
+    },
+)
 async def callback(
     provider: str,
     code: Optional[str] = Query(default=None),
