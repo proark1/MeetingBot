@@ -75,6 +75,12 @@ class Settings(BaseSettings):
     # Environment — set to "production" to enforce strict security defaults
     ENVIRONMENT: str = "development"
 
+    # Public base URL (e.g. "https://api.justheretolisten.io"). Used as the
+    # primary `servers[0].url` in the published OpenAPI schema so generated
+    # SDK clients hit the right host out of the box. Leave unset in dev — the
+    # schema will fall back to the local uvicorn URL.
+    PUBLIC_BASE_URL: str = ""
+
     # When True, the rate-limit/IP resolver may consult X-Forwarded-For. Only
     # enable behind a trusted reverse proxy that overwrites or appends this
     # header. With this off (default), client-supplied X-Forwarded-For is
