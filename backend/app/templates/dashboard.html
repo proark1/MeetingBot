@@ -1,16 +1,20 @@
 {% extends "base.html" %}
 {% block title %}Dashboard — JustHereToListen.io{% endblock %}
+{% block page_title %}Overview{% endblock %}
+{% block primary_action %}
+<a href="#section-bots" onclick="switchSection('bots');return false;" class="btn btn-primary btn-sm" style="font-weight:600">
+  <span aria-hidden="true">🎬</span> New Meeting
+</a>
+{% endblock %}
 
 {% block content %}
 <style>
-  /* ── Sidebar layout ─────────────────────────────────────────────────────── */
-  .dash-layout {
-    display: grid;
-    grid-template-columns: 210px 1fr;
-    gap: 1.5rem;
-    align-items: start;
-    margin: -0.5rem 0;
-  }
+  /* The page-local sidebar shipped before v2.48 has been replaced by the
+     global app-shell sidebar in base.html. Keep .dash-layout as a single
+     column so the existing inner markup keeps rendering, and hide the
+     legacy aside. */
+  .dash-layout { display: block; }
+  .dash-sidebar { display: none !important; }
 
   .dash-sidebar {
     position: sticky;
@@ -339,7 +343,7 @@
   <!-- ═══════════════════════════════════════════════
        MAIN CONTENT
   ════════════════════════════════════════════════ -->
-  <main>
+  <div class="dash-main">
 
     <!-- ────────────────────────────────────────────
          OVERVIEW
@@ -2150,7 +2154,7 @@
       </div>
     </div>
 
-  </main>
+  </div><!-- /.dash-main -->
 </div>
 
 {% endblock %}
@@ -2165,28 +2169,69 @@ function _activateSection(name) {
   document.querySelectorAll('.sidebar-nav-item[data-section]').forEach(el => el.classList.remove('active'));
   document.getElementById('section-' + name)?.classList.add('active');
   document.querySelector(`.sidebar-nav-item[data-section="${name}"]`)?.classList.add('active');
+  // Mirror the active section in the global app-shell sidebar so the
+  // user always sees where they are.
+  if (typeof syncSidebarActiveSection === 'function') {
+    syncSidebarActiveSection(name === 'overview' ? '' : name);
+  }
+  // Reflect the current section in the topbar title.
+  const titleEl = document.querySelector('.app-topbar .topbar-title');
+  if (titleEl) {
+    const labels = {
+      overview: 'Overview', bots: 'New Meeting', history: 'Meeting History',
+      analytics: 'Analytics', 'action-items': 'Action Items',
+      'api-keys': 'API Keys', webhooks: 'Webhooks',
+      integrations: 'Integrations', calendar: 'Calendar',
+      workspaces: 'Workspaces', billing: 'Billing', settings: 'Settings',
+    };
+    titleEl.textContent = labels[name] || 'Dashboard';
+  }
 }
 
 function switchSection(name) {
   _activateSection(name);
-  window.history.pushState({ section: name }, '', '#' + name);
+  // Use #section- prefix so back/forward and the global sidebar links agree.
+  // Stay on whatever path the page was loaded under — this script only runs
+  // on the dashboard route, but reading window.location.pathname avoids
+  // hardcoding the URL and keeps any prefix (e.g. mounted under /app).
+  const hash = name === 'overview' ? '' : '#section-' + name;
+  window.history.pushState({ section: name }, '', window.location.pathname + hash);
 }
+
+// Wire global app-shell sidebar links into the SPA section switcher.
+document.querySelectorAll('.sidebar-link[data-section-link]').forEach(a => {
+  a.addEventListener('click', (e) => {
+    const name = a.getAttribute('data-section-link');
+    if (!_VALID_SECTIONS.includes(name)) return;
+    e.preventDefault();
+    switchSection(name);
+  });
+});
 
 document.querySelectorAll('.sidebar-nav-item[data-section]').forEach(btn => {
   btn.addEventListener('click', () => switchSection(btn.dataset.section));
 });
 
+// Accept both #bots (legacy) and #section-bots (new app-shell sidebar).
+function _normalizeHash(raw) {
+  const s = (raw || '').replace(/^#/, '').replace(/^section-/, '');
+  return _VALID_SECTIONS.includes(s) ? s : '';
+}
+
 window.addEventListener('popstate', (e) => {
-  const name = e.state?.section || window.location.hash.replace('#', '') || 'overview';
+  const name = e.state?.section || _normalizeHash(window.location.hash) || 'overview';
   if (_VALID_SECTIONS.includes(name)) _activateSection(name);
 });
 
 // Handle hash on load
 document.addEventListener('DOMContentLoaded', () => {
-  const hash = window.location.hash.replace('#', '');
-  if (hash && _VALID_SECTIONS.includes(hash)) {
-    switchSection(hash);
-    if (hash === 'settings') _loadSupportKeys();
+  const name = _normalizeHash(window.location.hash);
+  if (name) {
+    switchSection(name);
+    if (name === 'settings') _loadSupportKeys();
+  } else {
+    // Default to overview but still sync the global sidebar.
+    if (typeof syncSidebarActiveSection === 'function') syncSidebarActiveSection('');
   }
 });
 

@@ -720,32 +720,409 @@
       60%, 100% { transform: translate(2px, 6px) scale(0); opacity: 0; }
     }
     @media (max-width: 768px) { .click-hint { display: none; } }
+
+    /* ════════════════════════════════════════════════════════════════════
+       App Shell — persistent left sidebar + content area for logged-in users.
+       Replaces the top nav for authenticated pages.
+       ════════════════════════════════════════════════════════════════════ */
+    .app-shell {
+      display: grid;
+      grid-template-columns: 240px 1fr;
+      min-height: 100vh;
+    }
+    .app-sidebar {
+      background: white;
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow: hidden;
+    }
+    [data-theme="dark"] .app-sidebar { background: #13141f; border-color: var(--border); }
+
+    .sidebar-brand {
+      display: flex;
+      align-items: center;
+      gap: 0.55rem;
+      padding: 1rem 1.1rem;
+      font-weight: 700;
+      font-size: 1rem;
+      color: var(--dark);
+      letter-spacing: -0.3px;
+      text-decoration: none;
+      flex-shrink: 0;
+    }
+    .sidebar-brand:hover { color: var(--dark); }
+    .sidebar-brand .brand-icon {
+      width: 28px; height: 28px;
+      background: var(--primary);
+      border-radius: 7px;
+      display: inline-flex; align-items: center; justify-content: center;
+      font-size: 14px; flex-shrink: 0;
+    }
+    [data-theme="dark"] .sidebar-brand .brand-icon { background: #374151; }
+
+    .sidebar-scroll {
+      flex: 1;
+      overflow-y: auto;
+      padding: 0.25rem 0.6rem 1rem;
+    }
+    .sidebar-scroll::-webkit-scrollbar { width: 6px; }
+    .sidebar-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    .sidebar-section-label {
+      font-size: 10.5px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: #94a3b8;
+      padding: 0.35rem 0.75rem;
+      margin-top: 0.85rem;
+    }
+    .sidebar-section-label:first-child { margin-top: 0.35rem; }
+
+    .sidebar-link {
+      display: flex;
+      align-items: center;
+      gap: 0.7rem;
+      padding: 0.5rem 0.75rem;
+      border-radius: 8px;
+      font-size: 13.5px;
+      font-weight: 500;
+      color: #475569;
+      text-decoration: none;
+      transition: background 0.15s, color 0.15s;
+      border: none;
+      background: none;
+      width: 100%;
+      text-align: left;
+      cursor: pointer;
+      user-select: none;
+      margin-bottom: 1px;
+    }
+    .sidebar-link:hover { background: var(--light); color: var(--dark); }
+    .sidebar-link.active {
+      background: var(--primary);
+      color: #fff;
+      font-weight: 600;
+    }
+    .sidebar-link.active .sidebar-icon { opacity: 1; }
+    .sidebar-link.admin { color: #b45309; }
+    .sidebar-link.admin:hover { background: #fef3c7; color: #92400e; }
+    [data-theme="dark"] .sidebar-link { color: #c8cad0; }
+    [data-theme="dark"] .sidebar-link:hover { background: #252636; color: #e5e7eb; }
+    [data-theme="dark"] .sidebar-link.active { background: #374151; color: #fff; }
+    [data-theme="dark"] .sidebar-link.admin { color: #f59e0b; }
+
+    .sidebar-icon {
+      font-size: 15px;
+      flex-shrink: 0;
+      opacity: 0.8;
+      width: 18px; text-align: center;
+    }
+    .sidebar-link-badge {
+      margin-left: auto;
+      background: #fee2e2;
+      color: #b91c1c;
+      font-size: 10.5px;
+      font-weight: 700;
+      padding: 1px 6px;
+      border-radius: 10px;
+      line-height: 1.5;
+    }
+    .sidebar-link-badge.blue { background: #E5DDD7; color: #1d4ed8; }
+    .sidebar-link.active .sidebar-link-badge { background: rgba(255,255,255,0.2); color: #fff; }
+
+    .sidebar-footer {
+      flex-shrink: 0;
+      border-top: 1px solid var(--border);
+      padding: 0.75rem;
+      display: flex;
+      align-items: center;
+      gap: 0.55rem;
+    }
+    .sidebar-footer .user-avatar {
+      width: 32px; height: 32px;
+      background: var(--primary);
+      border-radius: 50%;
+      display: inline-flex; align-items: center; justify-content: center;
+      font-size: 12px; font-weight: 700; color: #fff;
+      flex-shrink: 0;
+    }
+    [data-theme="dark"] .sidebar-footer .user-avatar { background: #374151; }
+    .sidebar-footer .user-email-line {
+      flex: 1;
+      min-width: 0;
+      font-size: 12.5px;
+      color: var(--gray);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .sidebar-footer .btn-out {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--gray);
+      border-radius: 6px;
+      padding: 4px 10px;
+      font-size: 12px;
+      font-weight: 500;
+      text-decoration: none;
+      transition: all 0.15s;
+      flex-shrink: 0;
+    }
+    .sidebar-footer .btn-out:hover { border-color: #9ca3af; color: var(--dark); background: var(--light); }
+
+    .sidebar-balance {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+      padding: 0.6rem 0.75rem;
+      margin: 0.4rem 0 0.6rem;
+      background: #ecfdf5;
+      border: 1px solid #a7f3d0;
+      border-radius: 10px;
+      color: #047857;
+      font-size: 13px;
+      font-weight: 600;
+      text-decoration: none;
+      transition: background 0.15s;
+    }
+    .sidebar-balance:hover { background: #d1fae5; color: #047857; }
+    .sidebar-balance.low {
+      background: #fef2f2; border-color: #fecaca; color: #b91c1c;
+    }
+    .sidebar-balance.low:hover { background: #fee2e2; color: #b91c1c; }
+    [data-theme="dark"] .sidebar-balance { background: #064e3b; border-color: #065f46; color: #34d399; }
+    [data-theme="dark"] .sidebar-balance.low { background: #7f1d1d; border-color: #991b1b; color: #fca5a5; }
+
+    /* ── Main column ──────────────────────────────────────────────────── */
+    .app-main {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+    }
+    .app-topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 1rem 1.75rem;
+      background: rgba(255,255,255,0.82);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      min-height: 62px;
+    }
+    [data-theme="dark"] .app-topbar { background: rgba(19,20,31,0.88); border-color: var(--border); }
+    .app-topbar .topbar-title {
+      font-size: 1.05rem;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+      color: var(--dark);
+      margin: 0;
+    }
+    .app-topbar .topbar-actions {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .app-content {
+      max-width: 1180px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 1.75rem 1.75rem 3rem;
+      flex: 1;
+    }
+
+    /* Mobile sidebar toggle (hamburger) — only shown on small screens. */
+    .sidebar-toggle {
+      display: none;
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 10px;
+      cursor: pointer;
+      color: var(--gray);
+      transition: all 0.15s;
+      min-width: 44px; min-height: 44px;
+    }
+    .sidebar-toggle:hover { background: var(--light); color: var(--dark); }
+    .sidebar-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.4);
+      z-index: 90;
+    }
+    .sidebar-overlay.open { display: block; }
+
+    @media (max-width: 900px) {
+      .app-shell { grid-template-columns: 1fr; }
+      .app-sidebar {
+        position: fixed;
+        top: 0; bottom: 0; left: 0;
+        width: 270px;
+        z-index: 100;
+        transform: translateX(-100%);
+        transition: transform 0.25s cubic-bezier(0.33,1,0.68,1);
+        box-shadow: 0 0 0 rgba(0,0,0,0);
+      }
+      .app-sidebar.open {
+        transform: translateX(0);
+        box-shadow: 8px 0 32px rgba(0,0,0,0.15);
+      }
+      .sidebar-toggle { display: inline-flex; align-items: center; justify-content: center; }
+      .app-content { padding: 1.25rem 1rem 3rem; }
+      .app-topbar { padding: 0.75rem 1rem; }
+    }
+    @media (max-width: 480px) {
+      .app-content { padding: 1rem 0.85rem 2.5rem; }
+      .app-topbar { padding: 0.65rem 0.85rem; }
+      .app-topbar .topbar-title { font-size: 1rem; }
+    }
   </style>
 </head>
 <body>
 
 <a href="#main-content" class="skip-link">Skip to main content</a>
 
-<!-- ── Navbar ──────────────────────────────────────────────────────────── -->
+{% if account %}
+{# ════════════════════════════════════════════════════════════════════
+   Logged-in users see the app shell: persistent sidebar + content area.
+   _path is scoped to the sidebar with {% with %} so it doesn't leak.
+   ════════════════════════════════════════════════════════════════════ #}
+<div class="app-shell">
+{% with _path = request.url.path %}
+
+  <div class="sidebar-overlay" id="sidebarOverlay" onclick="closeAppSidebar()"></div>
+
+  <aside class="app-sidebar" id="appSidebar" aria-label="Primary navigation">
+    <a class="sidebar-brand" href="/dashboard">
+      <span class="brand-icon" aria-hidden="true">🎧</span>
+      <span>JustHereToListen.io</span>
+    </a>
+
+    <nav class="sidebar-scroll" role="navigation">
+      <div class="sidebar-section-label">Main</div>
+      <a href="/dashboard" class="sidebar-link {% if _path == '/dashboard' %}active{% endif %}">
+        <span class="sidebar-icon" aria-hidden="true">📊</span> Overview
+      </a>
+      <a href="/dashboard#section-bots" class="sidebar-link" data-section-link="bots">
+        <span class="sidebar-icon" aria-hidden="true">🎬</span> New Meeting
+      </a>
+      <a href="/dashboard#section-history" class="sidebar-link" data-section-link="history">
+        <span class="sidebar-icon" aria-hidden="true">📋</span> Meeting History
+      </a>
+      <a href="/dashboard#section-analytics" class="sidebar-link" data-section-link="analytics">
+        <span class="sidebar-icon" aria-hidden="true">📈</span> Analytics
+      </a>
+      <a href="/dashboard#section-action-items" class="sidebar-link" data-section-link="action-items">
+        <span class="sidebar-icon" aria-hidden="true">✅</span> Action Items
+      </a>
+
+      <div class="sidebar-section-label">Workspace</div>
+      <a href="/dashboard#section-api-keys" class="sidebar-link" data-section-link="api-keys">
+        <span class="sidebar-icon" aria-hidden="true">🔑</span> API Keys
+      </a>
+      <a href="/dashboard#section-webhooks" class="sidebar-link" data-section-link="webhooks">
+        <span class="sidebar-icon" aria-hidden="true">🪝</span> Webhooks
+      </a>
+      <a href="/webhook-playground" class="sidebar-link {% if _path == '/webhook-playground' %}active{% endif %}">
+        <span class="sidebar-icon" aria-hidden="true">🧪</span> Webhook Playground
+      </a>
+      <a href="/dashboard#section-integrations" class="sidebar-link" data-section-link="integrations">
+        <span class="sidebar-icon" aria-hidden="true">🔌</span> Integrations
+      </a>
+      <a href="/dashboard#section-calendar" class="sidebar-link" data-section-link="calendar">
+        <span class="sidebar-icon" aria-hidden="true">📅</span> Calendar
+      </a>
+      <a href="/dashboard#section-workspaces" class="sidebar-link" data-section-link="workspaces">
+        <span class="sidebar-icon" aria-hidden="true">🏢</span> Workspaces
+      </a>
+
+      <div class="sidebar-section-label">Account</div>
+      <a href="/topup" class="sidebar-link {% if _path == '/topup' %}active{% endif %}">
+        <span class="sidebar-icon" aria-hidden="true">💳</span> Billing
+        {% if balance is defined and balance < 0.10 %}
+        <span class="sidebar-link-badge">Low</span>
+        {% endif %}
+      </a>
+      <a href="/dashboard#section-settings" class="sidebar-link" data-section-link="settings">
+        <span class="sidebar-icon" aria-hidden="true">⚙️</span> Settings
+      </a>
+      {% if is_admin %}
+      <a href="/admin" class="sidebar-link admin {% if _path == '/admin' %}active{% endif %}">
+        <span class="sidebar-icon" aria-hidden="true">🛡️</span> Admin Panel
+      </a>
+      {% endif %}
+      <a href="/api/docs" target="_blank" rel="noopener" class="sidebar-link">
+        <span class="sidebar-icon" aria-hidden="true">📖</span> API Docs ↗
+      </a>
+
+      {% if balance is defined %}
+      <a href="/topup" class="sidebar-balance {% if balance < 1.0 %}low{% endif %}" aria-label="Credit balance — open Billing">
+        <span>Credit balance</span>
+        <strong>${{ "%.2f"|format(balance) }}</strong>
+      </a>
+      {% endif %}
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="user-avatar" aria-hidden="true">{{ account.email[0].upper() }}</div>
+      <span class="user-email-line" title="{{ account.email }}">{{ account.email }}</span>
+      <a href="/logout" class="btn-out">Out</a>
+    </div>
+  </aside>
+{% endwith %}
+
+  <div class="app-main">
+    <header class="app-topbar" role="banner">
+      <div class="d-flex align-items-center" style="gap:0.5rem;min-width:0">
+        <button class="sidebar-toggle" onclick="openAppSidebar()" aria-label="Open navigation" aria-controls="appSidebar">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+        </button>
+        <h1 class="topbar-title">{% block page_title %}Dashboard{% endblock %}</h1>
+      </div>
+      <div class="topbar-actions">
+        <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle dark mode" title="Toggle dark mode">
+          <svg class="icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+          <svg class="icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+        </button>
+        {% block primary_action %}{% endblock %}
+      </div>
+    </header>
+
+    <main id="main-content" class="app-content" role="main">
+      {% if flash %}
+      {# Whitelist alert variants so a malicious flash.type cannot inject classes. #}
+      {% set _flash_type = flash.type if flash.type in ['success','danger','warning','info'] else 'info' %}
+      <div class="alert alert-{{ _flash_type }} alert-dismissible fade show mb-4" role="alert">
+        {{ flash.message }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Dismiss notification"></button>
+      </div>
+      {% endif %}
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+</div>
+
+{% else %}
+{# ════════════════════════════════════════════════════════════════════
+   Guest users keep the lightweight top nav (used by /, /login, /register).
+   ════════════════════════════════════════════════════════════════════ #}
 <nav class="app-nav">
   <div class="d-flex align-items-center">
-    <a class="app-nav-brand" href="{% if account %}/dashboard{% else %}/{% endif %}">
+    <a class="app-nav-brand" href="/">
       <div class="brand-icon">🎧</div>
       <span class="brand-text">JustHereToListen.io</span>
     </a>
-    {% if account %}
-    <ul class="nav-links d-none d-md-flex">
-      <li><a href="/dashboard" {% if request.url.path == '/dashboard' %}class="nav-active"{% endif %}>Dashboard</a></li>
-      <li><a href="/topup">Top Up</a></li>
-      <li><a href="/api/docs" target="_blank">API Docs</a></li>
-      {% if is_admin %}
-      <li><a href="/admin" class="admin-link {% if request.url.path == '/admin' %}nav-active{% endif %}">Admin</a></li>
-      {% endif %}
-    </ul>
-    <button class="nav-toggle" onclick="toggleMobileNav()" aria-label="Menu">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
-    </button>
-    {% endif %}
   </div>
 
   <div class="nav-right">
@@ -753,40 +1130,13 @@
       <svg class="icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
       <svg class="icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
     </button>
-    {% if account %}
-      {% if balance is defined %}
-      <a href="/topup" class="balance-pill {% if balance < 1.0 %}low{% endif %}">
-        ${{ "%.2f"|format(balance) }}
-      </a>
-      {% endif %}
-      <div class="user-pill">
-        <div class="user-avatar">{{ account.email[0].upper() }}</div>
-        <span class="user-email-text d-none d-lg-inline">{{ account.email }}</span>
-      </div>
-      <a href="/logout" class="btn-nav-logout">Logout</a>
-    {% else %}
-      <a href="/login" class="btn-nav-logout">Login</a>
-      <a href="/register" class="btn-nav-cta">Get started</a>
-    {% endif %}
+    <a href="/login" class="btn-nav-logout">Login</a>
+    <a href="/register" class="btn-nav-cta">Get started</a>
   </div>
 </nav>
 
-<!-- ── Mobile navigation panel ────────────────────────────────────────── -->
-{% if account %}
-<div class="mobile-nav" id="mobileNav">
-  <a href="/dashboard" {% if request.url.path == '/dashboard' %}class="nav-active"{% endif %}>Dashboard</a>
-  <a href="/topup">Top Up</a>
-  <a href="/api/docs" target="_blank">API Docs</a>
-  {% if is_admin %}
-  <a href="/admin" class="admin-link">Admin</a>
-  {% endif %}
-</div>
-{% endif %}
-
-<!-- ── Main ────────────────────────────────────────────────────────────── -->
 <main id="main-content" class="app-container" role="main">
   {% if flash %}
-  {# Whitelist alert variants so a malicious flash.type cannot inject classes. #}
   {% set _flash_type = flash.type if flash.type in ['success','danger','warning','info'] else 'info' %}
   <div class="alert alert-{{ _flash_type }} alert-dismissible fade show mb-4" role="alert">
     {{ flash.message }}
@@ -795,6 +1145,7 @@
   {% endif %}
   {% block content %}{% endblock %}
 </main>
+{% endif %}
 
 <!-- Toast container (used for inline interactions like "Copied" feedback) -->
 <div id="toast-container" class="position-fixed bottom-0 end-0 p-3" style="z-index: 1100;">
@@ -884,6 +1235,42 @@
   function toggleMobileNav() {
     const nav = document.getElementById('mobileNav');
     if (nav) nav.classList.toggle('open');
+  }
+
+  // App-shell sidebar (mobile drawer)
+  function openAppSidebar() {
+    const sb = document.getElementById('appSidebar');
+    const ov = document.getElementById('sidebarOverlay');
+    if (sb) sb.classList.add('open');
+    if (ov) ov.classList.add('open');
+  }
+  function closeAppSidebar() {
+    const sb = document.getElementById('appSidebar');
+    const ov = document.getElementById('sidebarOverlay');
+    if (sb) sb.classList.remove('open');
+    if (ov) ov.classList.remove('open');
+  }
+  // Close drawer after a sidebar link is tapped on mobile.
+  document.addEventListener('click', function (e) {
+    const link = e.target.closest('.sidebar-link');
+    if (link && window.matchMedia('(max-width: 900px)').matches) {
+      // Defer so the link's own handler fires first.
+      setTimeout(closeAppSidebar, 50);
+    }
+  });
+  // Escape closes the drawer.
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') closeAppSidebar();
+  });
+  // Highlight the sidebar link matching the dashboard's active section as
+  // the user navigates inside the dashboard SPA.
+  function syncSidebarActiveSection(name) {
+    document.querySelectorAll('.sidebar-link[data-section-link]').forEach(el => {
+      el.classList.toggle('active', el.getAttribute('data-section-link') === name);
+    });
+    // If the URL is /dashboard at root (no section), keep "Overview" active.
+    const overview = document.querySelector('.sidebar-link[href="/dashboard"]');
+    if (overview && !name) overview.classList.add('active');
   }
 
   function toggleTheme() {
