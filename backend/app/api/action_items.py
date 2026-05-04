@@ -37,6 +37,11 @@ class ActionItemPatch(BaseModel):
     assignee: Optional[str] = None
     due_date: Optional[str] = None
 
+    model_config = {"json_schema_extra": {"examples": [
+        {"status": "done"},
+        {"assignee": "Alice", "due_date": "2026-05-18"},
+    ]}}
+
 
 def _to_response(row: ActionItem) -> ActionItemResponse:
     return ActionItemResponse(

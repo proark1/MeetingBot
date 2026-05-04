@@ -39,6 +39,20 @@ class RetentionPolicyUpdate(BaseModel):
     transcript_retention_days: Optional[int] = None
     anonymize_speakers: Optional[bool] = None
 
+    model_config = {"json_schema_extra": {"examples": [
+        {
+            "bot_retention_days": 30,
+            "recording_retention_days": 14,
+            "transcript_retention_days": 365,
+            "anonymize_speakers": False,
+        },
+        {
+            "bot_retention_days": -1,
+            "recording_retention_days": -1,
+            "anonymize_speakers": True,
+        },
+    ]}}
+
 
 def _to_response(policy, account_id: Optional[str] = None, is_global: bool = False) -> dict:
     return {

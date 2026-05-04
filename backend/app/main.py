@@ -964,9 +964,9 @@ app = FastAPI(
     ),
     version=_APP_VERSION,
     lifespan=lifespan,
-    docs_url="/api/docs",
-    redoc_url="/api/redoc",
-    openapi_url="/api/openapi.json",
+    docs_url=None,       # served via custom request-aware route below
+    redoc_url=None,      # served via custom request-aware route below
+    openapi_url=None,    # served via custom request-aware route below
 )
 
 app.state.limiter = _limiter
@@ -1078,19 +1078,43 @@ _OPENAPI_TAGS: list[dict[str, str]] = [
 ]
 
 
-def _server_entries(*, include_admin: bool = False) -> list[dict[str, str]]:
+def _server_entries(*, include_admin: bool = False, request: "Request | None" = None) -> list[dict[str, Any]]:
     """Build the OpenAPI `servers` block.
 
-    Production gets the configured public base URL first; local dev gets a
-    localhost entry for quick try-it-out from Swagger UI. The list order
-    determines which server the Swagger UI defaults to.
+    Resolution order (first match wins as `servers[0]`):
+    1. `PUBLIC_BASE_URL` env var — explicit production override.
+    2. The base URL of the current request (host + scheme from headers,
+       respecting `X-Forwarded-Proto` / `X-Forwarded-Host` when behind a
+       trusted proxy). This makes the schema self-correcting when an
+       operator forgets to set `PUBLIC_BASE_URL` — clients see the URL they
+       actually reached.
+    3. `http://localhost:8000` for local dev / regen-script callers that
+       have no request context.
     """
-    servers: list[dict[str, str]] = []
+    servers: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    label = "Production (admin auth required)" if include_admin else "Production"
+
     public = (settings.PUBLIC_BASE_URL or "").rstrip("/")
     if public:
-        label = "Production" if not include_admin else "Production (admin auth required)"
         servers.append({"url": public, "description": label})
-    servers.append({"url": "http://localhost:8000", "description": "Local development"})
+        seen.add(public)
+
+    if request is not None:
+        # Starlette resolves `base_url` from forwarded headers when we have
+        # `X-Forwarded-Proto` / `X-Forwarded-Host` upstream. Strip the
+        # trailing slash so it matches the PUBLIC_BASE_URL form.
+        try:
+            req_base = str(request.base_url).rstrip("/")
+        except Exception:
+            req_base = ""
+        if req_base and req_base not in seen:
+            servers.append({"url": req_base, "description": "Current host"})
+            seen.add(req_base)
+
+    if "http://localhost:8000" not in seen:
+        servers.append({"url": "http://localhost:8000", "description": "Local development"})
+
     return servers
 
 
@@ -1262,6 +1286,24 @@ _ROUTE_SUMMARIES: dict[tuple[str, str], str] = {
 # Reusable error envelope component. Every HTTPException raised by the app is
 # wrapped by `_http_exception_handler` into this shape, so SDKs can deserialise
 # all 4xx/5xx responses to the same type.
+# Stable machine-readable error codes. Mirrors `_ERROR_CODE_MAP` plus a
+# catch-all. Generated SDKs emit a typed enum from this list so callers can
+# `match`/`switch` on `error_code` without comparing strings.
+_ERROR_CODE_VALUES: list[str] = [
+    "bad_request",
+    "unauthorized",
+    "forbidden",
+    "not_found",
+    "conflict",
+    "validation_error",
+    "too_early",
+    "rate_limited",
+    "internal_error",
+    "bad_gateway",
+    "service_unavailable",
+    "unknown_error",
+]
+
 _ERROR_RESPONSE_SCHEMA: dict[str, Any] = {
     "type": "object",
     "required": ["detail", "error_code", "retryable"],
@@ -1275,7 +1317,12 @@ _ERROR_RESPONSE_SCHEMA: dict[str, Any] = {
         },
         "error_code": {
             "type": "string",
-            "description": "Stable machine-readable code (e.g. `unauthorized`, `not_found`, `rate_limited`).",
+            "enum": _ERROR_CODE_VALUES,
+            "description": (
+                "Stable machine-readable error code. SDK generators emit a typed "
+                "enum from these values so callers can branch on the code without "
+                "string comparison."
+            ),
         },
         "retryable": {
             "type": "boolean",
@@ -1293,11 +1340,35 @@ _ERROR_RESPONSE_SCHEMA: dict[str, Any] = {
     },
 }
 
+# Header definitions reused across responses. Declaring them at the schema
+# level lets SDK generators surface the headers in their typed Response objects.
+_RATE_LIMIT_HEADERS: dict[str, dict[str, Any]] = {
+    "X-RateLimit-Remaining": {
+        "description": "Requests remaining in the current rate-limit window.",
+        "schema": {"type": "integer", "minimum": 0},
+    },
+    "X-RateLimit-Reset": {
+        "description": "Unix epoch seconds at which the current window resets.",
+        "schema": {"type": "integer"},
+    },
+}
+
+_RETRY_AFTER_HEADER: dict[str, dict[str, Any]] = {
+    "Retry-After": {
+        "description": (
+            "Seconds the caller should wait before retrying. Honour this on "
+            "429 and 503 responses; it overrides any backoff your client computes."
+        ),
+        "schema": {"type": "integer", "minimum": 0},
+    },
+}
+
+
 # Standard error responses surfaced in `responses:` for every authenticated
 # route. SDK generators emit named exception classes from these and reuse the
 # `ErrorResponse` component instead of inlining the schema 100+ times.
-def _err(description: str) -> dict[str, Any]:
-    return {
+def _err(description: str, *, headers: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
+    response: dict[str, Any] = {
         "description": description,
         "content": {
             "application/json": {
@@ -1305,13 +1376,19 @@ def _err(description: str) -> dict[str, Any]:
             },
         },
     }
+    if headers:
+        response["headers"] = headers
+    return response
 
 
 _STANDARD_ERROR_RESPONSES: dict[str, dict[str, Any]] = {
     "401": _err("Missing or invalid Authorization header."),
     "403": _err("Authenticated but not permitted (e.g. admin-only resource, sandbox limits)."),
     "404": _err("Resource not found, or not owned by the calling account."),
-    "429": _err("Rate-limit exceeded. Retry after the seconds in the `Retry-After` header."),
+    "429": _err(
+        "Rate-limit exceeded. Retry after the seconds in the `Retry-After` header.",
+        headers={**_RATE_LIMIT_HEADERS, **_RETRY_AFTER_HEADER},
+    ),
 }
 
 
@@ -1420,18 +1497,31 @@ def _webhook_components() -> dict[str, Any]:
     }
 
 
-def _apply_global_extras(schema: dict[str, Any], *, admin: bool) -> None:
+def _apply_global_extras(
+    schema: dict[str, Any],
+    *,
+    admin: bool,
+    request: "Request | None" = None,
+) -> None:
     """Augment a FastAPI-generated schema with servers, security, and tags.
 
     Mutates `schema` in place. Called on both the public and admin schemas so
-    SDK generators always get a self-contained spec.
+    SDK generators always get a self-contained spec. When called from a live
+    HTTP handler with `request` set, the `servers` block uses the actual
+    request host as a fallback when `PUBLIC_BASE_URL` is empty.
     """
-    schema["servers"] = _server_entries(include_admin=admin)
+    schema["servers"] = _server_entries(include_admin=admin, request=request)
     components = schema.setdefault("components", {})
     components.setdefault("securitySchemes", {}).update(_security_components())
     component_schemas = components.setdefault("schemas", {})
     component_schemas.setdefault("ErrorResponse", _ERROR_RESPONSE_SCHEMA)
     component_schemas.update(_webhook_components())
+    # Reusable header components — every response emitted by the app carries
+    # these (see `add_rate_limit_headers` middleware), so SDKs can `$ref` them
+    # without redefining per route.
+    component_headers = components.setdefault("headers", {})
+    for name, definition in {**_RATE_LIMIT_HEADERS, **_RETRY_AFTER_HEADER}.items():
+        component_headers.setdefault(name, definition)
     schema["security"] = [{"BearerAuth": []}]
     _apply_route_summaries(schema)
     # Preserve any existing `tags` (FastAPI auto-generates entries for tags it
@@ -1495,6 +1585,44 @@ def _make_public_openapi() -> dict[str, Any]:
 app.openapi = _make_public_openapi
 
 
+# ── Public docs (request-aware) ───────────────────────────────────────────────
+# We disable FastAPI's auto-generated docs/redoc/openapi routes and serve our
+# own so the schema's `servers:` block reflects the actual host the client
+# reached — without depending on `PUBLIC_BASE_URL` being configured.
+
+from fastapi.openapi.docs import get_redoc_html as _get_redoc_html
+
+
+@app.get("/api/openapi.json", include_in_schema=False)
+async def public_openapi_schema(request: Request):
+    """Public OpenAPI schema (no admin / analytics routes; no `ai_usage` cost fields)."""
+    import copy
+
+    schema = copy.deepcopy(_make_public_openapi())
+    schema["servers"] = _server_entries(include_admin=False, request=request)
+    return schema
+
+
+@app.get("/api/docs", include_in_schema=False, response_class=HTMLResponse)
+async def public_api_docs():
+    """Swagger UI for the public API."""
+    return _get_swagger_ui_html(
+        openapi_url="/api/openapi.json",
+        title="JustHereToListen.io API",
+        swagger_favicon_url="",
+    )
+
+
+@app.get("/api/redoc", include_in_schema=False, response_class=HTMLResponse)
+async def public_api_redoc():
+    """ReDoc reference for the public API."""
+    return _get_redoc_html(
+        openapi_url="/api/openapi.json",
+        title="JustHereToListen.io API — Reference",
+        redoc_favicon_url="",
+    )
+
+
 # ── Admin API docs (unauthenticated — actual endpoints still require admin auth) ─
 # These two routes are intentionally public so the browser Swagger UI can load
 # the OpenAPI schema without needing the Authorization header.  Security is
@@ -1511,7 +1639,7 @@ async def admin_api_docs():
 
 
 @app.get("/api/v1/admin/openapi.json", include_in_schema=False)
-async def admin_openapi_schema():
+async def admin_openapi_schema(request: Request):
     """Full OpenAPI schema — includes admin-only endpoints, platform analytics, and ai_usage fields."""
     schema = _get_openapi_util(
         title="JustHereToListen.io Admin API",
@@ -1519,7 +1647,7 @@ async def admin_openapi_schema():
         description=app.description,
         routes=app.routes,
     )
-    _apply_global_extras(schema, admin=True)
+    _apply_global_extras(schema, admin=True, request=request)
     return schema
 
 
