@@ -658,7 +658,12 @@ async def create_bot(payload: BotCreate, request: Request):
                     if ik_row:
                         existing = await store.get_bot(ik_row.bot_id)
                         if existing:
-                            return _to_response(existing)
+                            from fastapi.responses import JSONResponse
+                            return JSONResponse(
+                                content=_to_response(existing).model_dump(mode="json"),
+                                status_code=200,
+                                headers={"X-Idempotency-Replayed": "true"},
+                            )
                     raise HTTPException(
                         status_code=409,
                         detail="Idempotency-Key conflict — concurrent request in flight",

@@ -2,6 +2,7 @@
 
 import hmac
 import logging
+from collections import OrderedDict
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -22,7 +23,10 @@ _bearer = HTTPBearer(auto_error=False)
 # _LAST_USED_DEBOUNCE_S. Without this, every authed request opens a fresh
 # session purely to bump a timestamp, which under load starves the pool.
 _LAST_USED_DEBOUNCE_S = 60.0
-_last_used_at_seen: dict[str, float] = {}
+_LAST_USED_CACHE_MAX = 5000
+# OrderedDict gives us O(1) LRU eviction (popitem(last=False)) so we don't
+# pay an O(N) scan on every request once the cache is full.
+_last_used_at_seen: "OrderedDict[str, float]" = OrderedDict()
 
 # Sentinel value for the legacy superadmin API_KEY bypass
 SUPERADMIN_ACCOUNT_ID = "__superadmin__"
@@ -142,13 +146,12 @@ async def get_current_account_id(
     _now_mono = _time.monotonic()
     _last_seen = _last_used_at_seen.get(api_key.id, 0.0)
     if _now_mono - _last_seen >= _LAST_USED_DEBOUNCE_S:
+        # move_to_end keeps the most-recently-bumped key at the tail; eviction
+        # below pops from the head (oldest) — both O(1).
         _last_used_at_seen[api_key.id] = _now_mono
-        # Trim the cache occasionally so it can't grow without bound.
-        if len(_last_used_at_seen) > 5000:
-            _cutoff = _now_mono - _LAST_USED_DEBOUNCE_S * 10
-            for _k, _v in list(_last_used_at_seen.items()):
-                if _v < _cutoff:
-                    _last_used_at_seen.pop(_k, None)
+        _last_used_at_seen.move_to_end(api_key.id)
+        while len(_last_used_at_seen) > _LAST_USED_CACHE_MAX:
+            _last_used_at_seen.popitem(last=False)
 
         async def _bump_last_used(_key_id: str) -> None:
             try:
