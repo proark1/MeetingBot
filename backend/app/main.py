@@ -102,10 +102,18 @@ async def lifespan(app: FastAPI):
 
     # ── Startup validation ────────────────────────────────────────────────
     if settings.JWT_SECRET == "change-me-in-production":
-        if settings.ENVIRONMENT.lower() == "production":
+        # Production-ish deployments are detected by either ENVIRONMENT or by
+        # using a non-sqlite database (Railway/Heroku/Fly all inject a real DB
+        # URL). Either signal forces an explicit secret — never auto-generate
+        # in something that looks like prod.
+        _looks_like_prod = (
+            settings.ENVIRONMENT.lower() in {"production", "prod", "staging"}
+            or not settings.DATABASE_URL.startswith("sqlite")
+        )
+        if _looks_like_prod:
             raise SystemExit(
-                "FATAL: JWT_SECRET is the insecure default and ENVIRONMENT=production. "
-                "Set a strong JWT_SECRET before starting in production:\n"
+                "FATAL: JWT_SECRET is the insecure default in a non-development "
+                "deployment. Set a strong JWT_SECRET before starting:\n"
                 "  export JWT_SECRET=$(openssl rand -hex 32)"
             )
         # Round-2 fix #10: persist the auto-generated secret next to the SQLite

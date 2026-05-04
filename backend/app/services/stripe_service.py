@@ -95,6 +95,7 @@ async def record_stripe_session(session_id: str, account_id: str, amount_usd: in
         try:
             await db.commit()
         except Exception:
+            await db.rollback()
             logger.exception(
                 "Failed to record Stripe session %s for account %s — credits will still "
                 "be applied when the webhook arrives",

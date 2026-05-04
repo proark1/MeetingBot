@@ -53,6 +53,10 @@ async def log_event(
 
         async with AsyncSessionLocal() as db:
             db.add(entry)
-            await db.commit()
+            try:
+                await db.commit()
+            except Exception:
+                await db.rollback()
+                raise
     except Exception:
         logger.exception("audit_log_service: failed to write audit entry for action=%r", action)

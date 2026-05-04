@@ -227,7 +227,11 @@ async def deduct_credits_for_bot(
             reference_id=bot_id,
         )
         db.add(tx)
-        await db.commit()
+        try:
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            raise
 
     logger.info(
         "Credits deducted: -$%.4f from account %s for bot %s",

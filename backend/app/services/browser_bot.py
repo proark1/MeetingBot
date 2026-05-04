@@ -28,6 +28,8 @@ from typing import Awaitable, Callable, Optional
 
 from playwright.async_api import Browser, BrowserContext, Page, async_playwright
 
+from app.services.background_tasks import tracked_task as _tracked_task
+
 logger = logging.getLogger(__name__)
 
 PULSE_SINK_NAME = "meetingbot_sink"
@@ -5159,7 +5161,7 @@ async def run_browser_bot(
                 while True:
                     _tick += 1
                     await _step(f"cont#{_tick}", 15, always_info=False)
-            asyncio.create_task(_late_routing_syncs())
+            _tracked_task(_late_routing_syncs(), name="late_routing_syncs")
 
             # ── Audio-health watchdog ──────────────────────────────────────────
             # Periodically sample the tail of the growing WAV file; if Chrome
@@ -5257,7 +5259,7 @@ async def run_browser_bot(
 
                     await asyncio.sleep(20)
 
-            asyncio.create_task(_audio_health_watchdog())
+            _tracked_task(_audio_health_watchdog(), name="audio_health_watchdog")
 
             # Enable live captions so the mention monitor can read them
             if respond_on_mention:

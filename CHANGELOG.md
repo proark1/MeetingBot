@@ -4,7 +4,51 @@ All notable changes to JustHereToListen.io are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.46.0 — **Last updated:** 2026-05-01
+> **Latest version:** 2.46.1 — **Last updated:** 2026-05-04
+
+---
+
+## [2.46.1] - 2026-05-04
+
+### Fixed — bug-audit top-10 pass
+
+- **#1 Untracked async tasks.** `_late_routing_syncs` and
+  `_audio_health_watchdog` in `browser_bot.py` are now scheduled via
+  `tracked_task()` so the loop holds a strong reference and they can no
+  longer be GC'd mid-await, silently dropping audio routing/health work.
+- **#2 JWT_SECRET hardcoded default.** Startup now refuses to boot with
+  the insecure default whenever the deployment looks production-ish
+  (non-dev `ENVIRONMENT` *or* a non-sqlite `DATABASE_URL`), not just
+  when `ENVIRONMENT=production`.
+- **#3 Unprotected commit in `deduct_credits_for_bot`.** The credit-debit
+  commit is now wrapped in `try/except → rollback → raise` so a failed
+  commit can no longer leave a stale transaction on the session.
+- **#4 No timeout on plan/credit pre-flight.** The
+  `check_credits` + `check_plan_limit` block in `POST /bot` is wrapped
+  in `asyncio.timeout(5)`; a slow DB query now surfaces a 503 instead
+  of wedging connection-pool slots.
+- **#5 Idempotency-key race.** A concurrent insert with the same
+  `(account, sub_user, key)` tuple now hits the unique index, is caught
+  as `IntegrityError`, and the bot is replayed from the winning
+  request's record (or 409 if the row vanished) instead of leaving a
+  duplicate bot in memory.
+- **#6 Webhook fan-out exception handling.** `_fire_extra_webhook` now
+  catches transport-layer exceptions itself so a per-bot delivery
+  failure can no longer escape into asyncio's "Task exception was never
+  retrieved" warning with no diagnostic.
+- **#7 Brand leak in email From default.** Default From address is no
+  longer `noreply@meetingbot.io`; falls back to
+  `noreply@justheretolisten.io` when `SMTP_FROM_ADDRESS` is unset.
+- **#8 Missing rollback in audit_log/stripe services.** Both services
+  now `await db.rollback()` on commit failure so the underlying session
+  is left clean.
+- **#9 Swallowed URL-validation errors.** `POST /bot/validate-meeting-url`
+  now logs parser exceptions at warning level instead of silently
+  returning a generic error response.
+- **#10 Per-request session for `last_used_at`.** API-key timestamp
+  bumps are now debounced to once per 60 s per key and dispatched via
+  `tracked_task()`, so high-traffic accounts no longer spin up a fresh
+  DB session on every authed request. Failures log at warning level.
 
 ---
 
