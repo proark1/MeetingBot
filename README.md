@@ -1,8 +1,8 @@
 # JustHereToListen.io API
 
-**Version 2.47.0** — A stateless meeting bot API service with multi-tenant billing, business account support, Google/Microsoft SSO, Python & JS SDKs, webhook retry/delivery logs, bot persona customization, video recording, Prometheus metrics, idempotency keys, cloud storage, email notifications, calendar auto-join, Slack/Notion integrations, GDPR compliance, **and a new opt-in advanced-features layer (in-meeting @bot Q&A, live speaker analytics, smart decision detection, cross-meeting memory, host coaching, and agentic delegation)**.
+**Version 2.48.0** — A stateless meeting bot API service with multi-tenant billing, business account support, Google/Microsoft SSO, Python & JS SDKs, webhook retry/delivery logs, bot persona customization, video recording, Prometheus metrics, idempotency keys, cloud storage, email notifications, calendar auto-join, Slack/Notion integrations, GDPR compliance, **and a new opt-in advanced-features layer (in-meeting @bot Q&A, live speaker analytics, smart decision detection, cross-meeting memory, host coaching, and agentic delegation)**.
 
-> **Last updated:** 2026-05-04 · **API version in Swagger UI:** 2.47.0 · **Build:** UI/UX top-10 pass — first-run onboarding checklist, real `confirmDestructive` modal with type-to-confirm, loading skeletons + retry states, copy-with-flash on credentials, accessible focus rings + skip-link, hardened forms, dedup-and-cap toast system. <!-- auto-updated on each release -->
+> **Last updated:** 2026-05-04 · **API version in Swagger UI:** 2.48.0 · **Build:** App-shell layout — persistent left sidebar with grouped Main / Workspace / Account sections, page title + primary CTA topbar, off-canvas drawer on mobile, balance pill moved into the sidebar. <!-- auto-updated on each release -->
 
 
 Send bots into **Zoom**, **Google Meet**, **Microsoft Teams**, and **onepizza.io** meetings to record, transcribe, and analyse them with **Claude** (Anthropic) or **Gemini** (Google) AI.

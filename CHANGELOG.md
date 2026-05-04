@@ -4,7 +4,48 @@ All notable changes to JustHereToListen.io are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.47.0 — **Last updated:** 2026-05-04
+> **Latest version:** 2.48.0 — **Last updated:** 2026-05-04
+
+---
+
+## [2.48.0] - 2026-05-04
+
+### Changed — App-shell layout
+
+The logged-in surface moves from a horizontal top nav to a persistent
+left sidebar + content area, matching the layout most modern SaaS
+dashboards use (and the onepizza.io reference design).
+
+- **`base.html`** — when an `account` is in scope, the body renders an
+  `app-shell` grid: 240 px sticky sidebar on the left, content on the
+  right. The sidebar contains brand, three grouped nav sections (Main,
+  Workspace, Account), a Credit balance pill that turns red below $1,
+  and a fixed footer with avatar + email + Out (logout).
+- **Topbar** — every logged-in page now has a thin sticky header with
+  two new template blocks: `{% block page_title %}` and
+  `{% block primary_action %}` for the one obvious page CTA
+  (e.g. "🎬 New Meeting" on the dashboard).
+- **Mobile** — at ≤ 900 px the sidebar collapses to an off-canvas
+  drawer; a 44 × 44 px hamburger in the topbar opens it, an overlay
+  closes it, Escape closes it, and tapping any link auto-closes it.
+- **Dashboard** — the page-local secondary sidebar is hidden so the
+  new global sidebar is the single source of truth. The inner
+  `<main>` becomes a `<div>` to avoid nested-`<main>` (invalid HTML).
+  Dashboard JS gains `_normalizeHash()` (accepts both legacy `#bots`
+  and new `#section-bots`) and `syncSidebarActiveSection()` (keeps
+  the global sidebar's active link + topbar title in sync as the
+  user navigates the dashboard SPA).
+- **Other authed pages** (`topup`, `bot`, `admin`) declare a
+  `page_title` block so the topbar shows the right thing.
+- **Guest pages** (landing, login, register) keep the old top nav.
+
+### Files touched
+
+`backend/app/templates/base.html`,
+`backend/app/templates/dashboard.html`,
+`backend/app/templates/topup.html`,
+`backend/app/templates/bot.html`,
+`backend/app/templates/admin.html`.
 
 ---
 
