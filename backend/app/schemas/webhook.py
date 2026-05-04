@@ -9,6 +9,20 @@ class WebhookCreate(BaseModel):
     events: list[str] = ["*"]  # ["*"] = all events; or specific like ["bot.done", "bot.error"]
     secret: Optional[str] = None  # Optional HMAC signing secret
 
+    model_config = {"json_schema_extra": {
+        "examples": [
+            {
+                "url": "https://api.acme.com/justheretolisten/webhook",
+                "events": ["*"],
+                "secret": "whsec_super_secret_for_hmac",
+            },
+            {
+                "url": "https://api.acme.com/justheretolisten/webhook",
+                "events": ["bot.done", "bot.error", "bot.keyword_alert"],
+            },
+        ],
+    }}
+
     @field_validator("events")
     @classmethod
     def validate_events(cls, v: list[str]) -> list[str]:

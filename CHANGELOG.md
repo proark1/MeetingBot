@@ -4,7 +4,58 @@ All notable changes to JustHereToListen.io are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.49.0 — **Last updated:** 2026-05-04
+> **Latest version:** 2.50.0 — **Last updated:** 2026-05-04
+
+---
+
+## [2.50.0] - 2026-05-04
+
+### Added — round-2 OpenAPI completion
+
+Closes the remaining gaps from 2.49.0 — the schema is now fully self-
+documenting, every operation is named, every error is typed, and the
+SDK / docs pipeline is wired up.
+
+**Schema completeness**
+- Extended `_ROUTE_SUMMARIES` to cover all 114 operations. No more
+  auto-generated `Get Me` / `List Api Keys` names — Swagger UI and
+  generated SDKs see clean human summaries on every endpoint.
+- New `ErrorResponse` schema component matches the runtime error
+  envelope (`{detail, error_code, retryable, incident_id?}`). Every
+  authenticated `responses:` block now `$ref`s it instead of inlining
+  free-text descriptions, so SDK generators emit a single typed
+  `ApiError` class.
+- New `WebhookEvent` (string enum of all 14 events) and
+  `WebhookPayload` schema components describe the webhook delivery
+  contract — including the `X-MeetingBot-Signature` HMAC header.
+- Added `json_schema_extra.examples` to `BotCreate` (immediate +
+  scheduled examples) and `WebhookCreate` (wildcard + filtered
+  examples). Swagger UI's "Try it out" panel now pre-populates
+  realistic request bodies.
+
+**CI / dev tooling**
+- New `.github/workflows/openapi-check.yml` runs
+  `scripts/generate_openapi.py --check --admin` on every PR. CI fails
+  if `api/openapi.json` drifts from the live FastAPI app.
+- New `scripts/generate_sdks.sh` regenerates the Python SDK
+  (`openapi-python-client`), a TS types-only file
+  (`openapi-typescript`), and a full TS client
+  (`openapi-typescript-codegen`) from the committed schema. Hand-
+  written SDKs at `sdk/python/meetingbot/` and `sdk/js/src/index.ts`
+  remain the supported entry points; generated output is for type
+  checking and reference.
+- New `backend/.env.example` documents the required and optional env
+  vars — `PUBLIC_BASE_URL` is highlighted as the var that decides
+  what the OpenAPI `servers[0]` block resolves to in production.
+
+**Discovery**
+- New `/api/quickstart` HTML page: a no-scroll quickstart with curl /
+  Python / TypeScript snippets for register → top up → create bot →
+  receive results, plus auth options, error shape, and the full
+  webhook event list. Served from the API host so integrators can
+  share it without a separate docs site.
+
+No breaking changes — all routes work identically.
 
 ---
 

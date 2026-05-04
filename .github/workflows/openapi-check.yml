@@ -1,0 +1,40 @@
+name: OpenAPI snapshot
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Verify api/openapi.json is in sync with the live FastAPI app
+        env:
+          DATABASE_URL: "sqlite+aiosqlite:///./openapi-check.db"
+          JWT_SECRET: "ci-only-not-a-real-secret"
+          API_KEY: "ci-superadmin"
+          CORS_ORIGINS: "*"
+        run: |
+          python scripts/generate_openapi.py --check --admin
+          echo "OpenAPI snapshots are up to date."
+
+      - name: Hint on drift
+        if: failure()
+        run: |
+          echo "::error::api/openapi.json drifted from the live schema."
+          echo "Run 'python scripts/generate_openapi.py --admin' locally and commit the result."

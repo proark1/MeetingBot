@@ -23,7 +23,7 @@ for _candidate in [
         break
 _APP_VERSION = _VERSION_FILE.read_text().strip() if _VERSION_FILE else "2.45.0"
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -1213,15 +1213,105 @@ _ROUTE_SUMMARIES: dict[tuple[str, str], str] = {
     # — Retention —
     ("get", "/api/v1/auth/retention"): "Get retention policy",
     ("put", "/api/v1/auth/retention"): "Update retention policy",
+    ("delete", "/api/v1/auth/retention"): "Reset retention policy to defaults",
+    # — Auth (extended) —
+    ("get", "/api/v1/auth/me"): "Get the calling account profile",
+    ("get", "/api/v1/auth/wallet"): "Get registered USDC wallet address",
+    ("put", "/api/v1/auth/account-type"): "Switch between personal and business account",
+    ("get", "/api/v1/auth/test-keys"): "List sandbox `sk_test_…` API keys",
+    ("post", "/api/v1/auth/test-keys"): "Create a sandbox `sk_test_…` API key",
+    ("post", "/api/v1/auth/support-key"): "Mint a short-lived support-access key",
+    ("get", "/api/v1/auth/support-keys"): "List active support-access keys",
+    ("delete", "/api/v1/auth/support-key/{key_id}"): "Revoke a support-access key",
+    # — Bots (extended) —
+    ("get", "/api/v1/bot/{bot_id}/debug"): "Internal debug view of a bot session",
+    ("get", "/api/v1/bot/{bot_id}/highlight"): "Get an auto-generated meeting highlight clip",
+    ("post", "/api/v1/bot/{bot_id}/ask-live"): "Ask the bot a question while the meeting is live",
+    ("post", "/api/v1/bot/{bot_id}/followup-email"): "Generate a follow-up email draft from the meeting",
+    ("patch", "/api/v1/bot/{bot_id}/speakers"): "Rename or merge speakers in the transcript",
+    ("get", "/api/v1/bot/{bot_id}/analytics/live"): "Live speaker / sentiment analytics",
+    ("get", "/api/v1/bot/{bot_id}/analytics/history"): "Historical analytics snapshots for a bot",
+    ("get", "/api/v1/bot/{bot_id}/analytics/stream"): "Server-sent stream of live analytics",
+    ("get", "/api/v1/bot/{bot_id}/coaching/tips"): "List host coaching tips for the meeting",
+    ("get", "/api/v1/bot/{bot_id}/coaching/stream"): "Server-sent stream of host coaching tips",
+    ("get", "/api/v1/bot/{bot_id}/decisions"): "List decisions detected in the meeting",
+    ("get", "/api/v1/bot/{bot_id}/memory/related"): "Find related past meetings via vector memory",
+    ("post", "/api/v1/bot/{bot_id}/memory/refresh"): "Recompute related-meeting embeddings",
+    ("get", "/api/v1/bot/{bot_id}/agentic/instructions"): "List agentic instructions configured for this bot",
+    ("put", "/api/v1/bot/{bot_id}/agentic/instructions"): "Update agentic instructions for this bot",
+    ("post", "/api/v1/bot/{bot_id}/agentic/trigger"): "Manually trigger an agentic instruction",
+    ("post", "/api/v1/bot/{bot_id}/chat-qa/ask"): "Ask a question against the meeting chat history",
+    # — Webhooks (extended) —
+    ("get", "/api/v1/webhook/events"): "List supported webhook event names",
+    ("get", "/api/v1/webhook/deliveries"): "List recent deliveries across all webhooks",
+    # — Exports (extended) —
+    ("post", "/api/v1/bot/{bot_id}/export/drive"): "Export meeting report to Google Drive",
+    # — Search & audit —
+    ("get", "/api/v1/search"): "Full-text search across transcripts",
+    ("get", "/api/v1/audit-log"): "Account audit log (security-relevant events)",
+    # — Keyword alerts (extended) —
+    ("get", "/api/v1/keyword-alerts/{alert_id}"): "Get a keyword alert",
+    ("patch", "/api/v1/keyword-alerts/{alert_id}"): "Update a keyword alert",
+    # — Health —
+    ("get", "/api/health"): "Liveness probe",
+    ("get", "/health"): "Liveness probe (legacy path)",
+    ("get", "/api/ready"): "Readiness probe",
+    ("get", "/ready"): "Readiness probe (legacy path)",
+}
+
+# Reusable error envelope component. Every HTTPException raised by the app is
+# wrapped by `_http_exception_handler` into this shape, so SDKs can deserialise
+# all 4xx/5xx responses to the same type.
+_ERROR_RESPONSE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "required": ["detail", "error_code", "retryable"],
+    "properties": {
+        "detail": {
+            "description": "Human-readable error message, or a list of Pydantic validation errors.",
+            "oneOf": [
+                {"type": "string"},
+                {"type": "array", "items": {"type": "object"}},
+            ],
+        },
+        "error_code": {
+            "type": "string",
+            "description": "Stable machine-readable code (e.g. `unauthorized`, `not_found`, `rate_limited`).",
+        },
+        "retryable": {
+            "type": "boolean",
+            "description": "Whether the caller should retry the same request after a backoff.",
+        },
+        "incident_id": {
+            "type": "string",
+            "description": "Set on 5xx responses for support tracing.",
+        },
+    },
+    "example": {
+        "detail": "Bot 'bot_abc' not found",
+        "error_code": "not_found",
+        "retryable": False,
+    },
 }
 
 # Standard error responses surfaced in `responses:` for every authenticated
-# route. SDK generators emit named exception classes from these.
+# route. SDK generators emit named exception classes from these and reuse the
+# `ErrorResponse` component instead of inlining the schema 100+ times.
+def _err(description: str) -> dict[str, Any]:
+    return {
+        "description": description,
+        "content": {
+            "application/json": {
+                "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+            },
+        },
+    }
+
+
 _STANDARD_ERROR_RESPONSES: dict[str, dict[str, Any]] = {
-    "401": {"description": "Missing or invalid Authorization header."},
-    "403": {"description": "Authenticated but not permitted (e.g. admin-only resource, sandbox limits)."},
-    "404": {"description": "Resource not found, or not owned by the calling account."},
-    "429": {"description": "Rate-limit exceeded. Retry after the seconds in the `Retry-After` header."},
+    "401": _err("Missing or invalid Authorization header."),
+    "403": _err("Authenticated but not permitted (e.g. admin-only resource, sandbox limits)."),
+    "404": _err("Resource not found, or not owned by the calling account."),
+    "429": _err("Rate-limit exceeded. Retry after the seconds in the `Retry-After` header."),
 }
 
 
@@ -1252,6 +1342,84 @@ def _apply_route_summaries(schema: dict[str, Any]) -> None:
                 responses.setdefault(code, body)
 
 
+def _webhook_components() -> dict[str, Any]:
+    """Formal OpenAPI components describing webhook delivery payloads.
+
+    Until v2.49.0 the webhook contract was prose-only in the description.
+    Generators now have a concrete `WebhookPayload` schema and a string-enum
+    `WebhookEvent` covering all 14 events fired by the platform.
+    """
+    return {
+        "WebhookEvent": {
+            "type": "string",
+            "description": "Webhook event names emitted by the platform.",
+            "enum": [
+                "bot.joining",
+                "bot.in_call",
+                "bot.call_ended",
+                "bot.transcript_ready",
+                "bot.analysis_ready",
+                "bot.done",
+                "bot.error",
+                "bot.cancelled",
+                "bot.keyword_alert",
+                "bot.live_transcript",
+                "bot.live_transcript_translated",
+                "bot.live_chat_message",
+                "bot.recurring_intel_ready",
+                "bot.test",
+            ],
+        },
+        "WebhookPayload": {
+            "type": "object",
+            "description": (
+                "Body POSTed to your `webhook_url`. Signed with HMAC-SHA256 in the "
+                "`X-MeetingBot-Signature` header (format: `sha256=<hex>`). "
+                "`X-MeetingBot-Timestamp` carries the unix-seconds delivery time."
+            ),
+            "required": ["event", "delivery_id", "timestamp", "data"],
+            "properties": {
+                "event": {"$ref": "#/components/schemas/WebhookEvent"},
+                "delivery_id": {
+                    "type": "string",
+                    "description": "Unique ID for this delivery attempt.",
+                },
+                "timestamp": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "ISO-8601 UTC timestamp the event was emitted.",
+                },
+                "bot_id": {
+                    "type": "string",
+                    "description": "Bot the event relates to (omitted for `bot.test`).",
+                },
+                "account_id": {
+                    "type": "string",
+                    "description": "Account that owns the bot.",
+                },
+                "data": {
+                    "type": "object",
+                    "description": (
+                        "Event-specific payload. For `bot.done` this includes the "
+                        "full BotResponse; for `bot.live_transcript` it carries "
+                        "`{entry: {speaker, text, source, timestamp}}`; for "
+                        "`bot.live_chat_message` it carries an additional "
+                        "`message_id`."
+                    ),
+                },
+            },
+            "example": {
+                "event": "bot.done",
+                "delivery_id": "evt_2c8f4b9a",
+                "timestamp": "2026-05-04T12:34:56Z",
+                "bot_id": "bot_abc123",
+                "account_id": "acct_xyz",
+                "data": {"status": "done", "transcript": [], "analysis": {}},
+            },
+        },
+    }
+
+
 def _apply_global_extras(schema: dict[str, Any], *, admin: bool) -> None:
     """Augment a FastAPI-generated schema with servers, security, and tags.
 
@@ -1261,6 +1429,9 @@ def _apply_global_extras(schema: dict[str, Any], *, admin: bool) -> None:
     schema["servers"] = _server_entries(include_admin=admin)
     components = schema.setdefault("components", {})
     components.setdefault("securitySchemes", {}).update(_security_components())
+    component_schemas = components.setdefault("schemas", {})
+    component_schemas.setdefault("ErrorResponse", _ERROR_RESPONSE_SCHEMA)
+    component_schemas.update(_webhook_components())
     schema["security"] = [{"BearerAuth": []}]
     _apply_route_summaries(schema)
     # Preserve any existing `tags` (FastAPI auto-generates entries for tags it
@@ -1350,6 +1521,144 @@ async def admin_openapi_schema():
     )
     _apply_global_extras(schema, admin=True)
     return schema
+
+
+_QUICKSTART_HTML = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>JustHereToListen.io — API Quickstart</title>
+<style>
+  :root { --fg:#1a1a1a; --muted:#666; --accent:#3b5fbc; --bg:#fafafa; --code:#f4f4f5; }
+  body { font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+         color: var(--fg); background: var(--bg); margin: 0; padding: 0; }
+  main { max-width: 820px; margin: 0 auto; padding: 48px 24px 96px; }
+  h1 { font-size: 32px; margin: 0 0 8px; }
+  h2 { font-size: 22px; margin: 36px 0 12px; border-bottom: 1px solid #ddd; padding-bottom: 6px; }
+  h3 { font-size: 17px; margin: 24px 0 8px; }
+  .lede { color: var(--muted); margin: 0 0 24px; }
+  .links { display: flex; gap: 12px; flex-wrap: wrap; margin: 16px 0 32px; }
+  .links a { padding: 10px 16px; background: var(--accent); color: #fff; border-radius: 6px;
+             text-decoration: none; font-weight: 500; font-size: 14px; }
+  .links a:hover { background: #2c4a96; }
+  pre { background: var(--code); padding: 14px 16px; border-radius: 6px; overflow-x: auto;
+        font-size: 13px; line-height: 1.5; }
+  code { background: var(--code); padding: 1px 6px; border-radius: 3px; font-size: 0.9em; }
+  pre code { background: transparent; padding: 0; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 12px 0; }
+  .grid > div { background: #fff; border: 1px solid #e3e3e3; padding: 12px 14px; border-radius: 6px; }
+  .grid h4 { margin: 0 0 4px; font-size: 14px; color: var(--accent); }
+  .grid p { margin: 0; font-size: 14px; color: var(--muted); }
+  ul { padding-left: 22px; }
+  li { margin: 4px 0; }
+  small { color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>JustHereToListen.io — API Quickstart</h1>
+  <p class="lede">Send headless bots into Zoom / Google Meet / Microsoft Teams / onepizza.io meetings to record, transcribe (Gemini or Whisper), and analyse (Claude or Gemini) them.</p>
+
+  <div class="links">
+    <a href="/api/docs">Interactive API reference (Swagger UI)</a>
+    <a href="/api/redoc">ReDoc reference</a>
+    <a href="/api/openapi.json">OpenAPI 3.1 schema (JSON)</a>
+  </div>
+
+  <h2>1. Get an API key</h2>
+  <pre><code>curl -X POST {BASE}/api/v1/auth/register \\
+  -H "Content-Type: application/json" \\
+  -d '{"email":"you@example.com","password":"supersecret"}'</code></pre>
+  <p>Copy the <code>api_key</code> from the response — it's shown <strong>once</strong>. Format: <code>sk_live_…</code>.</p>
+
+  <h2>2. Top up credits</h2>
+  <p>Bot runs cost $0.10 each (flat fee). Top up via Stripe Checkout or USDC.</p>
+  <pre><code>curl -X POST {BASE}/api/v1/billing/stripe/checkout \\
+  -H "Authorization: Bearer sk_live_…" \\
+  -H "Content-Type: application/json" \\
+  -d '{"amount_usd": 25}'</code></pre>
+
+  <h2>3. Send a bot into a meeting</h2>
+  <h3>cURL</h3>
+  <pre><code>curl -X POST {BASE}/api/v1/bot \\
+  -H "Authorization: Bearer sk_live_…" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "meeting_url": "https://meet.google.com/abc-defg-hij",
+    "bot_name": "Notes Bot",
+    "webhook_url": "https://your-app.example.com/webhook",
+    "template": "sales"
+  }'</code></pre>
+
+  <h3>Python</h3>
+  <pre><code>from meetingbot import MeetingBot
+
+mb = MeetingBot(api_key="sk_live_…")
+bot = mb.create_bot(
+    meeting_url="https://meet.google.com/abc-defg-hij",
+    template="sales",
+    webhook_url="https://your-app.example.com/webhook",
+)
+print(bot.id, bot.status)</code></pre>
+
+  <h3>JavaScript / TypeScript</h3>
+  <pre><code>import { MeetingBot } from "@meetingbot/sdk";
+
+const mb = new MeetingBot({ apiKey: "sk_live_…" });
+const bot = await mb.createBot({
+  meeting_url: "https://meet.google.com/abc-defg-hij",
+  template: "sales",
+  webhook_url: "https://your-app.example.com/webhook",
+});
+console.log(bot.id, bot.status);</code></pre>
+
+  <h2>4. Receive results</h2>
+  <p>Either poll <code>GET /api/v1/bot/{id}</code> until <code>status</code> is <code>done</code>, or register a webhook URL and let us POST results to you when each bot finishes.</p>
+  <p>Webhook payloads are signed with HMAC-SHA256 (header <code>X-MeetingBot-Signature: sha256=&lt;hex&gt;</code>) and retried with exponential backoff up to 5 times.</p>
+
+  <h2>Authentication options</h2>
+  <div class="grid">
+    <div><h4>API key</h4><p><code>Authorization: Bearer sk_live_…</code> — primary auth for backend integrations.</p></div>
+    <div><h4>Sandbox key</h4><p><code>Authorization: Bearer sk_test_…</code> — same surface but bills $0 and runs in test mode.</p></div>
+    <div><h4>JWT</h4><p>Issued by <code>POST /api/v1/auth/login</code> for browser sessions.</p></div>
+    <div><h4>Sub-user</h4><p><code>X-Sub-User: &lt;id&gt;</code> — multi-tenant isolation on a business account.</p></div>
+  </div>
+
+  <h2>Errors</h2>
+  <p>Every 4xx/5xx response returns:</p>
+  <pre><code>{
+  "detail": "Bot 'bot_abc' not found",
+  "error_code": "not_found",
+  "retryable": false
+}</code></pre>
+  <p>Stable <code>error_code</code> values include <code>unauthorized</code>, <code>forbidden</code>, <code>not_found</code>, <code>rate_limited</code>, <code>validation_error</code>, <code>internal_error</code>. Honour <code>retryable</code>; on rate limits also honour the <code>Retry-After</code> header.</p>
+
+  <h2>Webhooks events</h2>
+  <ul>
+    <li><code>bot.joining</code> · <code>bot.in_call</code> · <code>bot.call_ended</code></li>
+    <li><code>bot.transcript_ready</code> · <code>bot.analysis_ready</code> · <code>bot.done</code></li>
+    <li><code>bot.error</code> · <code>bot.cancelled</code> · <code>bot.keyword_alert</code></li>
+    <li><code>bot.live_transcript</code> · <code>bot.live_transcript_translated</code> · <code>bot.live_chat_message</code></li>
+    <li><code>bot.recurring_intel_ready</code> · <code>bot.test</code></li>
+  </ul>
+
+  <p><small>Need help? Open an issue at <a href="https://github.com/proark1/meetingbot">github.com/proark1/meetingbot</a>.</small></p>
+</main>
+</body>
+</html>
+"""
+
+
+@app.get("/api/quickstart", include_in_schema=False, response_class=HTMLResponse)
+async def quickstart_page(request: Request) -> HTMLResponse:
+    """Friendly landing page with curl/Python/JS quickstarts.
+
+    Linked from the top of `/api/docs` and from the OpenAPI description so
+    integrators have a fast onramp before hitting the full schema.
+    """
+    base = (settings.PUBLIC_BASE_URL or "").rstrip("/") or str(request.base_url).rstrip("/")
+    return HTMLResponse(_QUICKSTART_HTML.replace("{BASE}", base))
 
 
 # ── Machine-readable error responses ─────────────────────────────────────────

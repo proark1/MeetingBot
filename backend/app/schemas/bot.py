@@ -155,6 +155,26 @@ def _reject_private_url(v: Any) -> str:
 class BotCreate(BaseModel):
     """Request body for creating a new meeting bot."""
 
+    model_config = {"json_schema_extra": {
+        "examples": [
+            {
+                "meeting_url": "https://meet.google.com/abc-defg-hij",
+                "bot_name": "Acme Notes Bot",
+                "webhook_url": "https://api.acme.com/justheretolisten/callback",
+                "template": "sales",
+            },
+            {
+                "meeting_url": "https://us02web.zoom.us/j/12345?pwd=secret",
+                "bot_name": "Standup Recorder",
+                "join_at": "2026-05-04T15:00:00Z",
+                "analysis_mode": "full",
+                "template": "standup",
+                "vocabulary": ["JustHereToListen", "MeetingBot", "OKR"],
+                "sub_user_id": "user_42",
+            },
+        ],
+    }}
+
     meeting_url: AnyHttpUrl = Field(description="Full URL of the Zoom, Google Meet, Teams, or onepizza.io meeting.")
     bot_name: str = Field(default="JustHereToListen.io", max_length=100, description="Display name shown in the meeting.")
 
