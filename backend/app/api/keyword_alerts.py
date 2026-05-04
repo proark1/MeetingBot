@@ -36,6 +36,19 @@ class KeywordAlertCreate(BaseModel):
     )
     is_active: bool = Field(default=True, description="Whether this alert is active.")
 
+    model_config = {"json_schema_extra": {"examples": [
+        {
+            "name": "Competitor mentions",
+            "keywords": ["acme corp", "competitor x", "we are switching"],
+            "webhook_url": "https://your-app.example.com/competitor-webhook",
+            "is_active": True,
+        },
+        {
+            "name": "Churn-risk phrases",
+            "keywords": ["cancel", "downgrade", "not working"],
+        },
+    ]}}
+
 
 class KeywordAlertResponse(BaseModel):
     id: str

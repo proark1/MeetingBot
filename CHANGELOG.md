@@ -4,7 +4,51 @@ All notable changes to JustHereToListen.io are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.50.0 — **Last updated:** 2026-05-04
+> **Latest version:** 2.51.0 — **Last updated:** 2026-05-04
+
+---
+
+## [2.51.0] - 2026-05-04
+
+### Added — round-3 OpenAPI polish
+
+The four loose ends from 2.50.0 — request-aware servers, typed error
+codes, rate-limit headers in schema, and examples on the remaining
+core models.
+
+**Request-aware schema endpoints**
+- `/api/openapi.json`, `/api/docs`, `/api/redoc` are now custom routes
+  that build `servers:` from the actual request host. When
+  `PUBLIC_BASE_URL` is unset, the schema reports the URL the client
+  reached instead of `http://localhost:8000` — production deployments
+  are now self-correcting.
+- The committed `api/openapi.json` snapshot still falls back to
+  localhost (no request context at regen time).
+
+**Typed `error_code`**
+- `ErrorResponse.error_code` is now a `string` with `enum:` listing
+  the 12 known codes (`bad_request`, `unauthorized`, `forbidden`,
+  `not_found`, `conflict`, `validation_error`, `too_early`,
+  `rate_limited`, `internal_error`, `bad_gateway`,
+  `service_unavailable`, `unknown_error`). SDK generators emit a
+  typed enum so callers can `match`/`switch` without string compare.
+
+**Rate-limit + Retry-After headers**
+- New reusable `components.headers.X-RateLimit-Remaining`,
+  `X-RateLimit-Reset`, and `Retry-After` definitions.
+- The standard 429 response now declares all three headers, matching
+  what the `add_rate_limit_headers` middleware emits at runtime.
+
+**More examples on core schemas**
+- `MeetingAnalysis` — full realistic analysis with summary, key
+  points, action items (with confidence), decisions, topics with
+  timestamps, risks, and unresolved items.
+- `KeywordAlertCreate` — competitor-mentions and churn-risk examples.
+- `RetentionPolicyUpdate` — standard retention + keep-forever
+  examples.
+- `ActionItemPatch` — mark-done and reassign examples.
+
+No breaking changes — all existing callers continue to work.
 
 ---
 

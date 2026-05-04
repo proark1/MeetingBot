@@ -509,7 +509,34 @@ class MeetingAnalysis(BaseModel):
     next_meeting: Optional[str] = None
     unresolved_items: list[str] = []
 
-    model_config = {"extra": "allow"}
+    model_config = {
+        "extra": "allow",
+        "json_schema_extra": {"examples": [{
+            "summary": "The team agreed to ship the v2 onboarding redesign by end of Q3 and to deprecate the old wizard once the new flow hits 95% completion.",
+            "key_points": [
+                "Onboarding completion is currently 71% — target 90%.",
+                "Engineering capacity confirmed for two devs through August.",
+                "Legal sign-off on new TOS is expected next week.",
+            ],
+            "action_items": [
+                {"owner": "Alice", "task": "Wire up the v2 onboarding A/B test", "due_date": "2026-05-18", "confidence": 0.93},
+                {"owner": "Bob", "task": "Draft TOS update doc", "due_date": "2026-05-11", "confidence": 0.87},
+            ],
+            "decisions": [
+                "Ship v2 onboarding to 10% of new accounts on May 20.",
+                "Sunset the legacy wizard once v2 reaches 95% completion.",
+            ],
+            "next_steps": ["Schedule design review for May 13.", "Loop in support team."],
+            "sentiment": "positive",
+            "topics": [
+                {"label": "Onboarding redesign", "start_time": "00:02:14", "end_time": "00:18:42"},
+                {"label": "TOS update", "start_time": "00:18:42", "end_time": "00:24:01"},
+            ],
+            "risks_blockers": ["Legal review may slip past May 18."],
+            "next_meeting": "2026-05-13T15:00:00Z",
+            "unresolved_items": ["Final pricing tier names not chosen."],
+        }]},
+    }
 
 
 class BotResponse(BaseModel):
