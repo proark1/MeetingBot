@@ -1,6 +1,6 @@
-# MeetingBot Python SDK
+# JustHereToListen.io Python SDK
 
-Official Python client for the [MeetingBot API](https://api.yourserver.com). Supports both synchronous and asynchronous usage via `httpx` and Pydantic v2 models.
+Official Python client for the [JustHereToListen.io API](https://api.justheretolisten.io). Supports both synchronous and asynchronous usage via `httpx` and Pydantic v2 models.
 
 ## Requirements
 
@@ -17,8 +17,8 @@ pip install meetingbot-sdk
 Or install from source:
 
 ```bash
-git clone https://github.com/your-org/meetingbot-sdk-python
-cd meetingbot-sdk-python
+git clone https://github.com/proark1/MeetingBot
+cd MeetingBot/sdk/python
 pip install .
 ```
 
@@ -37,7 +37,7 @@ You can also configure a custom base URL (useful for self-hosted deployments):
 ```python
 client = MeetingBotClient(
     api_key="sk_live_...",
-    base_url="https://api.yourserver.com",
+    base_url="https://api.justheretolisten.io",
 )
 ```
 
