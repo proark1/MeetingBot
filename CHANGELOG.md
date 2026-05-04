@@ -4,7 +4,49 @@ All notable changes to JustHereToListen.io are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.48.1 — **Last updated:** 2026-05-04
+> **Latest version:** 2.49.0 — **Last updated:** 2026-05-04
+
+---
+
+## [2.49.0] - 2026-05-04
+
+### Added — fully usable OpenAPI service
+
+The published API schema now contains everything an SDK generator (or a
+human consumer of `/api/docs`) needs to call the API correctly without
+reading source code.
+
+**Schema metadata**
+- New `PUBLIC_BASE_URL` env var feeds the OpenAPI `servers:` block so
+  generated clients hit the right host. Falls back to
+  `http://localhost:8000` for local dev.
+- `components.securitySchemes` now declares `BearerAuth`
+  (`sk_live_…` / `sk_test_…` / JWT), `SubUserHeader` (`X-Sub-User`), and
+  `IdempotencyKeyHeader` (`Idempotency-Key`). A global
+  `security: [{BearerAuth: []}]` entry removes the need to mark every
+  individual operation as authenticated.
+- 14 top-level `tags:` with descriptions — Auth, Auth — SSO, Bots,
+  Exports, Webhooks, Billing, Integrations, Calendar, Action Items,
+  Templates, Keyword Alerts, Workspaces, Retention, MCP — so Swagger UI
+  renders organised endpoint groups instead of a flat list.
+- A central `_ROUTE_SUMMARIES` mapping injects clean
+  `summary:` strings on the ~60 most-used endpoints (SDK consumers see
+  `create_meeting_bot()` instead of `Create Bot` from the function name).
+- Standard `401` / `403` / `404` / `429` `responses:` are added to every
+  authenticated operation so generated SDKs emit named exception
+  classes.
+
+**Snapshots & CI**
+- New `scripts/generate_openapi.py` regenerates `api/openapi.json`
+  (public) and `api/openapi.admin.json` (full admin schema). Run with
+  `--check` to fail CI when the committed snapshot drifts from the live
+  app.
+- Committed up-to-date snapshots — public schema grew to 89 paths /
+  114 operations, all with summaries and security applied.
+
+**No breaking changes** — the live `/api/openapi.json` endpoint and
+all routes work exactly as before; this release only enriches the
+schema metadata.
 
 ---
 

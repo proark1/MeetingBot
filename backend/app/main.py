@@ -1058,6 +1058,229 @@ async def add_rate_limit_headers(request, call_next):
 
 _public_openapi_cache: dict[str, Any] = {}
 
+# Tag descriptions surfaced as a top-level `tags:` block. Generated SDKs and
+# Swagger UI use this to group + document endpoint families.
+_OPENAPI_TAGS: list[dict[str, str]] = [
+    {"name": "Auth", "description": "Account registration, login, API key management, plan, notification prefs, GDPR erasure."},
+    {"name": "Auth — SSO", "description": "Google / Microsoft OAuth2 sign-in and sign-up."},
+    {"name": "Bots", "description": "Create, monitor, control, and inspect meeting bots. Primary surface for SDK consumers."},
+    {"name": "Exports", "description": "Download a bot session as Markdown, PDF, JSON, or SRT."},
+    {"name": "Webhooks", "description": "Subscribe to bot lifecycle events with HMAC-signed deliveries and exponential-backoff retries."},
+    {"name": "Billing", "description": "Stripe Checkout, USDC top-ups, balance, transactions, plan subscriptions."},
+    {"name": "Integrations", "description": "Push meeting summaries to Slack, Notion, and other 3rd-party tools."},
+    {"name": "Calendar", "description": "iCal feeds — auto-dispatch bots to upcoming meetings."},
+    {"name": "Action Items", "description": "List and update extracted action items across all bots."},
+    {"name": "Templates", "description": "Built-in and custom analysis prompt templates."},
+    {"name": "Keyword Alerts", "description": "Register keywords; bots fire `bot.keyword_alert` webhooks on match."},
+    {"name": "Workspaces", "description": "Shared workspaces with roles for team-based bot access."},
+    {"name": "Retention", "description": "Per-account retention policies for bots, transcripts, recordings."},
+    {"name": "MCP", "description": "Model Context Protocol — expose bot data to AI agents."},
+]
+
+
+def _server_entries(*, include_admin: bool = False) -> list[dict[str, str]]:
+    """Build the OpenAPI `servers` block.
+
+    Production gets the configured public base URL first; local dev gets a
+    localhost entry for quick try-it-out from Swagger UI. The list order
+    determines which server the Swagger UI defaults to.
+    """
+    servers: list[dict[str, str]] = []
+    public = (settings.PUBLIC_BASE_URL or "").rstrip("/")
+    if public:
+        label = "Production" if not include_admin else "Production (admin auth required)"
+        servers.append({"url": public, "description": label})
+    servers.append({"url": "http://localhost:8000", "description": "Local development"})
+    return servers
+
+
+def _security_components() -> dict[str, Any]:
+    """Reusable `components.securitySchemes` definitions.
+
+    Three accepted credentials, in priority order:
+    1. Bearer per-user API key (`sk_live_...` / `sk_test_...`)
+    2. Bearer JWT (web UI sessions)
+    3. Legacy superadmin `API_KEY` env var (HTTP Bearer; not exposed to integrators)
+
+    Swagger UI shows a single Authorize button covering both Bearer flows.
+    """
+    return {
+        "BearerAuth": {
+            "type": "http",
+            "scheme": "bearer",
+            "bearerFormat": "sk_live_… or sk_test_… or JWT",
+            "description": (
+                "Per-user API key (`sk_live_…` for production, `sk_test_…` for sandbox), "
+                "or a JWT issued by `/api/v1/auth/login`. Pass as "
+                "`Authorization: Bearer <token>`."
+            ),
+        },
+        "SubUserHeader": {
+            "type": "apiKey",
+            "in": "header",
+            "name": "X-Sub-User",
+            "description": (
+                "Business-account multi-tenant scope. Optional. When set, all "
+                "data is scoped to that opaque sub-user identifier. Different "
+                "sub-users on the same account cannot see each other's bots."
+            ),
+        },
+        "IdempotencyKeyHeader": {
+            "type": "apiKey",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "description": (
+                "Optional idempotency key for `POST /api/v1/bot`. A second request "
+                "with the same key within `IDEMPOTENCY_TTL_HOURS` returns the "
+                "original bot rather than creating a duplicate."
+            ),
+        },
+    }
+
+
+# Per-route summaries that show up in the Swagger sidebar / SDK method names.
+# Keyed by `(METHOD, path)` — paths use the public `/api/v1/...` prefix from
+# main.py's router mounts. Adding entries here is the cheapest way to give SDK
+# generators clean method names without touching 30+ route definitions.
+_ROUTE_SUMMARIES: dict[tuple[str, str], str] = {
+    # — Auth —
+    ("post", "/api/v1/auth/register"): "Register a new account",
+    ("post", "/api/v1/auth/login"): "Log in (email + password)",
+    ("post", "/api/v1/auth/keys"): "Create a new API key",
+    ("get", "/api/v1/auth/keys"): "List API keys",
+    ("delete", "/api/v1/auth/keys/{key_id}"): "Revoke an API key",
+    ("get", "/api/v1/auth/plan"): "Get current plan and monthly usage",
+    ("get", "/api/v1/auth/notify"): "Get notification preferences",
+    ("put", "/api/v1/auth/notify"): "Update notification preferences",
+    ("put", "/api/v1/auth/wallet"): "Register USDC wallet for top-ups",
+    ("delete", "/api/v1/auth/account"): "Permanently delete account (GDPR erasure)",
+    # — Bots —
+    ("post", "/api/v1/bot/validate-meeting-url"): "Pre-flight check a meeting URL",
+    ("post", "/api/v1/bot"): "Create a meeting bot",
+    ("get", "/api/v1/bot"): "List bots",
+    ("get", "/api/v1/bot/stats"): "Aggregate bot stats for the account",
+    ("get", "/api/v1/bot/{bot_id}"): "Get a bot by ID",
+    ("delete", "/api/v1/bot/{bot_id}"): "Cancel and delete a bot",
+    ("post", "/api/v1/bot/{bot_id}/leave"): "Make the bot leave the meeting now",
+    ("get", "/api/v1/bot/{bot_id}/transcript"): "Download the transcript",
+    ("get", "/api/v1/bot/{bot_id}/recording"): "Download the audio recording",
+    ("get", "/api/v1/bot/{bot_id}/video"): "Download the video recording",
+    ("post", "/api/v1/bot/{bot_id}/analyze"): "Re-run analysis (optionally with a different template)",
+    ("post", "/api/v1/bot/{bot_id}/ask"): "Ask a free-form question about a finished meeting",
+    ("post", "/api/v1/bot/{bot_id}/share"): "Mint a public share link for the meeting",
+    ("post", "/api/v1/bot/{bot_id}/say"): "Make the bot speak text into the meeting (TTS)",
+    ("post", "/api/v1/bot/{bot_id}/chat"): "Make the bot post a chat message into the meeting",
+    ("get", "/api/v1/bot/{bot_id}/stream"): "Server-sent live transcript + status events",
+    # — Exports —
+    ("get", "/api/v1/bot/{bot_id}/export/markdown"): "Export meeting report as Markdown",
+    ("get", "/api/v1/bot/{bot_id}/export/pdf"): "Export meeting report as PDF",
+    ("get", "/api/v1/bot/{bot_id}/export/json"): "Export full session as JSON",
+    ("get", "/api/v1/bot/{bot_id}/export/srt"): "Export transcript as SRT subtitles",
+    # — Webhooks —
+    ("post", "/api/v1/webhook"): "Register a global webhook",
+    ("get", "/api/v1/webhook"): "List webhooks",
+    ("get", "/api/v1/webhook/{webhook_id}"): "Get a webhook",
+    ("patch", "/api/v1/webhook/{webhook_id}"): "Update a webhook",
+    ("delete", "/api/v1/webhook/{webhook_id}"): "Delete a webhook",
+    ("get", "/api/v1/webhook/{webhook_id}/deliveries"): "List webhook delivery attempts",
+    ("post", "/api/v1/webhook/{webhook_id}/test"): "Send a test event to the webhook",
+    # — Billing —
+    ("get", "/api/v1/billing/balance"): "Get credit balance and recent transactions",
+    ("post", "/api/v1/billing/stripe/checkout"): "Create a Stripe Checkout session for a top-up",
+    ("get", "/api/v1/billing/usdc/address"): "Get USDC deposit address",
+    ("post", "/api/v1/billing/subscribe"): "Subscribe to a paid plan via Stripe",
+    # — Action items —
+    ("get", "/api/v1/action-items"): "List action items across all bots",
+    ("patch", "/api/v1/action-items/{item_id}"): "Update an action item (status, assignee, due_date)",
+    # — Integrations —
+    ("post", "/api/v1/integrations"): "Create an integration (Slack/Notion)",
+    ("get", "/api/v1/integrations"): "List integrations",
+    ("patch", "/api/v1/integrations/{integration_id}"): "Update an integration",
+    ("delete", "/api/v1/integrations/{integration_id}"): "Delete an integration",
+    # — Calendar —
+    ("post", "/api/v1/calendar"): "Add an iCal feed for auto-join",
+    ("get", "/api/v1/calendar"): "List calendar feeds",
+    ("patch", "/api/v1/calendar/{feed_id}"): "Update a calendar feed",
+    ("delete", "/api/v1/calendar/{feed_id}"): "Delete a calendar feed",
+    ("post", "/api/v1/calendar/{feed_id}/sync"): "Manually trigger a calendar sync",
+    # — Templates —
+    ("get", "/api/v1/templates"): "List built-in + custom analysis templates",
+    ("get", "/api/v1/templates/default-prompt"): "Get the raw default analysis prompt",
+    # — Keyword alerts —
+    ("post", "/api/v1/keyword-alerts"): "Register a keyword alert",
+    ("get", "/api/v1/keyword-alerts"): "List keyword alerts",
+    ("delete", "/api/v1/keyword-alerts/{alert_id}"): "Delete a keyword alert",
+    # — Retention —
+    ("get", "/api/v1/auth/retention"): "Get retention policy",
+    ("put", "/api/v1/auth/retention"): "Update retention policy",
+}
+
+# Standard error responses surfaced in `responses:` for every authenticated
+# route. SDK generators emit named exception classes from these.
+_STANDARD_ERROR_RESPONSES: dict[str, dict[str, Any]] = {
+    "401": {"description": "Missing or invalid Authorization header."},
+    "403": {"description": "Authenticated but not permitted (e.g. admin-only resource, sandbox limits)."},
+    "404": {"description": "Resource not found, or not owned by the calling account."},
+    "429": {"description": "Rate-limit exceeded. Retry after the seconds in the `Retry-After` header."},
+}
+
+
+def _apply_route_summaries(schema: dict[str, Any]) -> None:
+    """Inject summaries + standard error responses into individual operations."""
+    paths = schema.get("paths") or {}
+    for path, ops in paths.items():
+        if not isinstance(ops, dict):
+            continue
+        for method, op in ops.items():
+            method_lc = method.lower()
+            if method_lc not in {"get", "post", "put", "patch", "delete"}:
+                continue
+            if not isinstance(op, dict):
+                continue
+            summary = _ROUTE_SUMMARIES.get((method_lc, path))
+            if summary:
+                # Override FastAPI's auto-generated "Function Name" summary.
+                op["summary"] = summary
+            elif not op.get("summary"):
+                pass  # Leave the default; better than empty.
+            # Add standard error responses for routes that already declare auth-required.
+            # Skip the unauthenticated register/login endpoints.
+            responses = op.setdefault("responses", {})
+            if path in {"/api/v1/auth/register", "/api/v1/auth/login"}:
+                continue
+            for code, body in _STANDARD_ERROR_RESPONSES.items():
+                responses.setdefault(code, body)
+
+
+def _apply_global_extras(schema: dict[str, Any], *, admin: bool) -> None:
+    """Augment a FastAPI-generated schema with servers, security, and tags.
+
+    Mutates `schema` in place. Called on both the public and admin schemas so
+    SDK generators always get a self-contained spec.
+    """
+    schema["servers"] = _server_entries(include_admin=admin)
+    components = schema.setdefault("components", {})
+    components.setdefault("securitySchemes", {}).update(_security_components())
+    schema["security"] = [{"BearerAuth": []}]
+    _apply_route_summaries(schema)
+    # Preserve any existing `tags` (FastAPI auto-generates entries for tags it
+    # discovers on routes); merge our descriptions in.
+    existing = {t.get("name"): t for t in schema.get("tags", []) if isinstance(t, dict)}
+    merged = []
+    seen = set()
+    for tag in _OPENAPI_TAGS:
+        seen.add(tag["name"])
+        merged.append({**existing.get(tag["name"], {}), **tag})
+    for name, tag in existing.items():
+        if name not in seen:
+            merged.append(tag)
+    schema["tags"] = merged
+    # Top-level contact + license help SDK generators emit cleaner package metadata.
+    schema.setdefault("info", {}).setdefault(
+        "contact",
+        {"name": "JustHereToListen.io", "url": "https://justheretolisten.io"},
+    )
+
 
 def _make_public_openapi() -> dict[str, Any]:
     """Return a filtered OpenAPI schema for the public docs.
@@ -1092,6 +1315,8 @@ def _make_public_openapi() -> dict[str, Any]:
     for _name in ("AIUsageSummary", "AIUsageEntry"):
         comp_schemas.pop(_name, None)
 
+    _apply_global_extras(schema, admin=False)
+
     _public_openapi_cache.update(schema)
     return copy.deepcopy(_public_openapi_cache)
 
@@ -1117,12 +1342,14 @@ async def admin_api_docs():
 @app.get("/api/v1/admin/openapi.json", include_in_schema=False)
 async def admin_openapi_schema():
     """Full OpenAPI schema — includes admin-only endpoints, platform analytics, and ai_usage fields."""
-    return _get_openapi_util(
+    schema = _get_openapi_util(
         title="JustHereToListen.io Admin API",
         version=app.version,
         description=app.description,
         routes=app.routes,
     )
+    _apply_global_extras(schema, admin=True)
+    return schema
 
 
 # ── Machine-readable error responses ─────────────────────────────────────────
