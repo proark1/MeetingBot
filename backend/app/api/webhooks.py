@@ -142,7 +142,27 @@ async def create_webhook(payload: WebhookCreate, request: _Request):
     return _to_response(wh)
 
 
-@router.get("")
+@router.get(
+    "",
+    responses={200: {"content": {"application/json": {"example": {
+        "results": [{
+            "id": "wh_5fa921b7",
+            "url": "https://api.acme.com/justheretolisten/webhook",
+            "events": ["bot.done", "bot.error"],
+            "is_active": True,
+            "created_at": "2026-05-04T12:00:00Z",
+            "delivery_attempts": 124,
+            "last_delivery_at": "2026-05-04T15:34:18Z",
+            "last_delivery_status": 200,
+            "consecutive_failures": 0,
+            "account_id": "550e8400-e29b-41d4-a716-446655440000",
+        }],
+        "total": 1,
+        "limit": 1,
+        "offset": 0,
+        "has_more": False,
+    }}}}},
+)
 async def list_webhooks(request: _Request):
     """List webhooks owned by the authenticated account.
 
@@ -161,7 +181,19 @@ async def list_webhooks(request: _Request):
     }
 
 
-@router.get("/events")
+@router.get(
+    "/events",
+    responses={200: {"content": {"application/json": {"example": {
+        "events": [
+            "bot.joining", "bot.in_call", "bot.call_ended",
+            "bot.transcript_ready", "bot.analysis_ready",
+            "bot.done", "bot.error", "bot.cancelled",
+            "bot.keyword_alert",
+            "bot.live_transcript", "bot.live_transcript_translated", "bot.live_chat_message",
+            "bot.recurring_intel_ready", "bot.test",
+        ],
+    }}}}},
+)
 async def list_webhook_events():
     """Return the list of all supported webhook event names.
 
@@ -193,8 +225,46 @@ class DeliveryResponse(_BM):
     delivered_at: _Opt[_dt] = None
     created_at: _dt
 
+    model_config = {"json_schema_extra": {"example": {
+        "id": "wd_3fbc81a0",
+        "webhook_id": "wh_5fa921b7",
+        "bot_id": "bot_8a72c5e1",
+        "event": "bot.done",
+        "status": "delivered",
+        "attempt_number": 1,
+        "response_status_code": 200,
+        "response_body": "ok",
+        "error_message": None,
+        "next_retry_at": None,
+        "delivered_at": "2026-05-04T15:34:18Z",
+        "created_at": "2026-05-04T15:34:18Z",
+    }}}
 
-@router.get("/deliveries", tags=["Webhooks"])
+
+@router.get(
+    "/deliveries",
+    tags=["Webhooks"],
+    responses={200: {"content": {"application/json": {"example": {
+        "results": [{
+            "id": "wd_3fbc81a0",
+            "webhook_id": "wh_5fa921b7",
+            "bot_id": "bot_8a72c5e1",
+            "event": "bot.done",
+            "status": "delivered",
+            "attempt_number": 1,
+            "response_status_code": 200,
+            "response_body": "ok",
+            "error_message": None,
+            "next_retry_at": None,
+            "delivered_at": "2026-05-04T15:34:18Z",
+            "created_at": "2026-05-04T15:34:18Z",
+        }],
+        "total": 1,
+        "limit": 50,
+        "offset": 0,
+        "has_more": False,
+    }}}}},
+)
 async def list_all_deliveries(
     request: _Request,
     limit: int = 50,
@@ -265,6 +335,12 @@ class WebhookUpdate(_BM):
     events: _Opt[list[str]] = None
     is_active: _Opt[bool] = None
 
+    model_config = {"json_schema_extra": {"examples": [
+        {"events": ["bot.done", "bot.error"]},
+        {"is_active": True},
+        {"url": "https://api.acme.com/justheretolisten/v2"},
+    ]}}
+
 
 @router.patch("/{webhook_id}", response_model=WebhookResponse)
 @_limiter.limit("10/minute")
@@ -314,12 +390,22 @@ async def update_webhook(webhook_id: str, payload: WebhookUpdate, request: _Requ
 
 @router.get("/{webhook_id}", response_model=WebhookResponse)
 async def get_webhook(webhook_id: str, request: _Request):
+    """Return a single webhook by id.
+
+    Returns 404 if the webhook does not exist or belongs to another account.
+    Use this to inspect delivery counters and the current `is_active` flag.
+    """
     wh = await _get_webhook_or_404(webhook_id, _request_account_id(request))
     return _to_response(wh)
 
 
 @router.delete("/{webhook_id}", status_code=204)
 async def delete_webhook(webhook_id: str, request: _Request):
+    """Delete a registered webhook permanently.
+
+    Returns 204 on success. The webhook is removed from the in-memory store
+    and the database. Pending delivery attempts for this webhook are cancelled.
+    """
     account_id = _request_account_id(request)
     # Ownership check before destructive op (raises 404 on tenant mismatch).
     await _get_webhook_or_404(webhook_id, account_id)
@@ -334,7 +420,13 @@ async def delete_webhook(webhook_id: str, request: _Request):
     ))
 
 
-@router.post("/{webhook_id}/test")
+@router.post(
+    "/{webhook_id}/test",
+    responses={200: {"content": {"application/json": {"example": {
+        "status_code": 200,
+        "url": "https://api.acme.com/justheretolisten/webhook",
+    }}}}},
+)
 @_limiter.limit("5/minute")
 async def test_webhook(webhook_id: str, request: _Request):
     """Send a test event to this webhook endpoint."""
@@ -355,7 +447,26 @@ async def test_webhook(webhook_id: str, request: _Request):
     return {"status_code": status_code, "url": wh.url}
 
 
-@router.get("/{webhook_id}/deliveries")
+@router.get(
+    "/{webhook_id}/deliveries",
+    responses={200: {"content": {"application/json": {"example": {
+        "results": [{
+            "id": "wd_3fbc81a0",
+            "webhook_id": "wh_5fa921b7",
+            "bot_id": "bot_8a72c5e1",
+            "event": "bot.done",
+            "status": "delivered",
+            "attempt_number": 1,
+            "response_status_code": 200,
+            "delivered_at": "2026-05-04T15:34:18Z",
+            "created_at": "2026-05-04T15:34:18Z",
+        }],
+        "total": 1,
+        "limit": 50,
+        "offset": 0,
+        "has_more": False,
+    }}}}},
+)
 async def list_deliveries(
     webhook_id: str,
     request: _Request,

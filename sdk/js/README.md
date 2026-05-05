@@ -1,6 +1,6 @@
-# MeetingBot JavaScript/TypeScript SDK
+# JustHereToListen.io JavaScript/TypeScript SDK
 
-Official JavaScript/TypeScript client for the [MeetingBot API](https://api.yourserver.com). Works in Node.js 18+ (native `fetch`) and can be polyfilled for older environments. Ships with full TypeScript type definitions.
+Official JavaScript/TypeScript client for the [JustHereToListen.io API](https://api.justheretolisten.io). Works in Node.js 18+ (native `fetch`) and can be polyfilled for older environments. Ships with full TypeScript type definitions.
 
 ## Requirements
 
@@ -42,7 +42,7 @@ You can also configure a custom base URL (useful for self-hosted deployments):
 ```ts
 const client = new MeetingBotClient({
   apiKey: "sk_live_...",
-  baseUrl: "https://api.yourserver.com",
+  baseUrl: "https://api.justheretolisten.io",
   timeoutMs: 30000, // optional, default 30 000 ms
 });
 ```
@@ -354,8 +354,8 @@ try {
 ## Building from Source
 
 ```bash
-git clone https://github.com/your-org/meetingbot-sdk-js
-cd meetingbot-sdk-js
+git clone https://github.com/proark1/MeetingBot
+cd MeetingBot/sdk/js
 npm install
 npm run build
 # Compiled output is in ./dist/

@@ -1924,8 +1924,31 @@ app.include_router(ui_router)                                             # web 
 
 # ── Health & readiness probes ──────────────────────────────────────────────────
 
-@app.get("/health", tags=["Health"])
-@app.get("/api/health", tags=["Health"])
+@app.get(
+    "/health",
+    tags=["Health"],
+    responses={200: {"content": {"application/json": {"example": {
+        "status": "ok",
+        "service": "JustHereToListen.io",
+        "version": "2.52.0",
+        "background_tasks": {
+            "queue_processor": {"status": "healthy", "last_heartbeat": "2026-05-04T15:34:18Z", "age_seconds": 12},
+            "cleanup_loop": {"status": "healthy", "last_heartbeat": "2026-05-04T15:00:00Z", "age_seconds": 2058},
+        },
+    }}}}},
+)
+@app.get(
+    "/api/health",
+    tags=["Health"],
+    responses={200: {"content": {"application/json": {"example": {
+        "status": "ok",
+        "service": "JustHereToListen.io",
+        "version": "2.52.0",
+        "background_tasks": {
+            "queue_processor": {"status": "healthy", "last_heartbeat": "2026-05-04T15:34:18Z", "age_seconds": 12},
+        },
+    }}}}},
+)
 async def health():
     """Liveness probe — returns 200 when the process is running.
 
@@ -1965,8 +1988,34 @@ async def health():
     }
 
 
-@app.get("/ready", tags=["Health"])
-@app.get("/api/ready", tags=["Health"])
+@app.get(
+    "/ready",
+    tags=["Health"],
+    responses={
+        200: {"content": {"application/json": {"example": {
+            "status": "ok",
+            "checks": {"database": "ok", "ai_provider": "ok"},
+        }}}},
+        503: {"content": {"application/json": {"example": {
+            "status": "degraded",
+            "checks": {"database": "error: connection refused", "ai_provider": "ok"},
+        }}}},
+    },
+)
+@app.get(
+    "/api/ready",
+    tags=["Health"],
+    responses={
+        200: {"content": {"application/json": {"example": {
+            "status": "ok",
+            "checks": {"database": "ok", "ai_provider": "ok"},
+        }}}},
+        503: {"content": {"application/json": {"example": {
+            "status": "degraded",
+            "checks": {"database": "error: connection refused", "ai_provider": "ok"},
+        }}}},
+    },
+)
 async def ready():
     """Readiness probe — returns 200 only when all critical dependencies are healthy.
 

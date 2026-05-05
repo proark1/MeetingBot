@@ -44,10 +44,21 @@ class WorkspaceCreate(BaseModel):
         description="Optional workspace settings (e.g. default_bot_name, require_consent).",
     )
 
+    model_config = {"json_schema_extra": {"example": {
+        "name": "Acme Sales Team",
+        "slug": "acme-sales",
+        "settings": {"default_bot_name": "Acme Notes Bot", "require_consent": True},
+    }}}
+
 
 class WorkspaceUpdate(BaseModel):
     name: Optional[str] = Field(default=None, max_length=100)
     settings: Optional[dict] = None
+
+    model_config = {"json_schema_extra": {"example": {
+        "name": "Acme Sales Team — EMEA",
+        "settings": {"default_bot_name": "Acme EMEA Bot", "require_consent": True},
+    }}}
 
 
 class WorkspaceMemberAdd(BaseModel):
@@ -57,9 +68,18 @@ class WorkspaceMemberAdd(BaseModel):
         description="Role: 'admin', 'member', or 'viewer'.",
     )
 
+    model_config = {"json_schema_extra": {"example": {
+        "account_id": "5a0e8400-e29b-41d4-a716-446655440111",
+        "role": "member",
+    }}}
+
 
 class WorkspaceMemberUpdate(BaseModel):
     role: str = Field(description="New role: 'admin', 'member', or 'viewer'.")
+
+    model_config = {"json_schema_extra": {"example": {
+        "role": "admin",
+    }}}
 
 
 def _slugify(text: str) -> str:
@@ -138,7 +158,33 @@ async def _get_workspace_with_access(workspace_id: str, account_id: str, db, req
     return ws, member.role
 
 
-@router.get("", summary="List workspaces")
+_WORKSPACE_EXAMPLE = {
+    "id": "ws_8c1234ab",
+    "name": "Acme Sales Team",
+    "slug": "acme-sales",
+    "owner_account_id": "550e8400-e29b-41d4-a716-446655440000",
+    "settings": {"default_bot_name": "Acme Notes Bot", "require_consent": True},
+    "is_active": True,
+    "created_at": "2026-04-15T08:00:00Z",
+    "updated_at": "2026-05-04T12:00:00Z",
+    "member_role": "admin",
+}
+
+_WORKSPACE_MEMBER_EXAMPLE = {
+    "id": "wm_b1c2d3e4",
+    "workspace_id": "ws_8c1234ab",
+    "account_id": "5a0e8400-e29b-41d4-a716-446655440111",
+    "role": "member",
+    "invited_by": "550e8400-e29b-41d4-a716-446655440000",
+    "joined_at": "2026-04-22T09:00:00Z",
+}
+
+
+@router.get(
+    "",
+    summary="List workspaces",
+    responses={200: {"content": {"application/json": {"example": [_WORKSPACE_EXAMPLE]}}}},
+)
 async def list_workspaces(request: Request):
     """List all workspaces you are a member of (or own)."""
     account_id = _account_id(request)
@@ -172,7 +218,12 @@ async def list_workspaces(request: Request):
     return [_to_response(ws, role) for ws, role in owned.values()]
 
 
-@router.post("", status_code=201, summary="Create workspace")
+@router.post(
+    "",
+    status_code=201,
+    summary="Create workspace",
+    responses={201: {"content": {"application/json": {"example": _WORKSPACE_EXAMPLE}}}},
+)
 async def create_workspace(payload: WorkspaceCreate, request: Request):
     """Create a new team workspace. You will be the owner with admin role."""
     account_id = _account_id(request)
@@ -212,7 +263,11 @@ async def create_workspace(payload: WorkspaceCreate, request: Request):
     return _to_response(ws, "admin")
 
 
-@router.get("/{workspace_id}", summary="Get workspace")
+@router.get(
+    "/{workspace_id}",
+    summary="Get workspace",
+    responses={200: {"content": {"application/json": {"example": _WORKSPACE_EXAMPLE}}}},
+)
 async def get_workspace(workspace_id: str, request: Request):
     """Get workspace details."""
     account_id = _account_id(request)
@@ -225,7 +280,11 @@ async def get_workspace(workspace_id: str, request: Request):
     return _to_response(ws, role)
 
 
-@router.patch("/{workspace_id}", summary="Update workspace")
+@router.patch(
+    "/{workspace_id}",
+    summary="Update workspace",
+    responses={200: {"content": {"application/json": {"example": _WORKSPACE_EXAMPLE}}}},
+)
 async def update_workspace(workspace_id: str, payload: WorkspaceUpdate, request: Request):
     """Update workspace name or settings. Requires admin role."""
     account_id = _account_id(request)
@@ -267,7 +326,11 @@ async def delete_workspace(workspace_id: str, request: Request):
 
 # ── Members ───────────────────────────────────────────────────────────────────
 
-@router.get("/{workspace_id}/members", summary="List members")
+@router.get(
+    "/{workspace_id}/members",
+    summary="List members",
+    responses={200: {"content": {"application/json": {"example": [_WORKSPACE_MEMBER_EXAMPLE]}}}},
+)
 async def list_workspace_members(workspace_id: str, request: Request):
     """List all members of a workspace."""
     account_id = _account_id(request)
@@ -287,7 +350,12 @@ async def list_workspace_members(workspace_id: str, request: Request):
     return [_member_to_response(m) for m in members]
 
 
-@router.post("/{workspace_id}/members", status_code=201, summary="Add member")
+@router.post(
+    "/{workspace_id}/members",
+    status_code=201,
+    summary="Add member",
+    responses={201: {"content": {"application/json": {"example": _WORKSPACE_MEMBER_EXAMPLE}}}},
+)
 async def add_workspace_member(workspace_id: str, payload: WorkspaceMemberAdd, request: Request):
     """Add a member to the workspace. Requires admin role."""
     account_id = _account_id(request)
@@ -332,7 +400,11 @@ async def add_workspace_member(workspace_id: str, payload: WorkspaceMemberAdd, r
     return _member_to_response(member)
 
 
-@router.patch("/{workspace_id}/members/{member_account_id}", summary="Update member role")
+@router.patch(
+    "/{workspace_id}/members/{member_account_id}",
+    summary="Update member role",
+    responses={200: {"content": {"application/json": {"example": {**_WORKSPACE_MEMBER_EXAMPLE, "role": "admin"}}}}},
+)
 async def update_member_role(
     workspace_id: str,
     member_account_id: str,

@@ -133,6 +133,12 @@ class LoginResponse(BaseModel):
     token_type: str = Field(default="bearer", description="Always `bearer`.")
     account_id: str = Field(description="The authenticated account UUID.")
 
+    model_config = {"json_schema_extra": {"example": {
+        "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI1NTBlODQwMC1lMjliLTQxZDQtYTcxNi00NDY2NTU0NDAwMDAifQ.example",
+        "token_type": "bearer",
+        "account_id": "550e8400-e29b-41d4-a716-446655440000",
+    }}}
+
 
 class CreateKeyRequest(BaseModel):
     name: str = Field(
@@ -153,6 +159,16 @@ class ApiKeyResponse(BaseModel):
     created_at: datetime = Field(description="When the key was created (UTC).")
     last_used_at: Optional[datetime] = Field(default=None, description="Last time this key was used for an authenticated request (UTC), or null if never used.")
 
+    model_config = {"json_schema_extra": {"example": {
+        "id": "key_b1c2d3e4",
+        "name": "Production",
+        "key_preview": "sk_live_a1b2c3d4...",
+        "mode": "live",
+        "is_active": True,
+        "created_at": "2026-04-01T09:00:00Z",
+        "last_used_at": "2026-05-04T15:34:18Z",
+    }}}
+
 
 class AccountResponse(BaseModel):
     id: str = Field(description="Unique account UUID.")
@@ -169,6 +185,16 @@ class AccountResponse(BaseModel):
     is_active: bool = Field(description="False if the account has been disabled by an admin.")
     created_at: datetime = Field(description="Account creation time (UTC).")
 
+    model_config = {"json_schema_extra": {"example": {
+        "id": "550e8400-e29b-41d4-a716-446655440000",
+        "email": "you@example.com",
+        "account_type": "personal",
+        "credits_usd": 24.50,
+        "wallet_address": "0xAbCdEf0123456789AbCdEf0123456789AbCdEf01",
+        "is_active": True,
+        "created_at": "2026-04-01T09:00:00Z",
+    }}}
+
 
 class WalletRequest(BaseModel):
     wallet_address: str = Field(
@@ -176,10 +202,19 @@ class WalletRequest(BaseModel):
         examples=["0xAbCdEf0123456789AbCdEf0123456789AbCdEf01"],
     )
 
+    model_config = {"json_schema_extra": {"example": {
+        "wallet_address": "0xAbCdEf0123456789AbCdEf0123456789AbCdEf01",
+    }}}
+
 
 class WalletResponse(BaseModel):
     wallet_address: Optional[str] = Field(description="Your registered wallet address, or null if not set.")
     message: str = Field(description="Status message.")
+
+    model_config = {"json_schema_extra": {"example": {
+        "wallet_address": "0xAbCdEf0123456789AbCdEf0123456789AbCdEf01",
+        "message": "Wallet address updated.",
+    }}}
 
 
 class NotifyPrefsRequest(BaseModel):
@@ -190,11 +225,22 @@ class NotifyPrefsRequest(BaseModel):
         max_length=254,
     )
 
+    model_config = {"json_schema_extra": {"example": {
+        "notify_on_done": True,
+        "notify_email": "ops@acme.com",
+    }}}
+
 
 class NotifyPrefsResponse(BaseModel):
     notify_on_done: bool
     notify_email: Optional[str]
     message: str
+
+    model_config = {"json_schema_extra": {"example": {
+        "notify_on_done": True,
+        "notify_email": "ops@acme.com",
+        "message": "Notification preferences updated.",
+    }}}
 
 
 class PlanResponse(BaseModel):
@@ -202,6 +248,13 @@ class PlanResponse(BaseModel):
     monthly_bots_used: int = Field(description="Bots run in the current billing period.")
     monthly_limit: int = Field(description="Monthly bot limit for this plan (-1 = unlimited).")
     monthly_reset_at: Optional[datetime] = Field(description="When the monthly counter resets.")
+
+    model_config = {"json_schema_extra": {"example": {
+        "plan": "pro",
+        "monthly_bots_used": 47,
+        "monthly_limit": 200,
+        "monthly_reset_at": "2026-06-01T00:00:00Z",
+    }}}
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -407,7 +460,19 @@ async def create_api_key(
     )
 
 
-@router.get("/keys", response_model=list[ApiKeyResponse])
+@router.get(
+    "/keys",
+    response_model=list[ApiKeyResponse],
+    responses={200: {"content": {"application/json": {"example": [{
+        "id": "key_b1c2d3e4",
+        "name": "Production",
+        "key_preview": "sk_live_a1b2c3d4...",
+        "mode": "live",
+        "is_active": True,
+        "created_at": "2026-04-01T09:00:00Z",
+        "last_used_at": "2026-05-04T15:34:18Z",
+    }]}}}},
+)
 async def list_api_keys(
     account_id: Optional[str] = Depends(get_current_account_id),
     db: AsyncSession = Depends(get_db),
@@ -474,6 +539,14 @@ class TestKeyResponse(BaseModel):
     mode: str = "test"
     created_at: datetime
 
+    model_config = {"json_schema_extra": {"example": {
+        "id": "key_e5f6a7b8",
+        "name": "CI Sandbox",
+        "key": "sk_test_EXAMPLE_KEY_NOT_REAL",
+        "mode": "test",
+        "created_at": "2026-05-04T15:00:00Z",
+    }}}
+
 
 @router.post("/test-keys", response_model=TestKeyResponse, status_code=201, tags=["Auth"])
 async def create_test_key(
@@ -512,7 +585,20 @@ async def create_test_key(
     )
 
 
-@router.get("/test-keys", response_model=list[ApiKeyResponse], tags=["Auth"])
+@router.get(
+    "/test-keys",
+    response_model=list[ApiKeyResponse],
+    tags=["Auth"],
+    responses={200: {"content": {"application/json": {"example": [{
+        "id": "key_e5f6a7b8",
+        "name": "CI Sandbox",
+        "key_preview": "sk_test_a1b2c3d4...",
+        "mode": "test",
+        "is_active": True,
+        "created_at": "2026-05-04T15:00:00Z",
+        "last_used_at": None,
+    }]}}}},
+)
 async def list_test_keys(
     account_id: Optional[str] = Depends(get_current_account_id),
     db: AsyncSession = Depends(get_db),
@@ -729,6 +815,11 @@ class AccountTypeResponse(BaseModel):
     account_type: str = Field(description="Updated account type: `personal` or `business`.")
     message: str = Field(description="Human-readable confirmation.")
 
+    model_config = {"json_schema_extra": {"example": {
+        "account_type": "business",
+        "message": "Switched to Business account. Pass X-Sub-User: <user-id> on each request to isolate data per end-user.",
+    }}}
+
 
 @router.put("/account-type", response_model=AccountTypeResponse)
 async def set_account_type(
@@ -781,7 +872,14 @@ async def set_account_type(
 
 # ── GDPR account deletion ─────────────────────────────────────────────────────
 
-@router.delete("/account", status_code=200)
+@router.delete(
+    "/account",
+    status_code=200,
+    responses={200: {"content": {"application/json": {"example": {
+        "message": "Account permanently deleted. All associated data has been erased.",
+        "account_id": "550e8400-e29b-41d4-a716-446655440000",
+    }}}}},
+)
 async def delete_account(
     account_id: Optional[str] = Depends(get_current_account_id),
     db: AsyncSession = Depends(get_db),
@@ -890,6 +988,11 @@ class SupportKeyCreateRequest(BaseModel):
         description="Hours until the key expires. Set to null for no expiry. Defaults to 72 hours.",
     )
 
+    model_config = {"json_schema_extra": {"example": {
+        "label": "Vendor onboarding session 2026-05",
+        "expires_in_hours": 48,
+    }}}
+
 
 class SupportKeyResponse(BaseModel):
     id: str
@@ -899,8 +1002,29 @@ class SupportKeyResponse(BaseModel):
     last_used_at: Optional[datetime]
     is_active: bool
 
+    model_config = {"json_schema_extra": {"example": {
+        "id": "sk_3a82ff9c",
+        "label": "Vendor onboarding session 2026-05",
+        "created_at": "2026-05-04T15:00:00Z",
+        "expires_at": "2026-05-06T15:00:00Z",
+        "last_used_at": None,
+        "is_active": True,
+    }}}
 
-@router.post("/support-key", status_code=201, tags=["Auth"])
+
+@router.post(
+    "/support-key",
+    status_code=201,
+    tags=["Auth"],
+    responses={201: {"content": {"application/json": {"example": {
+        "id": "sk_3a82ff9c",
+        "plaintext_key": "OnetimeOnly_AbCdEfGhIjKlMnOpQrStUv",
+        "label": "Vendor onboarding session 2026-05",
+        "created_at": "2026-05-04T15:00:00Z",
+        "expires_at": "2026-05-06T15:00:00Z",
+        "warning": "This key will not be shown again. Store it securely and share only with support.",
+    }}}}},
+)
 async def create_support_key(
     payload: SupportKeyCreateRequest,
     account_id: Optional[str] = Depends(get_current_account_id),
@@ -949,7 +1073,19 @@ async def create_support_key(
     }
 
 
-@router.get("/support-keys", response_model=list[SupportKeyResponse], tags=["Auth"])
+@router.get(
+    "/support-keys",
+    response_model=list[SupportKeyResponse],
+    tags=["Auth"],
+    responses={200: {"content": {"application/json": {"example": [{
+        "id": "sk_3a82ff9c",
+        "label": "Vendor onboarding session 2026-05",
+        "created_at": "2026-05-04T15:00:00Z",
+        "expires_at": "2026-05-06T15:00:00Z",
+        "last_used_at": None,
+        "is_active": True,
+    }]}}}},
+)
 async def list_support_keys(
     account_id: Optional[str] = Depends(get_current_account_id),
     db: AsyncSession = Depends(get_db),

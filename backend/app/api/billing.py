@@ -59,17 +59,35 @@ class CheckoutResponse(BaseModel):
     checkout_url: str = Field(description="Redirect the user to this URL to complete payment.")
     amount_usd: int = Field(description="Amount that will be credited after successful payment.")
 
+    model_config = {"json_schema_extra": {"example": {
+        "session_id": "cs_test_a1b2c3d4e5f6a7b8c9d0e1f2",
+        "checkout_url": "https://checkout.stripe.com/c/pay/cs_test_a1b2c3d4e5f6a7b8c9d0e1f2",
+        "amount_usd": 25,
+    }}}
+
 
 class SubscribeRequest(BaseModel):
     plan: str = Field(description="Target plan: 'starter', 'pro', or 'business'.")
     success_url: Optional[str] = Field(None, description="Redirect URL after successful subscription.")
     cancel_url: Optional[str] = Field(None, description="Redirect URL if user cancels.")
 
+    model_config = {"json_schema_extra": {"example": {
+        "plan": "pro",
+        "success_url": "https://your-app.com/billing/success",
+        "cancel_url": "https://your-app.com/billing/cancel",
+    }}}
+
 
 class SubscribeResponse(BaseModel):
     session_id: str = Field(description="Stripe Checkout session ID.")
     checkout_url: str = Field(description="Redirect the user to this URL.")
     plan: str = Field(description="Plan being subscribed to.")
+
+    model_config = {"json_schema_extra": {"example": {
+        "session_id": "cs_test_subscription_a1b2c3d4",
+        "checkout_url": "https://checkout.stripe.com/c/pay/cs_test_subscription_a1b2c3d4",
+        "plan": "pro",
+    }}}
 
 
 class UsdcAddressResponse(BaseModel):
@@ -146,6 +164,28 @@ class BalanceResponse(BaseModel):
     transactions: list[TransactionItem] = Field(
         description="Last 50 transactions ordered by most recent first."
     )
+
+    model_config = {"json_schema_extra": {"example": {
+        "credits_usd": 24.50,
+        "transactions": [
+            {
+                "id": "tx_3a82ff9c",
+                "amount_usd": -0.063,
+                "type": "bot_usage",
+                "description": "Bot usage: 45-min meeting (claude-sonnet-4-6)",
+                "reference_id": "bot_8a72c5e1",
+                "created_at": "2026-05-04T15:34:18Z",
+            },
+            {
+                "id": "tx_2c41ee8b",
+                "amount_usd": 25.0,
+                "type": "stripe_topup",
+                "description": "Stripe top-up: $25.00",
+                "reference_id": "cs_test_a1b2c3d4",
+                "created_at": "2026-05-01T09:00:00Z",
+            },
+        ],
+    }}}
 
 
 # ── Helper ────────────────────────────────────────────────────────────────────

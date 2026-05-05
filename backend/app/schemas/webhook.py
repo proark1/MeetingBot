@@ -49,6 +49,19 @@ class WebhookResponse(BaseModel):
     consecutive_failures: int = 0
     account_id: Optional[str] = None
 
+    model_config = {"json_schema_extra": {"example": {
+        "id": "wh_5fa921b7",
+        "url": "https://api.acme.com/justheretolisten/webhook",
+        "events": ["bot.done", "bot.error", "bot.keyword_alert"],
+        "is_active": True,
+        "created_at": "2026-05-04T12:00:00Z",
+        "delivery_attempts": 124,
+        "last_delivery_at": "2026-05-04T15:34:18Z",
+        "last_delivery_status": 200,
+        "consecutive_failures": 0,
+        "account_id": "550e8400-e29b-41d4-a716-446655440000",
+    }}}
+
 
 # ── Webhook event payload schemas (for OpenAPI documentation) ─────────────────
 
@@ -98,3 +111,14 @@ class WebhookEventList(BaseModel):
     - `bot.test` — Test event sent from webhook playground
     """
     events: list[str]
+
+    model_config = {"json_schema_extra": {"example": {
+        "events": [
+            "bot.joining", "bot.in_call", "bot.call_ended",
+            "bot.transcript_ready", "bot.analysis_ready",
+            "bot.done", "bot.error", "bot.cancelled",
+            "bot.keyword_alert",
+            "bot.live_transcript", "bot.live_transcript_translated", "bot.live_chat_message",
+            "bot.recurring_intel_ready", "bot.test",
+        ],
+    }}}

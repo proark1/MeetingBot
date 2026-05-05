@@ -29,7 +29,21 @@ class ActionItemResponse(BaseModel):
     created_at: datetime
     completed_at: Optional[datetime] = None
 
-    model_config = {"from_attributes": True}
+    model_config = {
+        "from_attributes": True,
+        "json_schema_extra": {"example": {
+            "id": "ai_8a72c5e1abcd1234ef567890abcdef12",
+            "account_id": "550e8400-e29b-41d4-a716-446655440000",
+            "bot_id": "bot_8a72c5e1",
+            "task": "Wire up the v2 onboarding A/B test",
+            "assignee": "Alice",
+            "due_date": "2026-05-18",
+            "confidence": 0.93,
+            "status": "open",
+            "created_at": "2026-05-04T15:34:18Z",
+            "completed_at": None,
+        }},
+    }
 
 
 class ActionItemPatch(BaseModel):
@@ -58,7 +72,22 @@ def _to_response(row: ActionItem) -> ActionItemResponse:
     )
 
 
-@router.get("", response_model=list[ActionItemResponse])
+@router.get(
+    "",
+    response_model=list[ActionItemResponse],
+    responses={200: {"content": {"application/json": {"example": [{
+        "id": "ai_8a72c5e1abcd1234ef567890abcdef12",
+        "account_id": "550e8400-e29b-41d4-a716-446655440000",
+        "bot_id": "bot_8a72c5e1",
+        "task": "Wire up the v2 onboarding A/B test",
+        "assignee": "Alice",
+        "due_date": "2026-05-18",
+        "confidence": 0.93,
+        "status": "open",
+        "created_at": "2026-05-04T15:34:18Z",
+        "completed_at": None,
+    }]}}}},
+)
 async def list_action_items(
     request: Request,
     status: Optional[str] = Query(default=None, description="Filter by status: open or done"),

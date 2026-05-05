@@ -19,7 +19,7 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from pydantic import BaseModel
 
 from app.config import settings
@@ -39,6 +39,14 @@ class SamlConfigCreate(BaseModel):
     attribute_mapping: dict = {"email": "email", "first_name": "givenName", "last_name": "sn"}
     workspace_id: Optional[str] = None
     default_role: str = "member"
+
+    model_config = {"json_schema_extra": {"example": {
+        "org_name": "Acme Corp",
+        "idp_metadata_url": "https://idp.acme.com/metadata",
+        "attribute_mapping": {"email": "email", "first_name": "givenName", "last_name": "sn"},
+        "workspace_id": "ws_8c1234ab",
+        "default_role": "member",
+    }}}
 
 
 async def _load_saml_config(org_slug: str, db):
@@ -111,7 +119,12 @@ def _extract_email_from_assertion(auth, attribute_mapping: dict) -> Optional[str
     return None
 
 
-@router.get("/{org_slug}/metadata", summary="SP metadata")
+@router.get(
+    "/{org_slug}/metadata",
+    summary="SP metadata",
+    response_class=Response,
+    responses={200: {"content": {"application/xml": {"example": "<EntityDescriptor xmlns=\"urn:oasis:names:tc:SAML:2.0:metadata\" entityID=\"https://api.example.com/api/v1/auth/saml/acme-corp/metadata\">...</EntityDescriptor>"}}}},
+)
 async def saml_sp_metadata(org_slug: str):
     """Return the SAML Service Provider metadata XML for this org.
 
@@ -140,7 +153,13 @@ async def saml_sp_metadata(org_slug: str):
     return Response(content=metadata, media_type="application/xml")
 
 
-@router.get("/{org_slug}/authorize", summary="Initiate SAML login")
+@router.get(
+    "/{org_slug}/authorize",
+    summary="Initiate SAML login",
+    response_class=RedirectResponse,
+    status_code=302,
+    responses={302: {"description": "Redirect to the IdP SSO endpoint with a SAMLRequest."}},
+)
 async def saml_authorize(org_slug: str, request: Request, redirect: bool = False):
     """Redirect the user to the IdP for SAML authentication.
 
@@ -194,7 +213,18 @@ async def saml_authorize(org_slug: str, request: Request, redirect: bool = False
     return RedirectResponse(url=sso_url)
 
 
-@router.post("/{org_slug}/callback", summary="SAML callback")
+@router.post(
+    "/{org_slug}/callback",
+    summary="SAML callback",
+    responses={200: {"content": {"application/json": {"example": {
+        "account_id": "550e8400-e29b-41d4-a716-446655440000",
+        "email": "you@acme.com",
+        "api_key": "sk_live_EXAMPLE_KEY_NOT_REAL",
+        "access_token": "eyJhbGciOiJIUzI1NiJ9.example",
+        "is_new_account": False,
+        "org_slug": "acme-corp",
+    }}}}},
+)
 async def saml_callback(org_slug: str, request: Request):
     """Handle SAML assertion from the IdP.
 
@@ -320,8 +350,34 @@ class SamlConfigResponse(BaseModel):
     is_active: bool
     created_at: str
 
+    model_config = {"json_schema_extra": {"example": {
+        "id": "saml_5fb732c1",
+        "org_slug": "acme-corp",
+        "org_name": "Acme Corp",
+        "idp_metadata_url": "https://idp.acme.com/metadata",
+        "attribute_mapping": {"email": "email", "first_name": "givenName", "last_name": "sn"},
+        "workspace_id": "ws_8c1234ab",
+        "default_role": "member",
+        "is_active": True,
+        "created_at": "2026-04-15T12:00:00Z",
+    }}}
 
-@router.get("/configs", summary="List SAML configs (admin)")
+
+@router.get(
+    "/configs",
+    summary="List SAML configs (admin)",
+    responses={200: {"content": {"application/json": {"example": [{
+        "id": "saml_5fb732c1",
+        "org_slug": "acme-corp",
+        "org_name": "Acme Corp",
+        "idp_metadata_url": "https://idp.acme.com/metadata",
+        "attribute_mapping": {"email": "email", "first_name": "givenName", "last_name": "sn"},
+        "workspace_id": "ws_8c1234ab",
+        "default_role": "member",
+        "is_active": True,
+        "created_at": "2026-04-15T12:00:00Z",
+    }]}}}},
+)
 async def list_saml_configs(request: Request):
     """List all SAML organisation configurations. Admin only."""
     # Inline admin check (same logic as require_admin dependency)
@@ -363,7 +419,18 @@ async def list_saml_configs(request: Request):
     ]
 
 
-@router.post("/configs", status_code=201, summary="Create SAML config (admin)")
+@router.post(
+    "/configs",
+    status_code=201,
+    summary="Create SAML config (admin)",
+    responses={201: {"content": {"application/json": {"example": {
+        "id": "saml_5fb732c1",
+        "org_slug": "acme-corp",
+        "org_name": "Acme Corp",
+        "is_active": True,
+        "created_at": "2026-04-15T12:00:00Z",
+    }}}}},
+)
 async def create_saml_config(payload: SamlConfigCreate, request: Request):
     """Register a new SAML organisation. Admin only."""
     # Inline admin check (same logic as require_admin dependency)

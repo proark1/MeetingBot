@@ -59,6 +59,15 @@ class IntegrationResponse(BaseModel):
     config_preview: dict = Field(description="Config with secrets redacted.")
     created_at: str
 
+    model_config = {"json_schema_extra": {"example": {
+        "id": "int_4cb812aa",
+        "type": "slack",
+        "name": "Team channel",
+        "is_active": True,
+        "config_preview": {"webhook_url": "https://hooks.slack.com/services/T0..."},
+        "created_at": "2026-04-22T11:00:00Z",
+    }}}
+
 
 def _redact_config(integration_type: str, config: dict) -> dict:
     """Return config with secrets replaced by '***...' for API responses."""
@@ -88,7 +97,23 @@ def _to_response(integration: Integration) -> IntegrationResponse:
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
-@router.get("")
+@router.get(
+    "",
+    responses={200: {"content": {"application/json": {"example": {
+        "results": [{
+            "id": "int_4cb812aa",
+            "type": "slack",
+            "name": "Team channel",
+            "is_active": True,
+            "config_preview": {"webhook_url": "https://hooks.slack.com/services/T0..."},
+            "created_at": "2026-04-22T11:00:00Z",
+        }],
+        "total": 1,
+        "limit": 50,
+        "offset": 0,
+        "has_more": False,
+    }}}}},
+)
 async def list_integrations(
     account_id: Optional[str] = Depends(get_current_account_id),
     db: AsyncSession = Depends(get_db),

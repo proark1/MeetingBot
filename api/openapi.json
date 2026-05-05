@@ -3,7 +3,7 @@
   "info": {
     "title": "JustHereToListen.io API",
     "description": "A **multi-tenant meeting bot API** service. Send bots into **Zoom**, **Google Meet**, **Microsoft Teams**, and **onepizza.io** meetings to record, transcribe, and analyse them with **Claude** (Anthropic) or **Gemini** (Google) AI.\n\n## How it works\n1. Register an account (email/password or Google/Microsoft SSO) \u2192 receive an `sk_live_...` API key\n2. Top up credits via **Stripe card** or **USDC (ERC-20)**\n3. `POST /api/v1/bot` with your `meeting_url` and optional `webhook_url`\n4. A headless Chromium bot joins the meeting, records audio (and optionally video), and transcribes it\n5. Results are POSTed to your `webhook_url` when done (or poll `GET /api/v1/bot/{id}`)\n6. Results persist in the database \u2014 browse past meetings via the **Meeting History** tab in the dashboard\n\n## Authentication\nAll API calls (except `/api/v1/auth/register` and `/api/v1/auth/login`) require:\n```\nAuthorization: Bearer sk_live_<your-api-key>\n```\nAPI keys are prefixed with `sk_live_` and shown **once** at creation \u2014 copy immediately. The legacy `API_KEY` environment variable acts as a superadmin bypass and skips per-user account checks. Leave it unset to enforce per-user auth.\n\n## Accounts & API keys\nRegister at `POST /api/v1/auth/register` to receive your first `sk_live_...` key. Generate additional named keys with `POST /api/v1/auth/keys`. Revoke individual keys with `DELETE /api/v1/auth/keys/{id}`.\n\n**Account types:** Pass `account_type: \"personal\"` (default) or `\"business\"` at registration. See the **Business accounts** section below.\n\n**USDC wallet:** Register your Ethereum wallet with `PUT /api/v1/auth/wallet` so the platform can automatically attribute USDC deposits to your account.\n\n**Notification preferences:** Configure email alerts with `GET/PUT /api/v1/auth/notify`. Enable `notify_on_done` to receive an email when each bot finishes analysis.\n\n**Subscription plan:** View your plan and monthly usage with `GET /api/v1/auth/plan`. Plans: `free` (5 bots/mo), `starter` (50), `pro` (500), `business` (unlimited).\n\n**GDPR erasure:** Permanently delete your account and all data with `DELETE /api/v1/auth/account`.\n\n## SSO \u2014 Google & Microsoft OAuth2\nSign in or register with an existing Google or Microsoft account (when configured by the platform admin via `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` or `MICROSOFT_CLIENT_ID`/`MICROSOFT_CLIENT_SECRET`).\n\n- `GET /api/v1/auth/oauth/{provider}/authorize` \u2014 redirect to provider login (`provider`: `google` or `microsoft`). Pass `?redirect=1` to use the cookie flow for the web UI.\n- `GET /api/v1/auth/oauth/{provider}/callback` \u2014 OAuth2 callback; returns `{account_id, email, api_key, access_token, is_new_account}`.\nOn first login the response includes a new `sk_live_...` API key. Subsequent logins return an empty `api_key` \u2014 use your existing key.\n\n## Business accounts (multi-user data isolation)\nBusiness accounts are for **platforms integrating JustHereToListen.io on behalf of multiple end-users**. A single business account uses one API key and one shared credit balance, but isolates all bot data between end-users.\n\n**How to use:** Pass the `X-Sub-User: <user-id>` header on every request to scope data to a specific end-user. Users with different sub-user IDs cannot see each other's bots, transcripts, or analyses. Omit the header for an account-wide view of all bots.\n\n**Alternatively**, pass `sub_user_id` in the `POST /api/v1/bot` request body \u2014 the body field takes precedence over the header.\n\n`X-Sub-User` is an opaque string (max 255 chars): user ID, email, UUID, etc.\n\n## Credits & billing\nCredits are deducted per bot run. Default: `BOT_FLAT_FEE_USD` = $0.10 flat fee per bot. When flat fee is disabled (`BOT_FLAT_FEE_USD=0`), billing uses raw AI cost \u00d7 `CREDIT_MARKUP` (default 3\u00d7). A minimum balance of `MIN_CREDITS_USD` (default $0.10) is required to create a bot (HTTP 402 if below this threshold).\n\n**Top up via Stripe card:** `POST /api/v1/billing/stripe/checkout` \u2014 returns a Stripe Checkout URL. Credits are applied automatically once payment is confirmed via the Stripe webhook. Valid amounts are set by `STRIPE_TOP_UP_AMOUNTS` (default: 10, 25, 50, 100 USD).\n\n**Top up via USDC (ERC-20):** First register your Ethereum wallet via `PUT /api/v1/auth/wallet`. Then `GET /api/v1/billing/usdc/address` returns the platform deposit address. Send USDC **from your registered wallet** \u2014 the system matches the `from` address to your account. 1 USDC = $1 credit, credited automatically within ~1 minute of on-chain confirmation.\n\n**Check balance:** `GET /api/v1/billing/balance` \u2014 returns current `credits_usd` and the last 50 transactions. Transaction `type` values: `stripe_topup`, `usdc_topup`, `bot_usage`.\n\n## Webhooks (global, with retry & delivery logs)\nRegister a global webhook with `POST /api/v1/webhook` to receive events for **all** bots. For per-bot webhooks, pass `webhook_url` when creating a bot instead.\n\n**Events:** `bot.joining`, `bot.in_call`, `bot.call_ended`, `bot.transcript_ready`, `bot.analysis_ready`, `bot.done`, `bot.error`, `bot.cancelled`. Use `events: [\"*\"]` to receive all (default).\n\n**Retry logic:** Failed deliveries are retried up to `WEBHOOK_MAX_ATTEMPTS` times (default 5) with exponential backoff: 1 min, 5 min, 25 min, 2 h, 10 h.\n\n**Signatures:** Set a `secret` when registering \u2014 each delivery includes an `X-MeetingBot-Signature: sha256=<hmac>` header for verification.\n\n**Delivery logs:** `GET /api/v1/webhook/{id}/deliveries` \u2014 paginated delivery history with status, HTTP response code, error message, and next retry time.\n\n**Test endpoint:** `POST /api/v1/webhook/{id}/test` \u2014 send a test event immediately.\n\n## Integrations (Slack & Notion)\nPush meeting notes automatically to third-party tools after each bot session.\n\n- `POST /api/v1/integrations` \u2014 create an integration (`type`: `slack` or `notion`)\n- **Slack:** provide `config.webhook_url` (Incoming Webhook URL)\n- **Notion:** provide `config.api_token` and `config.database_id`\n- `GET /api/v1/integrations` \u2014 list all integrations (secrets redacted)\n- `PATCH /api/v1/integrations/{id}` \u2014 update config\n- `DELETE /api/v1/integrations/{id}` \u2014 remove integration\n\nAfter bot analysis completes, summaries and action items are pushed to all active integrations for that account.\n\n## Calendar auto-join\nConnect an iCal feed so JustHereToListen.io automatically dispatches bots to upcoming meetings.\n\n- `POST /api/v1/calendar` \u2014 add an iCal feed (`ical_url`, `name`, `bot_name?`, `auto_record`)\n- `GET /api/v1/calendar` \u2014 list all calendar feeds\n- `PATCH /api/v1/calendar/{id}` \u2014 update a feed\n- `DELETE /api/v1/calendar/{id}` \u2014 remove a feed\n- `POST /api/v1/calendar/{id}/sync` \u2014 manually trigger an immediate sync\n\nThe background service polls all active feeds every `CALENDAR_POLL_INTERVAL_S` seconds (default 5 min) and auto-creates bots for meetings starting within the next 10 minutes.\n\n## Idempotency keys\nPrevent duplicate bots from network retries by passing a unique key on bot creation:\n```\nIdempotency-Key: <your-unique-key>\n```\nIf a second request with the same key arrives within `IDEMPOTENCY_TTL_HOURS` (default 24 h), the original bot is returned instead of creating a new one. Keys are scoped to your account.\n\n## Bot persona\nCustomize how the bot appears in meetings with `bot_name` and `bot_avatar_url` fields on `POST /api/v1/bot`. The platform default avatar is set via `DEFAULT_BOT_AVATAR_URL`.\n\n## Video recording\nWhen `VIDEO_RECORDING_ENABLED=true` (default), the bot captures a screen recording alongside audio. Video is encoded with ffmpeg (configurable `VIDEO_CRF`, `VIDEO_FPS`, `VIDEO_SCALE`). Download the recording via `GET /api/v1/bot/{id}/recording`.\n\n## Cloud storage\nSet `STORAGE_BACKEND=s3` to upload recordings to S3-compatible storage (AWS S3, Cloudflare R2, MinIO). Configure with `S3_BUCKET`, `S3_ENDPOINT_URL`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`. Set `S3_PUBLIC_URL` for CDN-served links.\nDefault: `local` \u2014 recordings are stored on disk with automatic cleanup after `RECORDING_RETENTION_DAYS` days.\n\n## Consent & recording announcement\nSet `consent_enabled: true` on bot creation to have the bot announce recording at join. Transcripts are scanned for the opt-out phrase (default: `'opt out'`) \u2014 opted-out participants' content is automatically redacted. Configure globally via `CONSENT_ANNOUNCEMENT_ENABLED` and `CONSENT_OPT_OUT_PHRASE` env vars.\n\n## Data retention policies\n`GET/PUT /api/v1/retention` \u2014 configure per-account retention days for bots, recordings, and transcripts. Use `-1` for keep-forever. Platform defaults: `DEFAULT_BOT_RETENTION_DAYS` (90 days), `DEFAULT_RECORDING_RETENTION_DAYS` (30 days). A background task enforces policies nightly.\n\n## Keyword alerts\n`POST /api/v1/keyword-alerts` \u2014 register a keyword. When it is detected in any completed transcript, a `bot.keyword_alert` webhook event fires. Keywords can also be set per-bot at creation via `keyword_alerts: [{keyword, webhook_url?}]`.\n\n## Workspaces\n`POST /api/v1/workspaces` \u2014 create a shared workspace. Invite members with roles (`admin` / `member` / `viewer`). Tag bots with `workspace_id` at creation to make them visible to all workspace members. `WORKSPACES_ENABLED=true` (default).\n\n## MCP (Model Context Protocol)\n`GET /api/v1/mcp/schema` returns the server manifest. `POST /api/v1/mcp/call` executes tools: `list_meetings`, `get_meeting`, `search_meetings`, `get_action_items`, `get_meeting_brief`. Enable/disable with `MCP_ENABLED` (default `true`).\n\n## SAML 2.0 SSO\nSet `SAML_ENABLED=true` and `SAML_SP_BASE_URL` to enable enterprise SSO. Admins register IdP configs at `POST /api/v1/auth/saml/configs`. Users authenticate at `GET /api/v1/auth/saml/{org_slug}/authorize`.\n\n## Exports\nExport meeting reports in multiple formats:\n- `GET /api/v1/bot/{id}/export/markdown` \u2014 Markdown report with transcript, summary, and action items\n- `GET /api/v1/bot/{id}/export/pdf` \u2014 PDF report (same content)\n- `GET /api/v1/bot/{id}/export/json` \u2014 Full session as structured JSON\n- `GET /api/v1/bot/{id}/export/srt` \u2014 Transcript as SRT subtitle file\n\n## Analysis templates\nUse predefined templates to customize analysis output:\n- `GET /api/v1/templates` \u2014 list all templates (default, sales, standup, 1:1, retro, etc.)\n- Pass `template: \"<seed>\"` when creating a bot, or `prompt_override` for a one-off prompt\n- `GET /api/v1/templates/default-prompt` \u2014 get the raw default analysis prompt\n\n## Prometheus metrics\n`GET /metrics` \u2014 Prometheus-compatible metrics endpoint (unauthenticated). Includes HTTP request counts/latencies, active bot counts, and billing totals.\n\n## Bot response & analysis\nBot responses include: `id`, `status`, `meeting_platform`, `participants`, `transcript` (`[{speaker, text, timestamp}]`), `analysis` (`{summary, key_points, action_items, decisions, next_steps, sentiment, topics}`), `chapters` (`[{title, start_time, summary}]`), `speaker_stats` (`[{name, talk_time_s, talk_pct, turns}]`), `recording_available`, `is_demo_transcript`, `sub_user_id`, and `metadata`.\n\n## AI providers\nSet `ANTHROPIC_API_KEY` for Claude (preferred) or `GEMINI_API_KEY` for Gemini. When both are set, Claude takes precedence for transcription and analysis.\n\n## Bot lifecycle\n`ready` / `scheduled` / `queued` \u2192 `joining` \u2192 `in_call` \u2192 `call_ended` \u2192 `transcribing` \u2192 `done` (or `error` / `cancelled`)\n\n- **`scheduled`** \u2014 bot has a future `join_at` time and is waiting\n- **`queued`** \u2014 `MAX_CONCURRENT_BOTS` limit reached; waiting for a free slot\n- **`done`** \u2014 transcript + analysis complete; results available for 24 hours\n\n## Rate limits\n- `POST /api/v1/auth/register` \u2014 3 requests/min per IP\n- `POST /api/v1/auth/login` \u2014 5 requests/min per IP\n- `POST /api/v1/bot` \u2014 20 requests/min per IP\n\nExceeded limits return HTTP 429.\n\n## Real-time events (WebSocket)\nConnect to `ws://<host>/api/v1/ws` for live bot status updates. The server broadcasts events whenever a bot's status changes.\n\n## Auto-leave\nThe bot leaves automatically when it has been the only participant for `BOT_ALONE_TIMEOUT` seconds (default 5 min).\n\n## Web UI\n| Path | Description |\n|------|-------------|\n| `/register` | Create account (Personal or Business); Google/Microsoft SSO sign-up |\n| `/login` | Login with email/password or SSO |\n| `/dashboard` | Balance, API keys, plan & usage, notification prefs, USDC wallet, linked SSO accounts, integrations summary, calendar feeds, transactions |\n| `/topup` | Add credits via Stripe card or USDC |\n| `/bot/{id}` | Session viewer \u2014 transcript, AI analysis (summary, key points, action items, decisions, next steps, sentiment, topics), speaker breakdown, chapters, meeting metadata, and download links for audio/video/markdown/PDF |\n",
-    "version": "2.51.0",
+    "version": "2.52.0",
     "contact": {
       "name": "JustHereToListen.io",
       "url": "https://justheretolisten.io"
@@ -202,7 +202,18 @@
                   },
                   "type": "array",
                   "title": "Response List Api Keys Api V1 Auth Keys Get"
-                }
+                },
+                "example": [
+                  {
+                    "id": "key_b1c2d3e4",
+                    "name": "Production",
+                    "key_preview": "sk_live_a1b2c3d4...",
+                    "mode": "live",
+                    "is_active": true,
+                    "created_at": "2026-04-01T09:00:00Z",
+                    "last_used_at": "2026-05-04T15:34:18Z"
+                  }
+                ]
               }
             }
           },
@@ -506,7 +517,17 @@
                   },
                   "type": "array",
                   "title": "Response List Test Keys Api V1 Auth Test Keys Get"
-                }
+                },
+                "example": [
+                  {
+                    "id": "key_e5f6a7b8",
+                    "name": "CI Sandbox",
+                    "key_preview": "sk_test_a1b2c3d4...",
+                    "mode": "test",
+                    "is_active": true,
+                    "created_at": "2026-05-04T15:00:00Z"
+                  }
+                ]
               }
             }
           },
@@ -1291,7 +1312,11 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {},
+                "example": {
+                  "message": "Account permanently deleted. All associated data has been erased.",
+                  "account_id": "550e8400-e29b-41d4-a716-446655440000"
+                }
               }
             }
           },
@@ -1389,7 +1414,15 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {},
+                "example": {
+                  "id": "sk_3a82ff9c",
+                  "plaintext_key": "OnetimeOnly_AbCdEfGhIjKlMnOpQrStUv",
+                  "label": "Vendor onboarding session 2026-05",
+                  "created_at": "2026-05-04T15:00:00Z",
+                  "expires_at": "2026-05-06T15:00:00Z",
+                  "warning": "This key will not be shown again. Store it securely and share only with support."
+                }
               }
             }
           },
@@ -1493,7 +1526,16 @@
                   },
                   "type": "array",
                   "title": "Response List Support Keys Api V1 Auth Support Keys Get"
-                }
+                },
+                "example": [
+                  {
+                    "id": "sk_3a82ff9c",
+                    "label": "Vendor onboarding session 2026-05",
+                    "created_at": "2026-05-04T15:00:00Z",
+                    "expires_at": "2026-05-06T15:00:00Z",
+                    "is_active": true
+                  }
+                ]
               }
             }
           },
@@ -1709,13 +1751,8 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
+          "302": {
+            "description": "Redirect to the provider's OAuth2 consent page."
           },
           "422": {
             "description": "Validation Error",
@@ -1880,9 +1917,21 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {},
+                "example": {
+                  "account_id": "550e8400-e29b-41d4-a716-446655440000",
+                  "email": "you@example.com",
+                  "provider": "google",
+                  "api_key": "sk_live_EXAMPLE_KEY_NOT_REAL",
+                  "access_token": "eyJhbGciOiJIUzI1NiJ9.example",
+                  "token_type": "bearer",
+                  "is_new_account": true
+                }
               }
             }
+          },
+          "302": {
+            "description": "Redirect to the web UI with a session cookie (when ?redirect=1 was passed)."
           },
           "422": {
             "description": "Validation Error",
@@ -1982,8 +2031,8 @@
           "200": {
             "description": "Successful Response",
             "content": {
-              "application/json": {
-                "schema": {}
+              "application/xml": {
+                "example": "<EntityDescriptor xmlns=\"urn:oasis:names:tc:SAML:2.0:metadata\" entityID=\"https://api.example.com/api/v1/auth/saml/acme-corp/metadata\">...</EntityDescriptor>"
               }
             }
           },
@@ -2092,13 +2141,8 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
+          "302": {
+            "description": "Redirect to the IdP SSO endpoint with a SAMLRequest."
           },
           "422": {
             "description": "Validation Error",
@@ -2199,7 +2243,15 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {},
+                "example": {
+                  "account_id": "550e8400-e29b-41d4-a716-446655440000",
+                  "email": "you@acme.com",
+                  "api_key": "sk_live_EXAMPLE_KEY_NOT_REAL",
+                  "access_token": "eyJhbGciOiJIUzI1NiJ9.example",
+                  "is_new_account": false,
+                  "org_slug": "acme-corp"
+                }
               }
             }
           },
@@ -2291,7 +2343,24 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {},
+                "example": [
+                  {
+                    "id": "saml_5fb732c1",
+                    "org_slug": "acme-corp",
+                    "org_name": "Acme Corp",
+                    "idp_metadata_url": "https://idp.acme.com/metadata",
+                    "attribute_mapping": {
+                      "email": "email",
+                      "first_name": "givenName",
+                      "last_name": "sn"
+                    },
+                    "workspace_id": "ws_8c1234ab",
+                    "default_role": "member",
+                    "is_active": true,
+                    "created_at": "2026-04-15T12:00:00Z"
+                  }
+                ]
               }
             }
           },
@@ -2381,7 +2450,14 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {},
+                "example": {
+                  "id": "saml_5fb732c1",
+                  "org_slug": "acme-corp",
+                  "org_name": "Acme Corp",
+                  "is_active": true,
+                  "created_at": "2026-04-15T12:00:00Z"
+                }
               }
             }
           },
@@ -3545,7 +3621,38 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {},
+                "example": {
+                  "bot_id": "bot_8a72c5e1",
+                  "status": "done",
+                  "meeting_platform": "google_meet",
+                  "meeting_url": "https://meet.google.com/abc-defg-hij",
+                  "started_at": "2026-05-04T15:00:02Z",
+                  "ended_at": "2026-05-04T15:32:48Z",
+                  "ffmpeg_exit_code": 0,
+                  "ffmpeg_stderr_tail": "size=  17056kB time=00:32:48.00 ...",
+                  "audio_peak_amplitude": 0.6431,
+                  "audio_health_samples": [
+                    {
+                      "t": 60.0,
+                      "rms": 0.082
+                    }
+                  ],
+                  "webrtc_stats_samples": [],
+                  "pactl_dumps": {
+                    "on_join": "default-source: virt-mic"
+                  },
+                  "console_log_tail": [
+                    "[INFO] joined call"
+                  ],
+                  "gemini_finish_reason": "STOP",
+                  "gemini_safety_blocks": [],
+                  "debug_dir": "/app/data/debug/bot_8a72c5e1",
+                  "screenshots": [
+                    "/app/data/screenshots/bot_8a72c5e1-join.png"
+                  ],
+                  "recording_path": "/app/data/recordings/bot_8a72c5e1.wav"
+                }
               }
             }
           },
@@ -3653,7 +3760,12 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {},
+                "example": {
+                  "id": "bot_8a72c5e1",
+                  "status": "in_call",
+                  "message": "Bot is leaving the meeting gracefully."
+                }
               }
             }
           },
@@ -3761,7 +3873,24 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {},
+                "example": {
+                  "bot_id": "bot_8a72c5e1",
+                  "transcript": [
+                    {
+                      "speaker": "Alice",
+                      "text": "Welcome everyone.",
+                      "timestamp": 0.4,
+                      "source": "voice"
+                    },
+                    {
+                      "speaker": "Bob",
+                      "text": "Let's start with the roadmap.",
+                      "timestamp": 4.2,
+                      "source": "voice"
+                    }
+                  ]
+                }
               }
             }
           },
@@ -3866,10 +3995,10 @@
         ],
         "responses": {
           "200": {
-            "description": "Successful Response",
+            "description": "WAV recording of the meeting audio.",
             "content": {
-              "application/json": {
-                "schema": {}
+              "audio/wav": {
+                "example": "<binary WAV file>"
               }
             }
           },
@@ -3974,10 +4103,10 @@
         ],
         "responses": {
           "200": {
-            "description": "Successful Response",
+            "description": "MP4 screen recording of the meeting.",
             "content": {
-              "application/json": {
-                "schema": {}
+              "video/mp4": {
+                "example": "<binary MP4 video>"
               }
             }
           },
@@ -4325,7 +4454,12 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {},
+                "example": {
+                  "bot_id": "bot_8a72c5e1",
+                  "question": "Did anyone commit to a specific deadline for the v2 onboarding rollout?",
+                  "answer": "Yes \u2014 Alice committed to wiring up the A/B test by 2026-05-18."
+                }
               }
             }
           },
@@ -4443,7 +4577,14 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {},
+                "example": {
+                  "bot_id": "bot_8a72c5e1",
+                  "question": "What's been decided so far?",
+                  "answer": "So far the team has confirmed engineering capacity for two devs through August.",
+                  "transcript_entries": 47,
+                  "bot_status": "in_call"
+                }
               }
             }
           },
@@ -4551,7 +4692,16 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {},
+                "example": {
+                  "bot_id": "bot_8a72c5e1",
+                  "subject": "Recap \u2014 Sales sync (May 4)",
+                  "body": "Hi team,\n\nQuick recap of today's call...\n\nNext steps:\n- Alice \u2014 wire A/B test by May 18\n- Bob \u2014 draft TOS update by May 11\n\nThanks!",
+                  "to": [
+                    "alice@acme.com",
+                    "bob@acme.com"
+                  ]
+                }
               }
             }
           },
@@ -4776,10 +4926,10 @@
         ],
         "responses": {
           "200": {
-            "description": "Successful Response",
+            "description": "Server-Sent Events stream of live transcript entries.",
             "content": {
-              "application/json": {
-                "schema": {}
+              "text/event-stream": {
+                "example": "data: {\"speaker\": \"Alice\", \"text\": \"Welcome\", \"timestamp\": 0.4}\n\ndata: {\"__terminal__\": true, \"status\": \"done\"}\n\n"
               }
             }
           },
@@ -4904,7 +5054,11 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {},
+                "example": {
+                  "share_url": "https://api.example.com/share/4fM7vV2GxJq8y9XdQ1cE3pYzA",
+                  "bot_id": "bot_8a72c5e1"
+                }
               }
             }
           },
@@ -5252,7 +5406,28 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {},
+                "example": {
+                  "bot_id": "bot_8a72c5e1",
+                  "latest": {
+                    "ts": "2026-05-04T15:18:00Z",
+                    "speakers": [
+                      {
+                        "speaker": "Alice",
+                        "talk_time_s": 412.0,
+                        "interruptions": 1,
+                        "sentiment": "positive"
+                      },
+                      {
+                        "speaker": "Bob",
+                        "talk_time_s": 218.4,
+                        "interruptions": 3,
+                        "sentiment": "neutral"
+                      }
+                    ]
+                  },
+                  "history_count": 36
+                }
               }
             }
           },
@@ -5372,7 +5547,31 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {},
+                "example": {
+                  "bot_id": "bot_8a72c5e1",
+                  "snapshots": [
+                    {
+                      "ts": "2026-05-04T15:00:30Z",
+                      "speakers": [
+                        {
+                          "speaker": "Alice",
+                          "talk_time_s": 18.0
+                        }
+                      ]
+                    },
+                    {
+                      "ts": "2026-05-04T15:01:00Z",
+                      "speakers": [
+                        {
+                          "speaker": "Alice",
+                          "talk_time_s": 42.5
+                        }
+                      ]
+                    }
+                  ],
+                  "total": 36
+                }
               }
             }
           },
@@ -5477,10 +5676,10 @@
         ],
         "responses": {
           "200": {
-            "description": "Successful Response",
+            "description": "Server-Sent Events stream of speaker-analytics snapshots.",
             "content": {
-              "application/json": {
-                "schema": {}
+              "text/event-stream": {
+                "example": "data: {\"ts\": \"2026-05-04T15:18:00Z\", \"speakers\": [{\"speaker\": \"Alice\", \"talk_time_s\": 412.0}]}\n\n"
               }
             }
           },
@@ -5600,7 +5799,23 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {},
+                "example": {
+                  "bot_id": "bot_8a72c5e1",
+                  "tips": [
+                    {
+                      "ts": "2026-05-04T15:08:00Z",
+                      "metric": "talk_time",
+                      "tip": "You've spoken 68% of the last 5 minutes \u2014 invite Bob in."
+                    },
+                    {
+                      "ts": "2026-05-04T15:14:30Z",
+                      "metric": "filler_words",
+                      "tip": "10 'um's in 2 minutes \u2014 try a brief pause instead."
+                    }
+                  ],
+                  "total": 8
+                }
               }
             }
           },
@@ -5705,10 +5920,10 @@
         ],
         "responses": {
           "200": {
-            "description": "Successful Response",
+            "description": "Private SSE stream of host-coaching tips.",
             "content": {
-              "application/json": {
-                "schema": {}
+              "text/event-stream": {
+                "example": "data: {\"ts\": \"2026-05-04T15:08:00Z\", \"metric\": \"talk_time\", \"tip\": \"You've spoken 68% of the last 5 minutes.\"}\n\n"
               }
             }
           },
@@ -5846,7 +6061,25 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {},
+                "example": {
+                  "bot_id": "bot_8a72c5e1",
+                  "decisions": [
+                    {
+                      "kind": "decision",
+                      "text": "Ship v2 onboarding to 10% of new accounts on May 20.",
+                      "speaker": "Alice",
+                      "timestamp": 612.4
+                    },
+                    {
+                      "kind": "action",
+                      "text": "Wire up the v2 onboarding A/B test.",
+                      "speaker": "Alice",
+                      "timestamp": 624.1
+                    }
+                  ],
+                  "total": 2
+                }
               }
             }
           },
@@ -5954,7 +6187,19 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {},
+                "example": {
+                  "bot_id": "bot_8a72c5e1",
+                  "related_meetings": [
+                    {
+                      "bot_id": "bot_5e1da2bb",
+                      "title": "Onboarding alignment",
+                      "date": "2026-04-20",
+                      "similarity": 0.84,
+                      "summary": "Discussed early signals from the v1 onboarding and proposed redesigning the wizard."
+                    }
+                  ]
+                }
               }
             }
           },
@@ -6062,7 +6307,19 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {},
+                "example": {
+                  "bot_id": "bot_8a72c5e1",
+                  "related_meetings": [
+                    {
+                      "bot_id": "bot_5e1da2bb",
+                      "title": "Onboarding alignment",
+                      "date": "2026-04-20",
+                      "similarity": 0.84
+                    }
+                  ],
+                  "count": 1
+                }
               }
             }
           },
@@ -6147,6 +6404,7 @@
           "Bots"
         ],
         "summary": "List agentic instructions configured for this bot",
+        "description": "Return the bot's current agentic instruction list, autonomy level, and per-instruction invocation counts.\n\nUse this to inspect how often each delegated instruction has fired during\nthe meeting (`invocations` is a `{index: count}` map keyed by position in\nthe instruction list).",
         "operationId": "get_agentic_instructions_api_v1_bot__bot_id__agentic_instructions_get",
         "security": [
           {
@@ -6169,7 +6427,22 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {},
+                "example": {
+                  "bot_id": "bot_8a72c5e1",
+                  "autonomy": "medium",
+                  "instructions": [
+                    {
+                      "instruction": "Push back if scope creeps beyond the v2 onboarding.",
+                      "trigger": "on_topic",
+                      "speak": false,
+                      "max_invocations": 3
+                    }
+                  ],
+                  "invocations": {
+                    "0": 1
+                  }
+                }
               }
             }
           },
@@ -6252,6 +6525,7 @@
           "Bots"
         ],
         "summary": "Update agentic instructions for this bot",
+        "description": "Replace the bot's agentic instruction list (and optionally update its autonomy level).\n\nPass an empty `instructions` list to clear all directives. Max 20 instructions.\nAllowed `autonomy` values: `off`, `low`, `medium`, `high`. Pass `null` to leave autonomy unchanged.",
         "operationId": "update_agentic_instructions_api_v1_bot__bot_id__agentic_instructions_put",
         "security": [
           {
@@ -6284,7 +6558,20 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {},
+                "example": {
+                  "bot_id": "bot_8a72c5e1",
+                  "agentic_instructions": [
+                    {
+                      "instruction": "Summarise every 10 minutes.",
+                      "trigger": "on_interval",
+                      "interval_seconds": 600,
+                      "speak": true,
+                      "max_invocations": 6
+                    }
+                  ],
+                  "agentic_autonomy": "high"
+                }
               }
             }
           },
@@ -6369,6 +6656,7 @@
           "Bots"
         ],
         "summary": "Manually trigger an agentic instruction",
+        "description": "Manually fire a single agentic instruction by its zero-based index.\n\nReturns 409 if the bot's autonomy is `off` and 404 if `index` is out of range.\nThe response includes the action the engine produced (text or speak payload)\nand whether the action was successfully delivered into the live meeting.",
         "operationId": "trigger_agentic_instruction_api_v1_bot__bot_id__agentic_trigger_post",
         "security": [
           {
@@ -6403,7 +6691,15 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {},
+                "example": {
+                  "bot_id": "bot_8a72c5e1",
+                  "action": {
+                    "kind": "speak",
+                    "text": "Quick recap: we agreed on a May 20 rollout."
+                  },
+                  "delivered": true
+                }
               }
             }
           },
@@ -6521,7 +6817,13 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {},
+                "example": {
+                  "bot_id": "bot_8a72c5e1",
+                  "question": "Who owns the TOS update action item?",
+                  "answer": "Bob owns the TOS update \u2014 due May 11.",
+                  "delivered": true
+                }
               }
             }
           },
@@ -6613,7 +6915,30 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {},
+                "example": {
+                  "results": [
+                    {
+                      "id": "wh_5fa921b7",
+                      "url": "https://api.acme.com/justheretolisten/webhook",
+                      "events": [
+                        "bot.done",
+                        "bot.error"
+                      ],
+                      "is_active": true,
+                      "created_at": "2026-05-04T12:00:00Z",
+                      "delivery_attempts": 124,
+                      "last_delivery_at": "2026-05-04T15:34:18Z",
+                      "last_delivery_status": 200,
+                      "consecutive_failures": 0,
+                      "account_id": "550e8400-e29b-41d4-a716-446655440000"
+                    }
+                  ],
+                  "total": 1,
+                  "limit": 1,
+                  "offset": 0,
+                  "has_more": false
+                }
               }
             }
           },
@@ -6807,7 +7132,25 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {},
+                "example": {
+                  "events": [
+                    "bot.joining",
+                    "bot.in_call",
+                    "bot.call_ended",
+                    "bot.transcript_ready",
+                    "bot.analysis_ready",
+                    "bot.done",
+                    "bot.error",
+                    "bot.cancelled",
+                    "bot.keyword_alert",
+                    "bot.live_transcript",
+                    "bot.live_transcript_translated",
+                    "bot.live_chat_message",
+                    "bot.recurring_intel_ready",
+                    "bot.test"
+                  ]
+                }
               }
             }
           },
@@ -6922,7 +7265,27 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {},
+                "example": {
+                  "results": [
+                    {
+                      "id": "wd_3fbc81a0",
+                      "webhook_id": "wh_5fa921b7",
+                      "bot_id": "bot_8a72c5e1",
+                      "event": "bot.done",
+                      "status": "delivered",
+                      "attempt_number": 1,
+                      "response_status_code": 200,
+                      "response_body": "ok",
+                      "delivered_at": "2026-05-04T15:34:18Z",
+                      "created_at": "2026-05-04T15:34:18Z"
+                    }
+                  ],
+                  "total": 1,
+                  "limit": 50,
+                  "offset": 0,
+                  "has_more": false
+                }
               }
             }
           },
@@ -7125,6 +7488,7 @@
           "Webhooks"
         ],
         "summary": "Get a webhook",
+        "description": "Return a single webhook by id.\n\nReturns 404 if the webhook does not exist or belongs to another account.\nUse this to inspect delivery counters and the current `is_active` flag.",
         "operationId": "get_webhook_api_v1_webhook__webhook_id__get",
         "security": [
           {
@@ -7232,6 +7596,7 @@
           "Webhooks"
         ],
         "summary": "Delete a webhook",
+        "description": "Delete a registered webhook permanently.\n\nReturns 204 on success. The webhook is removed from the in-memory store\nand the database. Pending delivery attempts for this webhook are cancelled.",
         "operationId": "delete_webhook_api_v1_webhook__webhook_id__delete",
         "security": [
           {
@@ -7357,7 +7722,11 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {},
+                "example": {
+                  "status_code": 200,
+                  "url": "https://api.acme.com/justheretolisten/webhook"
+                }
               }
             }
           },
@@ -7485,7 +7854,26 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {},
+                "example": {
+                  "results": [
+                    {
+                      "id": "wd_3fbc81a0",
+                      "webhook_id": "wh_5fa921b7",
+                      "bot_id": "bot_8a72c5e1",
+                      "event": "bot.done",
+                      "status": "delivered",
+                      "attempt_number": 1,
+                      "response_status_code": 200,
+                      "delivered_at": "2026-05-04T15:34:18Z",
+                      "created_at": "2026-05-04T15:34:18Z"
+                    }
+                  ],
+                  "total": 1,
+                  "limit": 50,
+                  "offset": 0,
+                  "has_more": false
+                }
               }
             }
           },
@@ -7700,10 +8088,10 @@
         ],
         "responses": {
           "200": {
-            "description": "Successful Response",
+            "description": "Multi-page PDF report containing the meeting summary, transcript, and action items.",
             "content": {
-              "application/json": {
-                "schema": {}
+              "application/pdf": {
+                "example": "<binary PDF document>"
               }
             }
           },
@@ -7918,10 +8306,13 @@
         ],
         "responses": {
           "200": {
-            "description": "Successful Response",
+            "description": "SRT subtitle file derived from the transcript.",
             "content": {
-              "application/json": {
-                "schema": {}
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                },
+                "example": "1\n00:00:00,400 --> 00:00:04,200\nAlice: Welcome everyone.\n\n2\n00:00:04,200 --> 00:00:08,100\nBob: Let's start with the roadmap.\n"
               }
             }
           },
@@ -8134,7 +8525,26 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {},
+                "example": {
+                  "templates": [
+                    {
+                      "name": "default",
+                      "label": "Default (General)",
+                      "description": "General-purpose template for any meeting type."
+                    },
+                    {
+                      "name": "sales",
+                      "label": "Sales Call",
+                      "description": "Optimised for B2B/B2C sales calls."
+                    },
+                    {
+                      "name": "standup",
+                      "label": "Daily Standup",
+                      "description": "For agile standups."
+                    }
+                  ]
+                }
               }
             }
           },
@@ -8222,7 +8632,10 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {},
+                "example": {
+                  "prompt": "You are an expert meeting assistant. Read the transcript below and produce a JSON object with the following keys: summary, key_points, action_items (with owner, task, due_date, confidence)..."
+                }
               }
             }
           },
@@ -8377,7 +8790,22 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {},
+                "example": {
+                  "query": "v2 onboarding",
+                  "results": [
+                    {
+                      "bot_id": "bot_8a72c5e1",
+                      "meeting_url": "https://meet.google.com/abc-defg-hij",
+                      "bot_name": "Acme Notes Bot",
+                      "started_at": "2026-05-04T15:00:02Z",
+                      "snippet": "Bob: Let's start with the v2 onboarding rollout.",
+                      "score": 0.92
+                    }
+                  ],
+                  "total": 1,
+                  "limit": 50
+                }
               }
             }
           },
@@ -8541,7 +8969,19 @@
                     "$ref": "#/components/schemas/AuditLogEntryResponse"
                   },
                   "title": "Response Get Audit Log Api V1 Audit Log Get"
-                }
+                },
+                "example": [
+                  {
+                    "id": "al_5fb732c1",
+                    "account_id": "550e8400-e29b-41d4-a716-446655440000",
+                    "action": "bot.created",
+                    "resource_type": "bot",
+                    "resource_id": "bot_8a72c5e1",
+                    "ip_address": "203.0.113.42",
+                    "details": "{\"meeting_url\": \"https://meet.google.com/abc-defg-hij\"}",
+                    "created_at": "2026-05-04T14:58:00Z"
+                  }
+                ]
               }
             }
           },
@@ -8660,7 +9100,25 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {},
+                "example": {
+                  "results": [
+                    {
+                      "id": "int_4cb812aa",
+                      "type": "slack",
+                      "name": "Team channel",
+                      "is_active": true,
+                      "config_preview": {
+                        "webhook_url": "https://hooks.slack.com/services/T0..."
+                      },
+                      "created_at": "2026-04-22T11:00:00Z"
+                    }
+                  ],
+                  "total": 1,
+                  "limit": 50,
+                  "offset": 0,
+                  "has_more": false
+                }
               }
             }
           },
@@ -9086,7 +9544,19 @@
                   },
                   "type": "array",
                   "title": "Response List Feeds Api V1 Calendar Get"
-                }
+                },
+                "example": [
+                  {
+                    "id": "feed_2bc741ee",
+                    "name": "Work Calendar",
+                    "ical_url": "https://calendar.google.com/calendar/ical/you%40gmail.com/private-abc/basic.ics",
+                    "bot_name": "Recorder",
+                    "auto_record": true,
+                    "is_active": true,
+                    "last_synced_at": "2026-05-04T15:00:00Z",
+                    "created_at": "2026-04-15T08:00:00Z"
+                  }
+                ]
               }
             }
           },
@@ -9517,7 +9987,11 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {},
+                "example": {
+                  "dispatched": 2,
+                  "message": "Dispatched 2 bot(s) from this feed"
+                }
               }
             }
           },
@@ -9891,7 +10365,23 @@
                   },
                   "type": "array",
                   "title": "Response List Keyword Alerts Api V1 Keyword Alerts Get"
-                }
+                },
+                "example": [
+                  {
+                    "id": "kwa_2bc741ee",
+                    "account_id": "550e8400-e29b-41d4-a716-446655440000",
+                    "name": "Competitor mentions",
+                    "keywords": [
+                      "acme corp",
+                      "competitor x"
+                    ],
+                    "webhook_url": "https://your-app.example.com/competitor-webhook",
+                    "is_active": true,
+                    "trigger_count": 3,
+                    "last_triggered_at": "2026-05-04T15:32:08Z",
+                    "created_at": "2026-04-22T11:00:00Z"
+                  }
+                ]
               }
             }
           },
@@ -10414,7 +10904,23 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {},
+                "example": [
+                  {
+                    "id": "ws_8c1234ab",
+                    "name": "Acme Sales Team",
+                    "slug": "acme-sales",
+                    "owner_account_id": "550e8400-e29b-41d4-a716-446655440000",
+                    "settings": {
+                      "default_bot_name": "Acme Notes Bot",
+                      "require_consent": true
+                    },
+                    "is_active": true,
+                    "created_at": "2026-04-15T08:00:00Z",
+                    "updated_at": "2026-05-04T12:00:00Z",
+                    "member_role": "admin"
+                  }
+                ]
               }
             }
           },
@@ -10509,7 +11015,21 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {},
+                "example": {
+                  "id": "ws_8c1234ab",
+                  "name": "Acme Sales Team",
+                  "slug": "acme-sales",
+                  "owner_account_id": "550e8400-e29b-41d4-a716-446655440000",
+                  "settings": {
+                    "default_bot_name": "Acme Notes Bot",
+                    "require_consent": true
+                  },
+                  "is_active": true,
+                  "created_at": "2026-04-15T08:00:00Z",
+                  "updated_at": "2026-05-04T12:00:00Z",
+                  "member_role": "admin"
+                }
               }
             }
           },
@@ -10622,7 +11142,21 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {},
+                "example": {
+                  "id": "ws_8c1234ab",
+                  "name": "Acme Sales Team",
+                  "slug": "acme-sales",
+                  "owner_account_id": "550e8400-e29b-41d4-a716-446655440000",
+                  "settings": {
+                    "default_bot_name": "Acme Notes Bot",
+                    "require_consent": true
+                  },
+                  "is_active": true,
+                  "created_at": "2026-04-15T08:00:00Z",
+                  "updated_at": "2026-05-04T12:00:00Z",
+                  "member_role": "admin"
+                }
               }
             }
           },
@@ -10738,7 +11272,21 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {},
+                "example": {
+                  "id": "ws_8c1234ab",
+                  "name": "Acme Sales Team",
+                  "slug": "acme-sales",
+                  "owner_account_id": "550e8400-e29b-41d4-a716-446655440000",
+                  "settings": {
+                    "default_bot_name": "Acme Notes Bot",
+                    "require_consent": true
+                  },
+                  "is_active": true,
+                  "created_at": "2026-04-15T08:00:00Z",
+                  "updated_at": "2026-05-04T12:00:00Z",
+                  "member_role": "admin"
+                }
               }
             }
           },
@@ -10947,7 +11495,17 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {},
+                "example": [
+                  {
+                    "id": "wm_b1c2d3e4",
+                    "workspace_id": "ws_8c1234ab",
+                    "account_id": "5a0e8400-e29b-41d4-a716-446655440111",
+                    "role": "member",
+                    "invited_by": "550e8400-e29b-41d4-a716-446655440000",
+                    "joined_at": "2026-04-22T09:00:00Z"
+                  }
+                ]
               }
             }
           },
@@ -11063,7 +11621,15 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {},
+                "example": {
+                  "id": "wm_b1c2d3e4",
+                  "workspace_id": "ws_8c1234ab",
+                  "account_id": "5a0e8400-e29b-41d4-a716-446655440111",
+                  "role": "member",
+                  "invited_by": "550e8400-e29b-41d4-a716-446655440000",
+                  "joined_at": "2026-04-22T09:00:00Z"
+                }
               }
             }
           },
@@ -11190,7 +11756,15 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {},
+                "example": {
+                  "id": "wm_b1c2d3e4",
+                  "workspace_id": "ws_8c1234ab",
+                  "account_id": "5a0e8400-e29b-41d4-a716-446655440111",
+                  "role": "admin",
+                  "invited_by": "550e8400-e29b-41d4-a716-446655440000",
+                  "joined_at": "2026-04-22T09:00:00Z"
+                }
               }
             }
           },
@@ -11392,7 +11966,34 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {},
+                "example": {
+                  "name": "justheretolisten.io",
+                  "version": "2.51.0",
+                  "description": "MCP server for JustHereToListen.io meeting bots.",
+                  "tools": [
+                    {
+                      "name": "list_meetings",
+                      "description": "List recent meetings."
+                    },
+                    {
+                      "name": "get_meeting",
+                      "description": "Fetch a single meeting by id."
+                    },
+                    {
+                      "name": "search_meetings",
+                      "description": "Semantic search across past meetings."
+                    },
+                    {
+                      "name": "get_action_items",
+                      "description": "List open action items."
+                    },
+                    {
+                      "name": "get_meeting_brief",
+                      "description": "Generate a pre-meeting brief."
+                    }
+                  ]
+                }
               }
             }
           },
@@ -11489,7 +12090,21 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {},
+                "example": {
+                  "tool": "list_meetings",
+                  "result": {
+                    "meetings": [
+                      {
+                        "id": "bot_8a72c5e1",
+                        "title": "Sales sync",
+                        "date": "2026-05-04",
+                        "summary": "Team agreed to ship v2."
+                      }
+                    ],
+                    "total": 1
+                  }
+                }
               }
             }
           },
@@ -11658,7 +12273,20 @@
                     "$ref": "#/components/schemas/ActionItemResponse"
                   },
                   "title": "Response List Action Items Api V1 Action Items Get"
-                }
+                },
+                "example": [
+                  {
+                    "id": "ai_8a72c5e1abcd1234ef567890abcdef12",
+                    "account_id": "550e8400-e29b-41d4-a716-446655440000",
+                    "bot_id": "bot_8a72c5e1",
+                    "task": "Wire up the v2 onboarding A/B test",
+                    "assignee": "Alice",
+                    "due_date": "2026-05-18",
+                    "confidence": 0.93,
+                    "status": "open",
+                    "created_at": "2026-05-04T15:34:18Z"
+                  }
+                ]
               }
             }
           },
@@ -11870,7 +12498,19 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {},
+                "example": {
+                  "status": "ok",
+                  "service": "JustHereToListen.io",
+                  "version": "2.52.0",
+                  "background_tasks": {
+                    "queue_processor": {
+                      "status": "healthy",
+                      "last_heartbeat": "2026-05-04T15:34:18Z",
+                      "age_seconds": 12
+                    }
+                  }
+                }
               }
             }
           },
@@ -11952,7 +12592,24 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {},
+                "example": {
+                  "status": "ok",
+                  "service": "JustHereToListen.io",
+                  "version": "2.52.0",
+                  "background_tasks": {
+                    "queue_processor": {
+                      "status": "healthy",
+                      "last_heartbeat": "2026-05-04T15:34:18Z",
+                      "age_seconds": 12
+                    },
+                    "cleanup_loop": {
+                      "status": "healthy",
+                      "last_heartbeat": "2026-05-04T15:00:00Z",
+                      "age_seconds": 2058
+                    }
+                  }
+                }
               }
             }
           },
@@ -12034,7 +12691,28 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {},
+                "example": {
+                  "status": "ok",
+                  "checks": {
+                    "database": "ok",
+                    "ai_provider": "ok"
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "example": {
+                  "status": "degraded",
+                  "checks": {
+                    "database": "error: connection refused",
+                    "ai_provider": "ok"
+                  }
+                }
               }
             }
           },
@@ -12116,7 +12794,28 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {},
+                "example": {
+                  "status": "ok",
+                  "checks": {
+                    "database": "ok",
+                    "ai_provider": "ok"
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "example": {
+                  "status": "degraded",
+                  "checks": {
+                    "database": "error: connection refused",
+                    "ai_provider": "ok"
+                  }
+                }
               }
             }
           },
@@ -12243,7 +12942,16 @@
           "is_active",
           "created_at"
         ],
-        "title": "AccountResponse"
+        "title": "AccountResponse",
+        "example": {
+          "account_type": "personal",
+          "created_at": "2026-04-01T09:00:00Z",
+          "credits_usd": 24.5,
+          "email": "you@example.com",
+          "id": "550e8400-e29b-41d4-a716-446655440000",
+          "is_active": true,
+          "wallet_address": "0xAbCdEf0123456789AbCdEf0123456789AbCdEf01"
+        }
       },
       "AccountTypeRequest": {
         "properties": {
@@ -12280,7 +12988,11 @@
           "account_type",
           "message"
         ],
-        "title": "AccountTypeResponse"
+        "title": "AccountTypeResponse",
+        "example": {
+          "account_type": "business",
+          "message": "Switched to Business account. Pass X-Sub-User: <user-id> on each request to isolate data per end-user."
+        }
       },
       "ActionItemPatch": {
         "properties": {
@@ -12418,7 +13130,18 @@
           "status",
           "created_at"
         ],
-        "title": "ActionItemResponse"
+        "title": "ActionItemResponse",
+        "example": {
+          "account_id": "550e8400-e29b-41d4-a716-446655440000",
+          "assignee": "Alice",
+          "bot_id": "bot_8a72c5e1",
+          "confidence": 0.93,
+          "created_at": "2026-05-04T15:34:18Z",
+          "due_date": "2026-05-18",
+          "id": "ai_8a72c5e1abcd1234ef567890abcdef12",
+          "status": "open",
+          "task": "Wire up the v2 onboarding A/B test"
+        }
       },
       "AgenticInstruction": {
         "properties": {
@@ -12510,7 +13233,15 @@
           }
         },
         "type": "object",
-        "title": "AnalyzeRequest"
+        "title": "AnalyzeRequest",
+        "examples": [
+          {
+            "template": "sales"
+          },
+          {
+            "prompt_override": "Summarise as bullet points and list every commitment by speaker."
+          }
+        ]
       },
       "ApiKeyResponse": {
         "properties": {
@@ -12568,7 +13299,16 @@
           "is_active",
           "created_at"
         ],
-        "title": "ApiKeyResponse"
+        "title": "ApiKeyResponse",
+        "example": {
+          "created_at": "2026-04-01T09:00:00Z",
+          "id": "key_b1c2d3e4",
+          "is_active": true,
+          "key_preview": "sk_live_a1b2c3d4...",
+          "last_used_at": "2026-05-04T15:34:18Z",
+          "mode": "live",
+          "name": "Production"
+        }
       },
       "AskRequest": {
         "properties": {
@@ -12582,7 +13322,10 @@
         "required": [
           "question"
         ],
-        "title": "AskRequest"
+        "title": "AskRequest",
+        "example": {
+          "question": "Did anyone commit to a specific deadline for the v2 onboarding rollout?"
+        }
       },
       "AuditLogEntryResponse": {
         "properties": {
@@ -12661,7 +13404,17 @@
           "action",
           "created_at"
         ],
-        "title": "AuditLogEntryResponse"
+        "title": "AuditLogEntryResponse",
+        "example": {
+          "account_id": "550e8400-e29b-41d4-a716-446655440000",
+          "action": "bot.created",
+          "created_at": "2026-05-04T14:58:00Z",
+          "details": "{\"meeting_url\": \"https://meet.google.com/abc-defg-hij\"}",
+          "id": "al_5fb732c1",
+          "ip_address": "203.0.113.42",
+          "resource_id": "bot_8a72c5e1",
+          "resource_type": "bot"
+        }
       },
       "BalanceResponse": {
         "properties": {
@@ -12684,7 +13437,28 @@
           "credits_usd",
           "transactions"
         ],
-        "title": "BalanceResponse"
+        "title": "BalanceResponse",
+        "example": {
+          "credits_usd": 24.5,
+          "transactions": [
+            {
+              "amount_usd": -0.063,
+              "created_at": "2026-05-04T15:34:18Z",
+              "description": "Bot usage: 45-min meeting (claude-sonnet-4-6)",
+              "id": "tx_3a82ff9c",
+              "reference_id": "bot_8a72c5e1",
+              "type": "bot_usage"
+            },
+            {
+              "amount_usd": 25.0,
+              "created_at": "2026-05-01T09:00:00Z",
+              "description": "Stripe top-up: $25.00",
+              "id": "tx_2c41ee8b",
+              "reference_id": "cs_test_a1b2c3d4",
+              "type": "stripe_topup"
+            }
+          ]
+        }
       },
       "Body_login_api_v1_auth_login_post": {
         "properties": {
@@ -13169,7 +13943,40 @@
           "limit",
           "offset"
         ],
-        "title": "BotListResponse"
+        "title": "BotListResponse",
+        "example": {
+          "limit": 50,
+          "offset": 0,
+          "results": [
+            {
+              "ai_primary_model": "claude-sonnet-4-6",
+              "ai_total_cost_usd": 0.0287,
+              "ai_total_tokens": 6112,
+              "analysis_mode": "full",
+              "bot_name": "Acme Notes Bot",
+              "created_at": "2026-05-04T14:58:00Z",
+              "duration_seconds": 1966.0,
+              "ended_at": "2026-05-04T15:32:48Z",
+              "id": "bot_8a72c5e1",
+              "is_demo_transcript": false,
+              "meeting_platform": "google_meet",
+              "meeting_url": "https://meet.google.com/abc-defg-hij",
+              "metadata": {
+                "crm_id": "deal_42"
+              },
+              "participants": [
+                "Alice",
+                "Bob",
+                "Acme Notes Bot"
+              ],
+              "recording_available": true,
+              "started_at": "2026-05-04T15:00:02Z",
+              "status": "done",
+              "updated_at": "2026-05-04T15:34:12Z"
+            }
+          ],
+          "total": 1
+        }
       },
       "BotResponse": {
         "properties": {
@@ -13447,7 +14254,94 @@
           "created_at",
           "updated_at"
         ],
-        "title": "BotResponse"
+        "title": "BotResponse",
+        "example": {
+          "agentic_autonomy": "off",
+          "ai_usage": {
+            "operations": [],
+            "primary_model": "claude-sonnet-4-6",
+            "total_cost_usd": 0.0287,
+            "total_tokens": 6112
+          },
+          "analysis": {
+            "action_items": [
+              {
+                "confidence": 0.93,
+                "due_date": "2026-05-18",
+                "owner": "Alice",
+                "task": "Wire up the v2 onboarding A/B test"
+              }
+            ],
+            "decisions": [
+              "Ship v2 onboarding to 10% of new accounts on May 20."
+            ],
+            "key_points": [
+              "Onboarding completion is currently 71%."
+            ],
+            "next_meeting": "2026-05-13T15:00:00Z",
+            "next_steps": [
+              "Schedule design review for May 13."
+            ],
+            "risks_blockers": [],
+            "sentiment": "positive",
+            "summary": "Team agreed to ship v2 onboarding by end of Q3.",
+            "topics": [
+              {
+                "end_time": "00:18:42",
+                "label": "Onboarding redesign",
+                "start_time": "00:02:14"
+              }
+            ],
+            "unresolved_items": []
+          },
+          "analysis_mode": "full",
+          "bot_name": "Acme Notes Bot",
+          "chapters": [],
+          "created_at": "2026-05-04T14:58:00Z",
+          "detected_decisions": [],
+          "duration_seconds": 1966.0,
+          "enable_chat_qa": false,
+          "enable_coaching": false,
+          "enable_cross_meeting_memory": false,
+          "enable_decision_detection": false,
+          "enable_speaker_analytics": false,
+          "ended_at": "2026-05-04T15:32:48Z",
+          "health_score": 84,
+          "id": "bot_8a72c5e1",
+          "is_demo_transcript": false,
+          "meeting_platform": "google_meet",
+          "meeting_url": "https://meet.google.com/abc-defg-hij",
+          "metadata": {
+            "crm_id": "deal_42"
+          },
+          "participants": [
+            "Alice",
+            "Bob",
+            "Acme Notes Bot"
+          ],
+          "pii_detected": false,
+          "recording_available": true,
+          "related_meetings": [],
+          "speaker_stats": [],
+          "started_at": "2026-05-04T15:00:02Z",
+          "status": "done",
+          "transcript": [
+            {
+              "source": "voice",
+              "speaker": "Alice",
+              "text": "Welcome everyone.",
+              "timestamp": 0.4
+            },
+            {
+              "source": "voice",
+              "speaker": "Bob",
+              "text": "Let's start with the roadmap.",
+              "timestamp": 4.2
+            }
+          ],
+          "updated_at": "2026-05-04T15:34:12Z",
+          "video_available": false
+        }
       },
       "BotStatsResponse": {
         "properties": {
@@ -13489,7 +14383,25 @@
           "by_status"
         ],
         "title": "BotStatsResponse",
-        "description": "Aggregate bot counts by status."
+        "description": "Aggregate bot counts by status.",
+        "example": {
+          "active": 3,
+          "by_status": {
+            "call_ended": 0,
+            "cancelled": 0,
+            "done": 36,
+            "error": 3,
+            "in_call": 1,
+            "joining": 1,
+            "queued": 0,
+            "ready": 0,
+            "scheduled": 1,
+            "transcribing": 0
+          },
+          "done": 36,
+          "error": 3,
+          "total": 42
+        }
       },
       "BotSummary": {
         "properties": {
@@ -13643,7 +14555,33 @@
           "updated_at"
         ],
         "title": "BotSummary",
-        "description": "Lightweight representation returned by the list endpoint (no transcript/analysis)."
+        "description": "Lightweight representation returned by the list endpoint (no transcript/analysis).",
+        "example": {
+          "ai_primary_model": "claude-sonnet-4-6",
+          "ai_total_cost_usd": 0.0287,
+          "ai_total_tokens": 6112,
+          "analysis_mode": "full",
+          "bot_name": "Acme Notes Bot",
+          "created_at": "2026-05-04T14:58:00Z",
+          "duration_seconds": 1966.0,
+          "ended_at": "2026-05-04T15:32:48Z",
+          "id": "bot_8a72c5e1",
+          "is_demo_transcript": false,
+          "meeting_platform": "google_meet",
+          "meeting_url": "https://meet.google.com/abc-defg-hij",
+          "metadata": {
+            "crm_id": "deal_42"
+          },
+          "participants": [
+            "Alice",
+            "Bob",
+            "Acme Notes Bot"
+          ],
+          "recording_available": true,
+          "started_at": "2026-05-04T15:00:02Z",
+          "status": "done",
+          "updated_at": "2026-05-04T15:34:12Z"
+        }
       },
       "CalendarFeedCreate": {
         "properties": {
@@ -13755,7 +14693,17 @@
           "last_synced_at",
           "created_at"
         ],
-        "title": "CalendarFeedResponse"
+        "title": "CalendarFeedResponse",
+        "example": {
+          "auto_record": true,
+          "bot_name": "Recorder",
+          "created_at": "2026-04-15T08:00:00Z",
+          "ical_url": "https://calendar.google.com/calendar/ical/you%40gmail.com/private-abc/basic.ics",
+          "id": "feed_2bc741ee",
+          "is_active": true,
+          "last_synced_at": "2026-05-04T15:00:00Z",
+          "name": "Work Calendar"
+        }
       },
       "ChatQaConfig": {
         "properties": {
@@ -13805,7 +14753,10 @@
           "text"
         ],
         "title": "ChatRequest",
-        "description": "Post a message into the live meeting's chat panel."
+        "description": "Post a message into the live meeting's chat panel.",
+        "example": {
+          "text": "Heads up \u2014 recording started. Reply STOP if you'd like to opt out."
+        }
       },
       "ChatResponse": {
         "properties": {
@@ -13830,7 +14781,12 @@
           "task_id"
         ],
         "title": "ChatResponse",
-        "description": "Acknowledgement returned by POST /chat."
+        "description": "Acknowledgement returned by POST /chat.",
+        "example": {
+          "bot_id": "bot_8a72c5e1",
+          "queued": true,
+          "task_id": "ba4e3b1aafbf4c6395f8c2f06d8f5e21"
+        }
       },
       "CheckoutRequest": {
         "properties": {
@@ -13902,7 +14858,12 @@
           "checkout_url",
           "amount_usd"
         ],
-        "title": "CheckoutResponse"
+        "title": "CheckoutResponse",
+        "example": {
+          "amount_usd": 25,
+          "checkout_url": "https://checkout.stripe.com/c/pay/cs_test_a1b2c3d4e5f6a7b8c9d0e1f2",
+          "session_id": "cs_test_a1b2c3d4e5f6a7b8c9d0e1f2"
+        }
       },
       "CoachingConfig": {
         "properties": {
@@ -14046,7 +15007,12 @@
           }
         },
         "type": "object",
-        "title": "DriveExportRequest"
+        "title": "DriveExportRequest",
+        "example": {
+          "access_token": "ya29.a0AfH6...",
+          "folder_id": "1AbCdEfGhIjKlMnOpQrStUvWxYz",
+          "format": "markdown"
+        }
       },
       "DriveExportResponse": {
         "properties": {
@@ -14069,7 +15035,12 @@
           "file_name",
           "web_view_link"
         ],
-        "title": "DriveExportResponse"
+        "title": "DriveExportResponse",
+        "example": {
+          "file_id": "1XyZaB2CdEfGhIjKlMnOpQrStUv",
+          "file_name": "Acme Notes Bot \u2014 2026-05-04.md",
+          "web_view_link": "https://drive.google.com/file/d/1XyZaB2CdEfGhIjKlMnOpQrStUv/view"
+        }
       },
       "HTTPValidationError": {
         "properties": {
@@ -14126,7 +15097,29 @@
           "bot_id",
           "highlights"
         ],
-        "title": "HighlightResponse"
+        "title": "HighlightResponse",
+        "example": {
+          "bot_id": "bot_8a72c5e1",
+          "highlights": [
+            {
+              "text": "Onboarding completion is currently 71%.",
+              "type": "key_point"
+            },
+            {
+              "detail": {
+                "confidence": 0.93,
+                "due_date": "2026-05-18",
+                "owner": "Alice"
+              },
+              "text": "Wire up the v2 onboarding A/B test",
+              "type": "action_item"
+            },
+            {
+              "text": "Ship v2 onboarding to 10% of new accounts on May 20.",
+              "type": "decision"
+            }
+          ]
+        }
       },
       "IntegrationCreate": {
         "properties": {
@@ -14209,7 +15202,17 @@
           "config_preview",
           "created_at"
         ],
-        "title": "IntegrationResponse"
+        "title": "IntegrationResponse",
+        "example": {
+          "config_preview": {
+            "webhook_url": "https://hooks.slack.com/services/T0..."
+          },
+          "created_at": "2026-04-22T11:00:00Z",
+          "id": "int_4cb812aa",
+          "is_active": true,
+          "name": "Team channel",
+          "type": "slack"
+        }
       },
       "KeywordAlertConfig": {
         "properties": {
@@ -14368,7 +15371,22 @@
           "trigger_count",
           "created_at"
         ],
-        "title": "KeywordAlertResponse"
+        "title": "KeywordAlertResponse",
+        "example": {
+          "account_id": "550e8400-e29b-41d4-a716-446655440000",
+          "created_at": "2026-04-22T11:00:00Z",
+          "id": "kwa_2bc741ee",
+          "is_active": true,
+          "keywords": [
+            "acme corp",
+            "competitor x",
+            "we are switching"
+          ],
+          "last_triggered_at": "2026-05-04T15:32:08Z",
+          "name": "Competitor mentions",
+          "trigger_count": 3,
+          "webhook_url": "https://your-app.example.com/competitor-webhook"
+        }
       },
       "LoginResponse": {
         "properties": {
@@ -14395,7 +15413,12 @@
           "account_id"
         ],
         "title": "LoginResponse",
-        "description": "JWT access token for authenticating web UI sessions.\n\n**Note:** This token is intended for the browser-based web UI only.\nFor API calls, use your `sk_live_...` API key as a Bearer token instead."
+        "description": "JWT access token for authenticating web UI sessions.\n\n**Note:** This token is intended for the browser-based web UI only.\nFor API calls, use your `sk_live_...` API key as a Bearer token instead.",
+        "example": {
+          "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI1NTBlODQwMC1lMjliLTQxZDQtYTcxNi00NDY2NTU0NDAwMDAifQ.example",
+          "account_id": "550e8400-e29b-41d4-a716-446655440000",
+          "token_type": "bearer"
+        }
       },
       "McpToolCall": {
         "properties": {
@@ -14415,7 +15438,27 @@
         "required": [
           "tool"
         ],
-        "title": "McpToolCall"
+        "title": "McpToolCall",
+        "examples": [
+          {
+            "arguments": {
+              "limit": 5
+            },
+            "tool": "list_meetings"
+          },
+          {
+            "arguments": {
+              "query": "v2 onboarding"
+            },
+            "tool": "search_meetings"
+          },
+          {
+            "arguments": {
+              "bot_id": "bot_8a72c5e1"
+            },
+            "tool": "get_meeting"
+          }
+        ]
       },
       "MeetingAnalysis": {
         "properties": {
@@ -14579,7 +15622,11 @@
         "required": [
           "notify_on_done"
         ],
-        "title": "NotifyPrefsRequest"
+        "title": "NotifyPrefsRequest",
+        "example": {
+          "notify_email": "ops@acme.com",
+          "notify_on_done": true
+        }
       },
       "NotifyPrefsResponse": {
         "properties": {
@@ -14609,7 +15656,12 @@
           "notify_email",
           "message"
         ],
-        "title": "NotifyPrefsResponse"
+        "title": "NotifyPrefsResponse",
+        "example": {
+          "message": "Notification preferences updated.",
+          "notify_email": "ops@acme.com",
+          "notify_on_done": true
+        }
       },
       "PlanResponse": {
         "properties": {
@@ -14649,7 +15701,13 @@
           "monthly_limit",
           "monthly_reset_at"
         ],
-        "title": "PlanResponse"
+        "title": "PlanResponse",
+        "example": {
+          "monthly_bots_used": 47,
+          "monthly_limit": 200,
+          "monthly_reset_at": "2026-06-01T00:00:00Z",
+          "plan": "pro"
+        }
       },
       "RegisterRequest": {
         "properties": {
@@ -14778,7 +15836,15 @@
           "transcript_retention_days",
           "anonymize_speakers"
         ],
-        "title": "RetentionPolicyResponse"
+        "title": "RetentionPolicyResponse",
+        "example": {
+          "account_id": "550e8400-e29b-41d4-a716-446655440000",
+          "anonymize_speakers": false,
+          "bot_retention_days": 30,
+          "is_global": false,
+          "recording_retention_days": 14,
+          "transcript_retention_days": 365
+        }
       },
       "RetentionPolicyUpdate": {
         "properties": {
@@ -14901,7 +15967,18 @@
         "required": [
           "org_name"
         ],
-        "title": "SamlConfigCreate"
+        "title": "SamlConfigCreate",
+        "example": {
+          "attribute_mapping": {
+            "email": "email",
+            "first_name": "givenName",
+            "last_name": "sn"
+          },
+          "default_role": "member",
+          "idp_metadata_url": "https://idp.acme.com/metadata",
+          "org_name": "Acme Corp",
+          "workspace_id": "ws_8c1234ab"
+        }
       },
       "SayRequest": {
         "properties": {
@@ -14934,7 +16011,12 @@
           "text"
         ],
         "title": "SayRequest",
-        "description": "Speak arbitrary text in the live meeting via TTS + virtual microphone."
+        "description": "Speak arbitrary text in the live meeting via TTS + virtual microphone.",
+        "example": {
+          "interrupt": false,
+          "text": "Hi everyone \u2014 quick reminder that this meeting is being recorded.",
+          "voice": "gemini"
+        }
       },
       "SayResponse": {
         "properties": {
@@ -14965,7 +16047,13 @@
           "task_id"
         ],
         "title": "SayResponse",
-        "description": "Acknowledgement returned by POST /say."
+        "description": "Acknowledgement returned by POST /say.",
+        "example": {
+          "bot_id": "bot_8a72c5e1",
+          "interrupted_previous": false,
+          "queued": true,
+          "task_id": "f1c0a2c3a44d4d2cb6df7c6f3e6f1a2b"
+        }
       },
       "SpeakerAnalyticsConfig": {
         "properties": {
@@ -15009,7 +16097,13 @@
         "required": [
           "renames"
         ],
-        "title": "SpeakerRenameRequest"
+        "title": "SpeakerRenameRequest",
+        "example": {
+          "renames": {
+            "Speaker 1": "Alice",
+            "Speaker 2": "Bob"
+          }
+        }
       },
       "SubscribeRequest": {
         "properties": {
@@ -15047,7 +16141,12 @@
         "required": [
           "plan"
         ],
-        "title": "SubscribeRequest"
+        "title": "SubscribeRequest",
+        "example": {
+          "cancel_url": "https://your-app.com/billing/cancel",
+          "plan": "pro",
+          "success_url": "https://your-app.com/billing/success"
+        }
       },
       "SubscribeResponse": {
         "properties": {
@@ -15073,7 +16172,12 @@
           "checkout_url",
           "plan"
         ],
-        "title": "SubscribeResponse"
+        "title": "SubscribeResponse",
+        "example": {
+          "checkout_url": "https://checkout.stripe.com/c/pay/cs_test_subscription_a1b2c3d4",
+          "plan": "pro",
+          "session_id": "cs_test_subscription_a1b2c3d4"
+        }
       },
       "SupportKeyCreateRequest": {
         "properties": {
@@ -15099,7 +16203,11 @@
           }
         },
         "type": "object",
-        "title": "SupportKeyCreateRequest"
+        "title": "SupportKeyCreateRequest",
+        "example": {
+          "expires_in_hours": 48,
+          "label": "Vendor onboarding session 2026-05"
+        }
       },
       "SupportKeyResponse": {
         "properties": {
@@ -15154,7 +16262,14 @@
           "last_used_at",
           "is_active"
         ],
-        "title": "SupportKeyResponse"
+        "title": "SupportKeyResponse",
+        "example": {
+          "created_at": "2026-05-04T15:00:00Z",
+          "expires_at": "2026-05-06T15:00:00Z",
+          "id": "sk_3a82ff9c",
+          "is_active": true,
+          "label": "Vendor onboarding session 2026-05"
+        }
       },
       "TestKeyResponse": {
         "properties": {
@@ -15189,7 +16304,14 @@
           "key",
           "created_at"
         ],
-        "title": "TestKeyResponse"
+        "title": "TestKeyResponse",
+        "example": {
+          "created_at": "2026-05-04T15:00:00Z",
+          "id": "key_e5f6a7b8",
+          "key": "sk_test_EXAMPLE_KEY_NOT_REAL",
+          "mode": "test",
+          "name": "CI Sandbox"
+        }
       },
       "TransactionItem": {
         "properties": {
@@ -15313,7 +16435,10 @@
           "meeting_url"
         ],
         "title": "ValidateMeetingUrlRequest",
-        "description": "Request body for pre-flight meeting URL validation."
+        "description": "Request body for pre-flight meeting URL validation.",
+        "example": {
+          "meeting_url": "https://meet.google.com/abc-defg-hij"
+        }
       },
       "ValidateMeetingUrlResponse": {
         "properties": {
@@ -15370,7 +16495,13 @@
           "valid"
         ],
         "title": "ValidateMeetingUrlResponse",
-        "description": "Result of meeting URL validation."
+        "description": "Result of meeting URL validation.",
+        "example": {
+          "message": "Platform 'google_meet' detected.",
+          "platform": "google_meet",
+          "supported": true,
+          "valid": true
+        }
       },
       "ValidationError": {
         "properties": {
@@ -15420,7 +16551,10 @@
         "required": [
           "wallet_address"
         ],
-        "title": "WalletRequest"
+        "title": "WalletRequest",
+        "example": {
+          "wallet_address": "0xAbCdEf0123456789AbCdEf0123456789AbCdEf01"
+        }
       },
       "WalletResponse": {
         "properties": {
@@ -15447,7 +16581,11 @@
           "wallet_address",
           "message"
         ],
-        "title": "WalletResponse"
+        "title": "WalletResponse",
+        "example": {
+          "message": "Wallet address updated.",
+          "wallet_address": "0xAbCdEf0123456789AbCdEf0123456789AbCdEf01"
+        }
       },
       "WebhookCreate": {
         "properties": {
@@ -15579,7 +16717,23 @@
           "is_active",
           "created_at"
         ],
-        "title": "WebhookResponse"
+        "title": "WebhookResponse",
+        "example": {
+          "account_id": "550e8400-e29b-41d4-a716-446655440000",
+          "consecutive_failures": 0,
+          "created_at": "2026-05-04T12:00:00Z",
+          "delivery_attempts": 124,
+          "events": [
+            "bot.done",
+            "bot.error",
+            "bot.keyword_alert"
+          ],
+          "id": "wh_5fa921b7",
+          "is_active": true,
+          "last_delivery_at": "2026-05-04T15:34:18Z",
+          "last_delivery_status": 200,
+          "url": "https://api.acme.com/justheretolisten/webhook"
+        }
       },
       "WebhookUpdate": {
         "properties": {
@@ -15622,7 +16776,21 @@
         },
         "type": "object",
         "title": "WebhookUpdate",
-        "description": "Partial update for a registered webhook."
+        "description": "Partial update for a registered webhook.",
+        "examples": [
+          {
+            "events": [
+              "bot.done",
+              "bot.error"
+            ]
+          },
+          {
+            "is_active": true
+          },
+          {
+            "url": "https://api.acme.com/justheretolisten/v2"
+          }
+        ]
       },
       "WorkspaceCreate": {
         "properties": {
@@ -15656,7 +16824,15 @@
         "required": [
           "name"
         ],
-        "title": "WorkspaceCreate"
+        "title": "WorkspaceCreate",
+        "example": {
+          "name": "Acme Sales Team",
+          "settings": {
+            "default_bot_name": "Acme Notes Bot",
+            "require_consent": true
+          },
+          "slug": "acme-sales"
+        }
       },
       "WorkspaceMemberAdd": {
         "properties": {
@@ -15676,7 +16852,11 @@
         "required": [
           "account_id"
         ],
-        "title": "WorkspaceMemberAdd"
+        "title": "WorkspaceMemberAdd",
+        "example": {
+          "account_id": "5a0e8400-e29b-41d4-a716-446655440111",
+          "role": "member"
+        }
       },
       "WorkspaceMemberUpdate": {
         "properties": {
@@ -15690,7 +16870,10 @@
         "required": [
           "role"
         ],
-        "title": "WorkspaceMemberUpdate"
+        "title": "WorkspaceMemberUpdate",
+        "example": {
+          "role": "admin"
+        }
       },
       "WorkspaceUpdate": {
         "properties": {
@@ -15719,7 +16902,14 @@
           }
         },
         "type": "object",
-        "title": "WorkspaceUpdate"
+        "title": "WorkspaceUpdate",
+        "example": {
+          "name": "Acme Sales Team \u2014 EMEA",
+          "settings": {
+            "default_bot_name": "Acme EMEA Bot",
+            "require_consent": true
+          }
+        }
       },
       "_AgenticInstructionsUpdate": {
         "properties": {
@@ -15746,7 +16936,25 @@
           }
         },
         "type": "object",
-        "title": "_AgenticInstructionsUpdate"
+        "title": "_AgenticInstructionsUpdate",
+        "example": {
+          "autonomy": "medium",
+          "instructions": [
+            {
+              "instruction": "Push back if scope creeps beyond the v2 onboarding.",
+              "max_invocations": 3,
+              "speak": false,
+              "trigger": "on_topic"
+            },
+            {
+              "instruction": "Summarise every 10 minutes.",
+              "interval_seconds": 600,
+              "max_invocations": 6,
+              "speak": true,
+              "trigger": "on_interval"
+            }
+          ]
+        }
       },
       "_ChatQaRequest": {
         "properties": {
@@ -15773,7 +16981,11 @@
         "required": [
           "question"
         ],
-        "title": "_ChatQaRequest"
+        "title": "_ChatQaRequest",
+        "example": {
+          "question": "Who owns the TOS update action item?",
+          "reply_via": "chat"
+        }
       },
       "_ExportJsonResponse": {
         "properties": {
@@ -15910,7 +17122,46 @@
           "speaker_stats",
           "participants"
         ],
-        "title": "_ExportJsonResponse"
+        "title": "_ExportJsonResponse",
+        "example": {
+          "analysis": {
+            "key_points": [
+              "Onboarding completion is currently 71%."
+            ],
+            "summary": "Team agreed to ship v2 onboarding by end of Q3."
+          },
+          "bot_name": "Acme Notes Bot",
+          "chapters": [],
+          "duration_seconds": 1966.0,
+          "ended_at": "2026-05-04T15:32:48Z",
+          "id": "bot_8a72c5e1",
+          "meeting_platform": "google_meet",
+          "meeting_url": "https://meet.google.com/abc-defg-hij",
+          "metadata": {
+            "crm_id": "deal_42"
+          },
+          "participants": [
+            "Alice",
+            "Bob",
+            "Acme Notes Bot"
+          ],
+          "speaker_stats": [
+            {
+              "speaker": "Alice",
+              "talk_time_s": 612.4
+            }
+          ],
+          "started_at": "2026-05-04T15:00:02Z",
+          "status": "done",
+          "transcript": [
+            {
+              "source": "voice",
+              "speaker": "Alice",
+              "text": "Welcome everyone.",
+              "timestamp": 0.4
+            }
+          ]
+        }
       },
       "_ShareLinkRequest": {
         "properties": {
@@ -15931,7 +17182,10 @@
         },
         "type": "object",
         "title": "_ShareLinkRequest",
-        "description": "Optional request body for share-link creation."
+        "description": "Optional request body for share-link creation.",
+        "example": {
+          "expires_in_hours": 168
+        }
       },
       "ErrorResponse": {
         "type": "object",

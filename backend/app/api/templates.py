@@ -65,7 +65,17 @@ _TEMPLATES = [
 ]
 
 
-@router.get("", tags=["Templates"])
+@router.get(
+    "",
+    tags=["Templates"],
+    responses={200: {"content": {"application/json": {"example": {
+        "templates": [
+            {"name": "default", "label": "Default (General)", "description": "General-purpose template for any meeting type."},
+            {"name": "sales", "label": "Sales Call", "description": "Optimised for B2B/B2C sales calls."},
+            {"name": "standup", "label": "Daily Standup", "description": "For agile standups."},
+        ],
+    }}}}},
+)
 async def list_templates():
     """List all available built-in analysis templates.
 
@@ -84,7 +94,13 @@ async def list_templates():
     return {"templates": _TEMPLATES}
 
 
-@router.get("/default-prompt", tags=["Templates"])
+@router.get(
+    "/default-prompt",
+    tags=["Templates"],
+    responses={200: {"content": {"application/json": {"example": {
+        "prompt": "You are an expert meeting assistant. Read the transcript below and produce a JSON object with the following keys: summary, key_points, action_items (with owner, task, due_date, confidence)...",
+    }}}}},
+)
 async def get_default_prompt():
     """Return the raw default analysis prompt used when no template or prompt_override is supplied.
 

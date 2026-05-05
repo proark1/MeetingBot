@@ -40,12 +40,20 @@ class WalletResponse(BaseModel):
         description="The platform USDC collection wallet address (ERC-20). Null if not set."
     )
 
+    model_config = {"json_schema_extra": {"example": {
+        "wallet_address": "0xAbCdEf0123456789AbCdEf0123456789AbCdEf01",
+    }}}
+
 
 class WalletUpdateRequest(BaseModel):
     wallet_address: str = Field(
         description="Ethereum address (0x..., 42 characters) where users send USDC.",
         examples=["0xAbCdEf0123456789AbCdEf0123456789AbCdEf01"],
     )
+
+    model_config = {"json_schema_extra": {"example": {
+        "wallet_address": "0xAbCdEf0123456789AbCdEf0123456789AbCdEf01",
+    }}}
 
 
 class PlatformConfigItem(BaseModel):
@@ -57,11 +65,24 @@ class PlatformConfigItem(BaseModel):
 class PlatformConfigResponse(BaseModel):
     configs: list[PlatformConfigItem]
 
+    model_config = {"json_schema_extra": {"example": {
+        "configs": [
+            {"key": "usdc_collection_wallet", "value": "0xAbCdEf0123456789AbCdEf0123456789AbCdEf01", "updated_at": "2026-04-15T10:00:00Z"},
+            {"key": "crypto_rpc_url", "value": "https://mainnet.infura.io/v3/PROJECT_ID", "updated_at": "2026-04-15T10:00:00Z"},
+        ],
+    }}}
+
 
 class ManualCreditRequest(BaseModel):
     email: str = Field(description="Email of the account to credit.")
     amount_usd: float = Field(gt=0, description="Amount in USD to credit (must be positive).")
     note: Optional[str] = Field(None, description="Optional admin note recorded in the transaction description.")
+
+    model_config = {"json_schema_extra": {"example": {
+        "email": "you@example.com",
+        "amount_usd": 25.0,
+        "note": "USDC transfer 0x12abcd... arrived from unregistered wallet",
+    }}}
 
 
 class ManualCreditResponse(BaseModel):
@@ -70,14 +91,28 @@ class ManualCreditResponse(BaseModel):
     credited_usd: float
     new_balance_usd: float
 
+    model_config = {"json_schema_extra": {"example": {
+        "account_id": "550e8400-e29b-41d4-a716-446655440000",
+        "email": "you@example.com",
+        "credited_usd": 25.0,
+        "new_balance_usd": 49.50,
+    }}}
+
 
 class RescanRequest(BaseModel):
     from_block: int = Field(ge=0, description="Block number to start rescanning from.")
+
+    model_config = {"json_schema_extra": {"example": {"from_block": 19500000}}}
 
 
 class RescanResponse(BaseModel):
     from_block: int
     message: str
+
+    model_config = {"json_schema_extra": {"example": {
+        "from_block": 19500000,
+        "message": "USDC monitor rescan scheduled from block 19500000.",
+    }}}
 
 
 class UnmatchedTransferItem(BaseModel):
@@ -90,14 +125,43 @@ class UnmatchedTransferItem(BaseModel):
     resolved: bool = Field(description="True if an admin has manually credited the account.")
     resolution_note: Optional[str] = Field(default=None, description="Admin note set when resolving.")
 
+    model_config = {"json_schema_extra": {"example": {
+        "tx_hash": "0x12abcd34ef56789012345678901234567890abcdef1234567890abcdef123456",
+        "from_address": "0x9999999999999999999999999999999999999999",
+        "to_address": "0xAbCdEf0123456789AbCdEf0123456789AbCdEf01",
+        "amount_usdc": 25.0,
+        "block_number": 19501234,
+        "detected_at": "2026-05-04T15:00:00Z",
+        "resolved": False,
+        "resolution_note": None,
+    }}}
+
 
 class UnmatchedTransferListResponse(BaseModel):
     transfers: list[UnmatchedTransferItem]
     total: int
 
+    model_config = {"json_schema_extra": {"example": {
+        "transfers": [{
+            "tx_hash": "0x12abcd34ef56789012345678901234567890abcdef1234567890abcdef123456",
+            "from_address": "0x9999999999999999999999999999999999999999",
+            "to_address": "0xAbCdEf0123456789AbCdEf0123456789AbCdEf01",
+            "amount_usdc": 25.0,
+            "block_number": 19501234,
+            "detected_at": "2026-05-04T15:00:00Z",
+            "resolved": False,
+            "resolution_note": None,
+        }],
+        "total": 1,
+    }}}
+
 
 class ResolveUnmatchedRequest(BaseModel):
     note: Optional[str] = Field(None, description="Optional note describing the resolution action taken.")
+
+    model_config = {"json_schema_extra": {"example": {
+        "note": "Credited account you@example.com manually after confirming via support ticket #4231.",
+    }}}
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -217,10 +281,19 @@ class RpcUrlRequest(BaseModel):
         examples=["https://mainnet.infura.io/v3/YOUR_KEY"],
     )
 
+    model_config = {"json_schema_extra": {"example": {
+        "rpc_url": "https://mainnet.infura.io/v3/YOUR_KEY",
+    }}}
+
 
 class RpcUrlResponse(BaseModel):
     rpc_url_set: bool = Field(description="True if an RPC URL is now configured.")
     source: str = Field(description="'env' if from environment variable, 'db' if set via admin panel.")
+
+    model_config = {"json_schema_extra": {"example": {
+        "rpc_url_set": True,
+        "source": "db",
+    }}}
 
 
 @router.get("/rpc-url", response_model=RpcUrlResponse)
@@ -418,12 +491,21 @@ class SetAccountTypeRequest(BaseModel):
         examples=["business"],
     )
 
+    model_config = {"json_schema_extra": {"example": {"account_type": "business"}}}
+
 
 class SetAccountTypeResponse(BaseModel):
     account_id: str
     email: str
     account_type: str = Field(description="New account type.")
     message: str
+
+    model_config = {"json_schema_extra": {"example": {
+        "account_id": "550e8400-e29b-41d4-a716-446655440000",
+        "email": "you@example.com",
+        "account_type": "business",
+        "message": "Account type updated to 'business'.",
+    }}}
 
 
 @router.post("/accounts/{account_id}/set-account-type", response_model=SetAccountTypeResponse)
@@ -483,7 +565,24 @@ def _detect_platform(url: str) -> str:
     return "Other"
 
 
-@router.get("/platform-analytics", tags=["Admin"])
+@router.get(
+    "/platform-analytics",
+    tags=["Admin"],
+    responses={200: {"content": {"application/json": {"example": {
+        "total_accounts": 1842,
+        "active_accounts_30d": 421,
+        "total_meetings": 18472,
+        "meetings_30d": 3214,
+        "by_platform": {"Zoom": 8412, "Google Meet": 6231, "Microsoft Teams": 3128, "Other": 701},
+        "feature_adoption": {
+            "live_transcription": 0.62, "agentic": 0.08, "speaker_analytics": 0.21,
+            "coaching": 0.09, "cross_meeting_memory": 0.14,
+        },
+        "ai_tokens_30d": 18941223,
+        "ai_cost_30d_usd": 124.47,
+        "revenue_30d_usd": 4218.50,
+    }}}}},
+)
 async def platform_analytics(
     db: AsyncSession = Depends(get_db),
     _admin: str = Depends(require_admin),
@@ -895,7 +994,27 @@ async def platform_analytics(
 
 # ── Support key lookup ─────────────────────────────────────────────────────────
 
-@router.get("/support-lookup", tags=["Admin"])
+@router.get(
+    "/support-lookup",
+    tags=["Admin"],
+    responses={200: {"content": {"application/json": {"example": {
+        "account": {
+            "id": "550e8400-e29b-41d4-a716-446655440000",
+            "email": "you@example.com",
+            "account_type": "personal",
+            "plan": "pro",
+            "credits_usd": 24.50,
+            "is_active": True,
+            "created_at": "2026-04-01T09:00:00Z",
+        },
+        "recent_bots": [
+            {"id": "bot_8a72c5e1", "status": "done", "created_at": "2026-05-04T14:58:00Z", "platform": "google_meet"},
+        ],
+        "recent_transactions": [
+            {"id": "tx_3a82ff9c", "type": "bot_usage", "amount_usd": -0.063, "created_at": "2026-05-04T15:34:18Z"},
+        ],
+    }}}}},
+)
 async def support_lookup(
     key: str,
     db: AsyncSession = Depends(get_db),

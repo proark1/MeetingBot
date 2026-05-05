@@ -4,7 +4,51 @@ All notable changes to JustHereToListen.io are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.51.0 — **Last updated:** 2026-05-04
+> **Latest version:** 2.52.0 — **Last updated:** 2026-05-04
+
+---
+
+## [2.52.0] - 2026-05-04
+
+### Added — round-4 OpenAPI completion
+
+The previous three OpenAPI passes covered structure (servers,
+security, tags, components, summaries, request-aware schema). This
+release closes the last gap: **example coverage for every operation**.
+
+**100% example coverage**
+- All 114 public operations and 133 admin operations now have a
+  request example (when there is a JSON body) and a 2xx response
+  example. Up from ~12% response-example coverage in 2.51.0.
+- Examples live on the Pydantic response models via
+  `model_config["json_schema_extra"]["example"]` so they apply
+  uniformly wherever the model is reused (e.g. `BotResponse` covers
+  `POST /bot`, `GET /bot/{id}`, and `PATCH /bot/{id}/speakers` with a
+  single source of truth).
+- For endpoints that return raw dicts (`/leave`, `/share`, `/ask`,
+  `/transcript`, `/agentic/*`, `/decisions`, `/memory/*`, `/debug`,
+  workspace mutations, OAuth / SAML callbacks, MCP tool calls, etc.)
+  the example is declared per-route via `responses={200: {...}}`.
+
+**Filled-in descriptions**
+- Added missing docstrings to `GET/PUT /bot/{id}/agentic/instructions`,
+  `POST /bot/{id}/agentic/trigger`, and `GET/DELETE /webhook/{id}` —
+  the only 5 endpoints that were previously summary-only in 2.51.0.
+
+**Correct content types for non-JSON endpoints**
+- Recording / video downloads, SSE streams, PDF / SRT exports, the
+  SAML SP metadata XML, and the OAuth / SAML authorize redirects now
+  declare their actual `response_class` (and content-type example) so
+  the spec no longer advertises an empty `application/json` 200 for
+  responses that are in fact `audio/wav`, `video/mp4`,
+  `text/event-stream`, `application/pdf`, `text/plain`,
+  `application/xml`, or a 302 redirect.
+
+**Snapshots refreshed**
+- `api/openapi.json` (568 KB) and `api/openapi.admin.json` (657 KB)
+  regenerated and committed. The CI drift check (`scripts/generate_openapi.py
+  --check`) is green; both snapshots audit-clean against summary,
+  description, tags, request examples, and response examples.
 
 ---
 

@@ -61,6 +61,18 @@ class BotStatsResponse(BaseModel):
     error: int = Field(description="Number of bots that ended in an error state.")
     by_status: dict[str, int] = Field(description="Count of bots broken down by each status string.")
 
+    model_config = {"json_schema_extra": {"example": {
+        "total": 42,
+        "active": 3,
+        "done": 36,
+        "error": 3,
+        "by_status": {
+            "ready": 0, "scheduled": 1, "queued": 0, "joining": 1,
+            "in_call": 1, "call_ended": 0, "transcribing": 0,
+            "done": 36, "error": 3, "cancelled": 0,
+        },
+    }}}
+
 # Running lifecycle tasks (single-process only). A value of ``None`` is a
 # placeholder reservation written by ``_queue_processor`` while it awaits
 # DB lookups between popping a queued bot and creating the lifecycle task —
@@ -347,6 +359,10 @@ class ValidateMeetingUrlRequest(BaseModel):
     """Request body for pre-flight meeting URL validation."""
     meeting_url: str = Field(description="The meeting URL to validate.")
 
+    model_config = {"json_schema_extra": {"example": {
+        "meeting_url": "https://meet.google.com/abc-defg-hij",
+    }}}
+
 
 class ValidateMeetingUrlResponse(BaseModel):
     """Result of meeting URL validation."""
@@ -355,6 +371,14 @@ class ValidateMeetingUrlResponse(BaseModel):
     supported: bool = Field(default=False, description="Whether the platform supports real recording (not demo mode).")
     error_code: Optional[str] = Field(default=None, description="Machine-readable error code if the URL is invalid.")
     message: Optional[str] = Field(default=None, description="Human-readable explanation.")
+
+    model_config = {"json_schema_extra": {"example": {
+        "valid": True,
+        "platform": "google_meet",
+        "supported": True,
+        "error_code": None,
+        "message": "Platform 'google_meet' detected.",
+    }}}
 
 
 @router.post("/validate-meeting-url", response_model=ValidateMeetingUrlResponse, tags=["Bots"])
@@ -810,7 +834,30 @@ async def get_bot(bot_id: str, request: Request):
 
 # ── GET /api/v1/bot/{id}/debug ─────────────────────────────────────────────────
 
-@router.get("/{bot_id}/debug")
+@router.get(
+    "/{bot_id}/debug",
+    responses={200: {"content": {"application/json": {"example": {
+        "bot_id": "bot_8a72c5e1",
+        "status": "done",
+        "meeting_platform": "google_meet",
+        "meeting_url": "https://meet.google.com/abc-defg-hij",
+        "error_message": None,
+        "started_at": "2026-05-04T15:00:02Z",
+        "ended_at": "2026-05-04T15:32:48Z",
+        "ffmpeg_exit_code": 0,
+        "ffmpeg_stderr_tail": "size=  17056kB time=00:32:48.00 ...",
+        "audio_peak_amplitude": 0.6431,
+        "audio_health_samples": [{"t": 60.0, "rms": 0.082}],
+        "webrtc_stats_samples": [],
+        "pactl_dumps": {"on_join": "default-source: virt-mic"},
+        "console_log_tail": ["[INFO] joined call"],
+        "gemini_finish_reason": "STOP",
+        "gemini_safety_blocks": [],
+        "debug_dir": "/app/data/debug/bot_8a72c5e1",
+        "screenshots": ["/app/data/screenshots/bot_8a72c5e1-join.png"],
+        "recording_path": "/app/data/recordings/bot_8a72c5e1.wav",
+    }}}}},
+)
 async def get_bot_debug(bot_id: str, request: Request):
     """Return the diagnostic bundle for a bot.
 
@@ -860,7 +907,15 @@ async def get_bot_debug(bot_id: str, request: Request):
 
 # ── POST /api/v1/bot/{id}/leave ────────────────────────────────────────────────
 
-@router.post("/{bot_id}/leave", status_code=200)
+@router.post(
+    "/{bot_id}/leave",
+    status_code=200,
+    responses={200: {"content": {"application/json": {"example": {
+        "id": "bot_8a72c5e1",
+        "status": "in_call",
+        "message": "Bot is leaving the meeting gracefully.",
+    }}}}},
+)
 async def leave_bot(bot_id: str, request: Request):
     """Tell a running bot to gracefully leave the meeting.
 
@@ -978,7 +1033,16 @@ async def _wait_for_transcript(bot: BotSession, timeout: int = 25) -> BotSession
 
 # ── GET /api/v1/bot/{id}/transcript ──────────────────────────────────────────
 
-@router.get("/{bot_id}/transcript")
+@router.get(
+    "/{bot_id}/transcript",
+    responses={200: {"content": {"application/json": {"example": {
+        "bot_id": "bot_8a72c5e1",
+        "transcript": [
+            {"speaker": "Alice", "text": "Welcome everyone.", "timestamp": 0.4, "source": "voice"},
+            {"speaker": "Bob", "text": "Let's start with the roadmap.", "timestamp": 4.2, "source": "voice"},
+        ],
+    }}}}},
+)
 async def get_transcript(bot_id: str, request: Request):
     """Get the raw transcript.
 
@@ -1000,7 +1064,11 @@ async def get_transcript(bot_id: str, request: Request):
 
 # ── GET /api/v1/bot/{id}/recording ───────────────────────────────────────────
 
-@router.get("/{bot_id}/recording")
+@router.get(
+    "/{bot_id}/recording",
+    response_class=FileResponse,
+    responses={200: {"content": {"audio/wav": {"example": "<binary WAV file>"}}, "description": "WAV recording of the meeting audio."}},
+)
 @_limiter.limit("5/minute")
 async def download_recording(bot_id: str, request: Request):
     """Download the meeting audio recording (WAV).
@@ -1023,7 +1091,11 @@ async def download_recording(bot_id: str, request: Request):
 
 # ── GET /api/v1/bot/{id}/video ───────────────────────────────────────────────
 
-@router.get("/{bot_id}/video")
+@router.get(
+    "/{bot_id}/video",
+    response_class=FileResponse,
+    responses={200: {"content": {"video/mp4": {"example": "<binary MP4 video>"}}, "description": "MP4 screen recording of the meeting."}},
+)
 @_limiter.limit("5/minute")
 async def download_video(bot_id: str, request: Request):
     """Download the meeting video recording (MP4).
@@ -1052,6 +1124,11 @@ async def download_video(bot_id: str, request: Request):
 class AnalyzeRequest(BaseModel):
     template: Optional[str] = None
     prompt_override: Optional[str] = Field(default=None, max_length=8000)
+
+    model_config = {"json_schema_extra": {"examples": [
+        {"template": "sales"},
+        {"prompt_override": "Summarise as bullet points and list every commitment by speaker."},
+    ]}}
 
 
 @router.post("/{bot_id}/analyze", response_model=MeetingAnalysis)
@@ -1122,8 +1199,19 @@ async def get_highlights(bot_id: str, request: Request):
 class AskRequest(BaseModel):
     question: str = Field(description="Free-form question about the meeting transcript.")
 
+    model_config = {"json_schema_extra": {"example": {
+        "question": "Did anyone commit to a specific deadline for the v2 onboarding rollout?",
+    }}}
 
-@router.post("/{bot_id}/ask")
+
+@router.post(
+    "/{bot_id}/ask",
+    responses={200: {"content": {"application/json": {"example": {
+        "bot_id": "bot_8a72c5e1",
+        "question": "Did anyone commit to a specific deadline for the v2 onboarding rollout?",
+        "answer": "Yes — Alice committed to wiring up the A/B test by 2026-05-18.",
+    }}}}},
+)
 @_limiter.limit("10/minute")
 async def ask_bot(bot_id: str, request: Request, payload: AskRequest):
     """Ask a free-form question about the meeting transcript."""
@@ -1141,7 +1229,16 @@ async def ask_bot(bot_id: str, request: Request, payload: AskRequest):
 
 # ── POST /api/v1/bot/{id}/ask-live ───────────────────────────────────────────
 
-@router.post("/{bot_id}/ask-live")
+@router.post(
+    "/{bot_id}/ask-live",
+    responses={200: {"content": {"application/json": {"example": {
+        "bot_id": "bot_8a72c5e1",
+        "question": "What's been decided so far?",
+        "answer": "So far the team has confirmed engineering capacity for two devs through August.",
+        "transcript_entries": 47,
+        "bot_status": "in_call",
+    }}}}},
+)
 @_limiter.limit("10/minute")
 async def ask_live_bot(bot_id: str, request: Request, payload: AskRequest):
     """Ask a free-form question about a bot that is currently in a call.
@@ -1180,7 +1277,15 @@ async def ask_live_bot(bot_id: str, request: Request, payload: AskRequest):
 
 # ── POST /api/v1/bot/{id}/followup-email ─────────────────────────────────────
 
-@router.post("/{bot_id}/followup-email")
+@router.post(
+    "/{bot_id}/followup-email",
+    responses={200: {"content": {"application/json": {"example": {
+        "bot_id": "bot_8a72c5e1",
+        "subject": "Recap — Sales sync (May 4)",
+        "body": "Hi team,\n\nQuick recap of today's call...\n\nNext steps:\n- Alice — wire A/B test by May 18\n- Bob — draft TOS update by May 11\n\nThanks!",
+        "to": ["alice@acme.com", "bob@acme.com"],
+    }}}}},
+)
 @_limiter.limit("5/minute")
 async def generate_followup_email(bot_id: str, request: Request):
     """Generate a draft follow-up email for the meeting."""
@@ -1203,6 +1308,10 @@ class SpeakerRenameRequest(BaseModel):
     renames: dict[str, str] = Field(
         description="Map of original speaker label → new display name. E.g. {'Speaker 1': 'Alice'}."
     )
+
+    model_config = {"json_schema_extra": {"example": {
+        "renames": {"Speaker 1": "Alice", "Speaker 2": "Bob"},
+    }}}
 
 
 @router.patch("/{bot_id}/speakers", response_model=BotResponse)
@@ -1244,7 +1353,11 @@ async def rename_speakers(bot_id: str, request: Request, payload: SpeakerRenameR
 
 # ── GET /api/v1/bot/{id}/stream — SSE live transcript ────────────────────────
 
-@router.get("/{bot_id}/stream")
+@router.get(
+    "/{bot_id}/stream",
+    response_class=StreamingResponse,
+    responses={200: {"content": {"text/event-stream": {"example": 'data: {"speaker": "Alice", "text": "Welcome", "timestamp": 0.4}\n\ndata: {"__terminal__": true, "status": "done"}\n\n'}}, "description": "Server-Sent Events stream of live transcript entries."}},
+)
 async def stream_transcript(bot_id: str, request: Request):
     """Stream live transcript entries as Server-Sent Events.
 
@@ -1305,8 +1418,18 @@ class _ShareLinkRequest(BaseModel):
         description="Number of hours the share link should remain valid. Omit to keep the previous behaviour (no expiry).",
     )
 
+    model_config = {"json_schema_extra": {"example": {
+        "expires_in_hours": 168,
+    }}}
 
-@router.post("/{bot_id}/share")
+
+@router.post(
+    "/{bot_id}/share",
+    responses={200: {"content": {"application/json": {"example": {
+        "share_url": "https://api.example.com/share/4fM7vV2GxJq8y9XdQ1cE3pYzA",
+        "bot_id": "bot_8a72c5e1",
+    }}}}},
+)
 async def create_share_link(
     bot_id: str,
     request: Request,
@@ -1524,7 +1647,20 @@ def _require_feature(bot: BotSession, attr: str, label: str) -> None:
 
 # ── #7 — Live speaker analytics ─────────────────────────────────────────────
 
-@router.get("/{bot_id}/analytics/live")
+@router.get(
+    "/{bot_id}/analytics/live",
+    responses={200: {"content": {"application/json": {"example": {
+        "bot_id": "bot_8a72c5e1",
+        "latest": {
+            "ts": "2026-05-04T15:18:00Z",
+            "speakers": [
+                {"speaker": "Alice", "talk_time_s": 412.0, "interruptions": 1, "sentiment": "positive"},
+                {"speaker": "Bob", "talk_time_s": 218.4, "interruptions": 3, "sentiment": "neutral"},
+            ],
+        },
+        "history_count": 36,
+    }}}}},
+)
 async def get_live_analytics(bot_id: str, request: Request):
     """Return the latest live speaker analytics snapshot for the bot."""
     account_id = getattr(request.state, "account_id", None)
@@ -1539,7 +1675,17 @@ async def get_live_analytics(bot_id: str, request: Request):
     }
 
 
-@router.get("/{bot_id}/analytics/history")
+@router.get(
+    "/{bot_id}/analytics/history",
+    responses={200: {"content": {"application/json": {"example": {
+        "bot_id": "bot_8a72c5e1",
+        "snapshots": [
+            {"ts": "2026-05-04T15:00:30Z", "speakers": [{"speaker": "Alice", "talk_time_s": 18.0}]},
+            {"ts": "2026-05-04T15:01:00Z", "speakers": [{"speaker": "Alice", "talk_time_s": 42.5}]},
+        ],
+        "total": 36,
+    }}}}},
+)
 async def get_analytics_history(bot_id: str, request: Request, limit: int = Query(20, ge=1, le=200)):
     """Return the last N speaker-analytics snapshots."""
     account_id = getattr(request.state, "account_id", None)
@@ -1550,7 +1696,11 @@ async def get_analytics_history(bot_id: str, request: Request, limit: int = Quer
     return {"bot_id": bot_id, "snapshots": snaps[-limit:], "total": len(snaps)}
 
 
-@router.get("/{bot_id}/analytics/stream")
+@router.get(
+    "/{bot_id}/analytics/stream",
+    response_class=StreamingResponse,
+    responses={200: {"content": {"text/event-stream": {"example": 'data: {"ts": "2026-05-04T15:18:00Z", "speakers": [{"speaker": "Alice", "talk_time_s": 412.0}]}\n\n'}}, "description": "Server-Sent Events stream of speaker-analytics snapshots."}},
+)
 async def stream_analytics(bot_id: str, request: Request):
     """SSE stream of live speaker-analytics snapshots."""
     account_id = getattr(request.state, "account_id", None)
@@ -1562,7 +1712,17 @@ async def stream_analytics(bot_id: str, request: Request):
 
 # ── #13 — Host coaching ─────────────────────────────────────────────────────
 
-@router.get("/{bot_id}/coaching/tips")
+@router.get(
+    "/{bot_id}/coaching/tips",
+    responses={200: {"content": {"application/json": {"example": {
+        "bot_id": "bot_8a72c5e1",
+        "tips": [
+            {"ts": "2026-05-04T15:08:00Z", "metric": "talk_time", "tip": "You've spoken 68% of the last 5 minutes — invite Bob in."},
+            {"ts": "2026-05-04T15:14:30Z", "metric": "filler_words", "tip": "10 'um's in 2 minutes — try a brief pause instead."},
+        ],
+        "total": 8,
+    }}}}},
+)
 async def get_coaching_tips(bot_id: str, request: Request, limit: int = Query(50, ge=1, le=200)):
     """Return the most recent coaching tips emitted for this bot."""
     account_id = getattr(request.state, "account_id", None)
@@ -1573,7 +1733,11 @@ async def get_coaching_tips(bot_id: str, request: Request, limit: int = Query(50
     return {"bot_id": bot_id, "tips": tips[-limit:], "total": len(tips)}
 
 
-@router.get("/{bot_id}/coaching/stream")
+@router.get(
+    "/{bot_id}/coaching/stream",
+    response_class=StreamingResponse,
+    responses={200: {"content": {"text/event-stream": {"example": 'data: {"ts": "2026-05-04T15:08:00Z", "metric": "talk_time", "tip": "You\'ve spoken 68% of the last 5 minutes."}\n\n'}}, "description": "Private SSE stream of host-coaching tips."}},
+)
 async def stream_coaching(bot_id: str, request: Request):
     """Private SSE stream of coaching tips for the host UI."""
     account_id = getattr(request.state, "account_id", None)
@@ -1585,7 +1749,17 @@ async def stream_coaching(bot_id: str, request: Request):
 
 # ── #8 — Decision detection ─────────────────────────────────────────────────
 
-@router.get("/{bot_id}/decisions")
+@router.get(
+    "/{bot_id}/decisions",
+    responses={200: {"content": {"application/json": {"example": {
+        "bot_id": "bot_8a72c5e1",
+        "decisions": [
+            {"kind": "decision", "text": "Ship v2 onboarding to 10% of new accounts on May 20.", "speaker": "Alice", "timestamp": 612.4},
+            {"kind": "action", "text": "Wire up the v2 onboarding A/B test.", "speaker": "Alice", "timestamp": 624.1},
+        ],
+        "total": 2,
+    }}}}},
+)
 async def list_decisions(
     bot_id: str,
     request: Request,
@@ -1605,7 +1779,16 @@ async def list_decisions(
 
 # ── #11 — Cross-meeting memory ──────────────────────────────────────────────
 
-@router.get("/{bot_id}/memory/related")
+@router.get(
+    "/{bot_id}/memory/related",
+    responses={200: {"content": {"application/json": {"example": {
+        "bot_id": "bot_8a72c5e1",
+        "related_meetings": [
+            {"bot_id": "bot_5e1da2bb", "title": "Onboarding alignment", "date": "2026-04-20", "similarity": 0.84,
+             "summary": "Discussed early signals from the v1 onboarding and proposed redesigning the wizard."},
+        ],
+    }}}}},
+)
 async def list_related_meetings(bot_id: str, request: Request):
     """Return semantically related past meetings retrieved for this bot."""
     account_id = getattr(request.state, "account_id", None)
@@ -1615,7 +1798,16 @@ async def list_related_meetings(bot_id: str, request: Request):
     return {"bot_id": bot_id, "related_meetings": list(getattr(bot, "related_meetings", []) or [])}
 
 
-@router.post("/{bot_id}/memory/refresh")
+@router.post(
+    "/{bot_id}/memory/refresh",
+    responses={200: {"content": {"application/json": {"example": {
+        "bot_id": "bot_8a72c5e1",
+        "related_meetings": [
+            {"bot_id": "bot_5e1da2bb", "title": "Onboarding alignment", "date": "2026-04-20", "similarity": 0.84},
+        ],
+        "count": 1,
+    }}}}},
+)
 async def refresh_related_meetings(bot_id: str, request: Request):
     """Force-refresh the cross-meeting memory pool for this bot."""
     account_id = getattr(request.state, "account_id", None)
@@ -1649,9 +1841,35 @@ class _AgenticInstructionsUpdate(BaseModel):
         description="Optional autonomy level: off | low | medium | high.",
     )
 
+    model_config = {"json_schema_extra": {"example": {
+        "instructions": [
+            {"instruction": "Push back if scope creeps beyond the v2 onboarding.",
+             "trigger": "on_topic", "speak": False, "max_invocations": 3},
+            {"instruction": "Summarise every 10 minutes.",
+             "trigger": "on_interval", "interval_seconds": 600, "speak": True, "max_invocations": 6},
+        ],
+        "autonomy": "medium",
+    }}}
 
-@router.get("/{bot_id}/agentic/instructions")
+
+@router.get(
+    "/{bot_id}/agentic/instructions",
+    responses={200: {"content": {"application/json": {"example": {
+        "bot_id": "bot_8a72c5e1",
+        "autonomy": "medium",
+        "instructions": [
+            {"instruction": "Push back if scope creeps beyond the v2 onboarding.", "trigger": "on_topic", "speak": False, "max_invocations": 3},
+        ],
+        "invocations": {"0": 1},
+    }}}}},
+)
 async def get_agentic_instructions(bot_id: str, request: Request):
+    """Return the bot's current agentic instruction list, autonomy level, and per-instruction invocation counts.
+
+    Use this to inspect how often each delegated instruction has fired during
+    the meeting (`invocations` is a `{index: count}` map keyed by position in
+    the instruction list).
+    """
     account_id = getattr(request.state, "account_id", None)
     sub_user_id = _get_sub_user_from_request(request)
     bot = await _get_or_404(bot_id, account_id, sub_user_id)
@@ -1663,10 +1881,24 @@ async def get_agentic_instructions(bot_id: str, request: Request):
     }
 
 
-@router.put("/{bot_id}/agentic/instructions")
+@router.put(
+    "/{bot_id}/agentic/instructions",
+    responses={200: {"content": {"application/json": {"example": {
+        "bot_id": "bot_8a72c5e1",
+        "agentic_instructions": [
+            {"instruction": "Summarise every 10 minutes.", "trigger": "on_interval", "interval_seconds": 600, "speak": True, "max_invocations": 6},
+        ],
+        "agentic_autonomy": "high",
+    }}}}},
+)
 async def update_agentic_instructions(
     bot_id: str, request: Request, payload: _AgenticInstructionsUpdate
 ):
+    """Replace the bot's agentic instruction list (and optionally update its autonomy level).
+
+    Pass an empty `instructions` list to clear all directives. Max 20 instructions.
+    Allowed `autonomy` values: `off`, `low`, `medium`, `high`. Pass `null` to leave autonomy unchanged.
+    """
     account_id = getattr(request.state, "account_id", None)
     sub_user_id = _get_sub_user_from_request(request)
     bot = await _get_or_404(bot_id, account_id, sub_user_id)
@@ -1681,10 +1913,23 @@ async def update_agentic_instructions(
     return {"bot_id": bot_id, **update}
 
 
-@router.post("/{bot_id}/agentic/trigger")
+@router.post(
+    "/{bot_id}/agentic/trigger",
+    responses={200: {"content": {"application/json": {"example": {
+        "bot_id": "bot_8a72c5e1",
+        "action": {"kind": "speak", "text": "Quick recap: we agreed on a May 20 rollout."},
+        "delivered": True,
+    }}}}},
+)
 async def trigger_agentic_instruction(
     bot_id: str, request: Request, index: int = Query(..., ge=0, description="Zero-based instruction index.")
 ):
+    """Manually fire a single agentic instruction by its zero-based index.
+
+    Returns 409 if the bot's autonomy is `off` and 404 if `index` is out of range.
+    The response includes the action the engine produced (text or speak payload)
+    and whether the action was successfully delivered into the live meeting.
+    """
     account_id = getattr(request.state, "account_id", None)
     sub_user_id = _get_sub_user_from_request(request)
     bot = await _get_or_404(bot_id, account_id, sub_user_id)
@@ -1708,8 +1953,21 @@ class _ChatQaRequest(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
     reply_via: Optional[str] = Field(default=None, description="chat | voice | both. Defaults to bot config.")
 
+    model_config = {"json_schema_extra": {"example": {
+        "question": "Who owns the TOS update action item?",
+        "reply_via": "chat",
+    }}}
 
-@router.post("/{bot_id}/chat-qa/ask")
+
+@router.post(
+    "/{bot_id}/chat-qa/ask",
+    responses={200: {"content": {"application/json": {"example": {
+        "bot_id": "bot_8a72c5e1",
+        "question": "Who owns the TOS update action item?",
+        "answer": "Bob owns the TOS update — due May 11.",
+        "delivered": True,
+    }}}}},
+)
 async def chat_qa_ask(bot_id: str, request: Request, payload: _ChatQaRequest):
     """Ask a transcript-grounded question. Always available — does NOT require
     `enable_chat_qa` (that flag controls auto-trigger from in-meeting chat)."""
