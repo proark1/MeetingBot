@@ -4,7 +4,41 @@ All notable changes to JustHereToListen.io are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.52.0 — **Last updated:** 2026-05-04
+> **Latest version:** 2.52.1 — **Last updated:** 2026-05-05
+
+---
+
+## [2.52.1] - 2026-05-05
+
+### Added — developer documentation pages
+
+The OpenAPI snapshot is exhaustive but it isn't an onboarding
+experience. This release adds a small `docs/` folder with three
+focused, hand-written guides that link back into Swagger.
+
+- **`docs/API.md`** — auth (sk_live / sk_test / JWT precedence),
+  business sub-user scoping, idempotency, three-step cURL quickstart
+  (create → poll → fetch), router-prefix map, webhook signing recipe,
+  error / rate-limit reference.
+- **`docs/MCP.md`** — full catalogue of all **16** MCP tools (read,
+  write, reasoning), parameter tables, ready-to-paste
+  `claude_desktop_config.json` block using `mcp-remote`, sample tool
+  flows, caveats around per-bot feature flags.
+- **`docs/SDKs.md`** — Python (sync + async) and TypeScript
+  quickstarts, self-hosted base URLs, how to call MCP tools through
+  the existing SDK transport, copy-paste webhook signature
+  verification snippets, exception class table.
+- **`docs/README.md`** — index page that points to the three guides
+  plus the live Swagger / ReDoc surfaces.
+
+### Fixed
+
+- README MCP section listed only **5** tools and used the wrong
+  request-body field (`params` instead of `arguments`). Now correctly
+  documents all 16 tools and the actual `{"tool": ..., "arguments":
+  ...}` payload shape, with a link into `docs/MCP.md`.
+- Added a "Looking for a quick onboarding?" pointer to `docs/` at the
+  top of the README's API Reference section.
 
 ---
 
