@@ -30,7 +30,7 @@ JustHereToListen.io is an **HTTP-transport** MCP server. Add it to Claude Deskto
         "mcp-remote",
         "https://api.justheretolisten.io/api/v1/mcp",
         "--header",
-        "Authorization:Bearer sk_live_your_key_here"
+        "Authorization: Bearer sk_live_your_key_here"
       ]
     }
   }

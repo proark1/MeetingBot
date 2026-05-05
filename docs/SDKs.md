@@ -136,16 +136,20 @@ For the full tool catalogue see [MCP.md](./MCP.md).
 ### Python
 
 ```python
-import hmac, hashlib
+import hmac, hashlib, time
 
 def verify(signature_header: str, timestamp_header: str, raw_body: bytes, secret: str) -> bool:
+    # Replay protection: reject deliveries older than 5 minutes
+    if abs(time.time() - int(timestamp_header)) > 300:
+        return False
+
     expected = hmac.new(
         secret.encode(),
-        f"{timestamp_header}.{raw_body.decode()}".encode(),
+        f"{timestamp_header}.".encode() + raw_body,
         hashlib.sha256,
     ).hexdigest()
     # X-MeetingBot-Signature is "t=<unix>,v1=<hex>"
-    parts = dict(p.split("=", 1) for p in signature_header.split(","))
+    parts = dict(p.split("=", 1) for p in signature_header.split(",") if "=" in p)
     return hmac.compare_digest(expected, parts.get("v1", ""))
 ```
 
@@ -155,8 +159,16 @@ def verify(signature_header: str, timestamp_header: str, raw_body: bytes, secret
 import { createHmac, timingSafeEqual } from "node:crypto";
 
 export function verify(signatureHeader: string, timestampHeader: string, rawBody: string, secret: string): boolean {
+  // Replay protection: reject deliveries older than 5 minutes
+  if (Math.abs(Date.now() / 1000 - Number(timestampHeader)) > 300) {
+    return false;
+  }
+
   const expected = createHmac("sha256", secret).update(`${timestampHeader}.${rawBody}`).digest("hex");
-  const v1 = Object.fromEntries(signatureHeader.split(",").map(p => p.split("=", 2))).v1 ?? "";
+  const parts = Object.fromEntries(
+    signatureHeader.split(",").filter(p => p.includes("=")).map(p => p.split("=", 2)),
+  );
+  const v1 = parts.v1 ?? "";
   return v1.length === expected.length && timingSafeEqual(Buffer.from(v1), Buffer.from(expected));
 }
 ```
@@ -181,6 +193,7 @@ Both SDKs raise typed exceptions / errors that mirror HTTP status codes:
 | `MeetingBotError` | base class for all of the above |
 
 ```python
+import time
 from meetingbot.exceptions import RateLimitError
 
 try:
