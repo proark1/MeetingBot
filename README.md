@@ -1,8 +1,8 @@
 # JustHereToListen.io API
 
-**Version 2.52.0** — A stateless meeting bot API service with multi-tenant billing, business account support, Google/Microsoft SSO, Python & JS SDKs, webhook retry/delivery logs, bot persona customization, video recording, Prometheus metrics, idempotency keys, cloud storage, email notifications, calendar auto-join, Slack/Notion integrations, GDPR compliance, an opt-in advanced-features layer (in-meeting @bot Q&A, live speaker analytics, smart decision detection, cross-meeting memory, host coaching, agentic delegation), **and a fully usable OpenAPI 3.1 surface with 100% example coverage — every one of the 114 public + 133 admin operations now has summary, description, tags, request example (where applicable), and a 2xx response example**.
+**Version 2.52.1** — A stateless meeting bot API service with multi-tenant billing, business account support, Google/Microsoft SSO, Python & JS SDKs, webhook retry/delivery logs, bot persona customization, video recording, Prometheus metrics, idempotency keys, cloud storage, email notifications, calendar auto-join, Slack/Notion integrations, GDPR compliance, an opt-in advanced-features layer (in-meeting @bot Q&A, live speaker analytics, smart decision detection, cross-meeting memory, host coaching, agentic delegation), **and a fully usable OpenAPI 3.1 surface with 100% example coverage — every one of the 114 public + 133 admin operations now has summary, description, tags, request example (where applicable), and a 2xx response example**.
 
-> **Last updated:** 2026-05-04 · **API version in Swagger UI:** 2.52.0 · **Build:** Round-4 OpenAPI completion — added 2xx response examples to all 100 endpoints that previously lacked them, request examples to the remaining 22 inline request schemas, descriptions to the 5 agentic / webhook endpoints that were missing them, and explicit `response_class` declarations for every non-JSON endpoint (PDF / SRT / WAV / MP4 / SSE / SAML XML / OAuth redirects) so the spec advertises the correct content type. Both `api/openapi.json` and `api/openapi.admin.json` snapshots now audit-clean. <!-- auto-updated on each release -->
+> **Last updated:** 2026-05-05 · **API version in Swagger UI:** 2.52.1 · **Build:** Developer documentation polish — added a `docs/` folder with three onboarding pages (HTTP API quickstart, MCP server with 16-tool catalogue + Claude Desktop config, official SDK quickstarts) and corrected the stale MCP tool list + request-body field name in the main README. Round-4 OpenAPI completion — added 2xx response examples to all 100 endpoints that previously lacked them, request examples to the remaining 22 inline request schemas, descriptions to the 5 agentic / webhook endpoints that were missing them, and explicit `response_class` declarations for every non-JSON endpoint (PDF / SRT / WAV / MP4 / SSE / SAML XML / OAuth redirects) so the spec advertises the correct content type. Both `api/openapi.json` and `api/openapi.admin.json` snapshots now audit-clean. <!-- auto-updated on each release -->
 
 
 Send bots into **Zoom**, **Google Meet**, **Microsoft Teams**, and **onepizza.io** meetings to record, transcribe, and analyse them with **Claude** (Anthropic) or **Gemini** (Google) AI.
@@ -493,6 +493,8 @@ Full payload posted to `webhook_url` when a bot finishes.
 
 ## API Reference
 
+> **Looking for a quick onboarding?** Three short pages live in [`docs/`](docs/) — [API quickstart (cURL)](docs/API.md), [MCP server (Claude Desktop config + 16 tools)](docs/MCP.md), [SDKs (Python / TypeScript)](docs/SDKs.md). The full machine-readable contract is at [`/api/docs`](http://localhost:8000/api/docs).
+
 ### Auth & Accounts
 
 | Method | Endpoint | Description |
@@ -568,9 +570,9 @@ Tag bots with a `workspace_id` at creation to make them visible to all workspace
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/api/v1/mcp/schema` | Returns the MCP server manifest with available tools |
-| `POST` | `/api/v1/mcp/call` | Execute an MCP tool. Body: `{tool, params}` |
+| `POST` | `/api/v1/mcp/call` | Execute an MCP tool. Body: `{"tool": "<name>", "arguments": {...}}` |
 
-Available MCP tools: `list_meetings`, `get_meeting`, `search_meetings`, `get_action_items`, `get_meeting_brief`. Enable/disable with `MCP_ENABLED` env var (default `true`).
+**16 tools** are exposed — read (`list_meetings`, `get_meeting`, `search_meetings`, `get_action_items`, `get_speaker_analytics`, `get_meeting_cost_summary`, `get_decisions`, `get_live_analytics`, `get_coaching_tips`, `get_related_meetings`), write (`create_bot`, `cancel_bot`, `set_agentic_instructions`, `trigger_agentic_instruction`), and reasoning (`get_meeting_brief`, `ask_chat_qa`). See [`docs/MCP.md`](docs/MCP.md) for the full catalogue, request/response shapes, and a Claude Desktop / Cursor / Cline configuration block. Enable / disable with `MCP_ENABLED` (default `true`).
 
 ### Calendar Auto-Join
 
