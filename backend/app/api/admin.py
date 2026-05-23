@@ -566,24 +566,6 @@ def _detect_platform(url: str) -> str:
     return "Other"
 
 
-@router.get(
-    "/platform-analytics",
-    tags=["Admin"],
-    responses={200: {"content": {"application/json": {"example": {
-        "total_accounts": 1842,
-        "active_accounts_30d": 421,
-        "total_meetings": 18472,
-        "meetings_30d": 3214,
-        "by_platform": {"Zoom": 8412, "Google Meet": 6231, "Microsoft Teams": 3128, "Other": 701},
-        "feature_adoption": {
-            "live_transcription": 0.62, "agentic": 0.08, "speaker_analytics": 0.21,
-            "coaching": 0.09, "cross_meeting_memory": 0.14,
-        },
-        "ai_tokens_30d": 18941223,
-        "ai_cost_30d_usd": 124.47,
-        "revenue_30d_usd": 4218.50,
-    }}}}},
-)
 def _aggregate_bot_snapshots(snaps, d30, d7) -> dict:
     """CPU-bound aggregation over (up to 50k) terminal-bot snapshot rows.
 
@@ -731,6 +713,24 @@ def _aggregate_bot_snapshots(snaps, d30, d7) -> dict:
     }
 
 
+@router.get(
+    "/platform-analytics",
+    tags=["Admin"],
+    responses={200: {"content": {"application/json": {"example": {
+        "total_accounts": 1842,
+        "active_accounts_30d": 421,
+        "total_meetings": 18472,
+        "meetings_30d": 3214,
+        "by_platform": {"Zoom": 8412, "Google Meet": 6231, "Microsoft Teams": 3128, "Other": 701},
+        "feature_adoption": {
+            "live_transcription": 0.62, "agentic": 0.08, "speaker_analytics": 0.21,
+            "coaching": 0.09, "cross_meeting_memory": 0.14,
+        },
+        "ai_tokens_30d": 18941223,
+        "ai_cost_30d_usd": 124.47,
+        "revenue_30d_usd": 4218.50,
+    }}}}},
+)
 async def platform_analytics(
     db: AsyncSession = Depends(get_db),
     _admin: str = Depends(require_admin),
