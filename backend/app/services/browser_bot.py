@@ -693,6 +693,44 @@ def _tail_file(path: Path, n: int) -> Optional[str]:
         return None
 
 
+def _probe_audio_health(audio_path: str, pulse_sink: str) -> dict:
+    """Blocking audio-health probe (pactl sink-inputs + WAV-tail peak).
+
+    Runs the subprocess, file read, and pure-Python peak scan in one thread so
+    the 15 s health loop never blocks the event loop on these syscalls/CPU.
+    """
+    out = {"sink_inputs_total": -1, "sink_inputs_on_target": -1, "peak_recent_3s": None}
+    try:
+        r = subprocess.run(
+            ["pactl", "list", "sink-inputs"],
+            capture_output=True, text=True, timeout=3,
+        )
+        txt = r.stdout or ""
+        out["sink_inputs_total"] = txt.count("Sink Input #")
+        out["sink_inputs_on_target"] = sum(
+            1 for block in txt.split("Sink Input #")[1:]
+            if ("Sink: " in block) and (pulse_sink in block)
+        )
+    except Exception:
+        pass
+    try:
+        if os.path.exists(audio_path):
+            size = os.path.getsize(audio_path)
+            if size >= 4096:
+                with open(audio_path, "rb") as f:
+                    f.seek(max(0, size - 96000))   # last ~3 s of mono s16le @16kHz
+                    tail = f.read()
+                n = (len(tail) // 2) * 2
+                if n >= 2:
+                    import array as _array
+                    a = _array.array("h")
+                    a.frombytes(tail[:n])
+                    out["peak_recent_3s"] = max((abs(x) for x in a), default=0)
+    except Exception:
+        pass
+    return out
+
+
 async def _audio_health_loop(
     bot_id: str,
     audio_path: str,
@@ -722,47 +760,17 @@ async def _audio_health_loop(
                 "ffmpeg_alive": (ffmpeg_proc.poll() is None) if ffmpeg_proc else False,
             })
             last_size = size
-            try:
-                r = subprocess.run(
-                    ["pactl", "list", "sink-inputs"],
-                    capture_output=True, text=True, timeout=3,
-                )
-                txt = r.stdout or ""
-                inputs_total = txt.count("Sink Input #")
-                inputs_on_target = sum(
-                    1 for block in txt.split("Sink Input #")[1:]
-                    if ("Sink: " in block) and (pulse_sink in block)
-                )
-            except Exception:
-                inputs_total = -1
-                inputs_on_target = -1
+
+            # Peak-amplitude probe + sink-input routing check. Offloaded to a
+            # thread (subprocess + WAV read + Python peak scan) so this 15 s
+            # loop never blocks the event loop. peak is the Python-side truth
+            # for "is ffmpeg receiving non-zero samples right now?".
+            probe = await asyncio.to_thread(_probe_audio_health, audio_path, pulse_sink)
+            inputs_total = probe["sink_inputs_total"]
+            inputs_on_target = probe["sink_inputs_on_target"]
+            peak_recent = probe["peak_recent_3s"]
             sample["sink_inputs_total"] = inputs_total
             sample["sink_inputs_on_target"] = inputs_on_target
-
-            # Peak-amplitude probe on the last ~3 s of the WAV. This is the
-            # Python-side truth for "is ffmpeg actually receiving non-zero
-            # samples right now?" — independent of Gemini, onepizza UI,
-            # WebRTC stats. Logged at WARN if recording continues silent,
-            # INFO the first time audio is detected (2.38.0).
-            peak_recent = None
-            try:
-                if exists and size >= 4096:
-                    with open(audio_path, "rb") as f:
-                        # Read the last ~3 s = 3 * 16000 Hz * 2 bytes (mono s16le).
-                        # Default chunk overshoots header; good enough.
-                        f.seek(max(0, size - 96000))
-                        tail = f.read()
-                    if tail:
-                        mv = memoryview(tail)
-                        # Skip any odd trailing byte.
-                        n = (len(mv) // 2) * 2
-                        if n >= 2:
-                            import array as _array
-                            a = _array.array('h')
-                            a.frombytes(bytes(mv[:n]))
-                            peak_recent = max(abs(x) for x in a) if a else 0
-            except Exception as e:
-                logger.debug("audio_health_loop: peak probe failed: %s", e)
             sample["peak_recent_3s"] = peak_recent
 
             # Loud logging so this shows up in deploy tail without
@@ -1707,14 +1715,17 @@ _ALONE_TEXTS = {
 }
 
 
-async def _is_bot_alone(page: Page, platform: str) -> bool:
+async def _is_bot_alone(page: Page, platform: str, body_text: str | None = None) -> bool:
     """Return True if the bot appears to be the only participant in the meeting.
 
     Requires BOTH text pattern AND DOM tile count to agree before returning True.
     This prevents false positives from tooltips, loading text, or unrendered tiles.
+
+    ``body_text`` (already lower-cased) may be supplied by a caller that has
+    already fetched the page body this tick, avoiding a second ``inner_text``.
     """
     try:
-        body = (await page.inner_text("body")).lower()
+        body = body_text if body_text is not None else (await page.inner_text("body")).lower()
         text_alone = any(t in body for t in _ALONE_TEXTS.get(platform, []))
 
         # DOM participant tile count — only trust count == 1 (just the bot's
@@ -2590,6 +2601,7 @@ async def _chat_capture_loop(
     seen_chat_ids: set,
     on_transcript_entry=None,
     recording_t0: float = 0.0,
+    chat_cache: dict | None = None,
 ) -> None:
     """Poll the meeting chat panel and emit new messages as structured entries.
 
@@ -2627,6 +2639,12 @@ async def _chat_capture_loop(
             logger.debug("Chat capture scrape error: %s", exc)
             continue
 
+        # Share the freshly-scraped chat panel with the mention monitor so it
+        # doesn't run the same expensive scrape independently (C1 dedup).
+        if chat_cache is not None:
+            chat_cache["text"] = text
+            chat_cache["ts"] = time.monotonic()
+
         if not text or text == prev_text:
             continue
 
@@ -2643,7 +2661,10 @@ async def _chat_capture_loop(
         now_ts = round(max(0.0, time.monotonic() - recording_t0), 2) if recording_t0 else 0.0
         new_entries: list[dict] = []
 
-        for line in _chat_split_messages(text):
+        # Chat is chronological and earlier lines were already hashed on prior
+        # polls, so only the tail can contain new messages. Bounding the scan
+        # avoids re-hashing the entire history (O(n²) over a long meeting).
+        for line in _chat_split_messages(text)[-150:]:
             msg_id = _chat_message_id(line)
             if msg_id in seen_chat_ids:
                 continue
@@ -3087,6 +3108,24 @@ async def _streaming_transcription_loop(
         nonzero = sum(1 for s in samples if s != 0)
         return nonzero / len(samples) > SPEECH_ENERGY_THRESHOLD
 
+    def _read_new_frames(start: int):
+        """Stat + read newly-flushed WAV bytes. Run via a thread to keep the
+        synchronous filesystem syscalls off the event loop (this fires 10x/s)."""
+        if not os.path.exists(audio_path):
+            return None, start
+        size = os.path.getsize(audio_path)
+        end = max(_WAV_HEADER_SIZE, size - GUARD_BYTES)
+        if end <= start:
+            return b"", start
+        with open(audio_path, "rb") as f:
+            f.seek(start)
+            return f.read(end - start), end
+
+    def _read_range(start: int, length: int) -> bytes:
+        with open(audio_path, "rb") as f:
+            f.seek(start)
+            return f.read(length)
+
     async def _transcribe_utterance(pcm: bytes, start_byte: int) -> None:
         """Send PCM utterance to Gemini, append result to shared lists."""
         timestamp_s = max(0.0, (start_byte - _WAV_HEADER_SIZE) / _PCM_BYTES_PER_S)
@@ -3132,28 +3171,22 @@ async def _streaming_transcription_loop(
     while True:
         await asyncio.sleep(FRAME_MS / 1000)
         try:
-            if not os.path.exists(audio_path):
+            new_data, _safe_end = await asyncio.to_thread(_read_new_frames, file_pos)
+            if new_data is None:   # file not present yet
                 continue
-            file_size = os.path.getsize(audio_path)
-            safe_end  = max(_WAV_HEADER_SIZE, file_size - GUARD_BYTES)
-            if safe_end <= file_pos:
-                continue
-
-            # Read all new frames available
-            with open(audio_path, 'rb') as f:
-                f.seek(file_pos)
-                new_data = f.read(safe_end - file_pos)
-
-            if not new_data:
+            if not new_data:       # no new fully-flushed data available
                 continue
 
             # Process frame by frame
             offset = 0
+            pass_speech_frames = 0   # speech frames counted in THIS pass (for VAD heartbeat)
             while offset + FRAME_BYTES <= len(new_data):
                 frame = new_data[offset: offset + FRAME_BYTES]
                 frame_file_pos = file_pos + offset
                 offset += FRAME_BYTES
                 is_speech = _is_speech_frame(frame)
+                if is_speech:
+                    pass_speech_frames += 1
 
                 if not in_utterance:
                     if is_speech:
@@ -3165,9 +3198,11 @@ async def _streaming_transcription_loop(
                             utterance_pcm = bytearray()
                             # backfill the opening speech frames we already read
                             backfill_start = max(_WAV_HEADER_SIZE, utterance_start_byte)
-                            with open(audio_path, 'rb') as bf:
-                                bf.seek(backfill_start)
-                                utterance_pcm.extend(bf.read(frame_file_pos - backfill_start + FRAME_BYTES))
+                            _bf = await asyncio.to_thread(
+                                _read_range, backfill_start,
+                                frame_file_pos - backfill_start + FRAME_BYTES,
+                            )
+                            utterance_pcm.extend(_bf)
                     else:
                         speech_frames = 0
                 else:
@@ -3199,12 +3234,11 @@ async def _streaming_transcription_loop(
 
             # Partial frame left at end — leave in next read (file_pos not advanced past it)
 
-            # Diagnostic: log VAD activity every ~30 s of audio processed
+            # Diagnostic: log VAD activity every ~30 s of audio processed.
+            # Reuse the speech-frame count from the pass above instead of
+            # re-decoding every frame a second time.
             _total_frames_processed += offset // FRAME_BYTES
-            _total_speech_frames    += sum(
-                1 for i in range(0, offset, FRAME_BYTES)
-                if _is_speech_frame(new_data[i: i + FRAME_BYTES])
-            )
+            _total_speech_frames    += pass_speech_frames
             bytes_since_last = file_pos - _last_diag_log_pos
             if bytes_since_last >= _PCM_BYTES_PER_S * 30:   # every ~30 s of audio
                 _last_diag_log_pos = file_pos
@@ -3286,6 +3320,23 @@ def _build_live_system_instruction(
     )
 
 
+def _read_pcm_chunk(audio_path: str, start: int, guard: int, max_bytes: int) -> bytes:
+    """Read up to *max_bytes* of newly-flushed PCM past *start*.
+
+    Synchronous filesystem syscalls — call via ``asyncio.to_thread`` so the
+    Gemini Live sender (which fires every 100 ms) never blocks the event loop.
+    """
+    if not os.path.exists(audio_path):
+        return b""
+    size = os.path.getsize(audio_path)
+    safe_end = max(_WAV_HEADER_SIZE, size - guard)
+    if safe_end <= start:
+        return b""
+    with open(audio_path, "rb") as f:
+        f.seek(start)
+        return f.read(min(safe_end - start, max_bytes))
+
+
 async def _gemini_live_loop(
     audio_path: str,
     bot_name: str,
@@ -3364,15 +3415,10 @@ async def _gemini_live_loop(
                     while True:
                         await asyncio.sleep(_LIVE_CHUNK_MS / 1000)
                         try:
-                            if not os.path.exists(audio_path):
-                                continue
-                            file_size = os.path.getsize(audio_path)
-                            safe_end = max(_WAV_HEADER_SIZE, file_size - _LIVE_GUARD_BYTES)
-                            if safe_end <= file_pos:
-                                continue
-                            with open(audio_path, "rb") as f:
-                                f.seek(file_pos)
-                                chunk = f.read(min(safe_end - file_pos, _LIVE_CHUNK_BYTES * 4))
+                            chunk = await asyncio.to_thread(
+                                _read_pcm_chunk, audio_path, file_pos,
+                                _LIVE_GUARD_BYTES, _LIVE_CHUNK_BYTES * 4,
+                            )
                             if not chunk:
                                 continue
                             file_pos += len(chunk)
@@ -3526,6 +3572,7 @@ async def _mention_monitor(
     pulse_mic: str = PULSE_MIC_NAME,
     live_handles_audio: bool = False,
     last_live_response_at: list | None = None,
+    chat_cache: dict | None = None,
 ) -> None:
     """Coroutine that polls live captions AND chat messages, replying when the
     bot's name is mentioned in either source.
@@ -3564,14 +3611,23 @@ async def _mention_monitor(
         2. caption_log (rolling text buffer, fallback when transcription is off)
         """
         if structured_transcript:
-            history_lines = [
-                f"[{e.get('timestamp', 0):.0f}s] {e.get('speaker', '?')}: {e.get('text', '')}"
-                for e in structured_transcript
-            ]
-            # Keep up to ~8 000 chars of history (roughly 30-45 min of speech)
-            history = "\n".join(history_lines)
-            if len(history) > 8000:
-                history = "…(earlier content omitted)…\n" + history[-8000:]
+            # Build only from the tail needed to fill ~8 000 chars (roughly
+            # 30-45 min of speech) instead of joining the whole transcript on
+            # every mention.
+            tail_lines: list[str] = []
+            total = 0
+            omitted = False
+            for e in reversed(structured_transcript):
+                line = f"[{e.get('timestamp', 0):.0f}s] {e.get('speaker', '?')}: {e.get('text', '')}"
+                if tail_lines and total + len(line) + 1 > 8000:
+                    omitted = True
+                    break
+                tail_lines.append(line)
+                total += len(line) + 1
+            tail_lines.reverse()
+            history = "\n".join(tail_lines)
+            if omitted:
+                history = "…(earlier content omitted)…\n" + history
             history_section = f"Full meeting transcript so far:\n{history}"
         elif caption_log:
             history_section = "Recent meeting captions:\n" + " ".join(caption_log)[-3000:]
@@ -3799,7 +3855,14 @@ async def _mention_monitor(
         # ── Chat polling (every poll cycle for faster mention detection) ─────
         if True:
             try:
-                chat_raw = await _scrape_chat_messages(page, platform)
+                # Reuse the chat-capture loop's recent scrape when fresh
+                # (<1 s) to avoid a second expensive DOM scrape; otherwise
+                # scrape directly so behaviour is unchanged when that loop
+                # isn't running.
+                if chat_cache is not None and (time.monotonic() - chat_cache.get("ts", 0.0)) < 1.0:
+                    chat_raw = chat_cache.get("text", "")
+                else:
+                    chat_raw = await _scrape_chat_messages(page, platform)
             except Exception as exc:
                 logger.debug("Chat scrape error: %s", exc)
                 chat_raw = ""
@@ -4041,9 +4104,10 @@ async def _wait_for_meeting_end(
                 logger.debug("Participants so far: %s", participants)
 
         # ── Alone / empty-room detection (skip during post-join grace) ────
+        # Reuse the body text already fetched this tick for end-detection.
         alone = (
             time.monotonic() >= _join_grace_until
-            and await _is_bot_alone(page, platform)
+            and await _is_bot_alone(page, platform, body_text=body)
         )
         if alone:
             if alone_since is None:
@@ -5383,6 +5447,9 @@ async def run_browser_bot(
             # source="chat". Uses the same on_live_transcript_entry callback as
             # the VAD loop so WS / SSE / webhook delivery is unified.
             _chat_seen_ids: set = seen_chat_ids if seen_chat_ids is not None else set()
+            # Shared between the chat-capture loop (writer) and the mention
+            # monitor (reader) so the chat panel is scraped once, not twice.
+            chat_scrape_cache: dict = {"text": "", "ts": 0.0}
             try:
                 chat_capture_task = asyncio.create_task(
                     _chat_capture_loop(
@@ -5393,6 +5460,7 @@ async def run_browser_bot(
                         seen_chat_ids=_chat_seen_ids,
                         on_transcript_entry=on_live_transcript_entry,
                         recording_t0=t0,
+                        chat_cache=chat_scrape_cache,
                     )
                 )
             except Exception as exc:
@@ -5451,6 +5519,7 @@ async def run_browser_bot(
                         pulse_mic=pulse_mic,
                         live_handles_audio=_use_live,
                         last_live_response_at=_last_live_response_at,
+                        chat_cache=chat_scrape_cache,
                     )
                 )
 

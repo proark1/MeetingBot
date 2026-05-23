@@ -1,5 +1,6 @@
 """Admin API — platform configuration management (wallet address, etc.)."""
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -565,6 +566,153 @@ def _detect_platform(url: str) -> str:
     return "Other"
 
 
+def _aggregate_bot_snapshots(snaps, d30, d7) -> dict:
+    """CPU-bound aggregation over (up to 50k) terminal-bot snapshot rows.
+
+    Parses each snapshot's JSON blob and rolls up status/platform/daily/feature/
+    AI-usage/per-user stats. Run via ``asyncio.to_thread`` so this JSON parsing
+    never blocks the event loop.
+    """
+    status_counts: dict[str, int] = {}
+    platform_counts: dict[str, int] = {}
+    daily_bots: dict[str, int] = {}
+    daily_errors: dict[str, int] = {}
+    features: dict[str, int] = {
+        "analysis_full": 0, "analysis_transcript_only": 0,
+        "consent_enabled": 0, "live_transcription": 0,
+        "record_video": 0, "pii_redaction": 0, "translation": 0,
+        "keyword_alerts": 0, "workspace": 0, "scheduled": 0,
+        "custom_template": 0, "custom_prompt": 0, "auto_followup": 0,
+    }
+    template_counts: dict[str, int] = {}
+    transcription_counts: dict[str, int] = {}
+    duration_samples: list[float] = []
+    error_messages: dict[str, int] = {}
+    error_by_platform: dict[str, int] = {}
+    ai_by_model: dict[str, dict] = {}
+    ai_by_operation: dict[str, dict] = {}
+    ai_daily: dict[str, dict] = {}
+    total_ai_tokens = 0
+    total_ai_cost = 0.0
+    user_stats: dict[str, dict] = {}
+
+    def _inc_ai(bucket: dict, key: str, tokens: int, cost: float) -> None:
+        if key not in bucket:
+            bucket[key] = {"tokens": 0, "cost": 0.0, "calls": 0}
+        bucket[key]["tokens"] += tokens
+        bucket[key]["cost"] += cost
+        bucket[key]["calls"] += 1
+
+    for s in snaps:
+        # Status
+        sc = s.status or "unknown"
+        status_counts[sc] = status_counts.get(sc, 0) + 1
+
+        # Platform — derived from URL only, never expose full URL
+        p = _detect_platform(s.meeting_url or "")
+        platform_counts[p] = platform_counts.get(p, 0) + 1
+
+        # Daily trend
+        if s.created_at and s.created_at >= d30:
+            day = s.created_at.strftime("%Y-%m-%d")
+            daily_bots[day] = daily_bots.get(day, 0) + 1
+            if sc == "error":
+                daily_errors[day] = daily_errors.get(day, 0) + 1
+
+        # Parse JSON blob for feature flags & AI usage
+        try:
+            data = json.loads(s.data) if s.data else {}
+        except Exception:
+            data = {}
+
+        # Error analysis
+        if sc == "error":
+            short_err = (data.get("error_message") or "Unknown error")[:80]
+            error_messages[short_err] = error_messages.get(short_err, 0) + 1
+            error_by_platform[p] = error_by_platform.get(p, 0) + 1
+
+        am = data.get("analysis_mode", "full")
+        features["analysis_full" if am == "full" else "analysis_transcript_only"] += 1
+        if data.get("consent_enabled"):       features["consent_enabled"] += 1
+        if data.get("live_transcription"):    features["live_transcription"] += 1
+        if data.get("record_video"):          features["record_video"] += 1
+        if data.get("pii_redaction"):          features["pii_redaction"] += 1
+        if data.get("translation_language"):  features["translation"] += 1
+        if data.get("keyword_alerts"):        features["keyword_alerts"] += 1
+        if data.get("workspace_id"):          features["workspace"] += 1
+        if data.get("join_at"):               features["scheduled"] += 1
+        if data.get("auto_followup_email"):   features["auto_followup"] += 1
+        if data.get("template"):
+            features["custom_template"] += 1
+            t = data["template"]
+            template_counts[t] = template_counts.get(t, 0) + 1
+        if data.get("prompt_override"):       features["custom_prompt"] += 1
+
+        tp = data.get("transcription_provider", "gemini")
+        transcription_counts[tp] = transcription_counts.get(tp, 0) + 1
+
+        dur = data.get("duration_seconds")
+        if dur:
+            duration_samples.append(float(dur))
+
+        # AI usage — tokens and cost, never transcript text
+        day_key = s.created_at.strftime("%Y-%m-%d") if s.created_at else None
+        for u in data.get("ai_usage", []):
+            model = u.get("model", "unknown")
+            op    = u.get("operation", "unknown")
+            toks  = u.get("total_tokens", 0)
+            cost  = u.get("cost_usd", 0.0)
+            total_ai_tokens += toks
+            total_ai_cost   += cost
+            _inc_ai(ai_by_model, model, toks, cost)
+            _inc_ai(ai_by_operation, op, toks, cost)
+            if day_key and s.created_at and s.created_at >= d30:
+                if day_key not in ai_daily:
+                    ai_daily[day_key] = {"tokens": 0, "cost": 0.0}
+                ai_daily[day_key]["tokens"] += toks
+                ai_daily[day_key]["cost"]   += cost
+
+        # Per-user aggregate (email-keyed after join, no private content)
+        acct_id = s.account_id
+        if acct_id:
+            if acct_id not in user_stats:
+                user_stats[acct_id] = {
+                    "total_bots": 0, "bots_30d": 0, "bots_7d": 0,
+                    "last_active": None, "platform_pref": {},
+                    "ai_tokens": 0, "ai_cost": 0.0, "features_used": set(),
+                }
+            us = user_stats[acct_id]
+            us["total_bots"] += 1
+            if s.created_at and s.created_at >= d30:
+                us["bots_30d"] += 1
+            if s.created_at and s.created_at >= d7:
+                us["bots_7d"] += 1
+            if not us["last_active"] or (s.created_at and s.created_at > us["last_active"]):
+                us["last_active"] = s.created_at
+            us["platform_pref"][p] = us["platform_pref"].get(p, 0) + 1
+            for u in data.get("ai_usage", []):
+                us["ai_tokens"] += u.get("total_tokens", 0)
+                us["ai_cost"]   += u.get("cost_usd", 0.0)
+            for flag, key in [
+                ("consent_enabled", "consent"), ("live_transcription", "live_transcript"),
+                ("record_video", "video"), ("pii_redaction", "pii"),
+                ("translation_language", "translation"), ("workspace_id", "workspace"),
+            ]:
+                if data.get(flag):
+                    us["features_used"].add(key)
+
+    return {
+        "status_counts": status_counts, "platform_counts": platform_counts,
+        "daily_bots": daily_bots, "daily_errors": daily_errors,
+        "features": features, "template_counts": template_counts,
+        "transcription_counts": transcription_counts, "duration_samples": duration_samples,
+        "error_messages": error_messages, "error_by_platform": error_by_platform,
+        "ai_by_model": ai_by_model, "ai_by_operation": ai_by_operation, "ai_daily": ai_daily,
+        "total_ai_tokens": total_ai_tokens, "total_ai_cost": total_ai_cost,
+        "user_stats": user_stats,
+    }
+
+
 @router.get(
     "/platform-analytics",
     tags=["Admin"],
@@ -632,134 +780,24 @@ async def platform_analytics(
     from app.config import settings as _cfg_admin
     active_bots, _ = await _store.list_bots(limit=_cfg_admin.ANALYTICS_BOT_SCAN_LIMIT)
 
-    # ── Aggregate ──────────────────────────────────────────────────────────────
-    status_counts: dict[str, int] = {}
-    platform_counts: dict[str, int] = {}
-    daily_bots: dict[str, int] = {}
-    daily_errors: dict[str, int] = {}
-    features: dict[str, int] = {
-        "analysis_full": 0, "analysis_transcript_only": 0,
-        "consent_enabled": 0, "live_transcription": 0,
-        "record_video": 0, "pii_redaction": 0, "translation": 0,
-        "keyword_alerts": 0, "workspace": 0, "scheduled": 0,
-        "custom_template": 0, "custom_prompt": 0, "auto_followup": 0,
-    }
-    template_counts: dict[str, int] = {}
-    transcription_counts: dict[str, int] = {}
-    duration_samples: list[float] = []
-    error_messages: dict[str, int] = {}
-    error_by_platform: dict[str, int] = {}
-    ai_by_model: dict[str, dict] = {}
-    ai_by_operation: dict[str, dict] = {}
-    ai_daily: dict[str, dict] = {}
-    total_ai_tokens = 0
-    total_ai_cost = 0.0
-    user_stats: dict[str, dict] = {}
-
-    def _inc_ai(bucket: dict, key: str, tokens: int, cost: float) -> None:
-        if key not in bucket:
-            bucket[key] = {"tokens": 0, "cost": 0.0, "calls": 0}
-        bucket[key]["tokens"] += tokens
-        bucket[key]["cost"] += cost
-        bucket[key]["calls"] += 1
-
-    for s in snaps:
-        # Status
-        sc = s.status or "unknown"
-        status_counts[sc] = status_counts.get(sc, 0) + 1
-
-        # Platform — derived from URL only, never expose full URL
-        p = _detect_platform(s.meeting_url or "")
-        platform_counts[p] = platform_counts.get(p, 0) + 1
-
-        # Daily trend
-        if s.created_at and s.created_at >= d30:
-            day = s.created_at.strftime("%Y-%m-%d")
-            daily_bots[day] = daily_bots.get(day, 0) + 1
-            if sc == "error":
-                daily_errors[day] = daily_errors.get(day, 0) + 1
-
-        # Parse JSON blob for feature flags & AI usage
-        try:
-            data = json.loads(s.data) if s.data else {}
-        except Exception:
-            data = {}
-
-        # Error analysis
-        if sc == "error":
-            short_err = (data.get("error_message") or "Unknown error")[:80]
-            error_messages[short_err] = error_messages.get(short_err, 0) + 1
-            error_by_platform[p] = error_by_platform.get(p, 0) + 1
-
-        am = data.get("analysis_mode", "full")
-        features["analysis_full" if am == "full" else "analysis_transcript_only"] += 1
-        if data.get("consent_enabled"):       features["consent_enabled"] += 1
-        if data.get("live_transcription"):    features["live_transcription"] += 1
-        if data.get("record_video"):          features["record_video"] += 1
-        if data.get("pii_redaction"):         features["pii_redaction"] += 1
-        if data.get("translation_language"):  features["translation"] += 1
-        if data.get("keyword_alerts"):        features["keyword_alerts"] += 1
-        if data.get("workspace_id"):          features["workspace"] += 1
-        if data.get("join_at"):               features["scheduled"] += 1
-        if data.get("auto_followup_email"):   features["auto_followup"] += 1
-        if data.get("template"):
-            features["custom_template"] += 1
-            t = data["template"]
-            template_counts[t] = template_counts.get(t, 0) + 1
-        if data.get("prompt_override"):       features["custom_prompt"] += 1
-
-        tp = data.get("transcription_provider", "gemini")
-        transcription_counts[tp] = transcription_counts.get(tp, 0) + 1
-
-        dur = data.get("duration_seconds")
-        if dur:
-            duration_samples.append(float(dur))
-
-        # AI usage — tokens and cost, never transcript text
-        day_key = s.created_at.strftime("%Y-%m-%d") if s.created_at else None
-        for u in data.get("ai_usage", []):
-            model = u.get("model", "unknown")
-            op    = u.get("operation", "unknown")
-            toks  = u.get("total_tokens", 0)
-            cost  = u.get("cost_usd", 0.0)
-            total_ai_tokens += toks
-            total_ai_cost   += cost
-            _inc_ai(ai_by_model, model, toks, cost)
-            _inc_ai(ai_by_operation, op, toks, cost)
-            if day_key and s.created_at and s.created_at >= d30:
-                if day_key not in ai_daily:
-                    ai_daily[day_key] = {"tokens": 0, "cost": 0.0}
-                ai_daily[day_key]["tokens"] += toks
-                ai_daily[day_key]["cost"]   += cost
-
-        # Per-user aggregate (email-keyed after join, no private content)
-        acct_id = s.account_id
-        if acct_id:
-            if acct_id not in user_stats:
-                user_stats[acct_id] = {
-                    "total_bots": 0, "bots_30d": 0, "bots_7d": 0,
-                    "last_active": None, "platform_pref": {},
-                    "ai_tokens": 0, "ai_cost": 0.0, "features_used": set(),
-                }
-            us = user_stats[acct_id]
-            us["total_bots"] += 1
-            if s.created_at and s.created_at >= d30:
-                us["bots_30d"] += 1
-            if s.created_at and s.created_at >= d7:
-                us["bots_7d"] += 1
-            if not us["last_active"] or (s.created_at and s.created_at > us["last_active"]):
-                us["last_active"] = s.created_at
-            us["platform_pref"][p] = us["platform_pref"].get(p, 0) + 1
-            for u in data.get("ai_usage", []):
-                us["ai_tokens"] += u.get("total_tokens", 0)
-                us["ai_cost"]   += u.get("cost_usd", 0.0)
-            for flag, key in [
-                ("consent_enabled", "consent"), ("live_transcription", "live_transcript"),
-                ("record_video", "video"), ("pii_redaction", "pii"),
-                ("translation_language", "translation"), ("workspace_id", "workspace"),
-            ]:
-                if data.get(flag):
-                    us["features_used"].add(key)
+    # ── Aggregate (CPU-bound JSON parsing offloaded to a thread) ────────────────
+    agg = await asyncio.to_thread(_aggregate_bot_snapshots, snaps, d30, d7)
+    status_counts = agg["status_counts"]
+    platform_counts = agg["platform_counts"]
+    daily_bots = agg["daily_bots"]
+    daily_errors = agg["daily_errors"]
+    features = agg["features"]
+    template_counts = agg["template_counts"]
+    transcription_counts = agg["transcription_counts"]
+    duration_samples = agg["duration_samples"]
+    error_messages = agg["error_messages"]
+    error_by_platform = agg["error_by_platform"]
+    ai_by_model = agg["ai_by_model"]
+    ai_by_operation = agg["ai_by_operation"]
+    ai_daily = agg["ai_daily"]
+    total_ai_tokens = agg["total_ai_tokens"]
+    total_ai_cost = agg["total_ai_cost"]
+    user_stats = agg["user_stats"]
 
     # Include live bots in status/platform counts
     active_statuses = {"ready", "scheduled", "queued", "joining", "in_call", "call_ended"}

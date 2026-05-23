@@ -4,9 +4,22 @@ All notable changes to JustHereToListen.io are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.52.1 — **Last updated:** 2026-05-05
+> **Latest version:** 2.53.0 — **Last updated:** 2026-05-23
 
 ---
+
+## [2.53.0] - 2026-05-23
+
+### Performance / efficiency
+
+- **AI clients reused** — the Anthropic `AsyncAnthropic` client and Gemini SDK config + `GenerativeModel` are now built once and cached instead of being reconstructed on every call, removing per-call connection-pool/object setup on the hot live-meeting paths.
+- **Transcript input bounded** — transcripts sent to the LLM for analysis/chapters/Q&A are capped via the new `AI_TRANSCRIPT_MAX_CHARS` setting (default 200k chars), keeping the opening and closing and eliding the middle when over budget. The Q&A path now sends the transcript as a cached prompt prefix so repeat questions about the same meeting only pay full price for the question.
+- **Batched AI calls** — per-speaker sentiment (`get_sentiments_batch`) and post-meeting transcript translation (`translate_texts_batch`) now use a single batched request instead of one call per speaker / per transcript line.
+- **Keyword-alert rules cached** — account-level alert rules are cached per meeting (60s TTL, invalidated on create/update/delete) instead of being re-queried on every live transcript entry.
+- **Concurrent webhook delivery** — events fan out to subscribed endpoints concurrently (bounded), the SSRF check caches safe DNS resolutions briefly, and synchronous deliveries write a single delivery-log row instead of two.
+- **Event loop unblocked** — admin platform-analytics JSON parsing, PDF export rendering, the in-meeting audio file reads (VAD transcription + Gemini Live sender) and the audio-health probe (pactl + WAV peak scan) are offloaded to threads.
+- **Browser bot** — the in-meeting chat panel is scraped once and shared between the capture loop and mention monitor; VAD frames are no longer decoded twice; the meeting-end watcher reuses one page-body fetch per tick; chat dedup and mention-context building no longer rescan the whole history each poll.
+- **Database** — added composite indexes `(account_id, created_at)` on `action_items` and `(webhook_id, created_at)` on `webhook_deliveries`; the bot-list/stats endpoints filter anonymous bots in the store instead of fetching 10k rows to render one page.
 
 ## [2.52.1] - 2026-05-05
 

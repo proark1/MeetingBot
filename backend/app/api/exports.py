@@ -1,5 +1,6 @@
 """Export endpoints — download meeting reports as PDF, Markdown, JSON, or SRT."""
 
+import asyncio
 import io
 import logging
 from html import escape as _he
@@ -89,7 +90,7 @@ async def export_pdf(bot_id: str, request: Request):
         )
 
     bot = await _get_or_404(bot_id, getattr(request.state, "account_id", None), _get_sub_user_from_request(request))
-    pdf_bytes = _build_pdf(bot)
+    pdf_bytes = await asyncio.to_thread(_build_pdf, bot)
     filename = f"meeting-{bot_id[:8]}.pdf"
     return Response(
         content=pdf_bytes,
@@ -537,7 +538,7 @@ async def export_to_drive(bot_id: str, body: DriveExportRequest, request: Reques
 
     if body.format == "pdf":
         try:
-            content = _build_pdf(bot)
+            content = await asyncio.to_thread(_build_pdf, bot)
         except Exception:
             raise HTTPException(status_code=501, detail="PDF export requires reportlab — run: pip install reportlab")
         mime_type = "application/pdf"

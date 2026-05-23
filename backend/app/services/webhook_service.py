@@ -34,6 +34,16 @@ _webhook_locks: OrderedDict[str, asyncio.Lock] = OrderedDict()
 # Strong refs for fire-and-forget audit-log tasks so they aren't GC'd mid-await.
 _bg_audit_tasks: "set[asyncio.Task]" = set()
 
+# Bound on concurrent webhook deliveries fanned out per event / retry batch.
+_WEBHOOK_DELIVERY_CONCURRENCY = 10
+
+# Short-TTL cache of successful (safe) DNS resolutions, keyed by host. Avoids
+# re-resolving the same endpoint on every delivery attempt during a live
+# meeting. Only safe results are cached — blocked/failed resolutions are never
+# cached, so SSRF protection is never weakened.
+_DNS_CACHE_TTL_S = 60.0
+_dns_cache: "dict[str, float]" = {}
+
 
 def _get_webhook_lock(wh_id: str) -> asyncio.Lock:
     if wh_id in _webhook_locks:
@@ -245,6 +255,16 @@ async def check_url_ssrf(url: str) -> "str | None":
     except ValueError:
         pass  # hostname — resolve below
 
+    # Serve from cache only if a previous resolution was verified safe and is
+    # still within the TTL window. Expired/missing entries fall through to a
+    # fresh resolution; only safe results are ever written back to the cache.
+    cached_until = _dns_cache.get(host)
+    now_mono = asyncio.get_event_loop().time()
+    if cached_until is not None:
+        if cached_until > now_mono:
+            return None
+        _dns_cache.pop(host, None)
+
     try:
         infos = await asyncio.wait_for(
             asyncio.to_thread(socket.getaddrinfo, host, None),
@@ -262,6 +282,7 @@ async def check_url_ssrf(url: str) -> "str | None":
             continue
         if _is_blocked_ip(addr):
             return f"resolves to private/reserved address ({sockaddr[0]})"
+    _dns_cache[host] = now_mono + _DNS_CACHE_TTL_S
     return None
 
 
@@ -308,34 +329,33 @@ async def dispatch_event(
 
     # Tenant scoping: only deliver to webhooks owned by the originating
     # account (plus any legacy global webhooks with account_id=None).
-    for wh in await store.active_webhooks(account_id=account_id):
+    sem = asyncio.Semaphore(_WEBHOOK_DELIVERY_CONCURRENCY)
+
+    async def _deliver_one(wh) -> None:
         subscribed = wh.events == ["*"] or "*" in wh.events or event in wh.events
         if not subscribed:
-            continue
+            return
 
-        async with _get_webhook_lock(wh.id):
+        async with sem, _get_webhook_lock(wh.id):
             hdrs = dict(headers_base)
             if wh.secret:
                 sig, ts = _sign(body, wh.secret, ts_unix=_ts_unix)
                 hdrs["X-MeetingBot-Signature"] = sig
                 hdrs["X-MeetingBot-Timestamp"] = ts
 
-            delivery_id = await _log_delivery(
-                webhook_id=wh.id, bot_id=bot_id, event=event,
-                request_body=body, status="pending",
-                signed_ts=_ts_unix,
-            )
-
             status_code, resp_text = await _attempt_delivery(wh.url, body, hdrs)
             now = datetime.now(timezone.utc)
             outcome = _classify_status(status_code)
 
+            # Single-write the delivery log for terminal outcomes; only the
+            # retry path needs a persisted row the retry processor will later
+            # update by id (so signed_ts is carried only when retrying).
             if outcome == "success":
                 await _log_delivery(
                     webhook_id=wh.id, bot_id=bot_id, event=event,
                     request_body=body, status="success", attempt_number=1,
                     response_status_code=status_code, response_body=resp_text,
-                    delivered_at=now, delivery_id=delivery_id,
+                    delivered_at=now,
                 )
                 logger.info("Webhook delivered  wh=%s  url=%s  status=%d", wh.id, wh.url, status_code)
                 wh.consecutive_failures = 0
@@ -347,7 +367,7 @@ async def dispatch_event(
                     request_body=body, status="retrying", attempt_number=1,
                     response_status_code=status_code, response_body=resp_text,
                     error_message=resp_text if status_code is None else None,
-                    next_retry_at=next_retry_at, delivery_id=delivery_id,
+                    next_retry_at=next_retry_at, signed_ts=_ts_unix,
                 )
                 logger.warning(
                     "Webhook delivery failed  wh=%s  url=%s  status=%s — retry at %s",
@@ -360,7 +380,6 @@ async def dispatch_event(
                     request_body=body, status="failed", attempt_number=1,
                     response_status_code=status_code, response_body=resp_text,
                     error_message=f"Receiver rejected with HTTP {status_code} (not retried)",
-                    delivery_id=delivery_id,
                 )
                 logger.warning(
                     "Webhook permanently rejected  wh=%s  url=%s  status=%s",
@@ -389,6 +408,11 @@ async def dispatch_event(
             wh.last_delivery_at = now
             wh.last_delivery_status = status_code
             await store._persist_webhook(wh)
+
+    await asyncio.gather(
+        *(_deliver_one(wh) for wh in await store.active_webhooks(account_id=account_id)),
+        return_exceptions=True,
+    )
 
     # Per-bot best-effort webhook (no retry, no DB log) — tracked so the
     # task isn't GC'd mid-await before the HTTP POST completes.
@@ -452,10 +476,12 @@ async def _process_retries() -> None:
 
     from app.store import store
 
-    for delivery in pending:
+    sem = asyncio.Semaphore(_WEBHOOK_DELIVERY_CONCURRENCY)
+
+    async def _retry_one(delivery) -> None:
         # Per-webhook lock held for the full read→deliver→update→persist
         # iteration so concurrent PATCH/DELETE can't race in stale state.
-        async with _get_webhook_lock(delivery.webhook_id):
+        async with sem, _get_webhook_lock(delivery.webhook_id):
             wh = await store.get_webhook(delivery.webhook_id)
             if wh is None or not wh.is_active:
                 await _log_delivery(
@@ -464,7 +490,7 @@ async def _process_retries() -> None:
                     status="failed", attempt_number=delivery.attempt_number,
                     error_message="Webhook no longer active", delivery_id=delivery.id,
                 )
-                continue
+                return
 
             hdrs: dict = {"Content-Type": "application/json", "User-Agent": "JustHereToListen.io/1.0"}
             if wh.secret:
@@ -529,6 +555,8 @@ async def _process_retries() -> None:
             wh.last_delivery_at = retry_now
             wh.last_delivery_status = status_code
             await store._persist_webhook(wh)
+
+    await asyncio.gather(*(_retry_one(d) for d in pending), return_exceptions=True)
 
 
 async def prune_old_deliveries() -> int:

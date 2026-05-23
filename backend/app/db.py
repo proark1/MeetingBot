@@ -305,6 +305,11 @@ def _migrate_schema(conn) -> None:
         # round-3 fix #4 — partial unique index for USDC tx replay protection
         ("ix_credit_tx_unique_ref",
          "CREATE UNIQUE INDEX IF NOT EXISTS ix_credit_tx_unique_ref ON credit_transactions (type, reference_id) WHERE reference_id IS NOT NULL"),
+        # efficiency audit — composite indexes for hot list queries
+        ("ix_action_items_account_created",
+         "CREATE INDEX IF NOT EXISTS ix_action_items_account_created ON action_items (account_id, created_at)"),
+        ("ix_webhook_deliveries_webhook_created",
+         "CREATE INDEX IF NOT EXISTS ix_webhook_deliveries_webhook_created ON webhook_deliveries (webhook_id, created_at)"),
     ]
     existing_tables = set(inspector.get_table_names())
     for _idx_name, _idx_sql in _indexes:

@@ -762,10 +762,10 @@ async def get_stats(request: Request):
     account_id: Optional[str] = getattr(request.state, "account_id", None)
     sub_user_id = _get_sub_user_from_request(request)
     filter_account = account_id if (account_id and account_id != SUPERADMIN_ACCOUNT_ID) else None
-    all_bots, _ = await store.list_bots(limit=10000, account_id=filter_account, sub_user_id=sub_user_id)
-    if account_id is None:
-        # Unauth dev mode — only show legacy anonymous bots (bot.account_id is None)
-        all_bots = [b for b in all_bots if b.account_id is None]
+    all_bots, _ = await store.list_bots(
+        limit=10000, account_id=filter_account, sub_user_id=sub_user_id,
+        account_id_is_null=(account_id is None),
+    )
     counts: dict[str, int] = {}
     for b in all_bots:
         counts[b.status] = counts.get(b.status, 0) + 1
@@ -798,13 +798,12 @@ async def list_bots(
         account_id if (account_id and account_id != SUPERADMIN_ACCOUNT_ID) else None
     )
     if account_id is None:
-        # Unauth dev mode: store.list_bots can't filter for NULL account_id, so
-        # fetch a wide batch and slice in memory. Filtering after the store's
-        # offset+limit slice would silently drop pages and return wrong totals.
-        all_bots, _ = await store.list_bots(status=status, limit=10000, account_id=None, sub_user_id=sub_user_id)
-        bots_filtered = [b for b in all_bots if b.account_id is None]
-        total = len(bots_filtered)
-        bots = bots_filtered[offset : offset + limit]
+        # Unauth dev mode: select only legacy anonymous bots (account_id IS NULL)
+        # directly in the store so we paginate without materialising everything.
+        bots, total = await store.list_bots(
+            status=status, limit=limit, offset=offset,
+            account_id_is_null=True, sub_user_id=sub_user_id,
+        )
     else:
         bots, total = await store.list_bots(status=status, limit=limit, offset=offset, account_id=filter_account, sub_user_id=sub_user_id)
     return BotListResponse(
