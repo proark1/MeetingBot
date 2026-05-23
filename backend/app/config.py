@@ -6,6 +6,12 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: str = ""
     GEMINI_API_KEY: str = ""
 
+    # Cap on the rendered transcript length (characters) sent to the LLM for
+    # analysis/chapters/Q&A. Multi-hour meetings can otherwise send tens of
+    # thousands of tokens; over this budget the middle is elided, keeping the
+    # opening and closing. 0 disables the cap. ~200k chars ≈ 50k tokens.
+    AI_TRANSCRIPT_MAX_CHARS: int = 200_000
+
     # API key for authenticating client requests (Bearer token)
     # Leave empty to disable authentication (useful for internal deployments)
     API_KEY: str = ""
@@ -57,6 +63,20 @@ class Settings(BaseSettings):
     STRIPE_SECRET_KEY: str = ""
     STRIPE_WEBHOOK_SECRET: str = ""
     STRIPE_TOP_UP_AMOUNTS: str = "10,25,50,100"  # comma-separated USD amounts
+
+    @property
+    def stripe_top_up_amounts(self) -> list[int]:
+        """Parsed top-up amounts (USD). Single source of truth for the routes."""
+        out: list[int] = []
+        for part in self.STRIPE_TOP_UP_AMOUNTS.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            try:
+                out.append(int(part))
+            except ValueError:
+                continue
+        return out
 
     # USDC/ERC-20 — leave CRYPTO_RPC_URL empty to disable crypto payments
     CRYPTO_HD_SEED: str = ""          # hex seed for HD wallet (generate once, keep secret)

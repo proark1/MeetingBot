@@ -347,13 +347,17 @@ class Store:
         offset: int = 0,
         account_id: Optional[str] = None,
         sub_user_id: Optional[str] = None,
+        account_id_is_null: bool = False,
     ) -> tuple[list[BotSession], int]:
         async with self._lock:
-            # Filter inside the lock to avoid copying unneeded bots
+            # Filter inside the lock to avoid copying unneeded bots.
+            # account_id_is_null lets unauth dev-mode select only legacy
+            # anonymous bots without fetching everything and re-filtering.
             filtered = [
                 b for b in self._bots.values()
                 if (not status or b.status == status)
                 and (not account_id or b.account_id == account_id)
+                and (not account_id_is_null or b.account_id is None)
                 and (sub_user_id is None or b.sub_user_id == sub_user_id)
             ]
         bots = sorted(filtered, key=lambda b: b.created_at, reverse=True)

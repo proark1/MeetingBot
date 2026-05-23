@@ -189,7 +189,17 @@ def _use_gemini() -> bool:
     return bool(settings.GEMINI_API_KEY)
 
 
-def _get_gemini_model():
+# Reused provider clients/models — building these per call rebuilds an httpx
+# connection pool (Anthropic) or re-runs global SDK config (Gemini) on every
+# request, which is wasteful on the hot live-meeting paths.
+_gemini_configured_key: str | None = None
+_gemini_models: dict[str, Any] = {}
+_anthropic_clients: dict[str, Any] = {}
+
+
+def _configure_gemini():
+    """Configure the Gemini SDK once per API key (idempotent)."""
+    global _gemini_configured_key
     from app.config import settings
     try:
         import google.generativeai as genai
@@ -197,8 +207,19 @@ def _get_gemini_model():
         raise RuntimeError(
             "google-generativeai is not installed — run: pip install google-generativeai"
         )
-    genai.configure(api_key=settings.GEMINI_API_KEY)
-    return genai.GenerativeModel("gemini-2.5-flash")
+    if _gemini_configured_key != settings.GEMINI_API_KEY:
+        genai.configure(api_key=settings.GEMINI_API_KEY)
+        _gemini_configured_key = settings.GEMINI_API_KEY
+    return genai
+
+
+def _get_gemini_model(model_name: str = "gemini-2.5-flash"):
+    genai = _configure_gemini()
+    model = _gemini_models.get(model_name)
+    if model is None:
+        model = genai.GenerativeModel(model_name)
+        _gemini_models[model_name] = model
+    return model
 
 
 def _get_anthropic_client():
@@ -209,7 +230,33 @@ def _get_anthropic_client():
         raise RuntimeError(
             "anthropic is not installed — run: pip install anthropic"
         )
-    return anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+    key = settings.ANTHROPIC_API_KEY or ""
+    client = _anthropic_clients.get(key)
+    if client is None:
+        client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+        _anthropic_clients[key] = client
+    return client
+
+
+def _transcript_lines(transcript: list[dict[str, Any]], vocab_hint: str = "") -> str:
+    """Render transcript entries as ``[ts] speaker: text`` lines, length-capped.
+
+    Multi-hour meetings can produce transcripts of tens of thousands of tokens.
+    To bound LLM input cost we cap the rendered length (configurable via
+    ``AI_TRANSCRIPT_MAX_CHARS``), keeping the opening (intros/agenda) and the
+    closing (decisions/action items) and eliding the middle when over budget.
+    """
+    from app.config import settings
+    body = "\n".join(
+        f"[{e.get('timestamp', 0):.1f}s] {e.get('speaker', '?')}: {e.get('text', '')}"
+        for e in transcript
+    )
+    max_chars = getattr(settings, "AI_TRANSCRIPT_MAX_CHARS", 0) or 0
+    if max_chars and len(body) > max_chars:
+        head = body[: int(max_chars * 0.6)]
+        tail = body[-int(max_chars * 0.4):]
+        body = f"{head}\n[… transcript truncated for length …]\n{tail}"
+    return f"{vocab_hint}{body}" if vocab_hint else body
 
 
 def _strip_fences(text: str) -> str:
@@ -225,7 +272,21 @@ def _strip_fences(text: str) -> str:
 
 # ── Claude implementations ─────────────────────────────────────────────────────
 
-async def _claude_complete(prompt: str, max_tokens: int = 4096, temperature: float = 1.0, operation: str = "unknown") -> str:
+def _user_content(prompt: str, cache_prefix: str | None):
+    """Build message content, marking *cache_prefix* as a cached block when set.
+
+    When the same large prefix (e.g. a transcript) is reused across calls within
+    the cache window, Anthropic charges the prefix at ~0.1x on subsequent reads.
+    """
+    if cache_prefix:
+        return [
+            {"type": "text", "text": cache_prefix, "cache_control": {"type": "ephemeral"}},
+            {"type": "text", "text": prompt},
+        ]
+    return prompt
+
+
+async def _claude_complete(prompt: str, max_tokens: int = 4096, temperature: float = 1.0, operation: str = "unknown", cache_prefix: str | None = None) -> str:
     """Call Claude and return the text response. Uses adaptive thinking for complex tasks."""
     client = _get_anthropic_client()
     model_id = "claude-opus-4-6"
@@ -234,7 +295,7 @@ async def _claude_complete(prompt: str, max_tokens: int = 4096, temperature: flo
         model=model_id,
         max_tokens=max_tokens,
         thinking={"type": "adaptive"},
-        messages=[{"role": "user", "content": prompt}],
+        messages=[{"role": "user", "content": _user_content(prompt, cache_prefix)}],
         timeout=300.0,
     )
     async with stream as s:
@@ -395,10 +456,7 @@ async def _claude_analyze_transcript(
     if vocabulary:
         vocab_hint = f"Known terms and names (prefer these spellings): {', '.join(vocabulary)}\n\n"
 
-    lines = vocab_hint + "\n".join(
-        f"[{e.get('timestamp', 0):.1f}s] {e.get('speaker', '?')}: {e.get('text', '')}"
-        for e in transcript
-    )
+    lines = _transcript_lines(transcript, vocab_hint)
 
     # Round-3 fix #7: untrusted meeting content goes inside <transcript>…</transcript>
     # tags. Strip closing-tag mimicry so participants can't spoof the boundary.
@@ -419,10 +477,7 @@ async def _claude_analyze_transcript(
 
 
 async def _claude_generate_chapters(transcript: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    lines = "\n".join(
-        f"[{e.get('timestamp', 0):.1f}s] {e.get('speaker', '?')}: {e.get('text', '')}"
-        for e in transcript
-    )
+    lines = _transcript_lines(transcript)
     text = await _claude_complete(
         f"{_CHAPTERS_PROMPT}\n\nTranscript:\n{lines}",
         max_tokens=2048,
@@ -488,16 +543,17 @@ async def _claude_mention_response(
 async def _claude_ask_about_transcript(
     transcript: list[dict[str, Any]], question: str
 ) -> str:
-    lines = "\n".join(
-        f"[{e.get('timestamp', 0):.1f}s] {e.get('speaker', '?')}: {e.get('text', '')}"
-        for e in transcript
-    )
+    # The transcript is the large, reused part of the prompt — users typically
+    # ask several questions about the same meeting. Send it as a cached prefix
+    # so follow-up questions only pay full price for the question itself.
+    transcript_block = f"Meeting transcript:\n{_transcript_lines(transcript)}"
     return await _claude_complete(
-        f"You are a meeting assistant. Answer the following question based ONLY on the meeting transcript below. "
-        f"Be concise and specific. If the answer is not in the transcript, say so.\n\n"
-        f"Question: {question}\n\nTranscript:\n{lines}",
+        "You are a meeting assistant. Answer the following question based ONLY on the "
+        "meeting transcript above. Be concise and specific. If the answer is not in the "
+        f"transcript, say so.\n\nQuestion: {question}",
         max_tokens=1024,
         operation="ask_question",
+        cache_prefix=transcript_block,
     )
 
 
@@ -541,10 +597,7 @@ async def _gemini_analyze_transcript(
     if vocabulary:
         vocab_hint = f"Known terms and names (prefer these spellings): {', '.join(vocabulary)}\n\n"
 
-    lines = vocab_hint + "\n".join(
-        f"[{e.get('timestamp', 0):.1f}s] {e.get('speaker', '?')}: {e.get('text', '')}"
-        for e in transcript
-    )
+    lines = _transcript_lines(transcript, vocab_hint)
 
     prompt = prompt_override or _ANALYSIS_PROMPT
     model = _get_gemini_model()
@@ -558,10 +611,7 @@ async def _gemini_analyze_transcript(
 
 
 async def _gemini_generate_chapters(transcript: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    lines = "\n".join(
-        f"[{e.get('timestamp', 0):.1f}s] {e.get('speaker', '?')}: {e.get('text', '')}"
-        for e in transcript
-    )
+    lines = _transcript_lines(transcript)
     model = _get_gemini_model()
     t0 = time.monotonic()
     response = await model.generate_content_async(
@@ -636,10 +686,7 @@ async def _gemini_mention_response(
 async def _gemini_ask_about_transcript(
     transcript: list[dict[str, Any]], question: str
 ) -> str:
-    lines = "\n".join(
-        f"[{e.get('timestamp', 0):.1f}s] {e.get('speaker', '?')}: {e.get('text', '')}"
-        for e in transcript
-    )
+    lines = _transcript_lines(transcript)
     model = _get_gemini_model()
     t0 = time.monotonic()
     response = await model.generate_content_async(
@@ -1303,7 +1350,6 @@ async def extract_live_action_items(transcript_slice: list[dict[str, Any]]) -> l
     if _use_claude():
         try:
             client = _get_anthropic_client()
-            import anthropic as _anthropic
             model_id = "claude-haiku-4-5-20251001"
             t0 = time.monotonic()
             message = await client.messages.create(
@@ -1415,6 +1461,108 @@ async def get_sentiment(text: str) -> str:
     return "neutral"
 
 
+def _coerce_sentiments(raw: Any, n: int) -> list[str]:
+    arr = raw if isinstance(raw, list) else []
+    out: list[str] = []
+    for i in range(n):
+        v = str(arr[i]).strip().lower() if i < len(arr) else "neutral"
+        out.append(v if v in ("positive", "neutral", "negative") else "neutral")
+    return out
+
+
+async def get_sentiments_batch(texts: list[str]) -> list[str]:
+    """Classify several snippets' sentiment in ONE LLM call.
+
+    Returns a list aligned to *texts* (each "positive"/"neutral"/"negative").
+    A single call replaces one request per speaker.
+    """
+    if not texts:
+        return []
+    numbered = "\n".join(f"{i + 1}. {t}" for i, t in enumerate(texts))
+    prompt = (
+        "Classify the sentiment of each numbered text as exactly one of: positive, "
+        "neutral, negative. Return ONLY a JSON array of that many lowercase strings "
+        'in the same order, e.g. ["positive","neutral"]. No prose, no markdown.\n\n'
+        f"{numbered}"
+    )
+    if _use_gemini():
+        try:
+            model = _get_gemini_model()
+            t0 = time.monotonic()
+            response = await model.generate_content_async(
+                prompt, generation_config={"temperature": 0.0, "max_output_tokens": 256},
+            )
+            _record_gemini_usage(response, "sentiment_batch", duration_s=round(time.monotonic() - t0, 2))
+            return _coerce_sentiments(json.loads(_strip_fences(response.text)), len(texts))
+        except Exception as exc:
+            logger.debug("Batch sentiment failed (Gemini): %s", exc)
+            return ["neutral"] * len(texts)
+    if _use_claude():
+        try:
+            result = await _claude_complete(prompt, max_tokens=256, operation="sentiment_batch")
+            return _coerce_sentiments(json.loads(_strip_fences(result)), len(texts))
+        except Exception as exc:
+            logger.debug("Batch sentiment failed (Claude): %s", exc)
+            return ["neutral"] * len(texts)
+    return ["neutral"] * len(texts)
+
+
+_TRANSLATE_BATCH_SIZE = 40
+_TRANSLATE_CONCURRENCY = 5
+
+
+async def _translate_chunk(texts: list[str], target_language: str) -> list[str]:
+    payload = json.dumps(texts, ensure_ascii=False)
+    prompt = (
+        f"Translate each string in this JSON array to language code '{target_language}'. "
+        "Return ONLY a JSON array of the translated strings, in the same order and with the "
+        "exact same number of elements. Do not merge, split, add, or drop elements.\n\n"
+        f"{payload}"
+    )
+    try:
+        if _use_gemini():
+            model = _get_gemini_model()
+            t0 = time.monotonic()
+            response = await model.generate_content_async(
+                prompt, generation_config={"temperature": 0.1, "max_output_tokens": 4096},
+            )
+            _record_gemini_usage(response, "translation_batch", duration_s=round(time.monotonic() - t0, 2))
+            out = json.loads(_strip_fences(response.text))
+        elif _use_claude():
+            result = await _claude_complete(prompt, max_tokens=4096, operation="translation_batch")
+            out = json.loads(_strip_fences(result))
+        else:
+            return list(texts)
+        if isinstance(out, list) and len(out) == len(texts):
+            return [str(x) for x in out]
+    except Exception as exc:
+        logger.debug("Batch translation failed: %s", exc)
+    return list(texts)  # fall back to originals on any failure / size mismatch
+
+
+async def translate_texts_batch(texts: list[str], target_language: str) -> list[str]:
+    """Translate many snippets with far fewer LLM calls than one-per-entry.
+
+    Splits into chunks, translates each chunk in a single request (bounded
+    concurrency), and returns a list aligned to *texts*. On failure the original
+    text is returned for that chunk.
+    """
+    if not texts or not target_language:
+        return list(texts)
+    chunks = [texts[i:i + _TRANSLATE_BATCH_SIZE] for i in range(0, len(texts), _TRANSLATE_BATCH_SIZE)]
+    sem = asyncio.Semaphore(_TRANSLATE_CONCURRENCY)
+
+    async def _run(chunk: list[str]) -> list[str]:
+        async with sem:
+            return await _translate_chunk(chunk, target_language)
+
+    results = await asyncio.gather(*[_run(c) for c in chunks])
+    out: list[str] = []
+    for r in results:
+        out.extend(r)
+    return out
+
+
 def _hardcoded_demo_transcript() -> list[dict[str, Any]]:
     return [
         {"speaker": "Alice (PM)",     "text": "Good morning everyone! Let's get started with the sprint review.", "timestamp": 2.0},
@@ -1452,8 +1600,7 @@ async def embed_text(text: str) -> list[float]:
     if not settings.GEMINI_API_KEY:
         return []
     try:
-        import google.generativeai as genai
-        genai.configure(api_key=settings.GEMINI_API_KEY)
+        genai = _configure_gemini()
         result = await asyncio.to_thread(
             genai.embed_content,
             model="models/text-embedding-004",

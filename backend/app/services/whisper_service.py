@@ -25,25 +25,40 @@ _whisper_model = None
 _whisper_model_name: Optional[str] = None
 
 
+def _detect_backend() -> Optional[str]:
+    """Probe installed Whisper packages once at import time.
+
+    Returns ``"faster"`` (preferred), ``"openai"``, or ``None`` if neither is
+    installed. Cached at module load so callers don't re-run import probing on
+    every transcription request.
+    """
+    try:
+        from faster_whisper import WhisperModel  # noqa: F401
+        return "faster"
+    except ImportError:
+        pass
+    try:
+        import whisper  # noqa: F401
+        return "openai"
+    except ImportError:
+        return None
+
+
+# Detected once at module load — package availability doesn't change at runtime.
+_WHISPER_BACKEND: Optional[str] = _detect_backend()
+
+
 def _get_settings():
     from app.config import settings
     return settings
 
 
 def is_whisper_available() -> bool:
-    """Return True if Whisper is enabled and the package is importable."""
+    """Return True if Whisper is enabled and a backend package is installed."""
     s = _get_settings()
     if not s.WHISPER_ENABLED:
         return False
-    try:
-        import whisper  # noqa: F401
-        return True
-    except ImportError:
-        try:
-            from faster_whisper import WhisperModel  # noqa: F401
-            return True
-        except ImportError:
-            return False
+    return _WHISPER_BACKEND is not None
 
 
 def _load_model():
@@ -146,14 +161,8 @@ async def transcribe_with_whisper(
         return []
 
     try:
-        # Detect which backend is available
-        try:
-            from faster_whisper import WhisperModel as _FW  # noqa: F401
-            use_faster = True
-        except ImportError:
-            use_faster = False
-
-        if use_faster:
+        # Backend detected once at module load (faster-whisper preferred).
+        if _WHISPER_BACKEND == "faster":
             transcript = await asyncio.to_thread(
                 _transcribe_with_faster_whisper, audio_path, language
             )

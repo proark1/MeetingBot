@@ -691,7 +691,13 @@ async def get_my_analytics(request: Request):
     ai_cost_this_month = 0.0
     durations = []
     cost_by_platform: dict[str, float] = {}
-    sentiment_by_week: list[dict] = []
+
+    # 4-week sentiment trend accumulators (bucket 0 = most recent week).
+    # Bucketed in the single pass below instead of re-scanning all_bots per week.
+    _week_seconds = 7 * 24 * 3600
+    _score_map = {"positive": 1, "neutral": 0, "negative": -1}
+    week_sum = [0, 0, 0, 0]
+    week_count = [0, 0, 0, 0]
 
     for bot in all_bots:
         created = bot.created_at
@@ -705,26 +711,21 @@ async def get_my_analytics(request: Request):
         plat = bot.meeting_platform or "unknown"
         cost_by_platform[plat] = round(cost_by_platform.get(plat, 0.0) + bot.ai_total_cost_usd, 4)
 
-    # 4-week sentiment trend — average sentiment score per week (positive=1, neutral=0, negative=-1)
-    for i, week_start in enumerate(week_starts):
-        week_end = week_start + timedelta(weeks=1)
-        if week_start.tzinfo is None:
-            week_start = week_start.replace(tzinfo=timezone.utc)
-        if week_end.tzinfo is None:
-            week_end = week_end.replace(tzinfo=timezone.utc)
-        week_bots = [
-            b for b in all_bots
-            if b.created_at and (b.created_at.replace(tzinfo=timezone.utc) if b.created_at.tzinfo is None else b.created_at) >= week_start
-            and (b.created_at.replace(tzinfo=timezone.utc) if b.created_at.tzinfo is None else b.created_at) < week_end
-            and b.analysis
-        ]
-        sentiments = [b.analysis.get("sentiment", "neutral") for b in week_bots if b.analysis]
-        score_map = {"positive": 1, "neutral": 0, "negative": -1}
-        avg_score = sum(score_map.get(s, 0) for s in sentiments) / len(sentiments) if sentiments else 0
+        if created and bot.analysis:
+            weeks_ago = (now - created).total_seconds() / _week_seconds
+            if 0 <= weeks_ago < 4:
+                b = int(weeks_ago)
+                week_sum[b] += _score_map.get(bot.analysis.get("sentiment", "neutral"), 0)
+                week_count[b] += 1
+
+    # average sentiment score per week (positive=1, neutral=0, negative=-1)
+    sentiment_by_week: list[dict] = []
+    for i in range(4):
+        avg_score = week_sum[i] / week_count[i] if week_count[i] else 0
         sentiment_by_week.append({
-            "week": week_start.strftime("%Y-%m-%d"),
+            "week": week_starts[i].strftime("%Y-%m-%d"),
             "score": round(avg_score, 2),
-            "meetings": len(week_bots),
+            "meetings": week_count[i],
         })
 
     # Open action items count from DB

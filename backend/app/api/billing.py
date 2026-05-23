@@ -200,10 +200,7 @@ def _require_account(account_id: Optional[str]) -> str:
 
 
 def _get_valid_amounts() -> list[int]:
-    try:
-        return [int(x.strip()) for x in settings.STRIPE_TOP_UP_AMOUNTS.split(",") if x.strip()]
-    except ValueError:
-        return [10, 25, 50, 100]
+    return settings.stripe_top_up_amounts or [10, 25, 50, 100]
 
 
 # ── Stripe ────────────────────────────────────────────────────────────────────

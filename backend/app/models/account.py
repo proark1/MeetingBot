@@ -298,6 +298,8 @@ class WebhookDelivery(Base):
     __table_args__ = (
         # Used by the retry loop: SELECT WHERE status IN ('pending','retrying') AND next_retry_at <= now()
         Index("ix_webhook_deliveries_retry", "status", "next_retry_at"),
+        # Delivery-history-by-webhook: filter webhook_id, order by created_at.
+        Index("ix_webhook_deliveries_webhook_created", "webhook_id", "created_at"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
@@ -469,6 +471,10 @@ class SamlConfig(Base):
 class ActionItem(Base):
     """First-class action item extracted from a meeting, with lifecycle tracking."""
     __tablename__ = "action_items"
+    __table_args__ = (
+        # Main listing query: filter by account_id, order by created_at desc.
+        Index("ix_action_items_account_created", "account_id", "created_at"),
+    )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True, default=_uuid)
     account_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)

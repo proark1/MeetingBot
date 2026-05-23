@@ -1,5 +1,6 @@
 """Admin API — platform configuration management (wallet address, etc.)."""
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -583,56 +584,13 @@ def _detect_platform(url: str) -> str:
         "revenue_30d_usd": 4218.50,
     }}}}},
 )
-async def platform_analytics(
-    db: AsyncSession = Depends(get_db),
-    _admin: str = Depends(require_admin),
-):
-    """Aggregated platform analytics — no private user data.
+def _aggregate_bot_snapshots(snaps, d30, d7) -> dict:
+    """CPU-bound aggregation over (up to 50k) terminal-bot snapshot rows.
 
-    Returns counts, trends, feature-adoption rates, and AI token/cost breakdowns.
-    Transcript content, meeting URLs, and analysis text are never included.
-    Results are cached for 5 minutes.
+    Parses each snapshot's JSON blob and rolls up status/platform/daily/feature/
+    AI-usage/per-user stats. Run via ``asyncio.to_thread`` so this JSON parsing
+    never blocks the event loop.
     """
-    cached = _analytics_cache.get("platform")
-    if cached and (_time.monotonic() - cached[0]) < _ANALYTICS_TTL:
-        return cached[1]
-
-    from app.models.account import BotSnapshot
-    from app.store import store as _store
-
-    now = datetime.now(timezone.utc)
-    d30 = now - timedelta(days=30)
-    d7 = now - timedelta(days=7)
-
-    # ── Account stats ──────────────────────────────────────────────────────────
-    try:
-        total_accounts = (await db.execute(select(func.count(Account.id)))).scalar_one()
-        new_30d_accts = (await db.execute(
-            select(func.count(Account.id)).where(Account.created_at >= d30)
-        )).scalar_one()
-        plan_counts_q = await db.execute(
-            select(Account.plan, func.count(Account.id)).group_by(Account.plan)
-        )
-        plan_counts = {(r[0] or "free"): r[1] for r in plan_counts_q.all()}
-    except Exception:
-        logger.warning("Account stats query failed — using defaults", exc_info=True)
-        await db.rollback()
-        total_accounts, new_30d_accts, plan_counts = 0, 0, {}
-
-    # ── Load bot snapshots (terminal bots, capped at 50k for memory safety) ───
-    snaps_q = await db.execute(
-        select(
-            BotSnapshot.status, BotSnapshot.meeting_url,
-            BotSnapshot.created_at, BotSnapshot.account_id, BotSnapshot.data
-        ).order_by(BotSnapshot.created_at.desc()).limit(50000)
-    )
-    snaps = snaps_q.all()
-
-    # Active / live bots from in-memory store
-    from app.config import settings as _cfg_admin
-    active_bots, _ = await _store.list_bots(limit=_cfg_admin.ANALYTICS_BOT_SCAN_LIMIT)
-
-    # ── Aggregate ──────────────────────────────────────────────────────────────
     status_counts: dict[str, int] = {}
     platform_counts: dict[str, int] = {}
     daily_bots: dict[str, int] = {}
@@ -696,7 +654,7 @@ async def platform_analytics(
         if data.get("consent_enabled"):       features["consent_enabled"] += 1
         if data.get("live_transcription"):    features["live_transcription"] += 1
         if data.get("record_video"):          features["record_video"] += 1
-        if data.get("pii_redaction"):         features["pii_redaction"] += 1
+        if data.get("pii_redaction"):          features["pii_redaction"] += 1
         if data.get("translation_language"):  features["translation"] += 1
         if data.get("keyword_alerts"):        features["keyword_alerts"] += 1
         if data.get("workspace_id"):          features["workspace"] += 1
@@ -760,6 +718,86 @@ async def platform_analytics(
             ]:
                 if data.get(flag):
                     us["features_used"].add(key)
+
+    return {
+        "status_counts": status_counts, "platform_counts": platform_counts,
+        "daily_bots": daily_bots, "daily_errors": daily_errors,
+        "features": features, "template_counts": template_counts,
+        "transcription_counts": transcription_counts, "duration_samples": duration_samples,
+        "error_messages": error_messages, "error_by_platform": error_by_platform,
+        "ai_by_model": ai_by_model, "ai_by_operation": ai_by_operation, "ai_daily": ai_daily,
+        "total_ai_tokens": total_ai_tokens, "total_ai_cost": total_ai_cost,
+        "user_stats": user_stats,
+    }
+
+
+async def platform_analytics(
+    db: AsyncSession = Depends(get_db),
+    _admin: str = Depends(require_admin),
+):
+    """Aggregated platform analytics — no private user data.
+
+    Returns counts, trends, feature-adoption rates, and AI token/cost breakdowns.
+    Transcript content, meeting URLs, and analysis text are never included.
+    Results are cached for 5 minutes.
+    """
+    cached = _analytics_cache.get("platform")
+    if cached and (_time.monotonic() - cached[0]) < _ANALYTICS_TTL:
+        return cached[1]
+
+    from app.models.account import BotSnapshot
+    from app.store import store as _store
+
+    now = datetime.now(timezone.utc)
+    d30 = now - timedelta(days=30)
+    d7 = now - timedelta(days=7)
+
+    # ── Account stats ──────────────────────────────────────────────────────────
+    try:
+        total_accounts = (await db.execute(select(func.count(Account.id)))).scalar_one()
+        new_30d_accts = (await db.execute(
+            select(func.count(Account.id)).where(Account.created_at >= d30)
+        )).scalar_one()
+        plan_counts_q = await db.execute(
+            select(Account.plan, func.count(Account.id)).group_by(Account.plan)
+        )
+        plan_counts = {(r[0] or "free"): r[1] for r in plan_counts_q.all()}
+    except Exception:
+        logger.warning("Account stats query failed — using defaults", exc_info=True)
+        await db.rollback()
+        total_accounts, new_30d_accts, plan_counts = 0, 0, {}
+
+    # ── Load bot snapshots (terminal bots, capped at 50k for memory safety) ───
+    snaps_q = await db.execute(
+        select(
+            BotSnapshot.status, BotSnapshot.meeting_url,
+            BotSnapshot.created_at, BotSnapshot.account_id, BotSnapshot.data
+        ).order_by(BotSnapshot.created_at.desc()).limit(50000)
+    )
+    snaps = snaps_q.all()
+
+    # Active / live bots from in-memory store
+    from app.config import settings as _cfg_admin
+    active_bots, _ = await _store.list_bots(limit=_cfg_admin.ANALYTICS_BOT_SCAN_LIMIT)
+
+    # ── Aggregate (CPU-bound JSON parsing offloaded to a thread) ────────────────
+    agg = await asyncio.to_thread(_aggregate_bot_snapshots, snaps, d30, d7)
+    status_counts = agg["status_counts"]
+    platform_counts = agg["platform_counts"]
+    daily_bots = agg["daily_bots"]
+    daily_errors = agg["daily_errors"]
+    features = agg["features"]
+    template_counts = agg["template_counts"]
+    transcription_counts = agg["transcription_counts"]
+    duration_samples = agg["duration_samples"]
+    error_messages = agg["error_messages"]
+    error_by_platform = agg["error_by_platform"]
+    ai_by_model = agg["ai_by_model"]
+    ai_by_operation = agg["ai_by_operation"]
+    ai_daily = agg["ai_daily"]
+    total_ai_tokens = agg["total_ai_tokens"]
+    total_ai_cost = agg["total_ai_cost"]
+    user_stats = agg["user_stats"]
 
     # Include live bots in status/platform counts
     active_statuses = {"ready", "scheduled", "queued", "joining", "in_call", "call_ended"}

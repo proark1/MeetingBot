@@ -13,9 +13,21 @@ When a keyword is triggered, a `bot.keyword_alert` event is dispatched to:
 """
 
 import logging
+import time as _time
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+# Account-rule cache. `scan_live_entry` runs on EVERY live transcript line, so
+# without this it re-queries the same KeywordAlert rows hundreds of times per
+# meeting. Alerts rarely change mid-meeting, so a short TTL is safe.
+_alert_cache: dict[str, tuple[float, list[dict]]] = {}
+_ALERT_CACHE_TTL_S = 60.0
+
+
+def invalidate_account_alerts(account_id: str) -> None:
+    """Drop cached rules for an account so writes take effect immediately."""
+    _alert_cache.pop(account_id, None)
 
 
 def _matches_keyword(text: str, keyword: str) -> bool:
@@ -24,7 +36,10 @@ def _matches_keyword(text: str, keyword: str) -> bool:
 
 
 async def _load_account_keyword_alerts(account_id: str) -> list[dict]:
-    """Load active KeywordAlert rules for an account from the database."""
+    """Load active KeywordAlert rules for an account (cached, short TTL)."""
+    cached = _alert_cache.get(account_id)
+    if cached is not None and (_time.monotonic() - cached[0]) < _ALERT_CACHE_TTL_S:
+        return cached[1]
     try:
         import json
         from app.db import AsyncSessionLocal
@@ -52,6 +67,7 @@ async def _load_account_keyword_alerts(account_id: str) -> list[dict]:
                 "keywords": keywords,
                 "webhook_url": row.webhook_url,
             })
+        _alert_cache[account_id] = (_time.monotonic(), rules)
         return rules
     except Exception as exc:
         logger.error("Failed to load keyword alerts for account %s: %s", account_id, exc)

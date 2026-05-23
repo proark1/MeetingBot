@@ -714,11 +714,7 @@ async def topup_page(request: Request, db: AsyncSession = Depends(get_db)):
     if request.query_params.get("payment") == "cancelled":
         flash = _flash("warning", "Payment cancelled.")
 
-    amounts = []
-    try:
-        amounts = [int(x.strip()) for x in settings.STRIPE_TOP_UP_AMOUNTS.split(",") if x.strip()]
-    except ValueError:
-        amounts = [10, 25, 50, 100]
+    amounts = settings.stripe_top_up_amounts or [10, 25, 50, 100]
 
     return templates.TemplateResponse("topup.html", {
         "request": request,
@@ -744,11 +740,7 @@ async def topup_stripe_submit(
     if not account:
         return RedirectResponse("/login")
 
-    valid_amounts = []
-    try:
-        valid_amounts = [int(x.strip()) for x in settings.STRIPE_TOP_UP_AMOUNTS.split(",") if x.strip()]
-    except ValueError:
-        valid_amounts = [10, 25, 50, 100]
+    valid_amounts = settings.stripe_top_up_amounts or [10, 25, 50, 100]
 
     if amount_usd not in valid_amounts:
         return RedirectResponse("/topup?error=invalid_amount", status_code=303)

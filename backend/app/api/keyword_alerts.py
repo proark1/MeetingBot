@@ -158,6 +158,8 @@ async def create_keyword_alert(payload: KeywordAlertCreate, request: Request):
         await db.commit()
         await db.refresh(row)
 
+    from app.services import keyword_alert_service
+    keyword_alert_service.invalidate_account_alerts(account_id)
     return _to_response(row)
 
 
@@ -216,6 +218,8 @@ async def update_keyword_alert(alert_id: str, payload: KeywordAlertCreate, reque
         await db.commit()
         await db.refresh(row)
 
+    from app.services import keyword_alert_service
+    keyword_alert_service.invalidate_account_alerts(account_id)
     return _to_response(row)
 
 
@@ -243,3 +247,6 @@ async def delete_keyword_alert(alert_id: str, request: Request):
             KeywordAlert.account_id == account_id,
         ))
         await db.commit()
+
+    from app.services import keyword_alert_service
+    keyword_alert_service.invalidate_account_alerts(account_id)

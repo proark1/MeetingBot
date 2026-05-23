@@ -357,16 +357,16 @@ async def _compute_speaker_stats(
     if total == 0:
         return []
 
-    # Compute per-speaker sentiment in parallel
+    # Compute per-speaker sentiment in a single batched LLM call
     speaker_names = list(speaker_time.keys())
     combined_texts = [" ".join(speaker_texts.get(n, [])) for n in speaker_names]
-    sentiment_results = await asyncio.gather(
-        *[intelligence_service.get_sentiment(t) for t in combined_texts],
-        return_exceptions=True,
-    )
+    try:
+        sentiment_results = await intelligence_service.get_sentiments_batch(combined_texts)
+    except Exception:
+        sentiment_results = ["neutral"] * len(speaker_names)
     speaker_sentiment = {
-        name: (result if isinstance(result, str) else "neutral")
-        for name, result in zip(speaker_names, sentiment_results)
+        name: (sentiment_results[i] if i < len(sentiment_results) else "neutral")
+        for i, name in enumerate(speaker_names)
     }
 
     stats = []
@@ -643,17 +643,9 @@ async def _do_analysis_inner(bot: BotSession, audio_path: str, use_real_bot: boo
                 try:
                     lang = bot.translation_language
                     logger.info("Bot %s: translating transcript to %s", bot.id, lang)
-                    # Limit concurrency to avoid flooding the AI provider with
-                    # hundreds of simultaneous requests on long transcripts.
-                    _sem = asyncio.Semaphore(20)
-
-                    async def _translate(text: str) -> str:
-                        async with _sem:
-                            return await intelligence_service.translate_text(text, lang)
-
-                    translated_texts = await asyncio.gather(
-                        *[_translate(e.get("text", "")) for e in transcript],
-                        return_exceptions=True,
+                    # Batch many entries per request instead of one call per line.
+                    translated_texts = await intelligence_service.translate_texts_batch(
+                        [e.get("text", "") for e in transcript], lang,
                     )
                     for entry, result in zip(transcript, translated_texts):
                         if isinstance(result, str):
