@@ -5,6 +5,7 @@ survive server restarts.  Active bots are still RAM-only.
 """
 
 import asyncio
+import dataclasses
 import json
 import logging
 import uuid
@@ -16,6 +17,16 @@ if TYPE_CHECKING:
     from app.store_interface import BotStateStore
 
 logger = logging.getLogger(__name__)
+
+# Fields that can't / shouldn't cross a process boundary: live handles
+# (Playwright page, asyncio primitives) and the process-local dedup cache.
+# Excluded from BotSession serialization for shared/distributed state.
+_NON_SERIALIZABLE_FIELDS = frozenset({"leave_event", "runtime", "seen_chat_ids"})
+# Fields stored as datetimes — round-tripped via ISO-8601 strings.
+_DATETIME_FIELDS = frozenset({
+    "created_at", "updated_at", "started_at", "ended_at", "expires_at",
+    "share_token_expires_at", "join_at",
+})
 
 from app.config import settings as _settings
 
@@ -241,6 +252,44 @@ class BotSession:
     def video_available(self) -> bool:
         import os
         return bool(self.video_path and os.path.exists(self.video_path))
+
+    # ── Serialization for shared/distributed state ───────────────────────────
+    def to_state_dict(self) -> dict:
+        """JSON-serializable snapshot of the full live state.
+
+        Excludes non-serializable, process-local fields (``runtime`` Playwright
+        handles, the ``leave_event``, the ``seen_chat_ids`` cache). Datetimes
+        become ISO-8601 strings. Round-trips with ``from_state_dict``.
+        """
+        out: dict = {}
+        for f in dataclasses.fields(self):
+            if f.name in _NON_SERIALIZABLE_FIELDS:
+                continue
+            v = getattr(self, f.name)
+            if f.name in _DATETIME_FIELDS and isinstance(v, datetime):
+                v = v.isoformat()
+            out[f.name] = v
+        return out
+
+    @classmethod
+    def from_state_dict(cls, d: dict) -> "BotSession":
+        """Reconstruct a BotSession from ``to_state_dict`` output.
+
+        Unknown / non-serializable keys are ignored so the live handles fall
+        back to their defaults on the reconstructing worker.
+        """
+        valid = {f.name for f in dataclasses.fields(cls)}
+        kwargs: dict = {}
+        for k, v in d.items():
+            if k not in valid or k in _NON_SERIALIZABLE_FIELDS:
+                continue
+            if k in _DATETIME_FIELDS and isinstance(v, str):
+                try:
+                    v = datetime.fromisoformat(v)
+                except ValueError:
+                    v = None
+            kwargs[k] = v
+        return cls(**kwargs)
 
 
 # ── Webhook entry ──────────────────────────────────────────────────────────────
@@ -880,12 +929,30 @@ async def load_persisted_webhooks() -> int:
 # Module-level singleton
 store = Store()
 
+_shared_store = None
+
 
 def get_bot_state_store() -> "BotStateStore":
     """Return the active bot-state store behind the ``BotStateStore`` contract.
 
-    Call sites that only need bot-lifecycle state should depend on this rather
-    than the concrete ``Store`` singleton, so a shared/distributed backend can
-    be swapped in later without touching them.
+    Defaults to the in-memory ``Store`` singleton. When ``BOT_STATE_BACKEND`` is
+    ``"redis"`` and ``REDIS_URL`` is set, returns a process-wide
+    ``RedisBotStateStore`` instead so multiple API/worker processes can share
+    live bot state.
+
+    NOTE: most call sites still import the ``store`` singleton directly today, so
+    selecting a shared backend here does NOT by itself migrate the running app —
+    rewiring those call sites to this accessor (and validating on a staging
+    cluster) is the deliberate activation step. Keeping this inert by default
+    means the single-instance product is unaffected.
     """
+    global _shared_store
+    if _settings.BOT_STATE_BACKEND == "redis" and _settings.REDIS_URL:
+        if _shared_store is None:
+            import redis.asyncio as _aioredis
+
+            from app.redis_store import RedisBotStateStore
+            client = _aioredis.from_url(_settings.REDIS_URL, decode_responses=True)
+            _shared_store = RedisBotStateStore(client)
+        return _shared_store
     return store

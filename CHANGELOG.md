@@ -4,9 +4,18 @@ All notable changes to JustHereToListen.io are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.54.0 — **Last updated:** 2026-05-23
+> **Latest version:** 2.55.0 — **Last updated:** 2026-05-23
 
 ---
+
+## [2.55.0] - 2026-05-23
+
+### Distributed live-state — Phase 1 (Redis backend, opt-in)
+
+- **`BotSession` serialization** — `to_state_dict()` / `from_state_dict()` round-trip the full live state as JSON, excluding process-local, non-serializable fields (`runtime` Playwright handles, `leave_event`, the `seen_chat_ids` cache) and ISO-encoding datetimes. The prerequisite for any shared backend.
+- **`RedisBotStateStore`** (`app/redis_store.py`) — implements the `BotStateStore` protocol against Redis: bot JSON keyed per id, a created_at-scored sorted set for newest-first listing, and a hash for O(1) share-token lookup. `update_bot` uses a WATCH/MULTI retry for atomic read-modify-write and honours the same immutable-field guard as the in-memory store.
+- **Backend selection** — new settings `BOT_STATE_BACKEND` (`memory` default | `redis`) and `REDIS_URL`; `store.get_bot_state_store()` returns the Redis store when configured. **Inert by default**: the in-memory store remains the default and existing call sites are unchanged, so the single-instance product is unaffected until call sites are migrated to the accessor and validated on a staging cluster (a deliberate later step). Added `redis>=5` (prod) and `fakeredis` (test) dependencies.
+- Test suite expanded 82 → 96 — serialization round-trip (incl. handle exclusion) and the full Redis store surface driven by `fakeredis` (CRUD, filtered/paginated listing, share-hash index, immutable-field rejection, and parity with the in-memory `Store`).
 
 ## [2.54.0] - 2026-05-23
 
