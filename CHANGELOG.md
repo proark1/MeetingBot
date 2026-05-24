@@ -4,9 +4,17 @@ All notable changes to JustHereToListen.io are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.53.1 — **Last updated:** 2026-05-23
+> **Latest version:** 2.54.0 — **Last updated:** 2026-05-23
 
 ---
+
+## [2.54.0] - 2026-05-23
+
+### Scaling / resilience groundwork
+
+- **`BotStateStore` protocol** (`app/store_interface.py`) — an explicit contract for the bot-lifecycle state surface (`create_bot`, `get_bot`, `update_bot`, `get_bot_by_share_hash`, `list_bots`, `delete_bot`). The in-memory `Store` conforms to it and `get_bot_state_store()` returns it, so a future shared/distributed backend (for multi-worker live meetings) can be swapped in without touching call sites. Phase 0 of the distributed-state work — no behaviour change.
+- **Synthetic canary** (`app/services/canary_service.py` + `scripts/canary.py`) — joins a known per-platform test meeting and asserts the end-to-end pipeline (admitted → audio flowing → transcript captured → clean leave), the earliest warning for `browser_bot.py` selector drift. The health-evaluation logic is pure and unit-tested; the live launch is a black-box HTTP client against a deployed API. Configured via `CANARY_*` env vars; exits non-zero on failure for scheduler/alert wiring. Supports `--dry-run`.
+- Test suite expanded 71 → 82 (store-protocol conformance + canary evaluation/config/runner).
 
 ## [2.53.1] - 2026-05-23
 

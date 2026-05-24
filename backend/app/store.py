@@ -10,7 +10,10 @@ import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from app.store_interface import BotStateStore
 
 logger = logging.getLogger(__name__)
 
@@ -876,3 +879,13 @@ async def load_persisted_webhooks() -> int:
 
 # Module-level singleton
 store = Store()
+
+
+def get_bot_state_store() -> "BotStateStore":
+    """Return the active bot-state store behind the ``BotStateStore`` contract.
+
+    Call sites that only need bot-lifecycle state should depend on this rather
+    than the concrete ``Store`` singleton, so a shared/distributed backend can
+    be swapped in later without touching them.
+    """
+    return store
