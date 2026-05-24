@@ -187,6 +187,14 @@ class Settings(BaseSettings):
     STORE_CLEANUP_INTERVAL_SECONDS: int = 1800   # how often to run cleanup (30 min)
     STORE_MAX_BOTS: int = 10000           # max bots in memory before LRU eviction
 
+    # ── Bot-state backend (distributed-state groundwork) ──────────────────────
+    # "memory" (default) = in-process Store singleton. "redis" = shared
+    # RedisBotStateStore (requires REDIS_URL) so multiple workers can share live
+    # bot state. See app.store.get_bot_state_store — selecting "redis" is inert
+    # until call sites are migrated to that accessor and validated on staging.
+    BOT_STATE_BACKEND: str = "memory"     # "memory" | "redis"
+    REDIS_URL: str = ""                   # e.g. redis://localhost:6379/0
+
     # ── Idempotency ───────────────────────────────────────────────────────────
     IDEMPOTENCY_TTL_HOURS: int = 24       # how long to cache key → bot_id mappings
 
