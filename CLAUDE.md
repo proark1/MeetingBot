@@ -212,12 +212,26 @@ docker-compose up
 
 ---
 
-## No Automated Tests
+## Automated Tests
 
-No `tests/` directory. Verify changes via:
+A pytest suite lives in `backend/tests/` (async, in-memory SQLite via `conftest.py`).
+Run it from `backend/`:
+
+```bash
+python -m pytest tests/ -q
+```
+
+CI runs it on every PR (`.github/workflows/test.yml`). Coverage spans the HTTP API
+(auth, bots, webhooks, advanced features, health) plus unit tests for pure logic
+(intelligence-service helpers, config parsing, webhook signing/SSRF, the store's
+`list_bots` filtering, keyword-alert caching, admin snapshot aggregation).
+
+Browser automation (`browser_bot.py`) is **not** covered by the suite — selector
+behaviour can only be verified against a real meeting. For those changes also use:
 - Swagger UI at `/api/docs`
 - Webhook playground at `/webhook-playground`
 - Manual bot creation with a real or simulated meeting URL
+
 
 ---
 

@@ -4,9 +4,16 @@ All notable changes to JustHereToListen.io are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.53.0 — **Last updated:** 2026-05-23
+> **Latest version:** 2.53.1 — **Last updated:** 2026-05-23
 
 ---
+
+## [2.53.1] - 2026-05-23
+
+### Tests / docs
+
+- Expanded the pytest suite from 39 to 71 tests, adding unit coverage for the 2.53.0 efficiency work: `intelligence_service` helpers (`_transcript_lines` cap, `_coerce_sentiments`, cached prompt-prefix blocks, client/model reuse, fence stripping, cost estimation, time-anchor normalisation), `Settings` parsing (`stripe_top_up_amounts`, `async_database_url`), webhook `_sign`/`_classify_status` and `check_url_ssrf` (incl. the DNS cache), `Store.list_bots` filtering/pagination (incl. `account_id_is_null`), the keyword-alert account-rule cache + invalidation, and `admin._aggregate_bot_snapshots`.
+- Corrected the stale "No Automated Tests" note in CLAUDE.md (a `backend/tests/` suite exists and runs in CI).
 
 ## [2.53.0] - 2026-05-23
 
