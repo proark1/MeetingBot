@@ -905,9 +905,26 @@ async function reanalyze() {
 (function() {
   const active = ['ready', 'scheduled', 'queued', 'joining', 'in_call', 'call_ended', 'transcribing'];
   const status = '{{ bot.status }}';
-  if (active.includes(status)) {
-    setTimeout(() => location.reload(), 8000);
+  if (!active.includes(status)) return;
+
+  // Poll on an interval rather than a single hard reload so we can hold off
+  // when the user is mid-interaction or the tab is backgrounded. Reloading
+  // while an input is focused would discard what they're typing; reloading a
+  // hidden tab is wasted work.
+  function maybeReload() {
+    if (document.hidden) return;                 // defer until the tab is visible
+    const el = document.activeElement;
+    if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) {
+      return;                                     // don't clobber active typing
+    }
+    location.reload();
   }
+  const timer = setInterval(maybeReload, 8000);
+  // If the tab was hidden when a reload was due, refresh as soon as it returns.
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) maybeReload();
+  });
+  window.addEventListener('beforeunload', () => clearInterval(timer));
 })();
 </script>
 {% endblock %}

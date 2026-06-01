@@ -1637,3 +1637,101 @@ async def run_bot_lifecycle(bot_id: str) -> None:
                 os.remove(audio_path)
         except Exception:
             pass
+        # Delete any orphaned video file. A successful video recording is kept
+        # locally (current_bot.video_path points at it); only remove the .mp4
+        # when it was never persisted (e.g. the run failed before saving) so a
+        # crashed/aborted bot can't leave large .mp4 files filling the disk.
+        try:
+            if video_path and os.path.exists(video_path) and not (current_bot and getattr(current_bot, "video_path", None)):
+                os.remove(video_path)
+        except Exception:
+            pass
+
+
+# Statuses where a bot is actively running (consuming a concurrency slot and
+# host resources). Scheduled/ready/queued bots are intentionally waiting and
+# are NOT reaped — a meeting scheduled for next week is not "stuck".
+_ACTIVE_RUNNING_STATUSES = frozenset({"joining", "in_call", "call_ended", "transcribing"})
+
+
+async def reap_stuck_bots(max_age_seconds: Optional[int] = None) -> int:
+    """Force-terminate bots that have been actively running far longer than any
+    legitimate meeting could.
+
+    The per-phase timeouts (admission / max-duration / alone / transcription /
+    analysis) already bound normal operation. This is a defence-in-depth safety
+    net for the rare case where a lifecycle task hangs or exits without setting
+    a terminal state, leaving a bot stuck and occupying a concurrency slot
+    forever. Returns the number of bots reaped.
+    """
+    from datetime import timezone as _timezone
+
+    if max_age_seconds is None:
+        max_age_seconds = settings.BOT_LIFECYCLE_MAX_SECONDS
+
+    now = _now()
+    # Operates on the in-memory store (the default backend). The Redis backend
+    # also implements list_live_bots (protocol parity), but distributed-mode
+    # reaping — where mark_terminal must remove from the shared live-state store
+    # too — lands with the full BOT_STATE_BACKEND=redis cutover.
+    try:
+        candidates = await store.list_live_bots(_ACTIVE_RUNNING_STATUSES)
+    except Exception:
+        logger.exception("reap_stuck_bots: failed to list live bots")
+        return 0
+
+    # Import the running-task registry lazily to avoid a circular import at
+    # module load (api.bots imports this module).
+    try:
+        from app.api.bots import _running_tasks
+    except Exception:
+        _running_tasks = {}
+
+    reaped = 0
+    for bot in candidates:
+        # Age since the bot actually began running. started_at is set when it
+        # enters in_call; before that fall back to the last status transition.
+        anchor = bot.started_at or bot.updated_at or bot.created_at
+        if anchor is None:
+            continue
+        if anchor.tzinfo is None:
+            anchor = anchor.replace(tzinfo=_timezone.utc)
+        age = (now - anchor).total_seconds()
+        if age < max_age_seconds:
+            continue
+
+        task = _running_tasks.get(bot.id)
+        if task is not None and not task.done():
+            # Lifecycle task is still alive but overdue — cancel it so its own
+            # CancelledError salvage path runs (transcript salvage + terminal).
+            logger.warning(
+                "reap_stuck_bots: cancelling overdue bot %s (status=%s, age=%.0fs)",
+                bot.id, bot.status, age,
+            )
+            task.cancel()
+            reaped += 1
+            continue
+
+        # No live task but status is non-terminal — the coroutine exited without
+        # finishing the lifecycle. Force a terminal error state ourselves.
+        logger.error(
+            "reap_stuck_bots: forcing terminal error on orphaned bot %s (status=%s, age=%.0fs)",
+            bot.id, bot.status, age,
+        )
+        try:
+            await store.mark_terminal(
+                bot.id, "error",
+                error_message=f"Bot reaped after exceeding maximum lifetime ({max_age_seconds}s)",
+                ended_at=now,
+            )
+            try:
+                record_bot_completed("error")
+            except Exception:
+                pass
+            reaped += 1
+        except Exception:
+            logger.exception("reap_stuck_bots: failed to mark bot %s terminal", bot.id)
+
+    if reaped:
+        logger.info("reap_stuck_bots: reaped %d stuck bot(s)", reaped)
+    return reaped

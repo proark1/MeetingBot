@@ -183,6 +183,12 @@ function fmtTime(iso) {
   return d.toLocaleTimeString() + ' ' + d.toLocaleDateString();
 }
 
+// Escape any value before building it into innerHTML.
+function esc(v) {
+  if (v === null || v === undefined) return '';
+  return String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
 function statusBadge(status) {
   const m = {
     delivered: 'badge-success', active: 'badge-success',
@@ -325,8 +331,8 @@ async function loadDeliveries() {
   }
   body.innerHTML = rows.map(r => `
     <tr>
-      <td><code style="font-size:.75rem;">${r.event}</code></td>
-      <td style="color:var(--gray);font-size:.75rem;">${r.webhook_id.slice(0,12)}…</td>
+      <td><code style="font-size:.75rem;">${esc(r.event)}</code></td>
+      <td style="color:var(--gray);font-size:.75rem;">${esc(String(r.webhook_id||'').slice(0,12))}…</td>
       <td>${statusBadge(r.status)}</td>
       <td>${r.response_status_code !== null ? `<span style="font-weight:600;color:${r.response_status_code<300?'var(--success)':'var(--danger)'}">${r.response_status_code}</span>` : '—'}</td>
       <td style="color:var(--gray);">#${r.attempt_number}</td>
@@ -349,7 +355,7 @@ async function sendTest() {
       toast('Test event sent!');
       loadDeliveries();
     } else {
-      el.innerHTML = `<span style="color:var(--danger);">✗ ${data.detail || 'Failed'}</span>`;
+      el.innerHTML = `<span style="color:var(--danger);">✗ ${esc(data.detail) || 'Failed'}</span>`;
       toast('Delivery failed', 'error');
     }
   } catch (e) {

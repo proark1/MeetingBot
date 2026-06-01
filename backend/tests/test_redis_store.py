@@ -124,3 +124,21 @@ async def test_parity_with_in_memory_store_filtering(rstore):
     r_list, r_total, _ = await rstore.list_bots(account_id="acct")
     assert mem_total == r_total
     assert [b.id for b in mem_list] == [b.id for b in r_list]
+
+
+async def test_list_live_bots_filters_by_status(rstore):
+    await rstore.create_bot(_bot("j", status="joining"))
+    await rstore.create_bot(_bot("c", status="in_call"))
+    await rstore.create_bot(_bot("d", status="done"))
+    live = await rstore.list_live_bots({"joining", "in_call"})
+    assert {b.id for b in live} == {"j", "c"}
+
+
+async def test_list_live_bots_parity_with_memory(rstore):
+    mem = Store()
+    for b in (_bot("j", status="joining"), _bot("d", status="done")):
+        await mem.create_bot(b)
+        await rstore.create_bot(b)
+    statuses = {"joining", "in_call", "call_ended", "transcribing"}
+    assert {b.id for b in await mem.list_live_bots(statuses)} == \
+           {b.id for b in await rstore.list_live_bots(statuses)}

@@ -168,3 +168,18 @@ class RedisBotStateStore:
         if bot and bot.share_token_hash:
             pipe.hdel(self._share_key, bot.share_token_hash)
         await pipe.execute()
+
+    async def list_live_bots(self, statuses) -> list[BotSession]:
+        """Snapshot of bots whose status is in ``statuses`` (reaper support)."""
+        ids = await self._r.zrevrange(self._index_key, 0, -1)
+        if not ids:
+            return []
+        raws = await self._r.mget([self._bot_key(i) for i in ids])
+        out: list[BotSession] = []
+        for raw in raws:
+            if not raw:
+                continue
+            b = BotSession.from_state_dict(json.loads(raw))
+            if b.status in statuses:
+                out.append(b)
+        return out

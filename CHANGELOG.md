@@ -4,7 +4,66 @@ All notable changes to JustHereToListen.io are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.63.3 — **Last updated:** 2026-06-01
+> **Latest version:** 2.65.1 — **Last updated:** 2026-06-01
+
+---
+
+## [2.65.1] - 2026-06-01
+
+Distributed-state groundwork (scale-out, step 1) — no default-behaviour change.
+
+### Changed
+- **`BotStateStore` contract now includes `list_live_bots(statuses)`** — the method the stuck-bot reaper relies on is now part of the explicit interface, and the Redis backend (`RedisBotStateStore`) implements it at parity with the in-memory `Store`. The existing `runtime_checkable` protocol conformance test (`test_conforms_to_protocol`) enforces this, so the opt-in `BOT_STATE_BACKEND=redis` backend can't silently drift from the in-memory store as the live-state surface grows. +2 Redis tests (status filtering + memory-parity).
+
+> Context: this is the first reviewable increment of the horizontal-scale-out work. A full cutover (migrating the ~16 call sites off the in-memory `store` singleton to `get_bot_state_store()`, and making `mark_terminal` + the queue Redis-coordinated so `MAX_CONCURRENT_BOTS` is cluster-wide) remains a dedicated effort requiring a Redis instance and deploy plan. The reaper still operates on the in-memory backend (the default); distributed-mode reaping lands with that cutover.
+
+---
+
+## [2.65.0] - 2026-06-01
+
+Reliability — stuck-bot safety net.
+
+### Added
+- **Stuck-bot reaper** — a supervised background job (folded into the existing cleanup loop) that force-terminates bots stuck in an actively-running state (`joining` / `in_call` / `call_ended` / `transcribing`) past a hard wall-clock ceiling. The per-phase timeouts (admission / max-duration / alone / transcription / analysis) already bound normal operation; this is defence-in-depth for the rare case where a lifecycle task hangs or exits without setting a terminal state, leaving a bot occupying a concurrency slot forever.
+  - If the lifecycle task is still alive but overdue, it's **cancelled** so the task's own `CancelledError` salvage path runs (transcript salvage → terminal state).
+  - If no live task exists but the status is non-terminal (a true orphan), the bot is force-marked `error`.
+  - Scheduled / queued / ready bots are **never** reaped — a meeting scheduled for next week is intentionally waiting, not stuck.
+  - New `BOT_LIFECYCLE_MAX_SECONDS` setting (default `10800` = 3h) controls the ceiling. New `Store.list_live_bots(statuses)` snapshot helper backs the reaper.
+  - +3 unit tests (orphan force-error, overdue-task cancellation, no-op when healthy).
+
+---
+
+## [2.64.1] - 2026-06-01
+
+UI/UX hardening pass (continued) — session resilience and accessibility.
+
+### Added
+- **Global `fetch` 401 interceptor** — every authenticated page that extends `base.html` (dashboard, bot detail, admin, top-up) now redirects to `/login?next=…` whenever any `fetch` returns `401`, instead of surfacing a cryptic "Failed to…" error. The response is still returned so per-caller error handling runs normally. Standalone pages (API dashboard, login) are unaffected.
+
+### Changed
+- **Smarter bot-detail auto-refresh** — the bot detail page previously did a single hard `location.reload()` after 8s for any active bot. It now polls on an interval that (a) skips the reload while an `<input>`/`<textarea>`/contenteditable is focused so it can't discard what the user is typing, and (b) defers reloading a backgrounded tab until it becomes visible again, refreshing immediately on return.
+
+### Fixed (accessibility)
+- Decorative SVG icons in the top bar (hamburger, sun/moon theme toggle) are now `aria-hidden="true" focusable="false"` so screen readers announce only the button's `aria-label`, not the icon paths.
+- Removed the incorrect `role="status"` live-region from the reusable empty-state partial, which caused screen readers to re-announce static empty states on every render.
+
+---
+
+## [2.64.0] - 2026-06-01
+
+UI/UX hardening pass — security, money-path safety, and session resilience across the web UI.
+
+### Security
+- **HTML-injection in the admin console, API dashboard and webhook playground** — DB/user-controlled values (account emails, meeting URLs, error messages, audit-log details, workspace IDs, webhook event names) were interpolated straight into `innerHTML` via template literals. They are now escaped through a shared `jhtlEscape` helper (added to `base.html` and inlined in the standalone `api_dashboard.html` / `webhook_playground.html`). A malicious display name, meeting URL or stored error string can no longer execute script in an operator's browser.
+
+### Added
+- **Shared `apiFetch` session handling** — the dashboard fetch helper now redirects to `/login?next=…` on `401` (instead of surfacing a cryptic "Failed to…" toast) and converts network failures into a friendly message. New `jhtlHandleUnauthorized()` global is reused by the bot-creation flow.
+- **Card-payment confirmation** — the Stripe top-up form now shows a confirm dialog with the exact amount before redirecting to checkout.
+
+### Fixed
+- **Double-submit on bot creation** — the Send/Schedule Bot form now guards against rapid repeat submits (Enter key / double-click) with an in-flight flag, and validates the scheduled datetime before calling `toISOString()` (no more "Invalid Date" payloads).
+- **Orphaned `.mp4` recordings** — a bot run with video enabled that failed before persisting its recording left the local `.mp4` on disk forever (only the `.wav` was cleaned). The lifecycle `finally` now removes an unpersisted video file too, mirroring the audio cleanup, preventing disk fill-up from failed runs.
+- **Silent clipboard failures** — the USDC address "Copy" button now falls back to selecting the field (with a "Press Ctrl+C" hint) when the Clipboard API is unavailable (insecure context / private browsing), instead of failing with an unhandled promise rejection.
 
 ---
 

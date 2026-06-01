@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     BOT_ADMISSION_TIMEOUT: int = 300    # seconds to wait for host to admit the bot
     BOT_MAX_DURATION: int = 7200        # max meeting length in seconds (2 hours)
     BOT_ALONE_TIMEOUT: int = 300        # seconds alone before the bot leaves (5 min)
+    # Hard wall-clock ceiling on an actively-running bot (joining→transcribing).
+    # A safety net above BOT_MAX_DURATION (+ transcription/analysis headroom): if
+    # a bot's lifecycle hangs or exits without setting a terminal state, the
+    # reaper force-terminates it so it can't occupy a concurrency slot forever.
+    BOT_LIFECYCLE_MAX_SECONDS: int = 10800  # 3 hours
 
     # Concurrency — max simultaneous browser bots
     MAX_CONCURRENT_BOTS: int = 3

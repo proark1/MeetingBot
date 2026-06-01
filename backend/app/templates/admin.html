@@ -1112,27 +1112,27 @@ async function loadAuditLog() {
       const ts = new Date(r.created_at).toISOString().replace('T',' ').slice(0,19);
       const color = _auditColor(r.action);
       const resource = r.resource_type
-        ? `<span style="color:#94a3b8">${r.resource_type}</span> <code style="font-size:11px;color:#7dd3fc">${(r.resource_id||'').slice(0,8)}…</code>`
+        ? `<span style="color:#94a3b8">${esc(r.resource_type)}</span> <code style="font-size:11px;color:#7dd3fc">${esc(String(r.resource_id||'').slice(0,8))}…</code>`
         : '<span class="text-muted">—</span>';
       let details = '';
       if (r.details) {
         try {
           const d = JSON.parse(r.details);
           details = d.actor_email
-            ? `<span style="color:#E5A58E">${d.actor_email}</span>`
-            : Object.entries(d).map(([k,v])=>`<span class="text-muted">${k}:</span> ${v}`).join(' · ');
-        } catch { details = r.details; }
+            ? `<span style="color:#E5A58E">${esc(d.actor_email)}</span>`
+            : Object.entries(d).map(([k,v])=>`<span class="text-muted">${esc(k)}:</span> ${esc(v)}`).join(' · ');
+        } catch { details = esc(r.details); }
       }
       return `<tr style="border-bottom:1px solid rgba(255,255,255,0.04);">
         <td class="px-3 py-2" style="white-space:nowrap;color:#64748b">${ts}</td>
-        <td class="px-3 py-2"><span style="color:${color};font-weight:600">${r.action}</span></td>
+        <td class="px-3 py-2"><span style="color:${color};font-weight:600">${esc(r.action)}</span></td>
         <td class="px-3 py-2">${resource}</td>
         <td class="px-3 py-2" style="max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${details}</td>
-        <td class="px-3 py-2" style="font-family:monospace;color:#64748b">${r.ip_address||'—'}</td>
+        <td class="px-3 py-2" style="font-family:monospace;color:#64748b">${esc(r.ip_address)||'—'}</td>
       </tr>`;
     }).join('');
   } catch(e) {
-    tbody.innerHTML = `<tr><td colspan="5" class="text-center text-danger py-3">${e.message}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="5" class="text-center text-danger py-3">${esc(e.message)}</td></tr>`;
   }
 }
 
@@ -1174,6 +1174,12 @@ async function _loadAnalytics(force = false) {
 
 function _fmt(n) { return (n||0).toLocaleString(); }
 function _fmtCost(n) { return '$' + (+(n||0)).toFixed(4); }
+// Escape any DB/user-controlled string before building it into innerHTML.
+// Falls back to a local impl if base.html's global isn't present.
+const esc = window.jhtlEscape || function (v) {
+  if (v === null || v === undefined) return '';
+  return String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+};
 
 function _renderAnalytics(d) {
   const ov = d.overview || {};
@@ -1371,7 +1377,7 @@ function _renderAnalytics(d) {
   const topErrs = errData.top_messages || [];
   document.getElementById('error-messages-table').innerHTML = topErrs.length
     ? '<table class="table table-sm mb-0"><thead><tr><th>Error</th><th class="text-end">Count</th></tr></thead><tbody>' +
-      topErrs.map(([msg, cnt]) => '<tr><td style="font-size:12px;word-break:break-all">' + msg + '</td><td class="text-end small">' + cnt + '</td></tr>').join('') +
+      topErrs.map(([msg, cnt]) => '<tr><td style="font-size:12px;word-break:break-all">' + esc(msg) + '</td><td class="text-end small">' + esc(cnt) + '</td></tr>').join('') +
       '</tbody></table>'
     : '<div class="text-muted small text-center py-3">No errors recorded.</div>';
 
@@ -1466,16 +1472,16 @@ function _filterAnalyticsUsers(q) {
     return;
   }
   tbody.innerHTML = filtered.map(u => `<tr>
-    <td style="font-size:12.5px">${u.email}</td>
-    <td><span class="chip chip-gray" style="font-size:10px;padding:1px 5px">${u.plan}</span></td>
-    <td class="fw-semibold">${u.total_bots}</td>
-    <td>${u.bots_30d}</td>
-    <td>${u.bots_7d}</td>
-    <td style="font-size:12px;color:#94a3b8">${u.last_active || '—'}</td>
-    <td style="font-size:12px">${u.platform_pref || '—'}</td>
+    <td style="font-size:12.5px">${esc(u.email)}</td>
+    <td><span class="chip chip-gray" style="font-size:10px;padding:1px 5px">${esc(u.plan)}</span></td>
+    <td class="fw-semibold">${_fmt(u.total_bots)}</td>
+    <td>${_fmt(u.bots_30d)}</td>
+    <td>${_fmt(u.bots_7d)}</td>
+    <td style="font-size:12px;color:#94a3b8">${esc(u.last_active) || '—'}</td>
+    <td style="font-size:12px">${esc(u.platform_pref) || '—'}</td>
     <td style="font-size:12px">${_fmt(u.ai_tokens)}</td>
     <td style="font-size:12px">${_fmtCost(u.ai_cost_usd)}</td>
-    <td style="font-size:11px;color:#64748b">${(u.features_used||[]).join(', ') || '—'}</td>
+    <td style="font-size:11px;color:#64748b">${esc((u.features_used||[]).join(', ')) || '—'}</td>
   </tr>`).join('');
 }
 
@@ -1495,33 +1501,33 @@ async function _doSupportLookup() {
     if (!r.ok) {
       const err = await r.json().catch(() => ({ detail: r.statusText }));
       resultEl.className = '';
-      resultEl.innerHTML = `<div class="alert alert-danger">${err.detail || 'Lookup failed.'}</div>`;
+      resultEl.innerHTML = `<div class="alert alert-danger">${esc(err.detail) || 'Lookup failed.'}</div>`;
       return;
     }
     const d = await r.json();
     const bots = (d.recent_bots || []).map(b => `<tr>
-      <td style="font-size:12px">${b.id.slice(0,8)}…</td>
-      <td><span class="chip chip-gray" style="font-size:10px">${b.status}</span></td>
-      <td style="font-size:12px">${b.meeting_platform || '—'}</td>
-      <td style="font-size:11.5px;word-break:break-all;max-width:200px">${b.meeting_url || '—'}</td>
-      <td style="font-size:12px">${b.created_at ? b.created_at.slice(0,10) : '—'}</td>
+      <td style="font-size:12px">${esc(String(b.id||'').slice(0,8))}…</td>
+      <td><span class="chip chip-gray" style="font-size:10px">${esc(b.status)}</span></td>
+      <td style="font-size:12px">${esc(b.meeting_platform) || '—'}</td>
+      <td style="font-size:11.5px;word-break:break-all;max-width:200px">${esc(b.meeting_url) || '—'}</td>
+      <td style="font-size:12px">${b.created_at ? esc(b.created_at.slice(0,10)) : '—'}</td>
       <td style="font-size:12px">${b.duration_seconds ? (b.duration_seconds/60).toFixed(1)+'m' : '—'}</td>
-      <td style="font-size:12px">${b.transcript_entries || 0}</td>
+      <td style="font-size:12px">${_fmt(b.transcript_entries)}</td>
       <td style="font-size:12px;color:${b.has_analysis ? '#16a34a' : '#94a3b8'}">${b.has_analysis ? '✓' : '—'}</td>
-      <td style="font-size:12px">${b.error_message ? '<span class="text-danger">'+b.error_message.slice(0,40)+'</span>' : '—'}</td>
+      <td style="font-size:12px">${b.error_message ? '<span class="text-danger">'+esc(String(b.error_message).slice(0,40))+'</span>' : '—'}</td>
     </tr>`).join('');
 
     resultEl.className = '';
     resultEl.innerHTML = `
       <div class="card card-pad mb-3">
-        <div class="section-title mb-3">Account: ${d.email}</div>
+        <div class="section-title mb-3">Account: ${esc(d.email)}</div>
         <div class="row g-3">
-          <div class="col-md-3"><div class="stat-card"><div class="stat-label">Plan</div><div class="fw-semibold mt-1">${d.plan}</div></div></div>
-          <div class="col-md-3"><div class="stat-card"><div class="stat-label">Type</div><div class="fw-semibold mt-1">${d.account_type}</div></div></div>
-          <div class="col-md-3"><div class="stat-card"><div class="stat-label">Monthly Bots</div><div class="fw-semibold mt-1">${d.monthly_bots_used}</div></div></div>
-          <div class="col-md-3"><div class="stat-card"><div class="stat-label">Joined</div><div class="fw-semibold mt-1 small">${(d.created_at||'').slice(0,10)}</div></div></div>
+          <div class="col-md-3"><div class="stat-card"><div class="stat-label">Plan</div><div class="fw-semibold mt-1">${esc(d.plan)}</div></div></div>
+          <div class="col-md-3"><div class="stat-card"><div class="stat-label">Type</div><div class="fw-semibold mt-1">${esc(d.account_type)}</div></div></div>
+          <div class="col-md-3"><div class="stat-card"><div class="stat-label">Monthly Bots</div><div class="fw-semibold mt-1">${_fmt(d.monthly_bots_used)}</div></div></div>
+          <div class="col-md-3"><div class="stat-card"><div class="stat-label">Joined</div><div class="fw-semibold mt-1 small">${esc((d.created_at||'').slice(0,10))}</div></div></div>
         </div>
-        <div class="mt-2 small text-muted">Key: <strong>${d.key_label}</strong> · Issued ${(d.key_created_at||'').slice(0,10)}${d.key_expires_at ? ' · Expires '+d.key_expires_at.slice(0,10) : ''}</div>
+        <div class="mt-2 small text-muted">Key: <strong>${esc(d.key_label)}</strong> · Issued ${esc((d.key_created_at||'').slice(0,10))}${d.key_expires_at ? ' · Expires '+esc(d.key_expires_at.slice(0,10)) : ''}</div>
       </div>
       <div class="card">
         <div class="px-4 pt-3 pb-2"><div class="section-title">Recent Bots (last 30)</div></div>
@@ -1536,7 +1542,7 @@ async function _doSupportLookup() {
       </div>`;
   } catch(e) {
     resultEl.className = '';
-    resultEl.innerHTML = `<div class="alert alert-danger">${e.message}</div>`;
+    resultEl.innerHTML = `<div class="alert alert-danger">${esc(e.message)}</div>`;
   } finally {
     btn.disabled = false;
   }

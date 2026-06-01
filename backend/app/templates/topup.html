@@ -247,17 +247,53 @@ function applyCustom(val) {
 
 function copyAddress(btn) {
   const val = document.getElementById('usdc-address').value;
-  navigator.clipboard.writeText(val).then(() => {
-    const orig = btn.textContent;
+  const showCopied = () => {
+    const orig = btn.dataset.origLabel || btn.textContent;
+    btn.dataset.origLabel = orig;
+    if (btn._copyTimer) clearTimeout(btn._copyTimer);
     btn.textContent = 'Copied!';
     btn.classList.add('btn-success');
     btn.classList.remove('btn-outline-secondary');
-    setTimeout(() => {
+    btn._copyTimer = setTimeout(() => {
       btn.textContent = orig;
       btn.classList.remove('btn-success');
       btn.classList.add('btn-outline-secondary');
     }, 2000);
-  });
+  };
+  const showFailed = () => {
+    // Clipboard API unavailable (insecure context / private mode): select the
+    // field so the user can copy manually instead of failing silently.
+    const input = document.getElementById('usdc-address');
+    try { input.focus(); input.select(); } catch (e) {}
+    btn.textContent = 'Press Ctrl+C';
+    setTimeout(() => { btn.textContent = btn.dataset.origLabel || 'Copy'; }, 2500);
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(val).then(showCopied).catch(showFailed);
+  } else {
+    showFailed();
+  }
 }
+
+// Confirm the charge and guard against double-submit on the card payment form.
+document.addEventListener('DOMContentLoaded', function () {
+  const stripeForm = document.getElementById('stripe-form');
+  if (!stripeForm) return;
+  stripeForm.addEventListener('submit', function (e) {
+    const submitBtn = stripeForm.querySelector('button[type="submit"]');
+    if (submitBtn && submitBtn.dataset.submitting === '1') { e.preventDefault(); return; }
+    const amount = document.getElementById('stripe-amount').value;
+    if (!window.confirm(`Charge your card $${amount}? You'll be taken to a secure Stripe checkout.`)) {
+      e.preventDefault();
+      return;
+    }
+    if (submitBtn) {
+      submitBtn.dataset.submitting = '1';
+      submitBtn.disabled = true;
+      submitBtn.style.opacity = '0.7';
+      submitBtn.textContent = 'Redirecting to checkout…';
+    }
+  });
+});
 </script>
 {% endblock %}
