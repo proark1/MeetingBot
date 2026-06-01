@@ -102,10 +102,11 @@ def _transcribe_with_faster_whisper(audio_path: str, language: Optional[str] = N
     if not isinstance(model, WhisperModel):
         raise RuntimeError("faster-whisper model not loaded")
 
+    from app.config import settings
     segments, info = model.transcribe(
         audio_path,
         language=language or None,
-        beam_size=5,
+        beam_size=max(1, settings.WHISPER_BEAM_SIZE),
         vad_filter=True,
     )
     logger.info(

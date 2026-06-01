@@ -4324,6 +4324,15 @@ async def run_browser_bot(
         "--disable-backgrounding-occluded-windows",
         "--disable-renderer-backgrounding",
         "--window-size=1280,720",
+        # Resource trimming for a listen-only bot — fewer processes and no
+        # extension/component machinery cuts per-bot RSS without affecting the
+        # join/caption/audio paths. (Images are NOT disabled: some join flows
+        # rely on image-based buttons.)
+        "--renderer-process-limit=1",
+        "--disable-extensions",
+        "--disable-component-update",
+        "--disable-component-extensions-with-background-pages",
+        "--disable-default-apps",
     ]
 
     async with async_playwright() as pw:

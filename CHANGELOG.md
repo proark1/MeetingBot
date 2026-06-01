@@ -28,9 +28,11 @@ Hardening pass following a full-service audit (security, correctness, performanc
 - Keyword-alert cache is bounded (LRU) instead of growing per-account unboundedly.
 
 ### Performance
-- Post-meeting analysis/chapters/email run on Claude Sonnet with transcript prompt-caching (large per-meeting cost reduction); Opus stays available behind an explicit opt-in.
-- Tightened Chromium launch flags for the listen-only bot (fewer renderer processes, no extensions/images).
-- Reuse pooled `httpx` clients on the TTS and integration hot paths.
+- Post-meeting analysis/chapters run on Claude Sonnet (configurable via `AI_ANALYSIS_MODEL`/`AI_ANALYSIS_THINKING`) and share one cached transcript prefix, so the concurrent chapters call no longer re-pays full input price for the whole transcript — a large per-meeting cost reduction. Opus + adaptive thinking stays available behind an explicit opt-in.
+- Tightened Chromium launch flags for the listen-only bot (single renderer process, no extensions/component-update/default-apps) to cut per-bot RSS.
+- Reuse a pooled `httpx` client on the Gemini-TTS live voice path and the Google Drive upload path instead of standing up a new pool + TLS handshake per call.
+- Whisper defaults to greedy decoding (`WHISPER_BEAM_SIZE=1`, ~5× faster on CPU); configurable.
+- Indexed `accounts.monthly_reset_at` so the hourly monthly-reset sweep isn't a full table scan.
 
 ## [2.55.0] - 2026-05-23
 

@@ -12,6 +12,14 @@ class Settings(BaseSettings):
     # opening and closing. 0 disables the cap. ~200k chars ≈ 50k tokens.
     AI_TRANSCRIPT_MAX_CHARS: int = 200_000
 
+    # Claude model + thinking mode for post-meeting analysis/chapters/email/brief.
+    # Defaults to Sonnet without extended thinking: ~5-10× cheaper and faster than
+    # Opus+adaptive-thinking while still producing high-quality schema-shaped JSON.
+    # Set AI_ANALYSIS_MODEL=claude-opus-4-6 and AI_ANALYSIS_THINKING=true to opt
+    # back into the previous behaviour for maximum depth.
+    AI_ANALYSIS_MODEL: str = "claude-sonnet-4-6"
+    AI_ANALYSIS_THINKING: bool = False
+
     # API key for authenticating client requests (Bearer token)
     # Leave empty to disable authentication (useful for internal deployments)
     API_KEY: str = ""
@@ -242,6 +250,9 @@ class Settings(BaseSettings):
     WHISPER_ENABLED: bool = False       # set True to use local Whisper instead of Gemini
     WHISPER_MODEL: str = "base"         # Whisper model size: tiny, base, small, medium, large
     WHISPER_DEVICE: str = "cpu"         # "cpu" or "cuda" for GPU acceleration
+    # Beam width. 1 (greedy) is ~5× faster on CPU for marginal accuracy loss and
+    # avoids pegging a core for minutes on long meetings; raise for more accuracy.
+    WHISPER_BEAM_SIZE: int = 1
 
     # ── Team workspaces ────────────────────────────────────────────────────────
     WORKSPACES_ENABLED: bool = True
