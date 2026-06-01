@@ -4,9 +4,22 @@ All notable changes to JustHereToListen.io are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.59.0 — **Last updated:** 2026-06-01
+> **Latest version:** 2.60.0 — **Last updated:** 2026-06-01
 
 ---
+
+## [2.60.0] - 2026-06-01
+
+Maintainability (roadmap batch 5).
+
+### Added
+- **Alembic schema migrations.** `alembic.ini` + async-aware `alembic/env.py` (reads `DATABASE_URL` from app Settings, autogenerates against `Base.metadata`, `render_as_batch` on SQLite, `compare_type=True`) + a baseline revision capturing the full current schema (24 tables, 58 indexes) that applies cleanly to a fresh DB. The legacy in-app `_migrate_schema` still runs on startup; Alembic is the forward path for new changes (cutover deferred — same conservative pattern as the Redis scaffolding). Guard tests in `tests/test_alembic_migrations.py`.
+
+### Changed
+- Began decomposing the 5,807-line `browser_bot.py`: the per-platform admission/end/alone/waiting **text signals** moved to `services/browser/platform_texts.py` (the documented platform-extension point), re-imported into `browser_bot.py` under their legacy `_`-prefixed names so all references and behavior are unchanged.
+
+### Notes
+- The deeply-coupled page/audio/caption/join **logic** was intentionally **not** split across modules: on a 5,807-line file with no automation test coverage that carries real regression risk for purely cosmetic benefit. Data extraction (safe, verifiable) was done; blind logic fragmentation was not.
 
 ## [2.59.0] - 2026-06-01
 

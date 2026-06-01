@@ -130,7 +130,7 @@ f"<li>{_he(user_text)}</li>"   # required — Python f-strings do NOT auto-escap
 | `onepizza` | `onepizza.io` | Yes — lobby: `#lobbyName`, `#lobbyJoinBtn`; waiting room: `#waitingRoomOverlay` |
 | `webex`, `whereby`, `bluejeans`, `gotomeeting` | various | URL detection only |
 
-To add a new platform: update `_PLATFORM_NETLOC` + `_REAL_PLATFORMS` in `bot_service.py`, add `_join_<platform>()` in `browser_bot.py`, add entries in `_IN_CALL_TEXTS`, `_END_TEXTS`, `_ALONE_TEXTS`, `_WAITING_TEXTS`.
+To add a new platform: update `_PLATFORM_NETLOC` + `_REAL_PLATFORMS` in `bot_service.py`, add `_join_<platform>()` in `browser_bot.py`, and add entries to the per-platform text dicts in `services/browser/platform_texts.py` (`IN_CALL_TEXTS`, `END_TEXTS`, `ALONE_TEXTS`, `WAITING_TEXTS` — re-imported into `browser_bot.py` under their legacy `_`-prefixed names).
 
 ---
 
