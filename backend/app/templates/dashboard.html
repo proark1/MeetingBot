@@ -527,13 +527,13 @@
           <table class="table table-hover">
             <thead>
               <tr>
-                <th>Bot ID</th>
-                <th>Meeting</th>
-                <th>Platform</th>
-                <th>Status</th>
-                <th>Health</th>
-                <th>Created</th>
-                <th></th>
+                <th scope="col">Bot ID</th>
+                <th scope="col">Meeting</th>
+                <th scope="col">Platform</th>
+                <th scope="col">Status</th>
+                <th scope="col">Health</th>
+                <th scope="col">Created</th>
+                <th scope="col"></th>
               </tr>
             </thead>
             <tbody>
@@ -826,15 +826,15 @@
           <table class="table table-hover" id="bots-table">
             <thead>
               <tr>
-                <th>Bot ID</th>
-                <th>Meeting URL</th>
-                <th>Platform</th>
-                <th>Status</th>
-                <th>Health</th>
-                <th>Cost</th>
-                <th>Duration</th>
-                <th>Created</th>
-                <th></th>
+                <th scope="col">Bot ID</th>
+                <th scope="col">Meeting URL</th>
+                <th scope="col">Platform</th>
+                <th scope="col">Status</th>
+                <th scope="col">Health</th>
+                <th scope="col">Cost</th>
+                <th scope="col">Duration</th>
+                <th scope="col">Created</th>
+                <th scope="col"></th>
               </tr>
             </thead>
             <tbody>
@@ -979,13 +979,13 @@
             <table class="table table-hover">
               <thead>
                 <tr>
-                  <th>Bot</th>
-                  <th>Platform</th>
-                  <th>Duration</th>
-                  <th>Health Score</th>
-                  <th>Participants</th>
-                  <th>Cost</th>
-                  <th>Status</th>
+                  <th scope="col">Bot</th>
+                  <th scope="col">Platform</th>
+                  <th scope="col">Duration</th>
+                  <th scope="col">Health Score</th>
+                  <th scope="col">Participants</th>
+                  <th scope="col">Cost</th>
+                  <th scope="col">Status</th>
                 </tr>
               </thead>
               <tbody>
@@ -1191,7 +1191,7 @@
         <div style="overflow-x:auto">
           <table class="table table-hover" id="live-keys-table">
             <thead>
-              <tr><th>Name</th><th>Key</th><th>Last used</th><th></th></tr>
+              <tr><th scope="col">Name</th><th scope="col">Key</th><th scope="col">Last used</th><th scope="col"></th></tr>
             </thead>
             <tbody>
               {% for key in api_keys if not key.key_preview.startswith("sk_test_") %}
@@ -1236,7 +1236,7 @@
         <div style="overflow-x:auto">
           <table class="table table-hover" id="test-keys-table">
             <thead>
-              <tr><th>Name</th><th>Key</th><th>Last used</th><th></th></tr>
+              <tr><th scope="col">Name</th><th scope="col">Key</th><th scope="col">Last used</th><th scope="col"></th></tr>
             </thead>
             <tbody>
               {% for key in api_keys if key.key_preview.startswith("sk_test_") %}
@@ -1391,7 +1391,7 @@
         <div class="table-responsive">
           <table class="table table-hover" id="integrations-table">
             <thead>
-              <tr><th>Type</th><th>Name</th><th>Status</th><th>Added</th><th></th></tr>
+              <tr><th scope="col">Type</th><th scope="col">Name</th><th scope="col">Status</th><th scope="col">Added</th><th scope="col"></th></tr>
             </thead>
             <tbody>
               {% for integ in all_integrations %}
@@ -1484,7 +1484,7 @@
         <div class="table-responsive">
           <table class="table table-hover" id="cal-feeds-table">
             <thead>
-              <tr><th>Name</th><th>Status</th><th>Auto-join</th><th>Bot name</th><th>Last synced</th><th></th></tr>
+              <tr><th scope="col">Name</th><th scope="col">Status</th><th scope="col">Auto-join</th><th scope="col">Bot name</th><th scope="col">Last synced</th><th scope="col"></th></tr>
             </thead>
             <tbody>
               {% for feed in all_calendar_feeds %}
@@ -1962,7 +1962,7 @@
         <div style="overflow-x:auto">
           <table class="table table-hover">
             <thead>
-              <tr><th>Date</th><th>Type</th><th>Description</th><th class="text-end">Amount</th></tr>
+              <tr><th scope="col">Date</th><th scope="col">Type</th><th scope="col">Description</th><th class="text-end">Amount</th></tr>
             </thead>
             <tbody>
               {% for tx in transactions %}
@@ -2926,7 +2926,7 @@ async function _loadDashUsage() {
     // Platform table
     const platforms = d.top_platforms_7d || [];
     document.getElementById('dash-platform-table').innerHTML = platforms.length
-      ? '<table class="table table-sm mb-0"><thead><tr><th>Platform</th><th class="text-end">Bots</th></tr></thead><tbody>' +
+      ? '<table class="table table-sm mb-0"><thead><tr><th scope="col">Platform</th><th class="text-end">Bots</th></tr></thead><tbody>' +
         platforms.map(p => '<tr><td style="font-size:12.5px">' + (p.platform || 'unknown') + '</td><td class="text-end small fw-bold">' + _fmtN(p.count) + '</td></tr>').join('') +
         '</tbody></table>'
       : '<div class="text-muted small py-3 text-center">No data yet.</div>';
@@ -2936,7 +2936,7 @@ async function _loadDashUsage() {
     const costs = d.cost_by_operation_7d || {};
     const opKeys = Object.keys(ops);
     document.getElementById('dash-ops-table').innerHTML = opKeys.length
-      ? '<table class="table table-sm mb-0"><thead><tr><th>Operation</th><th class="text-end">Tokens</th><th class="text-end">Cost</th></tr></thead><tbody>' +
+      ? '<table class="table table-sm mb-0"><thead><tr><th scope="col">Operation</th><th class="text-end">Tokens</th><th class="text-end">Cost</th></tr></thead><tbody>' +
         opKeys.sort((a, b) => (ops[b] || 0) - (ops[a] || 0)).map(k =>
           '<tr><td style="font-size:12.5px">' + k + '</td><td class="text-end small">' + _fmtN(ops[k]) + '</td><td class="text-end small">' + _fmtC(costs[k] || 0) + '</td></tr>'
         ).join('') + '</tbody></table>'
@@ -2966,7 +2966,7 @@ async function _loadDashTrends() {
     // Sentiment trend
     const sentiment = d.sentiment_trend || [];
     document.getElementById('dash-sentiment-table').innerHTML = sentiment.length
-      ? '<table class="table table-sm mb-0"><thead><tr><th>Week</th><th>Meetings</th><th class="text-end">Sentiment</th></tr></thead><tbody>' +
+      ? '<table class="table table-sm mb-0"><thead><tr><th scope="col">Week</th><th scope="col">Meetings</th><th class="text-end">Sentiment</th></tr></thead><tbody>' +
         sentiment.map(w => {
           const score = (w.score || 0);
           const color = score > 0.2 ? '#10b981' : score < -0.2 ? '#ef4444' : '#6B7280';
@@ -2979,7 +2979,7 @@ async function _loadDashTrends() {
     const costPlat = d.cost_by_platform || {};
     const cpKeys = Object.keys(costPlat);
     document.getElementById('dash-cost-platform').innerHTML = cpKeys.length
-      ? '<table class="table table-sm mb-0"><thead><tr><th>Platform</th><th class="text-end">Cost</th></tr></thead><tbody>' +
+      ? '<table class="table table-sm mb-0"><thead><tr><th scope="col">Platform</th><th class="text-end">Cost</th></tr></thead><tbody>' +
         cpKeys.sort((a, b) => (costPlat[b] || 0) - (costPlat[a] || 0)).map(k =>
           '<tr><td style="font-size:12.5px">' + k.replace('_', ' ') + '</td><td class="text-end small fw-bold">' + _fmtC(costPlat[k]) + '</td></tr>'
         ).join('') + '</tbody></table>'
@@ -2996,7 +2996,7 @@ async function _loadDashTrends() {
         // Top topics
         const topics = lt.top_topics || [];
         document.getElementById('long-topics').innerHTML = topics.length
-          ? '<table class="table table-sm mb-0"><thead><tr><th>Topic</th><th class="text-end">Mentions</th></tr></thead><tbody>' +
+          ? '<table class="table table-sm mb-0"><thead><tr><th scope="col">Topic</th><th class="text-end">Mentions</th></tr></thead><tbody>' +
             topics.slice(0, 10).map(t =>
               '<tr><td style="font-size:12.5px">' + t.topic + '</td><td class="text-end small fw-bold">' + t.count + '</td></tr>'
             ).join('') + '</tbody></table>'
@@ -3005,7 +3005,7 @@ async function _loadDashTrends() {
         // Meetings per day
         const mpd = lt.meetings_per_day || [];
         document.getElementById('long-daily').innerHTML = mpd.length
-          ? '<table class="table table-sm mb-0"><thead><tr><th>Date</th><th class="text-end">Meetings</th></tr></thead><tbody>' +
+          ? '<table class="table table-sm mb-0"><thead><tr><th scope="col">Date</th><th class="text-end">Meetings</th></tr></thead><tbody>' +
             mpd.slice(-14).map(d =>
               '<tr><td style="font-size:12px">' + d.date + '</td><td class="text-end small fw-bold">' + d.count + '</td></tr>'
             ).join('') + '</tbody></table>'
@@ -3066,7 +3066,7 @@ async function _loadDashMyUsage() {
     // Daily usage table
     const daily = d.daily_usage || [];
     document.getElementById('mu-daily-table').innerHTML = daily.length
-      ? '<table class="table table-sm mb-0"><thead><tr><th>Date</th><th class="text-end">Bots</th></tr></thead><tbody>' +
+      ? '<table class="table table-sm mb-0"><thead><tr><th scope="col">Date</th><th class="text-end">Bots</th></tr></thead><tbody>' +
         daily.map(r =>
           '<tr><td style="font-size:12.5px">' + r.date + '</td><td class="text-end small fw-bold">' + r.count + '</td></tr>'
         ).join('') + '</tbody></table>'
@@ -3202,7 +3202,7 @@ async function loadMeetingHistory() {
       </tr>`;
     }).join('');
     container.innerHTML = `<div class="table-responsive"><table class="table table-hover">
-      <thead><tr><th>Meeting</th><th>Platform</th><th>Status</th><th>Duration</th><th>Participants</th><th>Data</th><th>Date</th><th></th></tr></thead>
+      <thead><tr><th scope="col">Meeting</th><th scope="col">Platform</th><th scope="col">Status</th><th scope="col">Duration</th><th scope="col">Participants</th><th scope="col">Data</th><th scope="col">Date</th><th scope="col"></th></tr></thead>
       <tbody>${rows}</tbody></table></div>`;
     _historyLoaded = true;
   } catch (e) {
@@ -3284,7 +3284,7 @@ async function viewDeliveries(webhookId) {
     const rows = deliveries.slice(0, 10).map(d =>
       `<tr><td style="font-size:11px">${d.event || '—'}</td><td><span class="chip ${d.status_code >= 200 && d.status_code < 300 ? 'chip-success' : 'chip-danger'}">${d.status_code || '—'}</span></td><td style="font-size:11px;color:#64748b">${d.created_at ? new Date(d.created_at).toLocaleString() : '—'}</td><td style="font-size:11px;color:#94a3b8">${d.error || '—'}</td></tr>`
     ).join('');
-    const html = `<table class="table table-sm"><thead><tr><th>Event</th><th>Status</th><th>Time</th><th>Error</th></tr></thead><tbody>${rows}</tbody></table>`;
+    const html = `<table class="table table-sm"><thead><tr><th scope="col">Event</th><th scope="col">Status</th><th scope="col">Time</th><th scope="col">Error</th></tr></thead><tbody>${rows}</tbody></table>`;
     const modal = document.createElement('div');
     modal.innerHTML = `<div class="modal fade" tabindex="-1"><div class="modal-dialog modal-lg"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">Delivery Logs</h5><button class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body">${html}</div></div></div></div>`;
     document.body.appendChild(modal);

@@ -4,7 +4,17 @@ All notable changes to JustHereToListen.io are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.65.1 — **Last updated:** 2026-06-01
+> **Latest version:** 2.65.2 — **Last updated:** 2026-06-01
+
+---
+
+## [2.65.2] - 2026-06-01
+
+Accessibility polish (markup-only, no behaviour change).
+
+### Fixed (accessibility)
+- **Table headers now declare `scope="col"`** — all 135 bare `<th>` across the dashboard, admin console, bot detail, API dashboard and webhook playground now carry an explicit column scope so screen readers reliably associate data cells with their headers (WCAG 1.3.1).
+- **Active admin section tab exposes `aria-current="page"`** — the admin sidebar previously signalled the current section by colour alone; the active tab now sets `aria-current` (and clears it on the others) so assistive tech announces which section is open. The decorative Overview emoji is marked `aria-hidden`.
 
 ---
 
