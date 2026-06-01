@@ -128,6 +128,13 @@ async def create_webhook(payload: WebhookCreate, request: _Request):
     account_id = _request_account_id(request)
     # Superadmin (legacy API_KEY) creates global webhooks → account_id=None.
     owner_id = None if account_id == SUPERADMIN_ACCOUNT_ID else account_id
+
+    # Enforce per-account limit to prevent memory DoS via unbounded webhook creation.
+    if owner_id is not None:
+        existing = await store.list_webhooks(account_id=owner_id)
+        if len(existing) >= 25:
+            raise HTTPException(status_code=400, detail="Webhook limit reached (25 per account)")
+
     wh = await store.new_webhook(
         url=payload.url, events=payload.events, secret=payload.secret, account_id=owner_id
     )
@@ -489,13 +496,34 @@ async def delete_webhook(webhook_id: str, request: _Request):
     """Delete a registered webhook permanently.
 
     Returns 204 on success. The webhook is removed from the in-memory store
-    and the database. Pending delivery attempts for this webhook are cancelled.
+    and the database, and all of its delivery records (pending, retrying, and
+    historical) are deleted.
     """
     account_id = _request_account_id(request)
     # Ownership check before destructive op (raises 404 on tenant mismatch).
     await _get_webhook_or_404(webhook_id, account_id)
     if not await store.delete_webhook(webhook_id):
         raise HTTPException(status_code=404, detail=f"Webhook {webhook_id!r} not found")
+
+    # Cascade-delete ALL delivery records for this webhook. There is no DB-level
+    # foreign key from webhook_deliveries.webhook_id → webhooks.id, so nothing is
+    # removed automatically: pending/retrying rows would keep the retry loop
+    # firing ghost deliveries, and success/failed rows would be orphaned history
+    # (unreachable now that the parent webhook 404s). Removing everything keeps
+    # the table consistent with the in-memory store.
+    try:
+        from app.db import AsyncSessionLocal
+        from app.models.account import WebhookDelivery
+        from sqlalchemy import delete as _sa_delete
+        async with AsyncSessionLocal() as session:
+            await session.execute(
+                _sa_delete(WebhookDelivery).where(
+                    WebhookDelivery.webhook_id == webhook_id,
+                )
+            )
+            await session.commit()
+    except Exception:
+        logger.exception("Failed to clean up delivery records for deleted webhook %s", webhook_id)
 
     _spawn_audit(_audit_log(
         account_id=account_id,

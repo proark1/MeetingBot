@@ -113,7 +113,7 @@ def _classify_status(status_code: "int | None") -> str:
                        disabled); don't retry, count toward auto-disable
     """
     if status_code is None:
-        return "retry"  # connection/timeout/SSRF — retry later
+        return "retry"  # connection error / network timeout — retry later
     if 200 <= status_code < 300:
         return "success"
     if status_code >= 500 or status_code in (408, 425, 429):
@@ -303,7 +303,9 @@ async def _attempt_delivery(url: str, body: str, headers: dict) -> "tuple[int | 
     ssrf_err = await check_url_ssrf(url)
     if ssrf_err is not None:
         logger.warning("Webhook delivery blocked by SSRF guard  url=%s  reason=%s", url, ssrf_err)
-        return None, f"SSRF blocked: {ssrf_err}"
+        # Return 403 (not None) so _classify_status marks this as permanent "fail"
+        # rather than "retry".  A blocked URL will not become unblocked on retry.
+        return 403, f"SSRF blocked: {ssrf_err}"
 
     client = _get_client()
     try:

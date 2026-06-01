@@ -126,6 +126,13 @@ async def _split_audio(audio_path: str, chunk_s: int = _CHUNK_SIZE_S) -> list[st
         proc.kill()
         await proc.wait()
         logger.error("ffmpeg audio split timed out after 600s for %s", audio_path)
+        # Clean up any partial chunk files ffmpeg wrote before being killed —
+        # repeated timeouts would otherwise leak /tmp space until disk exhaustion.
+        for partial in _glob.glob(f"/tmp/chunk_{uid}_*.wav"):
+            try:
+                os.unlink(partial)
+            except OSError:
+                pass
         return []
     chunks = sorted(_glob.glob(f"/tmp/chunk_{uid}_*.wav"))
     logger.info("Split %s into %d chunk(s)", audio_path, len(chunks))
