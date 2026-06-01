@@ -25,6 +25,9 @@ Roadmap batch — efficiency, operational observability, and CI quality gates.
 - Quota reservation now fails closed: a DB error while reserving a monthly usage slot rolls back the bot and returns 503 instead of silently letting it run un-metered (quota-bypass fix).
 - Removed unused imports across several modules and a duplicate `Response` import in `api/saml.py` (ruff F401/F811).
 
+### Tests
+- Added `tests/test_credit_service.py` covering the previously-untested money paths: idempotent crediting and per-bot deduction on the `(type, reference_id)` unique index, flat-fee deduction, monthly-quota enforcement (402 at plan limit), quota refund/clamp at zero, and superadmin/anonymous skip. Suite 98 → 104.
+
 ## [2.56.0] - 2026-06-01
 
 Hardening pass following a full-service audit (security, correctness, performance).
