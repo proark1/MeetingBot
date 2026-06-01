@@ -4,7 +4,17 @@ All notable changes to JustHereToListen.io are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.65.2 — **Last updated:** 2026-06-01
+> **Latest version:** 2.65.3 — **Last updated:** 2026-06-01
+
+---
+
+## [2.65.3] - 2026-06-01
+
+UI polish + scale-out design.
+
+### Added
+- **Live character counter** on the dashboard's custom-analysis-prompt textarea (`0 / 8000`, turns red past 90%), with the label now `for`-linked and `aria-describedby` wired to the counter so the remaining budget is announced to screen readers.
+- **`docs/redis-scale-out.md`** — the executable design doc for the horizontal scale-out cutover: target architecture, the three hard parts (backend-aware `mark_terminal`, distributed queue with lease-based global concurrency cap, control-op routing to the bot's owning worker), an ordered 16-call-site migration plan behind the existing `BOT_STATE_BACKEND` flag, config/deploy, rollout & fallback, and the real-Redis test matrix. Prepares the one substantial reliability item left after the v2.64–v2.65 hardening pass.
 
 ---
 
