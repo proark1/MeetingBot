@@ -115,6 +115,48 @@ async def test_scan_is_idempotent_per_stage(app, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_overdue_item_with_null_stage_still_fires(app, monkeypatch):
+    """Guards the terminal-stage query filter: an overdue item with a NULL
+    reminder_stage MUST still be processed. (A naive `reminder_stage != 'overdue'`
+    filter would wrongly drop NULL rows, since SQL `!=` is NULL for NULL.)"""
+    sent = []
+
+    async def _fake_dispatch(event, payload, **kwargs):
+        sent.append(event)
+
+    import app.services.webhook_service as _ws
+    monkeypatch.setattr(_ws, "dispatch_event", _fake_dispatch)
+
+    now = datetime(2026, 5, 18, 12, 0, tzinfo=timezone.utc)
+    await _add_item(due_date="2026-05-10", reminder_stage=None)  # overdue, never reminded
+
+    count = await svc.scan_and_dispatch(now=now)
+    assert count == 1
+    assert sent == ["action_item.overdue"]
+
+
+@pytest.mark.asyncio
+async def test_due_soon_staged_item_advances_to_overdue(app, monkeypatch):
+    """A non-terminal ("due_soon") staged item that is now overdue must still be
+    loaded and advanced — only the terminal "overdue" stage is filtered out."""
+    sent = []
+
+    async def _fake_dispatch(event, payload, **kwargs):
+        sent.append(event)
+
+    import app.services.webhook_service as _ws
+    monkeypatch.setattr(_ws, "dispatch_event", _fake_dispatch)
+
+    now = datetime(2026, 5, 18, 12, 0, tzinfo=timezone.utc)
+    item_id = await _add_item(due_date="2026-05-10", reminder_stage="due_soon")  # now overdue
+
+    count = await svc.scan_and_dispatch(now=now)
+    assert count == 1
+    assert sent == ["action_item.overdue"]
+    assert await _stage(item_id) == "overdue"
+
+
+@pytest.mark.asyncio
 async def test_done_items_are_ignored(app, monkeypatch):
     async def _fake_dispatch(event, payload, **kwargs):
         raise AssertionError("should not dispatch for a done item")

@@ -4,7 +4,16 @@ All notable changes to JustHereToListen.io are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.63.2 — **Last updated:** 2026-06-01
+> **Latest version:** 2.63.3 — **Last updated:** 2026-06-01
+
+---
+
+## [2.63.3] - 2026-06-01
+
+Background-scan efficiency.
+
+### Changed
+- **Action-item reminder scan no longer accumulates dead weight** — the periodic `scan_and_dispatch` loop previously loaded *every* open action item with a due date on each cycle, including items already at the terminal `"overdue"` reminder stage. Since reminder stages only ever advance (`None → due_soon → overdue`), those items can never fire again, yet they were re-loaded and re-evaluated forever, growing the per-cycle working set without bound as open-but-overdue items pile up. The query now excludes terminal-stage items (`reminder_stage IS NULL OR reminder_stage != 'overdue'`), bounding the scan to items still pending a transition. Behaviour is unchanged — terminal items were already skipped by the stage-advance check. +2 regression tests guard the NULL-stage handling (a naive `!= 'overdue'` filter would have wrongly dropped never-reminded items).
 
 ---
 

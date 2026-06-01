@@ -80,17 +80,27 @@ async def scan_and_dispatch(now: Optional[datetime] = None) -> int:
     from app.db import AsyncSessionLocal
     from app.models.account import ActionItem
     from app.services import webhook_service
-    from sqlalchemy import select
+    from sqlalchemy import select, or_
 
     now = now or datetime.now(timezone.utc)
     due_soon_hours = settings.ACTION_ITEM_DUE_SOON_HOURS
     dispatched = 0
 
     async with AsyncSessionLocal() as db:
+        # Skip items already at the terminal "overdue" stage: they can never
+        # advance further (stages only go None → due_soon → overdue), so they
+        # would be re-scanned and re-skipped every cycle forever, growing the
+        # working set without bound as open-but-overdue items accumulate.
+        # NULL stages MUST stay included (a plain `!= "overdue"` would drop them
+        # since SQL `!=` is NULL for NULL operands).
         result = await db.execute(
             select(ActionItem).where(
                 ActionItem.status == "open",
                 ActionItem.due_date.isnot(None),
+                or_(
+                    ActionItem.reminder_stage.is_(None),
+                    ActionItem.reminder_stage != "overdue",
+                ),
             )
         )
         items = result.scalars().all()
