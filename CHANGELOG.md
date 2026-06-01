@@ -4,9 +4,21 @@ All notable changes to JustHereToListen.io are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.57.1 — **Last updated:** 2026-06-01
+> **Latest version:** 2.58.0 — **Last updated:** 2026-06-01
 
 ---
+
+## [2.58.0] - 2026-06-01
+
+Self-healing-join observability (roadmap feature batch).
+
+### Added
+- **Join-reliability metrics** — new Prometheus counters `meetingbot_bot_join_attempts_total{platform}` (each self-healing retry counts separately) and `meetingbot_bot_join_results_total{platform,result}` (success/failure per bot), wired into the existing per-bot join retry loop in `bot_service`. A rising failure rate for a platform is the earliest signal of `browser_bot.py` selector drift — pairs with the synthetic canary for alerting.
+- Wired the previously-defined-but-unused `bots_created`/`bots_completed` lifecycle counters into `run_bot_lifecycle`.
+- Tests in `tests/test_join_metrics.py` (suite 107 → 110).
+
+### Notes
+- The join **retry/restart** mechanism itself already existed (`BOT_JOIN_MAX_RETRIES` whole-browser retry with delay, plus multi-selector `_click` fallbacks and screenshot/DOM capture on failure). This batch adds the missing **observability** half so reliability is measurable.
 
 ## [2.57.1] - 2026-06-01
 

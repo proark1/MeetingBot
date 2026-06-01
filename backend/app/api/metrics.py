@@ -117,6 +117,20 @@ webhook_deliveries_total = _make_counter(
     ["status"],  # success | retrying | failed
 )
 
+# Join-reliability metrics — the earliest signal of browser_bot selector drift.
+# A rising failure rate (or attempts > 1 trending up) for a platform means its
+# UI likely changed; pair with the synthetic canary for alerting.
+bot_join_attempts_total = _make_counter(
+    "meetingbot_bot_join_attempts_total",
+    "Total meeting-join attempts (includes self-healing retries)",
+    ["platform"],
+)
+bot_join_results_total = _make_counter(
+    "meetingbot_bot_join_results_total",
+    "Meeting-join outcomes by platform",
+    ["platform", "result"],  # result: success | failure
+)
+
 
 # ── Helper functions (called from services) ───────────────────────────────────
 
@@ -132,6 +146,26 @@ def record_bot_completed(status: str) -> None:
     if bots_completed_total:
         try:
             bots_completed_total.labels(status=status).inc()
+        except Exception:
+            pass
+
+
+def record_join_attempt(platform: str) -> None:
+    """Count one join attempt (each self-healing retry counts separately)."""
+    if bot_join_attempts_total:
+        try:
+            bot_join_attempts_total.labels(platform=platform).inc()
+        except Exception:
+            pass
+
+
+def record_join_result(platform: str, success: bool) -> None:
+    """Count the final join outcome for a bot (one per bot)."""
+    if bot_join_results_total:
+        try:
+            bot_join_results_total.labels(
+                platform=platform, result="success" if success else "failure"
+            ).inc()
         except Exception:
             pass
 
