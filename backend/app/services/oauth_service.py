@@ -25,6 +25,30 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 _http_client = httpx.AsyncClient(timeout=15, follow_redirects=True)
 
+
+class OAuthEmailNotVerifiedError(Exception):
+    """Raised when an SSO identity's email can't be trusted to auto-link to an
+    existing local account (prevents cross-provider account takeover)."""
+
+
+def email_is_verified(provider: str, userinfo: dict) -> bool:
+    """Whether the provider asserts this email address is verified.
+
+    Linking an SSO identity to a *pre-existing* local account by email is only
+    safe when the provider has verified the address — otherwise an attacker who
+    controls an IdP (e.g. their own Azure tenant on the multi-tenant ``/common``
+    endpoint) can mint an arbitrary email/UPN and take over the victim's account.
+
+    * Google returns an ``email_verified`` claim on its userinfo endpoint.
+    * Microsoft Graph ``/me`` exposes no verification claim, and ``/common``
+      lets a tenant admin set any ``userPrincipalName``; treat as unverified.
+    """
+    if provider == "google":
+        v = userinfo.get("email_verified")
+        return v is True or str(v).strip().lower() == "true"
+    # Microsoft (and any unknown provider): not provably verified.
+    return False
+
 # ── Provider configurations ────────────────────────────────────────────────────
 
 _PROVIDERS: dict[str, dict] = {
@@ -74,7 +98,7 @@ def generate_state(extra: Optional[str] = None) -> str:
         "extra": extra or "",
         "iat": int(time.time()),
     })
-    sig = hmac.new(_state_secret(), payload.encode(), hashlib.sha256).hexdigest()[:16]
+    sig = hmac.new(_state_secret(), payload.encode(), hashlib.sha256).hexdigest()
     token = base64.urlsafe_b64encode(f"{payload}||{sig}".encode()).decode()
     return token
 
@@ -89,7 +113,7 @@ def verify_state(token: str) -> Optional[str]:
     try:
         decoded = base64.urlsafe_b64decode(token.encode()).decode()
         payload, sig = decoded.rsplit("||", 1)
-        expected = hmac.new(_state_secret(), payload.encode(), hashlib.sha256).hexdigest()[:16]
+        expected = hmac.new(_state_secret(), payload.encode(), hashlib.sha256).hexdigest()
         if not hmac.compare_digest(sig, expected):
             return None
         data = json.loads(payload)
@@ -105,10 +129,19 @@ def verify_state(token: str) -> Optional[str]:
 
 # ── Authorization URL ──────────────────────────────────────────────────────────
 
-def get_authorization_url(provider: str, extra_state: Optional[str] = None) -> str:
-    """Build the provider's authorization URL for the redirect."""
+def get_authorization_url(
+    provider: str,
+    extra_state: Optional[str] = None,
+    signed_state: Optional[str] = None,
+) -> str:
+    """Build the provider's authorization URL for the redirect.
+
+    Pass ``signed_state`` to embed a state token already minted by the caller
+    (so the same value can be bound to a browser cookie); otherwise a fresh
+    one is generated from ``extra_state``.
+    """
     cfg = _PROVIDERS[provider]
-    state = generate_state(extra_state)
+    state = signed_state or generate_state(extra_state)
     params = {
         "client_id":     cfg["client_id"](),
         "redirect_uri":  _redirect_uri(provider),
@@ -227,6 +260,16 @@ async def upsert_oauth_account(
                 select(Account).where(Account.email == normalized_email)
             )
             account = result3.scalar_one_or_none()
+
+        # 2b. Account-takeover guard: only auto-link this SSO identity to a
+        # pre-existing local account when the provider has *verified* the email.
+        # Otherwise an attacker who controls an IdP could present an unverified
+        # address matching a victim's account and log in as them.
+        if account is not None and not email_is_verified(provider, userinfo):
+            raise OAuthEmailNotVerifiedError(
+                f"{provider} did not verify {normalized_email!r}; refusing to link "
+                "to the existing account. Sign in with your password instead."
+            )
 
         # 3. Create account if needed
         new_key_plaintext = ""

@@ -83,6 +83,7 @@ async def get_current_account_id(
             )
         # Unauthenticated dev mode (no accounts registered yet, or operator opt-in)
         request.state.account_id = None
+        request.state.sandbox = False  # keep the attribute consistent with other paths
         return None
 
     # Legacy superadmin bypass

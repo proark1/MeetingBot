@@ -23,11 +23,27 @@ logger = logging.getLogger(__name__)
 _tasks: set[asyncio.Task] = set()
 
 
+def _on_task_done(task: asyncio.Task) -> None:
+    """Drop the strong ref and surface any unhandled exception.
+
+    Without retrieving ``task.exception()`` a failing fire-and-forget task dies
+    silently (not even Python's "exception was never retrieved" warning fires,
+    because the done-callback retrieves the result). Log it so failures in
+    audit logging, webhook fires, usage bumps, etc. are visible.
+    """
+    _tasks.discard(task)
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.error("Tracked background task %r failed", task.get_name(), exc_info=exc)
+
+
 def tracked_task(coro: Coroutine[Any, Any, Any], *, name: str | None = None) -> asyncio.Task:
     """Schedule ``coro`` and keep a strong reference until it finishes."""
     task = asyncio.create_task(coro, name=name)
     _tasks.add(task)
-    task.add_done_callback(_tasks.discard)
+    task.add_done_callback(_on_task_done)
     return task
 
 

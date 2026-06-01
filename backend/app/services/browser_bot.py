@@ -4231,14 +4231,21 @@ async def run_browser_bot(
 
     # ── Infrastructure ──────────────────────────────────────────────────────
     await _save_pactl("pre_pulse")
-    pulse_ok = _start_pulseaudio()
+    # These helpers spawn subprocesses and call time.sleep — run them off the
+    # event loop so a bot launching doesn't freeze every other bot's lifecycle,
+    # WebSocket broadcasts, and HTTP handling (~1-2s stall otherwise).
+    pulse_ok = await asyncio.to_thread(_start_pulseaudio)
     if pulse_ok:
-        pulse_idx = _create_pulse_sink(pulse_sink)
+        pulse_idx = await asyncio.to_thread(_create_pulse_sink, pulse_sink)
         if pulse_idx:
-            ffmpeg_proc = _start_ffmpeg(audio_path, pulse_sink, stderr_log_path=ffmpeg_stderr_path)
+            ffmpeg_proc = await asyncio.to_thread(
+                _start_ffmpeg, audio_path, pulse_sink, stderr_log_path=ffmpeg_stderr_path
+            )
         # Create the TTS mic sink + virtual source so the bot can speak.
         # Must be created before Chrome launches so PULSE_SOURCE takes effect.
-        pulse_mic_idx, pulse_mic_virt_idx, pulse_source_name = _create_pulse_mic(pulse_mic)
+        pulse_mic_idx, pulse_mic_virt_idx, pulse_source_name = await asyncio.to_thread(
+            _create_pulse_mic, pulse_mic
+        )
 
     await _save_pactl("post_setup")
     if ffmpeg_proc is not None:
@@ -4251,7 +4258,7 @@ async def run_browser_bot(
             )
         )
 
-    xvfb_proc, xvfb_display = _start_xvfb()
+    xvfb_proc, xvfb_display = await asyncio.to_thread(_start_xvfb)
     headless = xvfb_proc is None   # fall back to headless if no Xvfb
 
     # Start with the full current process environment so Chrome inherits PATH,
@@ -4317,6 +4324,15 @@ async def run_browser_bot(
         "--disable-backgrounding-occluded-windows",
         "--disable-renderer-backgrounding",
         "--window-size=1280,720",
+        # Resource trimming for a listen-only bot — fewer processes and no
+        # extension/component machinery cuts per-bot RSS without affecting the
+        # join/caption/audio paths. (Images are NOT disabled: some join flows
+        # rely on image-based buttons.)
+        "--renderer-process-limit=1",
+        "--disable-extensions",
+        "--disable-component-update",
+        "--disable-component-extensions-with-background-pages",
+        "--disable-default-apps",
     ]
 
     async with async_playwright() as pw:
@@ -5258,7 +5274,9 @@ async def run_browser_bot(
                                 "ffmpeg died mid-recording (pid=%s exit=%s); restarting once",
                                 ffmpeg_proc.pid, ffmpeg_proc.returncode,
                             )
-                            new_proc = _start_ffmpeg(audio_path, pulse_sink, stderr_log_path=ffmpeg_stderr_path)
+                            new_proc = await asyncio.to_thread(
+                                _start_ffmpeg, audio_path, pulse_sink, stderr_log_path=ffmpeg_stderr_path
+                            )
                             if new_proc is not None:
                                 ffmpeg_proc = new_proc
                                 logger.info("ffmpeg restarted (pid=%s)", new_proc.pid)

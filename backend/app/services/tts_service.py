@@ -27,6 +27,19 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+# Reused HTTP client for Gemini TTS — this is on the live voice-response hot
+# path, so creating a fresh client (new pool + TLS handshake) per spoken reply
+# adds latency every time the bot talks. Lazily created on first use.
+_tts_http_client: httpx.AsyncClient | None = None
+
+
+def _get_tts_http_client() -> httpx.AsyncClient:
+    global _tts_http_client
+    if _tts_http_client is None:
+        _tts_http_client = httpx.AsyncClient(timeout=20.0)
+    return _tts_http_client
+
+
 # Serialise all TTS playback so responses never overlap and the full audio
 # always drains through PulseAudio before the next one starts.
 _tts_play_lock: asyncio.Lock | None = None
@@ -113,10 +126,9 @@ async def _synthesize_gemini(text: str, api_key: str, voice: str) -> str | None:
     }
 
     try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            r = await client.post(url, json=body)
-            r.raise_for_status()
-            data = r.json()
+        r = await _get_tts_http_client().post(url, json=body)
+        r.raise_for_status()
+        data = r.json()
 
         if not data.get("candidates"):
             logger.error("Gemini TTS: empty candidates in response")

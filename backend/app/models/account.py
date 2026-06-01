@@ -35,7 +35,7 @@ class Account(Base):
     plan: Mapped[str] = mapped_column(String(20), default="free", nullable=False)
     # Monthly usage counters (reset on billing cycle)
     monthly_bots_used: Mapped[int] = mapped_column(Integer, default=0)
-    monthly_reset_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    monthly_reset_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     # Stripe subscription fields
     stripe_customer_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
     stripe_subscription_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)

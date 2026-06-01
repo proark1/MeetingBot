@@ -321,18 +321,20 @@ async def _post_to_google_drive(access_token: str, folder_id: Optional[str], bot
         "Content-Type": f"multipart/related; boundary={boundary}",
     }
     try:
-        async with _httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
-                "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
-                headers=headers,
-                content=body,
-            )
-            if resp.status_code in (200, 201):
-                logger.info("Google Drive: uploaded %s", filename)
-                return True
-            else:
-                logger.warning("Google Drive upload failed: %s %s", resp.status_code, resp.text[:200])
-                return False
+        # Reuse the module-level pooled client (per-request 30s timeout for the
+        # upload) instead of standing up a fresh pool + TLS handshake each call.
+        resp = await _http_client.post(
+            "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
+            headers=headers,
+            content=body,
+            timeout=30.0,
+        )
+        if resp.status_code in (200, 201):
+            logger.info("Google Drive: uploaded %s", filename)
+            return True
+        else:
+            logger.warning("Google Drive upload failed: %s %s", resp.status_code, resp.text[:200])
+            return False
     except Exception as exc:
         logger.warning("Google Drive upload error: %s", exc)
         return False

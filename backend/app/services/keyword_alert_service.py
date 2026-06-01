@@ -14,6 +14,7 @@ When a keyword is triggered, a `bot.keyword_alert` event is dispatched to:
 
 import logging
 import time as _time
+from collections import OrderedDict
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -21,8 +22,13 @@ logger = logging.getLogger(__name__)
 # Account-rule cache. `scan_live_entry` runs on EVERY live transcript line, so
 # without this it re-queries the same KeywordAlert rows hundreds of times per
 # meeting. Alerts rarely change mid-meeting, so a short TTL is safe.
-_alert_cache: dict[str, tuple[float, list[dict]]] = {}
+#
+# Bounded LRU (OrderedDict) so accounts that stop sending live transcripts don't
+# leave their entries cached forever — distinct accounts seen over time would
+# otherwise grow this map without limit.
+_alert_cache: "OrderedDict[str, tuple[float, list[dict]]]" = OrderedDict()
 _ALERT_CACHE_TTL_S = 60.0
+_ALERT_CACHE_MAX = 1024
 
 
 def invalidate_account_alerts(account_id: str) -> None:
@@ -39,6 +45,7 @@ async def _load_account_keyword_alerts(account_id: str) -> list[dict]:
     """Load active KeywordAlert rules for an account (cached, short TTL)."""
     cached = _alert_cache.get(account_id)
     if cached is not None and (_time.monotonic() - cached[0]) < _ALERT_CACHE_TTL_S:
+        _alert_cache.move_to_end(account_id)  # mark recently used
         return cached[1]
     try:
         import json
@@ -68,6 +75,9 @@ async def _load_account_keyword_alerts(account_id: str) -> list[dict]:
                 "webhook_url": row.webhook_url,
             })
         _alert_cache[account_id] = (_time.monotonic(), rules)
+        _alert_cache.move_to_end(account_id)
+        while len(_alert_cache) > _ALERT_CACHE_MAX:
+            _alert_cache.popitem(last=False)  # evict least-recently-used
         return rules
     except Exception as exc:
         logger.error("Failed to load keyword alerts for account %s: %s", account_id, exc)

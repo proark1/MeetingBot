@@ -155,6 +155,9 @@ def _migrate_schema(conn) -> None:
             # round-3 fix #4 — partial unique on (type, reference_id) so the USDC
             # monitor + admin rescan can never double-credit the same on-chain tx
             "CREATE UNIQUE INDEX IF NOT EXISTS ix_credit_tx_unique_ref ON credit_transactions (type, reference_id) WHERE reference_id IS NOT NULL",
+            # The hourly monthly-reset sweep filters accounts on monthly_reset_at;
+            # index it so the sweep isn't a full table scan as accounts grow.
+            "CREATE INDEX IF NOT EXISTS ix_accounts_monthly_reset_at ON accounts (monthly_reset_at)",
         ]
         existing_tables = set(inspect(conn).get_table_names())
         for idx_sql in _pg_indexes:
@@ -310,6 +313,9 @@ def _migrate_schema(conn) -> None:
          "CREATE INDEX IF NOT EXISTS ix_action_items_account_created ON action_items (account_id, created_at)"),
         ("ix_webhook_deliveries_webhook_created",
          "CREATE INDEX IF NOT EXISTS ix_webhook_deliveries_webhook_created ON webhook_deliveries (webhook_id, created_at)"),
+        # hardening pass — index the hourly monthly-reset sweep predicate
+        ("ix_accounts_monthly_reset_at",
+         "CREATE INDEX IF NOT EXISTS ix_accounts_monthly_reset_at ON accounts (monthly_reset_at)"),
     ]
     existing_tables = set(inspector.get_table_names())
     for _idx_name, _idx_sql in _indexes:

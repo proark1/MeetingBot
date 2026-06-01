@@ -487,7 +487,14 @@ def _compute_health_score(
     action_item_score = min(len(action_items) / 5.0, 1.0)
 
     duration_min = (duration_seconds or 0) / 60.0
-    length_score = min(60.0 / max(duration_min, 60.0), 1.0) if duration_min > 0 else 0.5
+    if duration_min <= 0:
+        length_score = 0.5
+    else:
+        # Two-sided band: quality peaks around a focused ~30-min meeting and
+        # decays for meetings too short to accomplish anything OR overly long.
+        # (The previous one-sided form scored every meeting ≤60min a flat 1.0.)
+        IDEAL_MIN = 30.0
+        length_score = max(0.0, 1.0 - abs(duration_min - IDEAL_MIN) / 60.0)
 
     raw = (
         participation_score * 0.30
@@ -529,8 +536,16 @@ def _resolve_prompt(bot: BotSession) -> str | None:
 
 
 async def _transcribe_audio_for_bot(bot: BotSession, audio_path: str) -> list:
-    """Transcribe audio using the bot's configured transcription_provider."""
+    """Transcribe audio using the bot's configured transcription_provider.
+
+    Threads ``known_participants`` and ``prior_speaker_map`` through both the
+    Whisper and Gemini paths so speaker resolution stays consistent regardless
+    of which provider (or fallback) salvages the transcript.
+    """
     provider = getattr(bot, "transcription_provider", "gemini") or "gemini"
+    known_participants = list(getattr(bot, "participants", None) or [])
+    prior_map = dict(getattr(bot, "speaker_name_map", None) or {})
+    language = settings.TRANSCRIPTION_LANGUAGE or None
 
     if provider == "whisper":
         try:
@@ -539,7 +554,8 @@ async def _transcribe_audio_for_bot(bot: BotSession, audio_path: str) -> list:
                 logger.info("Bot %s: using Whisper transcription", bot.id)
                 transcript = await transcribe_with_whisper(
                     audio_path,
-                    language=settings.TRANSCRIPTION_LANGUAGE or None,
+                    language=language,
+                    known_participants=known_participants,
                 )
                 if transcript:
                     return transcript
@@ -550,7 +566,13 @@ async def _transcribe_audio_for_bot(bot: BotSession, audio_path: str) -> list:
             logger.warning("Bot %s: Whisper failed (%s) — falling back to Gemini", bot.id, exc)
 
     # Default / fallback: Gemini transcription
-    return await transcribe_audio(audio_path, bot_id=bot.id)
+    return await transcribe_audio(
+        audio_path,
+        known_participants=known_participants,
+        language=language,
+        bot_id=bot.id,
+        prior_speaker_map=prior_map,
+    )
 
 
 async def _do_analysis(bot: BotSession, audio_path: str, use_real_bot: bool, video_path: Optional[str] = None) -> None:
@@ -1567,6 +1589,14 @@ async def run_bot_lifecycle(bot_id: str) -> None:
                 )
                 bot = await store.get_bot(bot_id)
                 if bot:
+                    # Refund the reserved monthly quota slot if the bot never
+                    # joined the meeting — it never consumed the metered resource.
+                    if bot.started_at is None and bot.account_id:
+                        try:
+                            from app.services.credit_service import decrement_monthly_usage
+                            await decrement_monthly_usage(bot.account_id)
+                        except Exception:
+                            logger.warning("Bot %s: failed to refund monthly quota slot", bot_id)
                     if not _credits_deducted:
                         from app.services.credit_service import deduct_credits_for_bot
                         await deduct_credits_for_bot(bot.account_id, bot_id, bot.ai_total_cost_usd)

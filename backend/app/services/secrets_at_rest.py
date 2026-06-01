@@ -33,20 +33,45 @@ _FERNET_PREFIX = b"gAAAAA"
 
 
 def _derive_key(secret: str) -> bytes:
-    """Return a 32-byte URL-safe base64 Fernet key derived from JWT_SECRET."""
+    """Return a 32-byte URL-safe base64 Fernet key derived from ``secret``."""
     digest = hashlib.sha256(secret.encode() + b":" + _KEY_LABEL).digest()
     return base64.urlsafe_b64encode(digest)
 
 
-def _get_fernet():
+def _primary_secret() -> str:
+    """The secret used for *new* encryption.
+
+    Prefers the dedicated ``ENCRYPTION_KEY`` so the at-rest key is independent
+    of the JWT-signing key; falls back to ``JWT_SECRET`` when unset so existing
+    deployments keep working without new configuration.
+    """
     from app.config import settings
-    if settings.JWT_SECRET == _INSECURE_DEFAULT_SECRET:
+    return settings.ENCRYPTION_KEY or settings.JWT_SECRET
+
+
+def _decrypt_secrets() -> list[str]:
+    """Secrets to try when decrypting, newest first.
+
+    Includes the legacy JWT_SECRET-derived key so rows encrypted before
+    ``ENCRYPTION_KEY`` was introduced still decrypt after operators set it.
+    """
+    from app.config import settings
+    out: list[str] = []
+    for s in (settings.ENCRYPTION_KEY, settings.JWT_SECRET):
+        if s and s != _INSECURE_DEFAULT_SECRET and s not in out:
+            out.append(s)
+    return out
+
+
+def _get_fernet():
+    secret = _primary_secret()
+    if not secret or secret == _INSECURE_DEFAULT_SECRET:
         raise RuntimeError(
-            "JWT_SECRET is the insecure default — refusing to encrypt "
-            "integration config. Set JWT_SECRET before configuring integrations."
+            "No usable encryption key — set ENCRYPTION_KEY (or a non-default "
+            "JWT_SECRET) before configuring integrations."
         )
     from cryptography.fernet import Fernet
-    return Fernet(_derive_key(settings.JWT_SECRET))
+    return Fernet(_derive_key(secret))
 
 
 def encrypt_json(payload: dict[str, Any]) -> str:
@@ -67,13 +92,22 @@ def decrypt_json(stored: str | None) -> dict[str, Any]:
     raw = stored.encode() if isinstance(stored, str) else stored
 
     if raw.startswith(_FERNET_PREFIX):
-        try:
-            f = _get_fernet()
-            decoded = f.decrypt(raw)
-            return json.loads(decoded.decode())
-        except Exception as exc:
-            logger.warning("decrypt_json: Fernet decryption failed (%s); returning empty config", exc)
-            return {}
+        from cryptography.fernet import Fernet
+        # Try each candidate key (current ENCRYPTION_KEY, then legacy
+        # JWT_SECRET) so the value still decrypts across a key rotation.
+        for secret in _decrypt_secrets():
+            try:
+                decoded = Fernet(_derive_key(secret)).decrypt(raw)
+                return json.loads(decoded.decode())
+            except Exception:
+                continue
+        # Looks like ciphertext but no key could decrypt it — this is a real
+        # problem (wrong/rotated key or tampering), not a missing config.
+        logger.error(
+            "decrypt_json: ciphertext present but no configured key could "
+            "decrypt it (key rotation gap or tampering?); returning empty config"
+        )
+        return {}
 
     # Legacy plaintext JSON path
     try:

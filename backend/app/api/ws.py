@@ -111,10 +111,13 @@ class ConnectionManager:
         async def _send(ws: WebSocket, conn_account: Optional[str]) -> WebSocket | None:
             # Decide whether this connection should receive this event
             if conn_account not in (None, SUPERADMIN_ACCOUNT_ID):
-                # Per-user connection: only deliver events that belong to the same account
+                # Per-user connection: deliver only events provably owned by this
+                # account. Fail closed — if the event carries no resolvable
+                # account_id we must NOT deliver it (otherwise an unscoped event
+                # leaks to every authenticated tenant).
                 event_account = data.get("account_id") or account_id
-                if event_account and event_account != conn_account:
-                    return None  # skip — not this user's event
+                if not event_account or event_account != conn_account:
+                    return None  # skip — not provably this user's event
             try:
                 await asyncio.wait_for(ws.send_text(message), timeout=5.0)
                 return None
