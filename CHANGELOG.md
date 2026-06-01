@@ -4,7 +4,29 @@ All notable changes to JustHereToListen.io are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.61.0 — **Last updated:** 2026-06-01
+> **Latest version:** 2.62.0 — **Last updated:** 2026-06-01
+
+---
+
+## [2.62.0] - 2026-06-01
+
+Security + reliability hardening.
+
+### Security
+- **Prompt injection hardened** in `intelligence_service.py`. `bot_name` and `caption_context` now fully escape ALL angle brackets (`<` → `&lt;`, `>` → `&gt;`) before embedding in LLM prompts — the previous mitigation only stripped specific closing tags, leaving partial injection vectors. `meeting_url` in the demo transcript path is now wrapped in XML tags and length-capped. Both fields also capped at 200 / 8000 chars respectively.
+- 14 new tests in `test_prompt_injection_guard.py` covering open-tag, close-tag, cross-tag, and length-truncation attack vectors.
+
+### Reliability
+- **ffmpeg audio-split timeout** — `_split_audio()` now wraps `proc.wait()` in `asyncio.wait_for(timeout=600)`. On timeout the process is killed and `[]` returned, preventing indefinite hangs on corrupt audio files.
+- **Per-chunk transcription timeout** — each chunk in `_transcribe_chunked()` is wrapped in `asyncio.wait_for(timeout=600)` so a single hung chunk cannot stall the entire batch.
+- **Transcript entry count sanity check** — after transcription, logs a warning when entry count is suspiciously low relative to recording duration (possible Gemini truncation).
+
+### Changed
+- `POST /{bot_id}/analyze` rate limit tightened from `10/minute` to `5/minute`.
+- `POST /{bot_id}/followup-email` rate limit tightened from `5/minute` to `3/minute`.
+- `AskRequest.question` now enforces `min_length=1`, `max_length=1000` at the schema level.
+- Analytics transcript search now scans at most 200 in-memory bots (was 500).
+- Archive snapshot search limited to last 90 days (was unbounded full-history scan).
 
 ---
 

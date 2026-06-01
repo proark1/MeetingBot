@@ -120,7 +120,13 @@ async def _split_audio(audio_path: str, chunk_s: int = _CHUNK_SIZE_S) -> list[st
         stdout=asyncio.subprocess.DEVNULL,
         stderr=asyncio.subprocess.DEVNULL,
     )
-    await proc.wait()
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=600.0)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
+        logger.error("ffmpeg audio split timed out after 600s for %s", audio_path)
+        return []
     chunks = sorted(_glob.glob(f"/tmp/chunk_{uid}_*.wav"))
     logger.info("Split %s into %d chunk(s)", audio_path, len(chunks))
     return chunks
@@ -146,11 +152,15 @@ async def _transcribe_chunked(
     async def _process_chunk(idx: int, chunk_path: str) -> list[dict[str, Any]]:
         offset_s = idx * _CHUNK_SIZE_S
         logger.info("Transcribing chunk %d/%d (offset %d s)…", idx + 1, len(chunks), offset_s)
-        entries = await transcribe_audio(
-            chunk_path,
-            known_participants,
-            language=language,
-            prior_speaker_map=prior_speaker_map,
+        # Per-chunk safety timeout: 10 min per 30-min chunk is generous but prevents hangs.
+        entries = await asyncio.wait_for(
+            transcribe_audio(
+                chunk_path,
+                known_participants,
+                language=language,
+                prior_speaker_map=prior_speaker_map,
+            ),
+            timeout=600.0,
         )
         return [dict(e, timestamp=float(e.get("timestamp", 0)) + offset_s) for e in entries]
 
@@ -548,6 +558,16 @@ async def transcribe_audio(
                 validated, known_participants, prior_map=prior_speaker_map,
             )
             await _set_diag(bot_id, speaker_name_map=_new_map)
+
+        # Sanity check: very few entries relative to recording length suggests
+        # Gemini truncated or hallucinated.  Log a warning so operators can triage
+        # "sparse transcript" issues without digging through raw logs.
+        if estimated_s > 60 and len(validated) < max(1, estimated_s / 60):
+            logger.warning(
+                "Suspiciously few transcript entries (%d) for %.0fs audio — "
+                "possible Gemini truncation or silence",
+                len(validated), estimated_s,
+            )
 
         logger.info("Transcription complete: %d valid entries", len(validated))
         return validated
