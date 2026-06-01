@@ -22,16 +22,19 @@ callback endpoint (set ``?redirect=1`` to enable the cookie flow).
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
 from app.config import settings
+from app._limiter import limiter as _limiter
 from app.services.oauth_service import (
     get_authorization_url,
+    generate_state,
     exchange_code,
     get_userinfo,
     upsert_oauth_account,
     verify_state,
+    OAuthEmailNotVerifiedError,
     _PROVIDERS,
 )
 
@@ -61,7 +64,9 @@ def _provider_or_404(provider: str) -> None:
     status_code=302,
     responses={302: {"description": "Redirect to the provider's OAuth2 consent page."}},
 )
+@_limiter.limit("20/minute")
 async def authorize(
+    request: Request,
     provider: str,
     redirect: Optional[str] = Query(
         default=None,
@@ -77,8 +82,21 @@ async def authorize(
     redirect to the web UI instead of returning JSON.
     """
     _provider_or_404(provider)
-    url = get_authorization_url(provider, extra_state=redirect or "")
-    return RedirectResponse(url=url, status_code=302)
+    state = generate_state(redirect or "")
+    url = get_authorization_url(provider, signed_state=state)
+    resp = RedirectResponse(url=url, status_code=302)
+    # Bind the state to this browser (double-submit) so a captured/forged state
+    # can't be replayed in a victim's session — defends against OAuth login CSRF.
+    resp.set_cookie(
+        key="mb_oauth_state",
+        value=state,
+        httponly=True,
+        samesite="lax",  # sent on the top-level GET redirect back from the IdP
+        secure=True,
+        max_age=600,
+        path="/",
+    )
+    return resp
 
 
 # ── GET /auth/oauth/{provider}/callback ───────────────────────────────────────
@@ -99,7 +117,9 @@ async def authorize(
         302: {"description": "Redirect to the web UI with a session cookie (when ?redirect=1 was passed)."},
     },
 )
+@_limiter.limit("20/minute")
 async def callback(
+    request: Request,
     provider: str,
     code: Optional[str] = Query(default=None),
     state: Optional[str] = Query(default=None),
@@ -136,9 +156,15 @@ async def callback(
     if not code:
         raise HTTPException(status_code=400, detail="Missing authorization code")
 
-    # Verify CSRF state — always required (generated on authorize redirect)
+    # Verify CSRF state — always required (generated on authorize redirect).
     if not state:
         raise HTTPException(status_code=400, detail="Missing OAuth state parameter")
+    # Double-submit: the state must match the cookie set on /authorize so a
+    # state captured/forged by an attacker can't be replayed in this browser.
+    cookie_state = request.cookies.get("mb_oauth_state")
+    import hmac as _hmac
+    if not cookie_state or not _hmac.compare_digest(cookie_state, state):
+        raise HTTPException(status_code=400, detail="Invalid or expired OAuth state token")
     extra = verify_state(state)
     if extra is None:
         raise HTTPException(status_code=400, detail="Invalid or expired OAuth state token")
@@ -148,7 +174,7 @@ async def callback(
         token_data = await exchange_code(provider, code)
     except Exception as exc:
         logger.error("OAuth token exchange failed for %s: %s", provider, exc)
-        raise HTTPException(status_code=502, detail=f"Token exchange failed: {exc}")
+        raise HTTPException(status_code=502, detail="Token exchange with the provider failed")
 
     access_token_provider = token_data.get("access_token", "")
 
@@ -157,14 +183,23 @@ async def callback(
         userinfo = await get_userinfo(provider, access_token_provider)
     except Exception as exc:
         logger.error("OAuth userinfo fetch failed for %s: %s", provider, exc)
-        raise HTTPException(status_code=502, detail=f"User info fetch failed: {exc}")
+        raise HTTPException(status_code=502, detail="Could not fetch your profile from the provider")
 
     # Upsert account
     try:
         account_id, api_key = await upsert_oauth_account(provider, token_data, userinfo)
+    except OAuthEmailNotVerifiedError as exc:
+        logger.warning("OAuth link refused (unverified email) for %s: %s", provider, exc)
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "This email is already registered. Because the provider did not "
+                "verify it, sign in with your password instead of SSO."
+            ),
+        )
     except Exception as exc:
         logger.error("OAuth account upsert failed: %s", exc)
-        raise HTTPException(status_code=500, detail=f"Account creation failed: {exc}")
+        raise HTTPException(status_code=500, detail="Account creation failed")
 
     email = (
         userinfo.get("email")
@@ -199,6 +234,9 @@ async def callback(
             secure=True,  # round-3 fix #3 — match the password-login cookie flags
             max_age=settings.JWT_EXPIRE_HOURS * 3600,
         )
+        resp.delete_cookie("mb_oauth_state", path="/")  # single-use
         return resp
 
-    return JSONResponse(content=response_body)
+    resp = JSONResponse(content=response_body)
+    resp.delete_cookie("mb_oauth_state", path="/")  # single-use
+    return resp

@@ -92,6 +92,12 @@ class Settings(BaseSettings):
     JWT_SECRET: str = "change-me-in-production"
     JWT_EXPIRE_HOURS: int = 24
 
+    # Dedicated key for encryption-at-rest of third-party integration tokens.
+    # Kept separate from JWT_SECRET so a JWT-signing-key leak doesn't also
+    # decrypt stored OAuth/Slack/Notion tokens (key separation). When empty,
+    # falls back to deriving from JWT_SECRET for backward compatibility.
+    ENCRYPTION_KEY: str = ""
+
     # Environment — set to "production" to enforce strict security defaults
     ENVIRONMENT: str = "development"
 

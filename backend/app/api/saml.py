@@ -23,6 +23,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from pydantic import BaseModel
 
 from app.config import settings
+from app._limiter import limiter as _limiter
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth/saml", tags=["SSO — SAML"])
@@ -91,14 +92,37 @@ def _build_sp_settings(org_slug: str, cfg) -> dict:
             },
             "x509cert": "",
         },
+        # Force signature/assertion validation rather than relying on library
+        # defaults — without this an attacker could submit an unsigned or
+        # signature-wrapped assertion and be provisioned into any email's account.
+        "security": {
+            "wantMessagesSigned": True,
+            "wantAssertionsSigned": True,
+            "wantNameId": True,
+            "requestedAuthnContext": False,
+            "rejectDeprecatedAlgorithm": True,
+            "signatureAlgorithm": "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256",
+            "digestAlgorithm": "http://www.w3.org/2001/04/xmlenc#sha256",
+        },
     }
     return sp_settings
 
 
 async def _fetch_idp_metadata(url: str) -> str:
-    """Fetch IdP metadata XML from a URL."""
+    """Fetch IdP metadata XML from a URL (SSRF-guarded).
+
+    The URL is admin-supplied, so it's run through the same private-IP /
+    cloud-metadata resolver used for webhooks before any server-side fetch.
+    """
+    from app.services.webhook_service import check_url_ssrf
+    ssrf_error = await check_url_ssrf(url)
+    if ssrf_error:
+        raise HTTPException(
+            status_code=400,
+            detail=f"IdP metadata URL is not allowed: {ssrf_error}",
+        )
     import httpx
-    async with httpx.AsyncClient(timeout=10) as client:
+    async with httpx.AsyncClient(timeout=10, follow_redirects=False) as client:
         resp = await client.get(url)
         resp.raise_for_status()
         return resp.text
@@ -187,7 +211,9 @@ async def saml_authorize(org_slug: str, request: Request, redirect: bool = False
     # Merge IdP settings from metadata
     try:
         if cfg.idp_metadata_url:
-            idp_data = OneLogin_Saml2_IdPMetadataParser.parse_remote(cfg.idp_metadata_url)
+            idp_data = OneLogin_Saml2_IdPMetadataParser.parse(
+                await _fetch_idp_metadata(cfg.idp_metadata_url)
+            )
         elif cfg.idp_metadata_xml:
             idp_data = OneLogin_Saml2_IdPMetadataParser.parse(cfg.idp_metadata_xml)
         else:
@@ -197,7 +223,7 @@ async def saml_authorize(org_slug: str, request: Request, redirect: bool = False
         raise
     except Exception as exc:
         logger.error("SAML metadata error for %s: %s", org_slug, exc)
-        raise HTTPException(status_code=500, detail=f"Failed to load IdP metadata: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to load IdP metadata")
 
     # Build request object expected by python3-saml
     req = {
@@ -225,6 +251,7 @@ async def saml_authorize(org_slug: str, request: Request, redirect: bool = False
         "org_slug": "acme-corp",
     }}}}},
 )
+@_limiter.limit("20/minute")
 async def saml_callback(org_slug: str, request: Request):
     """Handle SAML assertion from the IdP.
 
@@ -253,7 +280,9 @@ async def saml_callback(org_slug: str, request: Request):
         sp_settings = _build_sp_settings(org_slug, cfg)
         try:
             if cfg.idp_metadata_url:
-                idp_data = OneLogin_Saml2_IdPMetadataParser.parse_remote(cfg.idp_metadata_url)
+                idp_data = OneLogin_Saml2_IdPMetadataParser.parse(
+                    await _fetch_idp_metadata(cfg.idp_metadata_url)
+                )
             elif cfg.idp_metadata_xml:
                 idp_data = OneLogin_Saml2_IdPMetadataParser.parse(cfg.idp_metadata_xml)
             else:
@@ -262,7 +291,8 @@ async def saml_callback(org_slug: str, request: Request):
         except HTTPException:
             raise
         except Exception as exc:
-            raise HTTPException(status_code=500, detail=f"Failed to load IdP metadata: {exc}")
+            logger.error("SAML metadata error for %s: %s", org_slug, exc)
+            raise HTTPException(status_code=500, detail="Failed to load IdP metadata")
 
         req = {
             "https": "on" if request.url.scheme == "https" else "off",

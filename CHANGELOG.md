@@ -4,9 +4,33 @@ All notable changes to JustHereToListen.io are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.55.0 — **Last updated:** 2026-05-23
+> **Latest version:** 2.56.0 — **Last updated:** 2026-06-01
 
 ---
+
+## [2.56.0] - 2026-06-01
+
+Hardening pass following a full-service audit (security, correctness, performance).
+
+### Security
+- **Account-takeover fix:** OAuth/SAML SSO no longer auto-links an identity to a pre-existing local account unless the provider has *verified* the email (`email_is_verified`). Google's `email_verified` claim is required; Microsoft (multi-tenant `/common`) is treated as unverified for linking.
+- **OAuth login CSRF:** `state` is now bound to a single-use `HttpOnly` browser cookie (double-submit) and the signing HMAC is no longer truncated to 64 bits.
+- **SAML:** the SP `security` block now forces `wantAssertionsSigned`/`wantMessagesSigned`/`rejectDeprecatedAlgorithm`; IdP-metadata URLs are SSRF-guarded (private-IP/metadata resolver, `follow_redirects=False`) instead of being fetched blindly.
+- **Encryption-at-rest:** integration tokens use a dedicated `ENCRYPTION_KEY` (separate from `JWT_SECRET`) with backward-compatible multi-key decryption; decryption failures now log at error level instead of silently returning `{}`.
+- Rate-limited the OAuth/SAML callback endpoints; the shared limiter is now proxy-aware (honours `TRUST_PROXY_HEADERS`).
+- Stopped leaking upstream exception strings to clients in the OAuth/SAML error paths.
+
+### Fixed (correctness)
+- Bot launch no longer blocks the event loop — PulseAudio/ffmpeg/Xvfb/mic setup runs via `asyncio.to_thread`.
+- Per-bot credit deduction is idempotent on `reference_id` (no more double-charge on retry).
+- WebSocket broadcasts no longer fall through to every tenant when an event lacks an `account_id`.
+- Background fire-and-forget tasks now log their exceptions instead of swallowing them.
+- Keyword-alert cache is bounded (LRU) instead of growing per-account unboundedly.
+
+### Performance
+- Post-meeting analysis/chapters/email run on Claude Sonnet with transcript prompt-caching (large per-meeting cost reduction); Opus stays available behind an explicit opt-in.
+- Tightened Chromium launch flags for the listen-only bot (fewer renderer processes, no extensions/images).
+- Reuse pooled `httpx` clients on the TTS and integration hot paths.
 
 ## [2.55.0] - 2026-05-23
 
