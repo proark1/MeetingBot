@@ -171,8 +171,8 @@
 
       <div class="admin-sidebar-label">Admin</div>
 
-      <button class="admin-nav-item active" data-section="overview">
-        <span>📊</span> Overview
+      <button class="admin-nav-item active" data-section="overview" aria-current="page">
+        <span aria-hidden="true">📊</span> Overview
       </button>
       <button class="admin-nav-item" data-section="users">
         <span>👥</span> Users
@@ -324,7 +324,7 @@
         <div style="overflow-x:auto">
           <table class="table table-hover">
             <thead>
-              <tr><th>Time</th><th>User</th><th>Type</th><th>Description</th><th class="text-end">Amount</th></tr>
+              <tr><th scope="col">Time</th><th scope="col">User</th><th scope="col">Type</th><th scope="col">Description</th><th class="text-end">Amount</th></tr>
             </thead>
             <tbody>
               {% for t in recent_txns[:8] %}
@@ -395,14 +395,14 @@
           <table class="table table-sm table-hover mb-0" id="acct-table">
             <thead class="table-light sticky-top">
               <tr>
-                <th>Email</th>
-                <th>Type</th>
-                <th>Plan</th>
-                <th>Balance</th>
-                <th>Bots Used</th>
-                <th>Joined</th>
-                <th>Status</th>
-                <th>Actions</th>
+                <th scope="col">Email</th>
+                <th scope="col">Type</th>
+                <th scope="col">Plan</th>
+                <th scope="col">Balance</th>
+                <th scope="col">Bots Used</th>
+                <th scope="col">Joined</th>
+                <th scope="col">Status</th>
+                <th scope="col">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -506,7 +506,7 @@
         <div class="table-responsive">
           <table class="table table-sm table-hover mb-0">
             <thead class="table-light">
-              <tr><th>Time</th><th>User</th><th>Type</th><th>Description</th><th class="text-end">Amount</th><th>Ref</th></tr>
+              <tr><th scope="col">Time</th><th scope="col">User</th><th scope="col">Type</th><th scope="col">Description</th><th class="text-end">Amount</th><th scope="col">Ref</th></tr>
             </thead>
             <tbody>
               {% for t in recent_txns %}
@@ -766,7 +766,7 @@
         <div class="table-responsive">
           <table class="table table-sm table-hover mb-0">
             <thead class="table-light">
-              <tr><th>Detected</th><th>From</th><th>Amount</th><th>Block</th><th>Tx Hash</th><th>Status</th><th>Action</th></tr>
+              <tr><th scope="col">Detected</th><th scope="col">From</th><th scope="col">Amount</th><th scope="col">Block</th><th scope="col">Tx Hash</th><th scope="col">Status</th><th scope="col">Action</th></tr>
             </thead>
             <tbody>
               {% for t in unmatched_transfers %}
@@ -983,8 +983,8 @@
               <table class="table table-sm table-hover mb-0" id="analytics-user-table">
                 <thead class="table-light sticky-top">
                   <tr>
-                    <th>Email</th><th>Plan</th><th>Total</th><th>30d</th><th>7d</th>
-                    <th>Last Active</th><th>Platform</th><th>AI Tokens</th><th>AI Cost</th><th>Features</th>
+                    <th scope="col">Email</th><th scope="col">Plan</th><th scope="col">Total</th><th scope="col">30d</th><th scope="col">7d</th>
+                    <th scope="col">Last Active</th><th scope="col">Platform</th><th scope="col">AI Tokens</th><th scope="col">AI Cost</th><th scope="col">Features</th>
                   </tr>
                 </thead>
                 <tbody id="analytics-user-tbody">
@@ -1041,11 +1041,14 @@ function filterAccounts(q) {
 
 function adminSwitch(name) {
   document.querySelectorAll('.admin-section').forEach(el => el.classList.remove('active'));
-  document.querySelectorAll('.admin-nav-item[data-section]').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.admin-nav-item[data-section]').forEach(el => {
+    el.classList.remove('active');
+    el.removeAttribute('aria-current');
+  });
   const section = document.getElementById('admin-section-' + name);
   if (section) section.classList.add('active');
   const btn = document.querySelector('.admin-nav-item[data-section="' + name + '"]');
-  if (btn) btn.classList.add('active');
+  if (btn) { btn.classList.add('active'); btn.setAttribute('aria-current', 'page'); }
   window.history.replaceState(null, '', '#' + name);
 }
 
@@ -1256,7 +1259,7 @@ function _renderAnalytics(d) {
   // AI model table
   const byModel = (d.ai_usage || {}).by_model || {};
   document.getElementById('ai-model-table').innerHTML = Object.keys(byModel).length
-    ? `<table class="table table-sm mb-0"><thead><tr><th>Model</th><th class="text-end">Calls</th><th class="text-end">Tokens</th><th class="text-end">Cost</th></tr></thead><tbody>` +
+    ? `<table class="table table-sm mb-0"><thead><tr><th scope="col">Model</th><th class="text-end">Calls</th><th class="text-end">Tokens</th><th class="text-end">Cost</th></tr></thead><tbody>` +
       Object.entries(byModel).map(([m,v]) =>
         `<tr><td style="font-size:12px">${m}</td><td class="text-end small">${_fmt(v.calls)}</td><td class="text-end small">${_fmt(v.tokens)}</td><td class="text-end small">${_fmtCost(v.cost)}</td></tr>`
       ).join('') + '</tbody></table>'
@@ -1265,7 +1268,7 @@ function _renderAnalytics(d) {
   // AI operation table
   const byOp = (d.ai_usage || {}).by_operation || {};
   document.getElementById('ai-op-table').innerHTML = Object.keys(byOp).length
-    ? `<table class="table table-sm mb-0"><thead><tr><th>Operation</th><th class="text-end">Calls</th><th class="text-end">Tokens</th><th class="text-end">Cost</th></tr></thead><tbody>` +
+    ? `<table class="table table-sm mb-0"><thead><tr><th scope="col">Operation</th><th class="text-end">Calls</th><th class="text-end">Tokens</th><th class="text-end">Cost</th></tr></thead><tbody>` +
       Object.entries(byOp).map(([op,v]) =>
         `<tr><td style="font-size:12px">${op}</td><td class="text-end small">${_fmt(v.calls)}</td><td class="text-end small">${_fmt(v.tokens)}</td><td class="text-end small">${_fmtCost(v.cost)}</td></tr>`
       ).join('') + '</tbody></table>'
@@ -1351,7 +1354,7 @@ function _renderAnalytics(d) {
       <div class="d-flex justify-content-between mb-1"><span>Credits Consumed</span><strong style="color:#ef4444">${_fmtCost(Math.abs(billing.total_credits_consumed_usd || 0))}</strong></div>
       <div class="d-flex justify-content-between mb-1"><span>Net Balance</span><strong>${_fmtCost(billing.net_balance_usd)}</strong></div>
     </div>
-    ${Object.keys(byType).length ? '<table class="table table-sm mb-0"><thead><tr><th>Type</th><th class="text-end">Amount</th><th class="text-end">Count</th></tr></thead><tbody>' +
+    ${Object.keys(byType).length ? '<table class="table table-sm mb-0"><thead><tr><th scope="col">Type</th><th class="text-end">Amount</th><th class="text-end">Count</th></tr></thead><tbody>' +
       Object.entries(byType).map(([t,v]) => '<tr><td style="font-size:12px">' + t + '</td><td class="text-end small">' + _fmtCost(Math.abs(v.amount)) + '</td><td class="text-end small">' + _fmt(v.count) + '</td></tr>').join('') +
       '</tbody></table>' : '<div class="text-muted small">No transactions.</div>'}`;
 
@@ -1376,7 +1379,7 @@ function _renderAnalytics(d) {
   // ── Top error messages table ────────────────────────────────────────────
   const topErrs = errData.top_messages || [];
   document.getElementById('error-messages-table').innerHTML = topErrs.length
-    ? '<table class="table table-sm mb-0"><thead><tr><th>Error</th><th class="text-end">Count</th></tr></thead><tbody>' +
+    ? '<table class="table table-sm mb-0"><thead><tr><th scope="col">Error</th><th class="text-end">Count</th></tr></thead><tbody>' +
       topErrs.map(([msg, cnt]) => '<tr><td style="font-size:12px;word-break:break-all">' + esc(msg) + '</td><td class="text-end small">' + esc(cnt) + '</td></tr>').join('') +
       '</tbody></table>'
     : '<div class="text-muted small text-center py-3">No errors recorded.</div>';
@@ -1416,7 +1419,7 @@ function _renderAnalytics(d) {
   // ── Template usage table ────────────────────────────────────────────────
   const tmpls = d.templates || {};
   document.getElementById('template-table').innerHTML = Object.keys(tmpls).length
-    ? '<table class="table table-sm mb-0"><thead><tr><th>Template</th><th class="text-end">Uses</th></tr></thead><tbody>' +
+    ? '<table class="table table-sm mb-0"><thead><tr><th scope="col">Template</th><th class="text-end">Uses</th></tr></thead><tbody>' +
       Object.entries(tmpls).sort((a,b) => b[1]-a[1]).map(([t,c]) => '<tr><td style="font-size:12px">' + t + '</td><td class="text-end small">' + _fmt(c) + '</td></tr>').join('') +
       '</tbody></table>'
     : '<div class="text-muted small text-center py-3">No custom templates used.</div>';
@@ -1534,7 +1537,7 @@ async function _doSupportLookup() {
         <div class="table-responsive">
           <table class="table table-sm table-hover mb-0">
             <thead class="table-light">
-              <tr><th>ID</th><th>Status</th><th>Platform</th><th>Meeting URL</th><th>Date</th><th>Duration</th><th>Transcript Entries</th><th>Analysis</th><th>Error</th></tr>
+              <tr><th scope="col">ID</th><th scope="col">Status</th><th scope="col">Platform</th><th scope="col">Meeting URL</th><th scope="col">Date</th><th scope="col">Duration</th><th scope="col">Transcript Entries</th><th scope="col">Analysis</th><th scope="col">Error</th></tr>
             </thead>
             <tbody>${bots || '<tr><td colspan="9" class="text-center text-muted py-3">No bots yet.</td></tr>'}</tbody>
           </table>
