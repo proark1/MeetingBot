@@ -496,7 +496,8 @@ async def delete_webhook(webhook_id: str, request: _Request):
     """Delete a registered webhook permanently.
 
     Returns 204 on success. The webhook is removed from the in-memory store
-    and the database. Pending delivery attempts for this webhook are cancelled.
+    and the database, and all of its delivery records (pending, retrying, and
+    historical) are deleted.
     """
     account_id = _request_account_id(request)
     # Ownership check before destructive op (raises 404 on tenant mismatch).
@@ -504,8 +505,12 @@ async def delete_webhook(webhook_id: str, request: _Request):
     if not await store.delete_webhook(webhook_id):
         raise HTTPException(status_code=404, detail=f"Webhook {webhook_id!r} not found")
 
-    # Cascade-delete pending/retrying delivery records so the retry loop
-    # doesn't keep loading and failing ghost deliveries for a deleted webhook.
+    # Cascade-delete ALL delivery records for this webhook. There is no DB-level
+    # foreign key from webhook_deliveries.webhook_id → webhooks.id, so nothing is
+    # removed automatically: pending/retrying rows would keep the retry loop
+    # firing ghost deliveries, and success/failed rows would be orphaned history
+    # (unreachable now that the parent webhook 404s). Removing everything keeps
+    # the table consistent with the in-memory store.
     try:
         from app.db import AsyncSessionLocal
         from app.models.account import WebhookDelivery
@@ -514,7 +519,6 @@ async def delete_webhook(webhook_id: str, request: _Request):
             await session.execute(
                 _sa_delete(WebhookDelivery).where(
                     WebhookDelivery.webhook_id == webhook_id,
-                    WebhookDelivery.status.in_(("pending", "retrying")),
                 )
             )
             await session.commit()

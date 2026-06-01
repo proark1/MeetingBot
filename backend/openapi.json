@@ -3729,7 +3729,7 @@
           "Webhooks"
         ],
         "summary": "Delete Webhook",
-        "description": "Delete a registered webhook permanently.\n\nReturns 204 on success. The webhook is removed from the in-memory store\nand the database. Pending delivery attempts for this webhook are cancelled.",
+        "description": "Delete a registered webhook permanently.\n\nReturns 204 on success. The webhook is removed from the in-memory store\nand the database, and all of its delivery records (pending, retrying, and\nhistorical) are deleted.",
         "operationId": "delete_webhook_api_v1_webhook__webhook_id__delete",
         "security": [
           {

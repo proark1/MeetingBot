@@ -17,8 +17,12 @@ Webhook reliability hardening.
 - **Orphaned delivery records** — deleting a webhook now cascade-deletes its `pending`/`retrying` delivery records from the DB, preventing the retry loop from repeatedly loading and failing ghost deliveries.
 - **Stale comment** in `_classify_status` — updated `# connection/timeout/SSRF — retry later` to accurately reflect that SSRF is no longer in the `None` path.
 
+- **Webhook delete now removes all delivery records** — `webhook_deliveries.webhook_id` has no DB foreign key, so deleting a webhook orphaned its delivery history. Deletion now removes every delivery row (pending, retrying, and historical), not just pending/retrying, keeping the table consistent with the in-memory store.
+- **ffmpeg partial-chunk leak** — when `_split_audio` times out, partial `/tmp/chunk_*.wav` files written before the kill are now removed, preventing `/tmp` exhaustion under repeated timeouts.
+
 ### Security
 - **Per-account webhook cap** — `POST /webhooks` now returns `400` when an account already has 25 webhooks, preventing memory DoS via unbounded webhook creation that would grow the `_webhooks` dict and O(n)-scan every `dispatch_event` call.
+- **Prompt-injection sanitization unified** — extracted a shared `sanitize_prompt_input()` helper (escapes ALL angle brackets + truncates) used by `bot_name`, `caption_context`, and `meeting_url`. The demo-transcript `meeting_url` path previously escaped only the closing `</meeting_url>` tag, leaving a partial-tag injection vector; it now gets full escaping. The injection-guard tests import and exercise the real helper instead of a duplicated copy.
 
 ---
 

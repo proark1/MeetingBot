@@ -35,6 +35,21 @@ def _estimate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
     return input_tokens * pricing["input"] + output_tokens * pricing["output"]
 
 
+def sanitize_prompt_input(text: "str | None", max_len: int, default: str = "") -> str:
+    """Neutralise untrusted text before embedding it in an LLM prompt.
+
+    Escapes ALL angle brackets (``<`` → ``&lt;``, ``>`` → ``&gt;``) so a crafted
+    value can't close an XML envelope tag (e.g. ``</meeting_context>``) and break
+    out of its context to inject instructions, then truncates to ``max_len``.
+
+    Shared by every prompt-assembly path (bot_name, caption_context, meeting_url)
+    so the mitigation can't drift apart between call sites — and so the prompt
+    injection guard tests can import and exercise the real implementation.
+    """
+    raw = (text or default)[:max_len]
+    return raw.replace("<", "&lt;").replace(">", "&gt;")
+
+
 # Per-task usage sink using ContextVar — each asyncio Task (one per bot) gets
 # its own context, so concurrent bots never share or corrupt each other's records.
 _usage_ctx: contextvars.ContextVar[list[dict[str, Any]] | None] = contextvars.ContextVar(
@@ -551,10 +566,8 @@ async def _claude_mention_response(
     # Round-3 fix #7 (hardened): bot_name is operator-set and caption_context
     # is fully untrusted (anyone in the meeting).  Escape ALL angle brackets in
     # both fields so no injected tag can break out of the XML envelope.
-    _raw_name = (bot_name or "AI assistant")[:200]
-    safe_bot_name = _raw_name.replace("<", "&lt;").replace(">", "&gt;")
-    _raw_context = (caption_context or "")[:8000]
-    safe_caption_context = _raw_context.replace("<", "&lt;").replace(">", "&gt;")
+    safe_bot_name = sanitize_prompt_input(bot_name, 200, default="AI assistant")
+    safe_caption_context = sanitize_prompt_input(caption_context, 8000)
     prompt = (
         f"You are <bot_name>{safe_bot_name}</bot_name>, an AI assistant attending a meeting as a participant.\n"
         f"Someone addressed you by name. Read the context below and respond appropriately.\n\n"
@@ -599,8 +612,10 @@ async def _claude_ask_about_transcript(
 
 async def _claude_demo_transcript(meeting_url: str) -> list[dict[str, Any]]:
     # Wrap meeting_url in XML tags so newlines/special chars can't escape the
-    # outer prompt context (prompt injection via crafted URLs).
-    safe_url = meeting_url.replace("</meeting_url>", "&lt;/meeting_url&gt;")[:500]
+    # outer prompt context (prompt injection via crafted URLs). Escape ALL angle
+    # brackets — not just the closing tag — to match the bot_name/caption_context
+    # hardening and close partial-tag injection vectors.
+    safe_url = sanitize_prompt_input(meeting_url, 500)
     text = await _claude_complete(
         f"{_DEMO_TRANSCRIPT_PROMPT}\n\n"
         f"Generate a realistic meeting transcript for a video call at: "
@@ -693,10 +708,8 @@ async def _gemini_mention_response(
     # Round-3 fix #7 (hardened): bot_name is operator-set and caption_context
     # is fully untrusted (anyone in the meeting).  Escape ALL angle brackets in
     # both fields so no injected tag can break out of the XML envelope.
-    _raw_name = (bot_name or "AI assistant")[:200]
-    safe_bot_name = _raw_name.replace("<", "&lt;").replace(">", "&gt;")
-    _raw_context = (caption_context or "")[:8000]
-    safe_caption_context = _raw_context.replace("<", "&lt;").replace(">", "&gt;")
+    safe_bot_name = sanitize_prompt_input(bot_name, 200, default="AI assistant")
+    safe_caption_context = sanitize_prompt_input(caption_context, 8000)
     prompt = (
         f"You are <bot_name>{safe_bot_name}</bot_name>, an AI assistant attending a meeting as a participant.\n"
         f"Someone addressed you by name. Read the context below and respond appropriately.\n\n"
