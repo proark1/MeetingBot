@@ -630,25 +630,10 @@ async def create_bot(payload: BotCreate, request: Request):
         except Exception:
             logger.warning("Failed to increment monthly usage for %s", account_id)
 
-    # ── Sandbox fast-path: return demo bot instantly, no credits deducted ─────
-    if is_sandbox:
-        demo_transcript = await intelligence_service.generate_demo_transcript(bot.meeting_url)
-        now = _now()
-        await store.update_bot(
-            bot.id,
-            status="done",
-            transcript=demo_transcript,
-            is_demo_transcript=True,
-            started_at=now,
-            ended_at=now,
-            duration_seconds=0,
-            participants=[e.get("speaker") for e in demo_transcript if e.get("speaker")],
-        )
-        bot = await store.get_bot(bot.id)
-        logger.info("Sandbox bot %s completed instantly with demo transcript", bot.id)
-        return _to_response(bot)
-
     # ── Store idempotency key ─────────────────────────────────────────────────
+    # Registered BEFORE the sandbox fast-path so repeated sandbox (sk_test_*)
+    # calls with the same Idempotency-Key replay the original demo bot instead
+    # of minting a new one each time.
     if idempotency_key_raw:
         from app.db import AsyncSessionLocal
         from app.models.account import IdempotencyKey as IKModel
@@ -698,6 +683,24 @@ async def create_bot(payload: BotCreate, request: Request):
             logger.exception("Failed to store idempotency key — rolling back bot %s", bot.id)
             await store.delete_bot(bot.id)
             raise HTTPException(status_code=500, detail="Failed to register idempotency key") from _ik_exc
+
+    # ── Sandbox fast-path: return demo bot instantly, no credits deducted ─────
+    if is_sandbox:
+        demo_transcript = await intelligence_service.generate_demo_transcript(bot.meeting_url)
+        now = _now()
+        await store.update_bot(
+            bot.id,
+            status="done",
+            transcript=demo_transcript,
+            is_demo_transcript=True,
+            started_at=now,
+            ended_at=now,
+            duration_seconds=0,
+            participants=[e.get("speaker") for e in demo_transcript if e.get("speaker")],
+        )
+        bot = await store.get_bot(bot.id)
+        logger.info("Sandbox bot %s completed instantly with demo transcript", bot.id)
+        return _to_response(bot)
 
     if is_scheduled:
         # Defer start until join time — does NOT occupy a concurrent slot while waiting.
@@ -988,17 +991,30 @@ async def delete_bot(bot_id: str, request: Request):
             if bot.status == "in_call":
                 await store.update_bot(bot_id, status="call_ended", ended_at=_now())
             task.cancel()
+            timed_out = False
             try:
                 await asyncio.wait_for(task, timeout=30.0)
-            except (asyncio.TimeoutError, asyncio.CancelledError):
+            except asyncio.TimeoutError:
+                timed_out = True
+            except asyncio.CancelledError:
                 pass
-            # Ensure bot reaches a terminal state after task cancellation.
-            # The lifecycle task's error handler may have already done this,
-            # but if not (e.g. status still 'joining'), force it.
-            bot = await store.get_bot(bot_id)
-            if bot and bot.status not in ("done", "error", "cancelled"):
-                await store.mark_terminal(bot_id, "cancelled", ended_at=_now())
-            logger.info("Cancelled lifecycle task for bot %s", bot_id)
+            if timed_out:
+                # The task didn't stop within 30s (e.g. mid-analysis). It still
+                # owns its own terminal transition — forcing mark_terminal here
+                # would race the running task into duplicate `bot.cancelled`
+                # webhooks and snapshot writes. Leave it to finish.
+                logger.warning(
+                    "Bot %s cancel timed out after 30s; lifecycle task still "
+                    "finishing — leaving its terminal transition to the task",
+                    bot_id,
+                )
+            else:
+                # Task has fully stopped. Its error handler may already have set
+                # a terminal state; if not (e.g. still 'joining'), force one.
+                bot = await store.get_bot(bot_id)
+                if bot and bot.status not in ("done", "error", "cancelled"):
+                    await store.mark_terminal(bot_id, "cancelled", ended_at=_now())
+                logger.info("Cancelled lifecycle task for bot %s", bot_id)
         else:
             # Already finished — remove from memory immediately
             await store.delete_bot(bot_id)

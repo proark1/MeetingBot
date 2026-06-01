@@ -336,19 +336,28 @@ class Store:
                 self._share_token_index[session.share_token_hash] = session.id
             # LRU eviction: if store exceeds max, evict oldest terminal bots
             max_bots = _settings.STORE_MAX_BOTS
-            if len(self._bots) > max_bots:
+            size_before = len(self._bots)
+            if size_before > max_bots:
                 terminal = sorted(
                     (b for b in self._bots.values() if b.status in ("done", "error", "cancelled")),
                     key=lambda b: b.updated_at or b.created_at,
                 )
-                evict_count = len(self._bots) - max_bots
-                for bot in terminal[:evict_count]:
+                want = size_before - max_bots
+                evicted = 0
+                for bot in terminal[:want]:
                     self._bots.pop(bot.id, None)
                     if bot.share_token_hash and self._share_token_index.get(bot.share_token_hash) == bot.id:
                         self._share_token_index.pop(bot.share_token_hash, None)
-                if evict_count > 0:
-                    logger.info("Evicted %d terminal bot(s) from memory (store size %d > %d)",
-                                min(evict_count, len(terminal)), len(self._bots), max_bots)
+                    evicted += 1
+                logger.info("Evicted %d terminal bot(s) from memory (store size %d > %d)",
+                            evicted, size_before, max_bots)
+                if evicted < want:
+                    # Couldn't free enough — the store is full of *active* bots.
+                    logger.warning(
+                        "Store over capacity: %d bots > max %d but only %d terminal "
+                        "bot(s) evictable; active load exceeds STORE_MAX_BOTS",
+                        len(self._bots), max_bots, evicted,
+                    )
 
     async def get_bot(self, bot_id: str) -> Optional[BotSession]:
         async with self._lock:

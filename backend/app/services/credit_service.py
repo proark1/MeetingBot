@@ -123,6 +123,27 @@ async def increment_monthly_usage(account_id: str) -> None:
     )
 
 
+async def decrement_monthly_usage(account_id: str) -> None:
+    """Release a previously reserved monthly quota slot (clamped at 0).
+
+    Called when a bot reaches a terminal state without ever joining the meeting
+    (e.g. an immediate join failure) so the user isn't charged a monthly slot
+    for a bot that never ran. No-op for superadmin/unknown accounts.
+    """
+    from app.deps import SUPERADMIN_ACCOUNT_ID
+    if not account_id or account_id == SUPERADMIN_ACCOUNT_ID:
+        return
+    from app.db import AsyncSessionLocal
+    from sqlalchemy import update
+    async with AsyncSessionLocal() as db:
+        await db.execute(
+            update(Account)
+            .where(Account.id == account_id, Account.monthly_bots_used > 0)
+            .values(monthly_bots_used=Account.monthly_bots_used - 1)
+        )
+        await db.commit()
+
+
 async def add_credits(
     account_id: str,
     amount_usd: Decimal,
@@ -227,8 +248,18 @@ async def deduct_credits_for_bot(
             reference_id=bot_id,
         )
         db.add(tx)
+        from sqlalchemy.exc import IntegrityError
         try:
             await db.commit()
+        except IntegrityError:
+            # Idempotency: the partial-unique index on (type, reference_id)
+            # already holds a bot_usage row for this bot — a retry/re-run tried
+            # to charge twice. Roll back (no double-charge) and no-op.
+            await db.rollback()
+            logger.info(
+                "deduct_credits_for_bot no-op: bot %s already charged", bot_id,
+            )
+            return
         except Exception:
             await db.rollback()
             raise
