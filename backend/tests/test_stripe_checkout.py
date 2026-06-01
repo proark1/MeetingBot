@@ -8,7 +8,6 @@ Guards against a bug where the UI top-up handler called the async
 import inspect
 from types import SimpleNamespace
 
-import pytest
 from starlette.responses import RedirectResponse
 
 from app.api import ui as ui_module
