@@ -1,6 +1,5 @@
 """Integrations API — manage Slack and Notion integrations per account."""
 
-import json
 import logging
 import uuid
 from typing import Optional

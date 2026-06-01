@@ -715,6 +715,10 @@ class Store:
         """Remove expired bots (and their recording files) from memory and DB."""
         import os
         now = _now()
+        # Collect file paths to delete inside the lock, but perform the blocking
+        # os.remove() calls OUTSIDE it — file I/O can stall, and holding the
+        # global store lock during it freezes every other store operation.
+        paths_to_delete: list[str] = []
         async with self._lock:
             expired = [
                 bot_id
@@ -725,18 +729,22 @@ class Store:
                 bot = self._bots.pop(bot_id)
                 if bot.share_token_hash and self._share_token_index.get(bot.share_token_hash) == bot_id:
                     self._share_token_index.pop(bot.share_token_hash, None)
-                if bot.recording_path and os.path.exists(bot.recording_path):
-                    try:
-                        os.remove(bot.recording_path)
-                        logger.debug("Deleted recording for expired bot %s", bot_id)
-                    except Exception as exc:
-                        logger.warning("Could not delete recording %s: %s", bot.recording_path, exc)
-                if bot.video_path and os.path.exists(bot.video_path):
-                    try:
-                        os.remove(bot.video_path)
-                        logger.debug("Deleted video for expired bot %s", bot_id)
-                    except Exception as exc:
-                        logger.warning("Could not delete video %s: %s", bot.video_path, exc)
+                if bot.recording_path:
+                    paths_to_delete.append(bot.recording_path)
+                if bot.video_path:
+                    paths_to_delete.append(bot.video_path)
+
+        # Delete files off the event loop, lock released.
+        def _remove_files(paths: list[str]) -> None:
+            for p in paths:
+                try:
+                    if p and os.path.exists(p):
+                        os.remove(p)
+                except Exception as exc:
+                    logger.warning("Could not delete file %s: %s", p, exc)
+
+        if paths_to_delete:
+            await asyncio.to_thread(_remove_files, paths_to_delete)
 
         if expired:
             # Purge expired snapshots from DB too

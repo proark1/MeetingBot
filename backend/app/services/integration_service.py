@@ -9,7 +9,6 @@ Supported integration types:
 """
 
 import asyncio
-import json
 import logging
 from typing import Any, Optional
 
@@ -269,14 +268,13 @@ async def _post_to_google_drive(access_token: str, folder_id: Optional[str], bot
 
     Uses Drive Files API v3 multipart upload. Returns True on success.
     """
-    import httpx
 
     bot_id = bot_data.get("bot_id", "unknown")
     # Build markdown content
     try:
         from app.api.exports import _build_markdown
         # Build a minimal BotSession-like object from bot_data
-        from app.store import BotSession, _now as _store_now
+        from app.store import BotSession
         from dataclasses import fields as _dc_fields
         # Use only fields that exist in both bot_data and BotSession
         session_kwargs: dict = {}
@@ -345,7 +343,6 @@ async def _post_to_linear(api_key: str, team_id: str, bot_data: dict) -> bool:
 
     Uses Linear's GraphQL API. Returns True on success, False on failure.
     """
-    import httpx
 
     action_items = (bot_data.get("analysis") or {}).get("action_items", [])
     if not action_items:
@@ -394,7 +391,6 @@ async def _post_to_jira(base_url: str, token: str, email: str, project_key: str,
 
     Uses Jira REST API v3 with Basic Auth. Returns True on success, False on failure.
     """
-    import httpx
     import base64
 
     action_items = (bot_data.get("analysis") or {}).get("action_items", [])

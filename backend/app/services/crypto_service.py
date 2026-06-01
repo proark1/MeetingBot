@@ -155,7 +155,6 @@ async def test_rpc_url(url: str) -> tuple[bool, str]:
     Makes a lightweight ``eth_blockNumber`` JSON-RPC call.  Returns
     ``(True, "")`` on success or ``(False, reason)`` on failure.
     """
-    import json
     try:
         import httpx
     except ImportError:

@@ -127,7 +127,6 @@ def _transcribe_with_faster_whisper(audio_path: str, language: Optional[str] = N
 
 def _transcribe_with_openai_whisper(audio_path: str, language: Optional[str] = None) -> list[dict]:
     """Transcribe using openai-whisper. Returns [{speaker, text, timestamp}]."""
-    import whisper
     model = _load_model()
 
     options = {"language": language} if language else {}

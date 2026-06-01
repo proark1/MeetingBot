@@ -11,7 +11,6 @@ Strategy:
 """
 
 import asyncio
-import base64
 import contextlib
 import functools
 import itertools
@@ -802,9 +801,16 @@ async def _audio_health_loop(
 
             bot = await store.get_bot(bot_id) if bot_id else None
             if bot:
-                samples = list(getattr(bot, "audio_health_samples", []) or [])
-                samples.append(sample)
-                await store.update_bot(bot_id, audio_health_samples=samples[-40:])
+                # Mutate the live bot's diagnostic buffer in place instead of
+                # copy + store.update_bot — the latter takes the global store
+                # lock every 15s per bot and contends with all store ops as the
+                # bot count grows. The same object is read by the API and
+                # serialized (sliced to [-40:]) at terminal time, so no write
+                # through the store is needed.
+                buf = bot.audio_health_samples
+                buf.append(sample)
+                if len(buf) > 40:
+                    del buf[:-40]
         except Exception as e:
             logger.debug("audio_health_loop error: %s", e)
 
@@ -877,9 +883,12 @@ async def _webrtc_stats_loop(
             if bot_id:
                 bot = await store.get_bot(bot_id)
                 if bot:
-                    samples = list(getattr(bot, "webrtc_stats_samples", []) or [])
-                    samples.append(sample)
-                    await store.update_bot(bot_id, webrtc_stats_samples=samples[-40:])
+                    # In-place append + trim (see _audio_health_loop) — avoids the
+                    # per-iteration global-store-lock write under update_bot.
+                    buf = bot.webrtc_stats_samples
+                    buf.append(sample)
+                    if len(buf) > 40:
+                        del buf[:-40]
         except Exception as e:
             logger.debug("webrtc_stats_loop error: %s", e)
 

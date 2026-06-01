@@ -7,7 +7,6 @@ import os
 import re as _re
 import tempfile
 import time
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse, parse_qs, unquote
@@ -19,7 +18,6 @@ from app.store import store, BotSession, _now
 # keep working. The single source of truth is services.background_tasks.
 from app.services.background_tasks import (
     tracked_task as _tracked_task,
-    cancel_all_tracked_tasks,
 )
 from app.api.ws import manager as ws_manager
 from app.services import intelligence_service, webhook_service

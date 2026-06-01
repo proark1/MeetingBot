@@ -42,7 +42,7 @@ async def _resolve_ws_account(token: Optional[str]) -> Optional[str]:
     # JWT (web UI sessions)
     if token.startswith("eyJ"):
         try:
-            from jose import jwt, JWTError
+            from jose import jwt
             payload = jwt.decode(token, settings.JWT_SECRET, algorithms=["HS256"])
             return payload.get("sub") or None
         except Exception:

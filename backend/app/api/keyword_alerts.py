@@ -10,7 +10,7 @@ Per-bot alerts can also be specified at bot creation time.
 import json
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from app.deps import SUPERADMIN_ACCOUNT_ID

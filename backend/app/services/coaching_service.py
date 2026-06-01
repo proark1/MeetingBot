@@ -18,7 +18,6 @@ bot's ``coaching_config.deliver_via`` is ``webhook`` or ``both``.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import re
 import time

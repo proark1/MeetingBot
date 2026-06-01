@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Form, Request, Response
+from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from jose import JWTError, jwt
@@ -771,7 +771,7 @@ async def admin_page(request: Request, db: AsyncSession = Depends(get_db)):
         return RedirectResponse("/dashboard")
 
     from app.api.admin import WALLET_KEY, RPC_URL_KEY
-    from sqlalchemy import func, desc, case
+    from sqlalchemy import func, desc
 
     # Platform wallet
     wallet_result = await db.execute(
@@ -1972,7 +1972,6 @@ async def create_support_key_ui(request: Request, db: AsyncSession = Depends(get
     except Exception:
         return JSONResponse({"detail": "Invalid JSON body"}, status_code=400)
 
-    import hashlib as _hl
     import secrets as _sec
     from datetime import datetime as _dt, timezone as _tz, timedelta as _td
     from app.models.account import SupportKey
@@ -2076,7 +2075,7 @@ async def share_meeting(token: str, request: Request):
     import json as _json
     from datetime import datetime as _dt, timezone as _tz
     from app.store import store, BotSession
-    from app.services.token_hash import verify_token, hash_candidates
+    from app.services.token_hash import hash_candidates
 
     not_found = HTMLResponse(
         "<h1>Not Found</h1><p>This share link is invalid or has expired.</p>",

@@ -11,7 +11,6 @@ Config JSON schema:
 """
 
 import asyncio
-import json
 import logging
 from typing import Any, Optional
 
@@ -79,7 +78,6 @@ async def _post_to_hubspot(access_token: str, config: dict, bot_data: dict) -> b
 
     Returns True on success, False on failure (never raises).
     """
-    import httpx
 
     note_body = _build_hubspot_note_body(bot_data)
 
@@ -160,7 +158,6 @@ async def _post_to_salesforce(instance_url: str, access_token: str, config: dict
 
     Returns True on success, False on failure (never raises).
     """
-    import httpx
     from datetime import date
 
     task = _build_salesforce_task(bot_data)

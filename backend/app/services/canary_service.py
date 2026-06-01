@@ -242,3 +242,40 @@ async def run_all(cfg: CanaryConfig, runner: Optional[Runner] = None) -> list[Ca
     for platform, url in cfg.meeting_urls.items():
         reports.append(await run_canary(platform, url, cfg, runner=runner))
     return reports
+
+
+async def canary_loop() -> None:
+    """Background loop: periodically run the canary sweep.
+
+    Started from the app lifespan when ``CANARY_ENABLED`` is set. Each sweep
+    drives every configured test meeting through the full pipeline and logs a
+    health report per platform (a failing report is the earliest signal that a
+    platform's UI changed and broke ``browser_bot.py`` selectors). Errors are
+    swallowed so a transient failure never kills the loop.
+    """
+    import asyncio
+    from app.config import settings
+
+    interval = max(60, settings.CANARY_INTERVAL_S)
+    while True:
+        try:
+            cfg = CanaryConfig.from_env()
+            if not cfg.meeting_urls:
+                logger.warning(
+                    "Canary enabled but no CANARY_*_URL test meetings configured — "
+                    "sleeping (set e.g. CANARY_MEET_URL)."
+                )
+            else:
+                reports = await run_all(cfg)
+                failed = [r for r in reports if not r.ok]
+                if failed:
+                    logger.error(
+                        "Canary sweep: %d/%d platform(s) UNHEALTHY: %s",
+                        len(failed), len(reports),
+                        ", ".join(r.platform for r in failed),
+                    )
+                else:
+                    logger.info("Canary sweep: all %d platform(s) healthy", len(reports))
+        except Exception:
+            logger.exception("Canary loop iteration failed")
+        await asyncio.sleep(interval)

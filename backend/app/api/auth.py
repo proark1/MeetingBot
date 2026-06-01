@@ -1,6 +1,5 @@
 """Account registration, login, and API key management."""
 
-import hashlib as _hashlib
 import logging
 import secrets
 import uuid
@@ -9,7 +8,7 @@ from decimal import Decimal
 from typing import Optional
 
 import bcrypt
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.security import OAuth2PasswordRequestForm
 from jose import jwt
 from pydantic import BaseModel, EmailStr, Field
