@@ -548,11 +548,13 @@ async def _claude_mention_response(
     else:
         context_label = "Recent live captions from the meeting (spoken words):"
 
-    # Round-3 fix #7: bot_name is operator-set but still flows through an LLM
-    # prompt; strip the delimiter token to prevent self-injection. Caption
-    # content is fully untrusted (anyone in the meeting) so wrap it in tags.
-    safe_bot_name = (bot_name or "AI assistant").replace("</bot_name>", "")
-    safe_caption_context = (caption_context or "").replace("</meeting_context>", "&lt;/meeting_context&gt;")
+    # Round-3 fix #7 (hardened): bot_name is operator-set and caption_context
+    # is fully untrusted (anyone in the meeting).  Escape ALL angle brackets in
+    # both fields so no injected tag can break out of the XML envelope.
+    _raw_name = (bot_name or "AI assistant")[:200]
+    safe_bot_name = _raw_name.replace("<", "&lt;").replace(">", "&gt;")
+    _raw_context = (caption_context or "")[:8000]
+    safe_caption_context = _raw_context.replace("<", "&lt;").replace(">", "&gt;")
     prompt = (
         f"You are <bot_name>{safe_bot_name}</bot_name>, an AI assistant attending a meeting as a participant.\n"
         f"Someone addressed you by name. Read the context below and respond appropriately.\n\n"
@@ -596,9 +598,13 @@ async def _claude_ask_about_transcript(
 
 
 async def _claude_demo_transcript(meeting_url: str) -> list[dict[str, Any]]:
+    # Wrap meeting_url in XML tags so newlines/special chars can't escape the
+    # outer prompt context (prompt injection via crafted URLs).
+    safe_url = meeting_url.replace("</meeting_url>", "&lt;/meeting_url&gt;")[:500]
     text = await _claude_complete(
         f"{_DEMO_TRANSCRIPT_PROMPT}\n\n"
-        f"Generate a realistic meeting transcript for a video call at: {meeting_url}\n"
+        f"Generate a realistic meeting transcript for a video call at: "
+        f"<meeting_url>{safe_url}</meeting_url>\n"
         "Topics should feel natural for this kind of meeting. Include 3–4 distinct speakers.",
         max_tokens=8192,
         operation="demo_transcript",
@@ -684,11 +690,13 @@ async def _gemini_mention_response(
     else:
         context_label = "Recent live captions from the meeting (spoken words):"
 
-    # Round-3 fix #7: bot_name is operator-set but still flows through an LLM
-    # prompt; strip the delimiter token to prevent self-injection. Caption
-    # content is fully untrusted (anyone in the meeting) so wrap it in tags.
-    safe_bot_name = (bot_name or "AI assistant").replace("</bot_name>", "")
-    safe_caption_context = (caption_context or "").replace("</meeting_context>", "&lt;/meeting_context&gt;")
+    # Round-3 fix #7 (hardened): bot_name is operator-set and caption_context
+    # is fully untrusted (anyone in the meeting).  Escape ALL angle brackets in
+    # both fields so no injected tag can break out of the XML envelope.
+    _raw_name = (bot_name or "AI assistant")[:200]
+    safe_bot_name = _raw_name.replace("<", "&lt;").replace(">", "&gt;")
+    _raw_context = (caption_context or "")[:8000]
+    safe_caption_context = _raw_context.replace("<", "&lt;").replace(">", "&gt;")
     prompt = (
         f"You are <bot_name>{safe_bot_name}</bot_name>, an AI assistant attending a meeting as a participant.\n"
         f"Someone addressed you by name. Read the context below and respond appropriately.\n\n"

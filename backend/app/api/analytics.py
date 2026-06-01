@@ -430,7 +430,7 @@ async def search_transcripts(
     account_id = getattr(request.state, "account_id", None)
     filter_account = account_id if (account_id and account_id != SUPERADMIN_ACCOUNT_ID) else None
     sub_user_id = _sub_user_from_request(request)
-    all_bots, _, _ = await store.list_bots(limit=500, account_id=filter_account, sub_user_id=sub_user_id)
+    all_bots, _, _ = await store.list_bots(limit=200, account_id=filter_account, sub_user_id=sub_user_id)
 
     # ── Semantic (embedding) search ──────────────────────────────────────────
     if semantic:
@@ -506,9 +506,13 @@ async def search_transcripts(
             from sqlalchemy import select
 
             async with AsyncSessionLocal() as db:
+                from datetime import timedelta
                 query = select(BotSnapshot)
                 if filter_account:
                     query = query.where(BotSnapshot.account_id == filter_account)
+                # Limit to last 90 days by default to prevent full-history scans.
+                cutoff = _now() - timedelta(days=90)
+                query = query.where(BotSnapshot.created_at >= cutoff)
                 query = query.order_by(BotSnapshot.created_at.desc()).limit(500)
                 result = await db.execute(query)
                 snapshots = result.scalars().all()

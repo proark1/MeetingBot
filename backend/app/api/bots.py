@@ -1259,7 +1259,7 @@ class AnalyzeRequest(BaseModel):
 
 
 @router.post("/{bot_id}/analyze", response_model=MeetingAnalysis)
-@_limiter.limit("10/minute")
+@_limiter.limit("5/minute")
 async def analyze_bot(bot_id: str, request: Request, payload: AnalyzeRequest = AnalyzeRequest()):
     """(Re-)run AI analysis on the transcript.
 
@@ -1324,7 +1324,11 @@ async def get_highlights(bot_id: str, request: Request):
 # ── POST /api/v1/bot/{id}/ask ─────────────────────────────────────────────────
 
 class AskRequest(BaseModel):
-    question: str = Field(description="Free-form question about the meeting transcript.")
+    question: str = Field(
+        description="Free-form question about the meeting transcript.",
+        min_length=1,
+        max_length=1000,
+    )
 
     model_config = {"json_schema_extra": {"example": {
         "question": "Did anyone commit to a specific deadline for the v2 onboarding rollout?",
@@ -1413,7 +1417,7 @@ async def ask_live_bot(bot_id: str, request: Request, payload: AskRequest):
         "to": ["alice@acme.com", "bob@acme.com"],
     }}}}},
 )
-@_limiter.limit("5/minute")
+@_limiter.limit("3/minute")
 async def generate_followup_email(bot_id: str, request: Request):
     """Generate a draft follow-up email for the meeting."""
     account_id: Optional[str] = getattr(request.state, "account_id", None)
