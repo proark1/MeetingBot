@@ -5070,7 +5070,11 @@ async def run_browser_bot(
                         stderr=subprocess.DEVNULL,
                         env=_venv,
                     )
-                    time.sleep(0.5)
+                    # Give ffmpeg a moment to fail fast on a bad capture setup.
+                    # Must be async — this runs on the event loop (unlike the
+                    # _start_* helpers, which run in a worker thread), so a bare
+                    # time.sleep here would freeze every other bot + API request.
+                    await asyncio.sleep(0.5)
                     if ffmpeg_video_proc.poll() is None:
                         _register_proc(ffmpeg_video_proc)
                         logger.info("Video recording started → %s", video_path)

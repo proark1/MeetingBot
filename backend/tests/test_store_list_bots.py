@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 
-from app.store import Store, BotSession, encode_list_cursor
+from app.store import Store, BotSession
 
 
 def _bot(bot_id, status="done", account_id=None, sub_user_id=None, day=1):

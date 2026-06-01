@@ -1,6 +1,6 @@
 """Tests for action-item due-date reminders."""
 import uuid
-from datetime import datetime, timezone, timedelta, date
+from datetime import datetime, timezone, date
 
 import pytest
 

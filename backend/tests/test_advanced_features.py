@@ -12,7 +12,6 @@ Live-meeting paths (PlayWright + TTS + chat scraping) are NOT exercised here;
 they require a real meeting URL and are covered by manual smoke tests.
 """
 
-import asyncio
 
 import httpx
 import pytest

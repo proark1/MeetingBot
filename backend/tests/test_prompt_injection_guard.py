@@ -5,7 +5,6 @@ operator, caption_context from meeting participants, meeting_url in demo mode)
 before they are embedded in LLM prompts.
 """
 
-import pytest
 
 # Import the REAL sanitization helper so these tests catch regressions in the
 # actual implementation rather than a local copy of the logic.
