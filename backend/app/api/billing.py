@@ -241,12 +241,19 @@ async def create_stripe_checkout(
     cancel_url = payload.cancel_url or f"{base_url}/topup?payment=cancelled"
 
     from app.services.stripe_service import create_checkout_session, record_stripe_session
-    session_id, checkout_url = await create_checkout_session(
-        account_id=account_id,
-        amount_usd=payload.amount_usd,
-        success_url=success_url,
-        cancel_url=cancel_url,
-    )
+    try:
+        session_id, checkout_url = await create_checkout_session(
+            account_id=account_id,
+            amount_usd=payload.amount_usd,
+            success_url=success_url,
+            cancel_url=cancel_url,
+        )
+    except Exception:
+        logger.exception("Stripe checkout session creation failed for account %s", account_id)
+        raise HTTPException(
+            status_code=503,
+            detail="Payment provider is temporarily unavailable. Please try again.",
+        )
 
     await record_stripe_session(session_id, account_id, payload.amount_usd)
 
