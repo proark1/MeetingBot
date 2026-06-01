@@ -488,6 +488,15 @@ class Store:
                 if self._share_token_index.get(removed.share_token_hash) == bot_id:
                     self._share_token_index.pop(removed.share_token_hash, None)
 
+    async def list_live_bots(self, statuses) -> list[BotSession]:
+        """Return a snapshot of in-memory bots whose status is in ``statuses``.
+
+        Used by the stuck-bot reaper. Returns a copied list so the caller can
+        cancel tasks / mutate state without holding the store lock.
+        """
+        async with self._lock:
+            return [b for b in self._bots.values() if b.status in statuses]
+
     async def mark_terminal(self, bot_id: str, status: str, **kwargs) -> Optional[BotSession]:
         """Set terminal status, schedule TTL expiry, and persist to SQLite."""
         kwargs["expires_at"] = _now() + timedelta(hours=BOT_TTL_HOURS)

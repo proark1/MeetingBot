@@ -4,7 +4,21 @@ All notable changes to JustHereToListen.io are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.64.1 — **Last updated:** 2026-06-01
+> **Latest version:** 2.65.0 — **Last updated:** 2026-06-01
+
+---
+
+## [2.65.0] - 2026-06-01
+
+Reliability — stuck-bot safety net.
+
+### Added
+- **Stuck-bot reaper** — a supervised background job (folded into the existing cleanup loop) that force-terminates bots stuck in an actively-running state (`joining` / `in_call` / `call_ended` / `transcribing`) past a hard wall-clock ceiling. The per-phase timeouts (admission / max-duration / alone / transcription / analysis) already bound normal operation; this is defence-in-depth for the rare case where a lifecycle task hangs or exits without setting a terminal state, leaving a bot occupying a concurrency slot forever.
+  - If the lifecycle task is still alive but overdue, it's **cancelled** so the task's own `CancelledError` salvage path runs (transcript salvage → terminal state).
+  - If no live task exists but the status is non-terminal (a true orphan), the bot is force-marked `error`.
+  - Scheduled / queued / ready bots are **never** reaped — a meeting scheduled for next week is intentionally waiting, not stuck.
+  - New `BOT_LIFECYCLE_MAX_SECONDS` setting (default `10800` = 3h) controls the ceiling. New `Store.list_live_bots(statuses)` snapshot helper backs the reaper.
+  - +3 unit tests (orphan force-error, overdue-task cancellation, no-op when healthy).
 
 ---
 

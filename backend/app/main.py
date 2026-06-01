@@ -271,9 +271,16 @@ async def lifespan(app: FastAPI):
     # Start periodic cleanup of expired bots
     async def _cleanup_loop():
         from app.store import store
+        from app.services.bot_service import reap_stuck_bots
         while True:
             await asyncio.sleep(settings.STORE_CLEANUP_INTERVAL_SECONDS)
             await store.cleanup_expired()
+            # Safety net: force-terminate any bot stuck running past its hard
+            # wall-clock ceiling so it can't hold a concurrency slot forever.
+            try:
+                await reap_stuck_bots()
+            except Exception:
+                logger.exception("stuck-bot reaper failed")
 
     cleanup_task = asyncio.create_task(_supervised("cleanup_loop", _cleanup_loop))
 
