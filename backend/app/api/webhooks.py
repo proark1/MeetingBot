@@ -128,6 +128,13 @@ async def create_webhook(payload: WebhookCreate, request: _Request):
     account_id = _request_account_id(request)
     # Superadmin (legacy API_KEY) creates global webhooks → account_id=None.
     owner_id = None if account_id == SUPERADMIN_ACCOUNT_ID else account_id
+
+    # Enforce per-account limit to prevent memory DoS via unbounded webhook creation.
+    if owner_id is not None:
+        existing = await store.list_webhooks(account_id=owner_id)
+        if len(existing) >= 25:
+            raise HTTPException(status_code=400, detail="Webhook limit reached (25 per account)")
+
     wh = await store.new_webhook(
         url=payload.url, events=payload.events, secret=payload.secret, account_id=owner_id
     )
@@ -496,6 +503,23 @@ async def delete_webhook(webhook_id: str, request: _Request):
     await _get_webhook_or_404(webhook_id, account_id)
     if not await store.delete_webhook(webhook_id):
         raise HTTPException(status_code=404, detail=f"Webhook {webhook_id!r} not found")
+
+    # Cascade-delete pending/retrying delivery records so the retry loop
+    # doesn't keep loading and failing ghost deliveries for a deleted webhook.
+    try:
+        from app.db import AsyncSessionLocal
+        from app.models.account import WebhookDelivery
+        from sqlalchemy import delete as _sa_delete
+        async with AsyncSessionLocal() as session:
+            await session.execute(
+                _sa_delete(WebhookDelivery).where(
+                    WebhookDelivery.webhook_id == webhook_id,
+                    WebhookDelivery.status.in_(("pending", "retrying")),
+                )
+            )
+            await session.commit()
+    except Exception:
+        logger.exception("Failed to clean up delivery records for deleted webhook %s", webhook_id)
 
     _spawn_audit(_audit_log(
         account_id=account_id,

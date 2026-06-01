@@ -4,7 +4,21 @@ All notable changes to JustHereToListen.io are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.62.0 — **Last updated:** 2026-06-01
+> **Latest version:** 2.63.0 — **Last updated:** 2026-06-01
+
+---
+
+## [2.63.0] - 2026-06-01
+
+Webhook reliability hardening.
+
+### Fixed
+- **SSRF retry bug** — `_attempt_delivery` now returns `(403, ...)` instead of `(None, ...)` when the SSRF guard blocks a URL. `_classify_status(None)` was returning `"retry"`, causing the retry loop to hammer permanently blocked endpoints indefinitely. `_classify_status(403)` correctly returns `"fail"` and stops all retries.
+- **Orphaned delivery records** — deleting a webhook now cascade-deletes its `pending`/`retrying` delivery records from the DB, preventing the retry loop from repeatedly loading and failing ghost deliveries.
+- **Stale comment** in `_classify_status` — updated `# connection/timeout/SSRF — retry later` to accurately reflect that SSRF is no longer in the `None` path.
+
+### Security
+- **Per-account webhook cap** — `POST /webhooks` now returns `400` when an account already has 25 webhooks, preventing memory DoS via unbounded webhook creation that would grow the `_webhooks` dict and O(n)-scan every `dispatch_event` call.
 
 ---
 
