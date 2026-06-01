@@ -4,9 +4,23 @@ All notable changes to JustHereToListen.io are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.58.0 — **Last updated:** 2026-06-01
+> **Latest version:** 2.59.0 — **Last updated:** 2026-06-01
 
 ---
+
+## [2.59.0] - 2026-06-01
+
+Action-item lifecycle — due-date reminders (roadmap feature batch).
+
+### Added
+- **Action-item due-date reminders:** an opt-in background loop (`ACTION_ITEM_REMINDERS_ENABLED`, scan interval `ACTION_ITEM_REMINDER_INTERVAL_S`) scans open action items with a parseable `due_date` and dispatches two new webhook events:
+  - `action_item.due_soon` — due within `ACTION_ITEM_DUE_SOON_HOURS` (default 24h)
+  - `action_item.overdue` — past the due date
+  Integrations can use these to nudge assignees. `due_date` is parsed defensively (explicit calendar dates only — ISO and common formats; relative phrases like "next Friday" are skipped, never guessed). Each stage fires at most once per item (tracked via new `action_items.reminder_stage` / `reminder_sent_at` columns), and stages only ever advance `due_soon → overdue`.
+- Tests in `tests/test_action_item_reminders.py` (13 new tests).
+
+### Notes
+- The rest of the action-item lifecycle (list/filter, PATCH status/assignee/due_date, open↔done with `completed_at`, idempotent upsert) already existed — this batch adds the missing proactive reminder/notification half.
 
 ## [2.58.0] - 2026-06-01
 
