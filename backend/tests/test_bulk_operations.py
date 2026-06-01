@@ -1,6 +1,5 @@
 """Tests for bulk bot cancel/delete endpoints and list_bots cursor pagination."""
 
-import pytest
 import httpx
 
 

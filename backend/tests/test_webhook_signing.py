@@ -3,7 +3,6 @@
 import hashlib
 import hmac
 
-import pytest
 
 from app.services import webhook_service as W
 

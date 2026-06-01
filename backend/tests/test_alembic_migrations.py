@@ -8,7 +8,6 @@ import os
 import tempfile
 from pathlib import Path
 
-import pytest
 
 _BACKEND = Path(__file__).resolve().parent.parent
 
