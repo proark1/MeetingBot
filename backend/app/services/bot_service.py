@@ -1670,6 +1670,10 @@ async def reap_stuck_bots(max_age_seconds: Optional[int] = None) -> int:
         max_age_seconds = settings.BOT_LIFECYCLE_MAX_SECONDS
 
     now = _now()
+    # Operates on the in-memory store (the default backend). The Redis backend
+    # also implements list_live_bots (protocol parity), but distributed-mode
+    # reaping — where mark_terminal must remove from the shared live-state store
+    # too — lands with the full BOT_STATE_BACKEND=redis cutover.
     try:
         candidates = await store.list_live_bots(_ACTIVE_RUNNING_STATUSES)
     except Exception:

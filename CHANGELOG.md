@@ -4,7 +4,18 @@ All notable changes to JustHereToListen.io are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.65.0 — **Last updated:** 2026-06-01
+> **Latest version:** 2.65.1 — **Last updated:** 2026-06-01
+
+---
+
+## [2.65.1] - 2026-06-01
+
+Distributed-state groundwork (scale-out, step 1) — no default-behaviour change.
+
+### Changed
+- **`BotStateStore` contract now includes `list_live_bots(statuses)`** — the method the stuck-bot reaper relies on is now part of the explicit interface, and the Redis backend (`RedisBotStateStore`) implements it at parity with the in-memory `Store`. The existing `runtime_checkable` protocol conformance test (`test_conforms_to_protocol`) enforces this, so the opt-in `BOT_STATE_BACKEND=redis` backend can't silently drift from the in-memory store as the live-state surface grows. +2 Redis tests (status filtering + memory-parity).
+
+> Context: this is the first reviewable increment of the horizontal-scale-out work. A full cutover (migrating the ~16 call sites off the in-memory `store` singleton to `get_bot_state_store()`, and making `mark_terminal` + the queue Redis-coordinated so `MAX_CONCURRENT_BOTS` is cluster-wide) remains a dedicated effort requiring a Redis instance and deploy plan. The reaper still operates on the in-memory backend (the default); distributed-mode reaping lands with that cutover.
 
 ---
 
