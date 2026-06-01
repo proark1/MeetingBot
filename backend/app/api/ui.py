@@ -318,7 +318,7 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
     recent_bots = []
     try:
         from app.store import store as _store
-        bots_list, _total = await _store.list_bots(limit=8, account_id=account.id)
+        bots_list, _total, _ = await _store.list_bots(limit=8, account_id=account.id)
         recent_bots = [
             {
                 "id": b.id,
@@ -909,7 +909,7 @@ async def admin_page(request: Request, db: AsyncSession = Depends(get_db)):
     try:
         from app.store import store as _store
         from app.config import settings as _cfg_ui
-        all_bots, total_bots_mem = await _store.list_bots(limit=_cfg_ui.ANALYTICS_BOT_SCAN_LIMIT)
+        all_bots, total_bots_mem, _ = await _store.list_bots(limit=_cfg_ui.ANALYTICS_BOT_SCAN_LIMIT)
         bot_status_counts: dict[str, int] = {}
         bot_platform_counts: dict[str, int] = {}
         total_ai_cost = 0.0
@@ -1617,7 +1617,7 @@ async def bot_status_poll(request: Request, db: AsyncSession = Depends(get_db)):
         return JSONResponse({"detail": "Unauthenticated"}, status_code=401)
 
     from app.store import store as _st
-    bots, _total = await _st.list_bots(limit=20, account_id=account.id)
+    bots, _total, _ = await _st.list_bots(limit=20, account_id=account.id)
     return JSONResponse([
         {
             "id": b.id,

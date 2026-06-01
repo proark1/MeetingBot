@@ -271,11 +271,15 @@ async def list_all_deliveries(
     request: _Request,
     limit: int = 50,
     offset: int = 0,
+    event: _Opt[str] = None,
+    status: _Opt[str] = None,
 ):
     """List recent webhook delivery attempts across the caller's webhooks.
 
-    Superadmin sees all deliveries. Returns a paginated envelope with
-    `results`, `total`, `limit`, `offset`, and `has_more`.
+    Superadmin sees all deliveries. Filter by ``event`` (e.g. ``bot.done``)
+    or ``status`` (``pending`` / ``delivered`` / ``failed`` / ``retrying``).
+    Returns a paginated envelope with ``results``, ``total``, ``limit``,
+    ``offset``, and ``has_more``.
     """
     account_id = _request_account_id(request)
     try:
@@ -286,7 +290,6 @@ async def list_all_deliveries(
             base = select(WebhookDelivery)
             count_q = select(func.count(WebhookDelivery.id))
             if account_id and account_id != SUPERADMIN_ACCOUNT_ID:
-                # Restrict to deliveries whose webhook is owned by the caller.
                 owned_ids = (
                     await session.execute(
                         select(_WebhookModel.id).where(_WebhookModel.account_id == account_id)
@@ -296,6 +299,12 @@ async def list_all_deliveries(
                     return {"results": [], "total": 0, "limit": limit, "offset": offset, "has_more": False}
                 base = base.where(WebhookDelivery.webhook_id.in_(owned_ids))
                 count_q = count_q.where(WebhookDelivery.webhook_id.in_(owned_ids))
+            if event:
+                base = base.where(WebhookDelivery.event == event)
+                count_q = count_q.where(WebhookDelivery.event == event)
+            if status:
+                base = base.where(WebhookDelivery.status == status)
+                count_q = count_q.where(WebhookDelivery.status == status)
             total = (await session.execute(count_q)).scalar() or 0
             result = await session.execute(
                 base.order_by(WebhookDelivery.created_at.desc()).limit(limit).offset(offset)
@@ -303,6 +312,80 @@ async def list_all_deliveries(
             rows = result.scalars().all()
     except Exception:
         logger.exception("Failed to list webhook deliveries")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+    items = [
+        DeliveryResponse(
+            id=r.id,
+            webhook_id=r.webhook_id,
+            bot_id=r.bot_id,
+            event=r.event,
+            status=r.status,
+            attempt_number=r.attempt_number,
+            response_status_code=r.response_status_code,
+            response_body=r.response_body,
+            error_message=r.error_message,
+            next_retry_at=r.next_retry_at,
+            delivered_at=r.delivered_at,
+            created_at=r.created_at,
+        )
+        for r in rows
+    ]
+    return {
+        "results": items,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "has_more": offset + limit < total,
+    }
+
+
+@router.get("/{webhook_id}/deliveries", tags=["Webhooks"])
+async def list_webhook_deliveries(
+    webhook_id: str,
+    request: _Request,
+    limit: int = 50,
+    offset: int = 0,
+    event: _Opt[str] = None,
+    status: _Opt[str] = None,
+):
+    """List delivery history for a specific webhook.
+
+    Filter by ``event`` or ``status``.  Results are ordered newest-first.
+    Only the authenticated account's webhooks are accessible.
+    """
+    account_id = _request_account_id(request)
+    try:
+        from app.db import AsyncSessionLocal
+        from app.models.account import Webhook as _WebhookModel, WebhookDelivery
+        from sqlalchemy import select, func
+        async with AsyncSessionLocal() as session:
+            # Ownership check
+            wh = (await session.execute(
+                select(_WebhookModel).where(_WebhookModel.id == webhook_id)
+            )).scalar_one_or_none()
+            if wh is None:
+                raise HTTPException(status_code=404, detail=f"Webhook {webhook_id!r} not found")
+            if account_id and account_id != SUPERADMIN_ACCOUNT_ID and wh.account_id != account_id:
+                raise HTTPException(status_code=404, detail=f"Webhook {webhook_id!r} not found")
+
+            base = select(WebhookDelivery).where(WebhookDelivery.webhook_id == webhook_id)
+            count_q = select(func.count(WebhookDelivery.id)).where(WebhookDelivery.webhook_id == webhook_id)
+            if event:
+                base = base.where(WebhookDelivery.event == event)
+                count_q = count_q.where(WebhookDelivery.event == event)
+            if status:
+                base = base.where(WebhookDelivery.status == status)
+                count_q = count_q.where(WebhookDelivery.status == status)
+            total = (await session.execute(count_q)).scalar() or 0
+            result = await session.execute(
+                base.order_by(WebhookDelivery.created_at.desc()).limit(limit).offset(offset)
+            )
+            rows = result.scalars().all()
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Failed to list deliveries for webhook %s", webhook_id)
         raise HTTPException(status_code=500, detail="Internal server error")
 
     items = [

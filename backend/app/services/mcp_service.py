@@ -266,7 +266,7 @@ async def _tool_list_meetings(args: dict, account_id: Optional[str]) -> dict:
     status_filter = args.get("status")
     filter_account = account_id if (account_id and account_id != SUPERADMIN_ACCOUNT_ID) else None
 
-    bots, total = await store.list_bots(
+    bots, total, _ = await store.list_bots(
         limit=limit,
         status=status_filter,
         account_id=filter_account,
@@ -338,7 +338,7 @@ async def _tool_search_meetings(args: dict, account_id: Optional[str]) -> dict:
     semantic = bool(args.get("semantic", False))
     filter_account = account_id if (account_id and account_id != SUPERADMIN_ACCOUNT_ID) else None
 
-    all_bots, _ = await store.list_bots(limit=10000, account_id=filter_account)
+    all_bots, _ = (lambda r: r[:2])((await store.list_bots(limit=10000, account_id=filter_account)))
 
     if semantic:
         from app.services.intelligence_service import embed_text
@@ -401,7 +401,7 @@ async def _tool_get_action_items(args: dict, account_id: Optional[str]) -> dict:
     assignee_filter = (args.get("assignee") or "").lower().strip()
     filter_account = account_id if (account_id and account_id != SUPERADMIN_ACCOUNT_ID) else None
 
-    all_bots, _ = await store.list_bots(limit=10000, account_id=filter_account)
+    all_bots, _ = (lambda r: r[:2])((await store.list_bots(limit=10000, account_id=filter_account)))
     items = []
 
     for bot in all_bots:
@@ -441,7 +441,7 @@ async def _tool_get_meeting_brief(args: dict, account_id: Optional[str]) -> dict
         from app.store import store
         from app.deps import SUPERADMIN_ACCOUNT_ID
         filter_account = account_id if (account_id and account_id != SUPERADMIN_ACCOUNT_ID) else None
-        recent_bots, _ = await store.list_bots(limit=5, status="done", account_id=filter_account)
+        recent_bots, _ = (lambda r: r[:2])((await store.list_bots(limit=5, status="done", account_id=filter_account)))
         for bot in recent_bots:
             if bot.analysis:
                 s = bot.analysis.get("summary", "")
@@ -561,7 +561,7 @@ async def _tool_get_meeting_cost_summary(args: dict, account_id: Optional[str]) 
     days = min(max(int(args.get("days", 30)), 1), 90)
     filter_account = account_id if (account_id and account_id != SUPERADMIN_ACCOUNT_ID) else None
 
-    all_bots, _ = await store.list_bots(limit=10000, account_id=filter_account)
+    all_bots, _ = (lambda r: r[:2])((await store.list_bots(limit=10000, account_id=filter_account)))
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
     total_meeting_cost = 0.0

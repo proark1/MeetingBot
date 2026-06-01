@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 
-from app.store import Store, BotSession
+from app.store import Store, BotSession, encode_list_cursor
 
 
 def _bot(bot_id, status="done", account_id=None, sub_user_id=None, day=1):
@@ -30,30 +30,30 @@ async def _seed():
 
 async def test_filter_by_account():
     s = await _seed()
-    bots, total = await s.list_bots(account_id="acct-1")
+    bots, total, _ = await s.list_bots(account_id="acct-1")
     assert total == 3
     assert {b.id for b in bots} == {"a1", "a2", "err"}
 
 
 async def test_filter_by_status():
     s = await _seed()
-    bots, total = await s.list_bots(status="error")
+    bots, total, _ = await s.list_bots(status="error")
     assert total == 1 and bots[0].id == "err"
 
 
 async def test_account_id_is_null_filter():
     s = await _seed()
-    bots, total = await s.list_bots(account_id_is_null=True)
+    bots, total, _ = await s.list_bots(account_id_is_null=True)
     assert total == 1 and bots[0].id == "anon"
 
 
 async def test_sorted_newest_first_and_pagination():
     s = await _seed()
-    page1, total = await s.list_bots(limit=2, offset=0)
+    page1, total, _ = await s.list_bots(limit=2, offset=0)
     assert total == 5
     # newest first by created_at: err(day5) > anon(day4) ...
     assert [b.id for b in page1] == ["err", "anon"]
-    page2, _ = await s.list_bots(limit=2, offset=2)
+    page2, _, _ = await s.list_bots(limit=2, offset=2)
     assert [b.id for b in page2] == ["a2", "b1"]
 
 
@@ -61,5 +61,45 @@ async def test_sub_user_filter():
     s = Store()
     await s.create_bot(_bot("s1", account_id="acct", sub_user_id="u1"))
     await s.create_bot(_bot("s2", account_id="acct", sub_user_id="u2"))
-    bots, total = await s.list_bots(account_id="acct", sub_user_id="u1")
+    bots, total, _ = await s.list_bots(account_id="acct", sub_user_id="u1")
     assert total == 1 and bots[0].id == "s1"
+
+
+async def test_cursor_pagination_full_traversal():
+    """Cursor-based pagination should traverse all bots without duplicates or gaps."""
+    s = await _seed()
+    seen = []
+    cursor = None
+    while True:
+        page, total, next_cursor = await s.list_bots(limit=2, after_cursor=cursor)
+        seen.extend(b.id for b in page)
+        assert total == 5
+        if next_cursor is None:
+            break
+        cursor = next_cursor
+    assert len(seen) == 5
+    assert len(set(seen)) == 5
+
+
+async def test_cursor_matches_offset_ordering():
+    """Page 2 via cursor must match page 2 via offset."""
+    s = await _seed()
+    _, _, next_cursor = await s.list_bots(limit=2)
+    cursor_page, _, _ = await s.list_bots(limit=2, after_cursor=next_cursor)
+    offset_page, _, _ = await s.list_bots(limit=2, offset=2)
+    assert [b.id for b in cursor_page] == [b.id for b in offset_page]
+
+
+async def test_cursor_no_next_on_last_page():
+    """next_cursor must be None when the last page is returned."""
+    s = await _seed()
+    _, _, next_cursor = await s.list_bots(limit=100)
+    assert next_cursor is None
+
+
+async def test_invalid_cursor_falls_back_to_first_page():
+    """A malformed cursor should not crash — returns first page."""
+    s = await _seed()
+    bots, total, _ = await s.list_bots(limit=2, after_cursor="not-valid-base64!!!")
+    assert total == 5
+    assert len(bots) == 2

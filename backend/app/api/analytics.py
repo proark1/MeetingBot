@@ -53,7 +53,7 @@ async def _get_bots(filter_account: Optional[str], sub_user_id: Optional[str] = 
     if bots is not None and (_time.monotonic() - ts) < _BOTS_LIST_TTL:
         return bots
     from app.config import settings as _cfg
-    all_bots, _ = await store.list_bots(
+    all_bots, _, _ = await store.list_bots(
         limit=_cfg.ANALYTICS_BOT_SCAN_LIMIT, account_id=filter_account, sub_user_id=sub_user_id
     )
     _bots_list_cache[key] = (_time.monotonic(), all_bots)
@@ -430,7 +430,7 @@ async def search_transcripts(
     account_id = getattr(request.state, "account_id", None)
     filter_account = account_id if (account_id and account_id != SUPERADMIN_ACCOUNT_ID) else None
     sub_user_id = _sub_user_from_request(request)
-    all_bots, _ = await store.list_bots(limit=500, account_id=filter_account, sub_user_id=sub_user_id)
+    all_bots, _, _ = await store.list_bots(limit=500, account_id=filter_account, sub_user_id=sub_user_id)
 
     # ── Semantic (embedding) search ──────────────────────────────────────────
     if semantic:
@@ -683,7 +683,7 @@ async def get_my_analytics(request: Request):
 
     # Use account-scoped store (never superadmin expanded)
     from app.config import settings as _cfg
-    all_bots, _ = await store.list_bots(
+    all_bots, _, _ = await store.list_bots(
         limit=_cfg.ANALYTICS_BOT_SCAN_LIMIT, account_id=account_id, sub_user_id=sub_user_id
     )
 

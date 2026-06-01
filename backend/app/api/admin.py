@@ -774,7 +774,7 @@ async def platform_analytics(
 
     # Active / live bots from in-memory store
     from app.config import settings as _cfg_admin
-    active_bots, _ = await _store.list_bots(limit=_cfg_admin.ANALYTICS_BOT_SCAN_LIMIT)
+    active_bots, _, _ = await _store.list_bots(limit=_cfg_admin.ANALYTICS_BOT_SCAN_LIMIT)
 
     # ── Aggregate (CPU-bound JSON parsing offloaded to a thread) ────────────────
     agg = await asyncio.to_thread(_aggregate_bot_snapshots, snaps, d30, d7)
@@ -1094,7 +1094,7 @@ async def support_lookup(
 
     # Recent bots — metadata only, no transcript/analysis text
     from app.store import store as _store
-    bots, _ = await _store.list_bots(limit=30, account_id=sk.account_id)
+    bots, _, _ = await _store.list_bots(limit=30, account_id=sk.account_id)
 
     return {
         "account_id": account.id,

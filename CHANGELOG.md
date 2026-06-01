@@ -4,7 +4,29 @@ All notable changes to JustHereToListen.io are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.60.0 — **Last updated:** 2026-06-01
+> **Latest version:** 2.61.0 — **Last updated:** 2026-06-01
+
+---
+
+## [2.61.0] - 2026-06-01
+
+Production hardening + API improvements.
+
+### Added
+- **Cursor-based pagination** for `GET /api/v1/bot`. Response now includes `next_cursor`; pass it as `?cursor=` to get the next page stably without offset drift. Backwards-compatible: offset still works.
+- **Bulk cancel** — `POST /api/v1/bot/bulk/cancel` cancels up to 50 bots at once. Returns `cancelled`, `already_terminal`, `not_found` breakdown.
+- **Bulk delete** — `DELETE /api/v1/bot/bulk` deletes up to 50 terminal bots at once. Refuses active bots (reports in `active`).
+- **Per-webhook delivery history** — `GET /api/v1/webhooks/{id}/deliveries` with optional `?event=` and `?status=` filters. Existing `GET /api/v1/webhooks/deliveries` also gains these filters.
+- **`browser/text_matchers.py`** — pure text-matching helpers (`text_signals_in_call`, `text_signals_waiting`, `text_signals_ended`, `text_signals_alone`) extracted from `browser_bot.py`. 80-case test suite in `test_text_matchers.py` covers every platform × signal combination including negative cases and case-sensitivity invariants.
+
+### Fixed
+- Speaker normalisation no longer crashes the transcription pipeline on malformed data — wrapped in try/except with logged fallback.
+- `webhook_service.py` httpx client now has explicit connection pool limits (`max_connections=100`, `max_keepalive_connections=20`) to prevent FD exhaustion under high webhook fan-out.
+- `GET /api/v1/bot?status=<unknown>` returns 400 with a clear error listing valid values; previously silently returned an empty list.
+
+### Changed
+- `Store.list_bots` and `RedisBotStateStore.list_bots` both updated to return `(page, total, next_cursor)` 3-tuple. All internal callers updated.
+- `browser_bot.py` admission/end/alone logic now uses `text_matchers` helpers; the raw dict aliases are gone (behaviour unchanged).
 
 ---
 

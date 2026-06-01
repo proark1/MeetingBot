@@ -5,6 +5,7 @@ survive server restarts.  Active bots are still RAM-only.
 """
 
 import asyncio
+import base64
 import dataclasses
 import json
 import logging
@@ -311,6 +312,25 @@ class WebhookEntry:
     account_id: Optional[str] = None
 
 
+# ── Cursor helpers (for cursor-based pagination of list_bots) ─────────────────
+
+
+def encode_list_cursor(created_at: datetime, bot_id: str) -> str:
+    """Encode a pagination cursor from the last-seen bot's (created_at, id)."""
+    raw = f"{created_at.isoformat()}|{bot_id}"
+    return base64.urlsafe_b64encode(raw.encode()).decode()
+
+
+def decode_list_cursor(cursor: str) -> tuple[datetime, str]:
+    """Decode a pagination cursor.  Raises ValueError on malformed input."""
+    try:
+        raw = base64.urlsafe_b64decode(cursor.encode()).decode()
+        ts_str, bot_id = raw.split("|", 1)
+        return datetime.fromisoformat(ts_str), bot_id
+    except Exception as exc:
+        raise ValueError(f"Invalid cursor: {exc}") from exc
+
+
 # ── Store ─────────────────────────────────────────────────────────────────────
 
 class Store:
@@ -409,7 +429,15 @@ class Store:
         account_id: Optional[str] = None,
         sub_user_id: Optional[str] = None,
         account_id_is_null: bool = False,
-    ) -> tuple[list[BotSession], int]:
+        after_cursor: Optional[str] = None,
+    ) -> tuple[list[BotSession], int, Optional[str]]:
+        """List bots with optional cursor-based pagination.
+
+        Returns ``(page, total, next_cursor)``.  ``next_cursor`` is non-None
+        when there are more results after the current page; pass it as
+        ``after_cursor`` in the next call.  Offset-based pagination still works
+        (``offset`` is ignored when ``after_cursor`` is provided).
+        """
         async with self._lock:
             # Filter inside the lock to avoid copying unneeded bots.
             # account_id_is_null lets unauth dev-mode select only legacy
@@ -421,9 +449,37 @@ class Store:
                 and (not account_id_is_null or b.account_id is None)
                 and (sub_user_id is None or b.sub_user_id == sub_user_id)
             ]
-        bots = sorted(filtered, key=lambda b: b.created_at, reverse=True)
+        # Sort by (created_at DESC, id ASC) for stable, deterministic ordering.
+        bots = sorted(filtered, key=lambda b: (-b.created_at.timestamp(), b.id))
         total = len(bots)
-        return bots[offset : offset + limit], total
+
+        if after_cursor:
+            try:
+                cursor_ts, cursor_id = decode_list_cursor(after_cursor)
+                # Find the position right after the cursor bot.
+                start = 0
+                for i, b in enumerate(bots):
+                    if b.created_at == cursor_ts and b.id == cursor_id:
+                        start = i + 1
+                        break
+                    if b.created_at < cursor_ts:
+                        # Cursor bot must have been evicted; start from here.
+                        start = i
+                        break
+            except ValueError:
+                start = 0
+            page = bots[start : start + limit]
+            next_start = start + limit
+        else:
+            page = bots[offset : offset + limit]
+            next_start = offset + limit
+
+        next_cursor: Optional[str] = None
+        if next_start < total and page:
+            last = page[-1]
+            next_cursor = encode_list_cursor(last.created_at, last.id)
+
+        return page, total, next_cursor
 
     async def delete_bot(self, bot_id: str) -> None:
         async with self._lock:

@@ -77,6 +77,11 @@ def _get_client() -> httpx.AsyncClient:
         _http_client = httpx.AsyncClient(
             timeout=settings.WEBHOOK_TIMEOUT_SECONDS,
             follow_redirects=False,
+            limits=httpx.Limits(
+                max_connections=100,
+                max_keepalive_connections=20,
+                keepalive_expiry=30,
+            ),
         )
     return _http_client
 

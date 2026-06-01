@@ -112,12 +112,14 @@ class RedisBotStateStore:
         account_id: Optional[str] = None,
         sub_user_id: Optional[str] = None,
         account_id_is_null: bool = False,
-    ) -> "tuple[list[BotSession], int]":
+        after_cursor: Optional[str] = None,
+    ) -> "tuple[list[BotSession], int, Optional[str]]":
         # Newest-first via the created_at-scored index, then filter in Python
         # (parity with the in-memory store, which also scans the full set).
+        from app.store import decode_list_cursor, encode_list_cursor
         ids = await self._r.zrevrange(self._index_key, 0, -1)
         if not ids:
-            return [], 0
+            return [], 0, None
         raws = await self._r.mget([self._bot_key(i) for i in ids])
         bots: list[BotSession] = []
         for raw in raws:
@@ -134,7 +136,29 @@ class RedisBotStateStore:
                 continue
             bots.append(b)
         total = len(bots)
-        return bots[offset:offset + limit], total
+        if after_cursor:
+            try:
+                cursor_ts, cursor_id = decode_list_cursor(after_cursor)
+                start = 0
+                for i, b in enumerate(bots):
+                    if b.created_at == cursor_ts and b.id == cursor_id:
+                        start = i + 1
+                        break
+                    if b.created_at < cursor_ts:
+                        start = i
+                        break
+            except ValueError:
+                start = 0
+            page = bots[start:start + limit]
+            next_start = start + limit
+        else:
+            page = bots[offset:offset + limit]
+            next_start = offset + limit
+        next_cursor: Optional[str] = None
+        if next_start < total and page:
+            last = page[-1]
+            next_cursor = encode_list_cursor(last.created_at, last.id)
+        return page, total, next_cursor
 
     async def delete_bot(self, bot_id: str) -> None:
         bot = await self.get_bot(bot_id)

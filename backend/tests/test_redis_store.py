@@ -83,26 +83,26 @@ async def test_list_bots_filter_sort_paginate(rstore):
     await rstore.create_bot(_bot("anon", account_id=None, day=4))
     await rstore.create_bot(_bot("err", account_id="acct-1", status="error", day=5))
 
-    by_acct, total = await rstore.list_bots(account_id="acct-1")
+    by_acct, total, _ = await rstore.list_bots(account_id="acct-1")
     assert total == 3 and {b.id for b in by_acct} == {"a1", "a2", "err"}
 
-    errs, terr = await rstore.list_bots(status="error")
+    errs, terr, _ = await rstore.list_bots(status="error")
     assert terr == 1 and errs[0].id == "err"
 
-    anon, tanon = await rstore.list_bots(account_id_is_null=True)
+    anon, tanon, _ = await rstore.list_bots(account_id_is_null=True)
     assert tanon == 1 and anon[0].id == "anon"
 
     # newest-first ordering by created_at + pagination
-    page1, total_all = await rstore.list_bots(limit=2, offset=0)
+    page1, total_all, _ = await rstore.list_bots(limit=2, offset=0)
     assert total_all == 5 and [b.id for b in page1] == ["err", "anon"]
-    page2, _ = await rstore.list_bots(limit=2, offset=2)
+    page2, _, _ = await rstore.list_bots(limit=2, offset=2)
     assert [b.id for b in page2] == ["a2", "b1"]
 
 
 async def test_delete_clears_index_and_share(rstore):
     await rstore.create_bot(_bot("a1", share="h1"))
     await rstore.delete_bot("a1")
-    bots, total = await rstore.list_bots()
+    bots, total, _ = await rstore.list_bots()
     assert total == 0 and bots == []
     assert await rstore.get_bot_by_share_hash("h1") is None
 
@@ -120,7 +120,7 @@ async def test_parity_with_in_memory_store_filtering(rstore):
         await mem.create_bot(b)
         await rstore.create_bot(b)
 
-    mem_list, mem_total = await mem.list_bots(account_id="acct")
-    r_list, r_total = await rstore.list_bots(account_id="acct")
+    mem_list, mem_total, _ = await mem.list_bots(account_id="acct")
+    r_list, r_total, _ = await rstore.list_bots(account_id="acct")
     assert mem_total == r_total
     assert [b.id for b in mem_list] == [b.id for b in r_list]
