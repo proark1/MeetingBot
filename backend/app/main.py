@@ -430,6 +430,14 @@ async def lifespan(app: FastAPI):
 
     digest_task = asyncio.create_task(_supervised("weekly_digest", _weekly_digest_loop))
 
+    # Synthetic canary — periodically exercise the join→audio→transcript→leave
+    # pipeline so browser_bot.py selector drift is caught before customers hit it.
+    canary_task = None
+    if settings.CANARY_ENABLED:
+        from app.services.canary_service import canary_loop
+        canary_task = asyncio.create_task(_supervised("canary", canary_loop))
+        logger.info("Synthetic canary enabled (interval %ds)", settings.CANARY_INTERVAL_S)
+
     logger.info("JustHereToListen.io ready — API docs at /api/docs")
     yield
 
@@ -441,6 +449,8 @@ async def lifespan(app: FastAPI):
     retention_task.cancel()
     monthly_reset_task.cancel()
     digest_task.cancel()
+    if canary_task is not None:
+        canary_task.cancel()
 
     if _running_tasks:
         logger.info("Cancelling %d running bot task(s)…", len(_running_tasks))
@@ -448,7 +458,7 @@ async def lifespan(app: FastAPI):
             task.cancel()
         await asyncio.gather(*list(_running_tasks.values()), return_exceptions=True)
 
-    from app.services.bot_service import cancel_all_tracked_tasks
+    from app.services.background_tasks import cancel_all_tracked_tasks
     await cancel_all_tracked_tasks()
 
     from app.services import webhook_service
@@ -688,6 +698,11 @@ _PUBLIC_DESCRIPTION = (
     "decisions, next steps, sentiment, topics), speaker breakdown, chapters, meeting metadata, "
     "and download links for audio/video/markdown/PDF |\n"
 )
+
+# Initialise error tracking before the app is created so the SDK can
+# auto-instrument FastAPI/Starlette. No-op unless SENTRY_DSN is configured.
+from app.observability import init_sentry as _init_sentry
+_init_sentry()
 
 app = FastAPI(
     title="JustHereToListen.io API",

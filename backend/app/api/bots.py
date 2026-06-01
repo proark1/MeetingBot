@@ -4,10 +4,10 @@ import asyncio
 import logging
 import uuid
 from collections import deque
-from datetime import datetime, timezone
+from datetime import timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from slowapi import Limiter
@@ -16,7 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.config import settings
-from app.deps import get_current_account_id, get_sub_user_id, SUPERADMIN_ACCOUNT_ID
+from app.deps import SUPERADMIN_ACCOUNT_ID
 from app.schemas.bot import (
     BotCreate, BotListResponse, BotResponse, BotSummary,
     MeetingAnalysis, AIUsageSummary, AIUsageEntry,
@@ -498,7 +498,6 @@ async def create_bot(payload: BotCreate, request: Request):
                     existing = await store.get_bot(ik_row.bot_id)
                     if existing:
                         from fastapi.responses import JSONResponse
-                        import json
                         resp_data = _to_response(existing).model_dump(mode="json")
                         return JSONResponse(
                             content=resp_data,
@@ -627,8 +626,16 @@ async def create_bot(payload: BotCreate, request: Request):
         except HTTPException:
             await store.delete_bot(bot.id)  # roll back the bot we just stored
             raise
-        except Exception:
-            logger.warning("Failed to increment monthly usage for %s", account_id)
+        except Exception as exc:
+            # Fail closed: a quota-reservation failure must not let the bot run
+            # un-metered (that would be a quota bypass). Roll back and surface a
+            # 503 so the caller retries rather than silently under-counting.
+            logger.error("Failed to increment monthly usage for %s: %s", account_id, exc)
+            await store.delete_bot(bot.id)
+            raise HTTPException(
+                status_code=503,
+                detail="Could not reserve a usage slot — please retry.",
+            )
 
     # ── Store idempotency key ─────────────────────────────────────────────────
     # Registered BEFORE the sandbox fast-path so repeated sandbox (sk_test_*)
@@ -1420,7 +1427,6 @@ async def stream_transcript(bot_id: str, request: Request):
 
 # ── POST /api/v1/bot/{id}/share ───────────────────────────────────────────────
 
-import hashlib as _hashlib
 import secrets as _secrets
 
 
@@ -1514,7 +1520,6 @@ async def say_in_meeting(bot_id: str, request: Request, payload: SayRequest):
         )
 
     from app.services.browser_bot import _speak_in_meeting
-    from app.store import _now as _now_fn
 
     task_id = uuid.uuid4().hex
     speak_lock: asyncio.Lock = runtime["speak_lock"]

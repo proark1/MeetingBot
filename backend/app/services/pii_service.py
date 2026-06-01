@@ -11,7 +11,6 @@ All functions are synchronous and pure — no external dependencies.
 
 import re
 from dataclasses import dataclass
-from typing import Optional
 
 # ── Regex patterns ─────────────────────────────────────────────────────────────
 

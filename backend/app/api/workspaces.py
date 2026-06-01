@@ -191,7 +191,7 @@ async def list_workspaces(request: Request):
 
     from app.db import AsyncSessionLocal
     from app.models.account import Workspace, WorkspaceMember
-    from sqlalchemy import select, or_
+    from sqlalchemy import select
 
     async with AsyncSessionLocal() as db:
         # Get workspaces where user is owner or member
@@ -311,8 +311,6 @@ async def delete_workspace(workspace_id: str, request: Request):
     account_id = _account_id(request)
 
     from app.db import AsyncSessionLocal
-    from app.models.account import Workspace
-    from sqlalchemy import select
 
     async with AsyncSessionLocal() as db:
         ws, role = await _get_workspace_with_access(workspace_id, account_id, db, require_role="admin")
@@ -451,8 +449,8 @@ async def remove_workspace_member(
     account_id = _account_id(request)
 
     from app.db import AsyncSessionLocal
-    from app.models.account import WorkspaceMember, Workspace
-    from sqlalchemy import select, delete
+    from app.models.account import WorkspaceMember
+    from sqlalchemy import delete
 
     async with AsyncSessionLocal() as db:
         ws, role = await _get_workspace_with_access(workspace_id, account_id, db, require_role="viewer")

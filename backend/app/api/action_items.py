@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from app.db import AsyncSessionLocal
 from app.deps import SUPERADMIN_ACCOUNT_ID
 from app.models.account import ActionItem
-from sqlalchemy import select, update
+from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/action-items", tags=["Action Items"])

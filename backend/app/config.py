@@ -109,6 +109,20 @@ class Settings(BaseSettings):
     # Environment — set to "production" to enforce strict security defaults
     ENVIRONMENT: str = "development"
 
+    # ── Error tracking (Sentry) — optional, graceful no-op when unset ──────────
+    # Set SENTRY_DSN to enable exception aggregation + performance tracing.
+    SENTRY_DSN: str = ""
+    SENTRY_TRACES_SAMPLE_RATE: float = 0.0   # 0.0 = errors only, no perf traces
+    SENTRY_PROFILES_SAMPLE_RATE: float = 0.0
+
+    # ── Synthetic canary ───────────────────────────────────────────────────────
+    # When enabled, a background loop periodically drives the join→audio→
+    # transcript→leave pipeline against configured test meetings (see
+    # canary_service.CanaryConfig.from_env / CANARY_* vars) to catch browser_bot
+    # selector drift before customers do. Off by default; needs test-meeting URLs.
+    CANARY_ENABLED: bool = False
+    CANARY_INTERVAL_S: int = 1800   # how often to run the canary sweep (seconds)
+
     # Public base URL (e.g. "https://api.justheretolisten.io"). Used as the
     # primary `servers[0].url` in the published OpenAPI schema so generated
     # SDK clients hit the right host out of the box. Leave unset in dev — the

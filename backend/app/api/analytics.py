@@ -859,7 +859,7 @@ async def get_trends(
 
     from app.db import AsyncSessionLocal
     from app.models.account import MeetingSummary
-    from sqlalchemy import select, func, Date, cast
+    from sqlalchemy import select
 
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(days=days)

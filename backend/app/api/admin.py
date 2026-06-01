@@ -1,7 +1,6 @@
 """Admin API — platform configuration management (wallet address, etc.)."""
 
 import asyncio
-import hashlib
 import json
 import logging
 import re
@@ -11,9 +10,6 @@ from decimal import Decimal
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from fastapi.openapi.docs import get_swagger_ui_html
-from fastapi.openapi.utils import get_openapi as _fastapi_get_openapi
-from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession

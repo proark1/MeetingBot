@@ -21,10 +21,9 @@ Autonomy gating mirrors ``BotSession.agentic_autonomy``:
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
-from typing import Any, Optional
+from typing import Optional
 
 from app.services import intelligence_service
 

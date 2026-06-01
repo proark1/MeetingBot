@@ -4,9 +4,26 @@ All notable changes to JustHereToListen.io are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.56.0 — **Last updated:** 2026-06-01
+> **Latest version:** 2.57.0 — **Last updated:** 2026-06-01
 
 ---
+
+## [2.57.0] - 2026-06-01
+
+Roadmap batch — efficiency, operational observability, and CI quality gates.
+
+### Performance
+- Per-bot diagnostic loops (`_audio_health_loop`, `_webrtc_stats_loop`) mutate the live bot's sample buffer in place instead of copy + `store.update_bot` every 15s — removes global-store-lock contention that scaled with concurrent bot count.
+- `store.cleanup_expired` performs the blocking recording/video file deletions off the event loop (`asyncio.to_thread`) instead of under the global store lock.
+
+### Added
+- **Error tracking (Sentry):** optional `sentry-sdk` integration (`app/observability.py`), enabled by setting `SENTRY_DSN` (graceful no-op otherwise). `SENTRY_TRACES_SAMPLE_RATE`/`SENTRY_PROFILES_SAMPLE_RATE` tune tracing. WARNING+ breadcrumbs, ERROR+ events, never sends PII.
+- **Synthetic canary now runs:** the previously-unwired `canary_service` is started from the app lifespan when `CANARY_ENABLED=true` (interval `CANARY_INTERVAL_S`), periodically exercising the join→audio→transcript→leave pipeline to catch `browser_bot.py` selector drift before customers do.
+- **CI linting:** a `ruff` lint job (bug-catching rules — unused imports, redefinitions, syntax) plus `backend/ruff.toml`.
+
+### Fixed
+- Quota reservation now fails closed: a DB error while reserving a monthly usage slot rolls back the bot and returns 503 instead of silently letting it run un-metered (quota-bypass fix).
+- Removed unused imports across several modules and a duplicate `Response` import in `api/saml.py` (ruff F401/F811).
 
 ## [2.56.0] - 2026-06-01
 

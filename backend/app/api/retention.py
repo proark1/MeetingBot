@@ -6,7 +6,7 @@ Per-account policies override the global defaults set by the admin.
 The background cleanup task honours these policies when deleting expired data.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from typing import Optional
 
@@ -195,7 +195,7 @@ async def delete_retention_policy(request: Request):
 
     from app.db import AsyncSessionLocal
     from app.models.account import RetentionPolicy
-    from sqlalchemy import select, delete
+    from sqlalchemy import delete
 
     async with AsyncSessionLocal() as db:
         await db.execute(

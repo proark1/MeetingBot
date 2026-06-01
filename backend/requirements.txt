@@ -77,3 +77,6 @@ pytest>=7.4.0
 pytest-asyncio>=0.21.0
 pytest-timeout>=2.2.0
 fakeredis>=2.20.0   # in-memory Redis for RedisBotStateStore tests (no real Redis needed)
+
+# Error tracking (optional — graceful no-op if SENTRY_DSN unset)
+sentry-sdk[fastapi]>=2.0.0

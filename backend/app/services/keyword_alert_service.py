@@ -90,7 +90,7 @@ async def _update_trigger_count(alert_id: str) -> None:
         from datetime import datetime, timezone
         from app.db import AsyncSessionLocal
         from app.models.account import KeywordAlert
-        from sqlalchemy import select, update
+        from sqlalchemy import update
 
         now = datetime.now(timezone.utc)
         async with AsyncSessionLocal() as session:

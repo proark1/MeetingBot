@@ -14,10 +14,9 @@ Supported tools:
   get_meeting_brief  — pre-meeting preparation brief (agenda + talking points)
 """
 
-import json
 import logging
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -475,8 +474,7 @@ async def _tool_create_bot(args: dict, account_id: Optional[str]) -> dict:
         return {"error": f"Invalid arguments: {exc}"}
 
     import uuid
-    from datetime import datetime, timezone
-    from app.store import BotSession, _now
+    from app.store import BotSession
     from app.config import settings
 
     bot_id = str(uuid.uuid4())
@@ -558,7 +556,7 @@ async def _tool_get_speaker_analytics(args: dict, account_id: Optional[str]) -> 
 async def _tool_get_meeting_cost_summary(args: dict, account_id: Optional[str]) -> dict:
     from app.store import store
     from app.deps import SUPERADMIN_ACCOUNT_ID
-    from datetime import datetime, timezone, timedelta
+    from datetime import timedelta
 
     days = min(max(int(args.get("days", 30)), 1), 90)
     filter_account = account_id if (account_id and account_id != SUPERADMIN_ACCOUNT_ID) else None

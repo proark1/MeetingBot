@@ -1,0 +1,19 @@
+# Ruff configuration — bug-catching focus, not style enforcement.
+#
+# This codebase predates linting, so we intentionally start with the rules that
+# catch real defects (unused imports, redefinitions, syntax/runtime errors)
+# rather than the full style suite. Cosmetic rules (F541 placeholder-less
+# f-strings) and the unused-local backlog (F841) are deferred to a later pass.
+target-version = "py312"
+line-length = 120
+
+[lint]
+# F401 = unused imports · F811 = redefinition of unused name · E9 = syntax/runtime
+select = ["F401", "F811", "E9"]
+
+[lint.per-file-ignores]
+# __init__.py re-exports are intentional.
+"**/__init__.py" = ["F401"]
+# metrics.py imports prometheus_client names inside a try/except availability
+# probe; they're re-exported/guarded, not dead.
+"app/api/metrics.py" = ["F401"]
