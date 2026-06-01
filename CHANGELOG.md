@@ -4,7 +4,25 @@ All notable changes to JustHereToListen.io are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.63.3 — **Last updated:** 2026-06-01
+> **Latest version:** 2.64.0 — **Last updated:** 2026-06-01
+
+---
+
+## [2.64.0] - 2026-06-01
+
+UI/UX hardening pass — security, money-path safety, and session resilience across the web UI.
+
+### Security
+- **HTML-injection in the admin console, API dashboard and webhook playground** — DB/user-controlled values (account emails, meeting URLs, error messages, audit-log details, workspace IDs, webhook event names) were interpolated straight into `innerHTML` via template literals. They are now escaped through a shared `jhtlEscape` helper (added to `base.html` and inlined in the standalone `api_dashboard.html` / `webhook_playground.html`). A malicious display name, meeting URL or stored error string can no longer execute script in an operator's browser.
+
+### Added
+- **Shared `apiFetch` session handling** — the dashboard fetch helper now redirects to `/login?next=…` on `401` (instead of surfacing a cryptic "Failed to…" toast) and converts network failures into a friendly message. New `jhtlHandleUnauthorized()` global is reused by the bot-creation flow.
+- **Card-payment confirmation** — the Stripe top-up form now shows a confirm dialog with the exact amount before redirecting to checkout.
+
+### Fixed
+- **Double-submit on bot creation** — the Send/Schedule Bot form now guards against rapid repeat submits (Enter key / double-click) with an in-flight flag, and validates the scheduled datetime before calling `toISOString()` (no more "Invalid Date" payloads).
+- **Orphaned `.mp4` recordings** — a bot run with video enabled that failed before persisting its recording left the local `.mp4` on disk forever (only the `.wav` was cleaned). The lifecycle `finally` now removes an unpersisted video file too, mirroring the audio cleanup, preventing disk fill-up from failed runs.
+- **Silent clipboard failures** — the USDC address "Copy" button now falls back to selecting the field (with a "Press Ctrl+C" hint) when the Clipboard API is unavailable (insecure context / private browsing), instead of failing with an unhandled promise rejection.
 
 ---
 

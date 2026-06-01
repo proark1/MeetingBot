@@ -1124,14 +1124,55 @@
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js" defer></script>
 <script>
   /**
+   * jhtlEscape — escape a value for safe interpolation into innerHTML.
+   * Use this for ANY server/user-controlled string built into an HTML
+   * template literal. Returns '' for null/undefined.
+   */
+  function jhtlEscape(value) {
+    if (value === null || value === undefined) return '';
+    return String(value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+  window.jhtlEscape = jhtlEscape;
+
+  // Redirect to login on session expiry, preserving the current location so
+  // the user lands back where they were. Guarded so we never loop on /login.
+  let _authRedirecting = false;
+  function jhtlHandleUnauthorized() {
+    if (_authRedirecting) return;
+    const path = window.location.pathname;
+    if (path === '/login' || path === '/register') return;
+    _authRedirecting = true;
+    try { showToast('Your session expired — redirecting to sign in…', 'warning', 2000); } catch (e) {}
+    const next = encodeURIComponent(window.location.pathname + window.location.search);
+    setTimeout(() => { window.location.href = '/login?next=' + next; }, 600);
+  }
+  window.jhtlHandleUnauthorized = jhtlHandleUnauthorized;
+
+  /**
    * apiFetch — shared async helper for all dashboard mutations.
    * Sends JSON, expects JSON back. Throws Error with detail message on failure.
+   * On 401 it redirects to /login (session expiry) instead of surfacing a
+   * cryptic error to the caller.
    */
   async function apiFetch(url, options = {}) {
-    const resp = await fetch(url, {
-      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', ...(options.headers || {}) },
-      ...options,
-    });
+    let resp;
+    try {
+      resp = await fetch(url, {
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', ...(options.headers || {}) },
+        ...options,
+      });
+    } catch (netErr) {
+      throw new Error('Network error — please check your connection and try again.');
+    }
+    if (resp.status === 401) {
+      jhtlHandleUnauthorized();
+      throw new Error('Session expired');
+    }
     if (resp.status === 204) return null;
     const body = await resp.json().catch(() => ({ detail: resp.statusText }));
     if (!resp.ok) throw new Error(body.detail || `HTTP ${resp.status}`);

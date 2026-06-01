@@ -209,10 +209,16 @@ function fmtUsd(v) {
   return '$' + Number(v).toFixed(4);
 }
 
+// Escape any value before building it into innerHTML.
+function esc(v) {
+  if (v === null || v === undefined) return '';
+  return String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
 function renderRetryRow(tbodyId, colspan, msg) {
   const el = document.getElementById(tbodyId);
   if (!el) return;
-  el.innerHTML = `<tr><td colspan="${colspan}"><div class="retry-block"><div class="retry-msg">${msg}</div><button class="btn btn-outline btn-sm" onclick="loadAll()">↻ Retry</button></div></td></tr>`;
+  el.innerHTML = `<tr><td colspan="${Number(colspan)||1}"><div class="retry-block"><div class="retry-msg">${esc(msg)}</div><button class="btn btn-outline btn-sm" onclick="loadAll()">↻ Retry</button></div></td></tr>`;
 }
 
 // ── Load API usage ─────────────────────────────────────────────────────────────
@@ -227,7 +233,7 @@ async function loadApiUsage() {
       renderRetryRow('platformBody', 3, msg);
       renderRetryRow('opBody', 3, msg);
       document.getElementById('kpiGrid').innerHTML =
-        `<div class="stat-card" style="grid-column:1/-1"><div class="retry-block"><div class="retry-msg">${msg}</div><button class="btn btn-outline btn-sm" onclick="loadAll()">↻ Retry</button></div></div>`;
+        `<div class="stat-card" style="grid-column:1/-1"><div class="retry-block"><div class="retry-msg">${esc(msg)}</div><button class="btn btn-outline btn-sm" onclick="loadAll()">↻ Retry</button></div></div>`;
       return;
     }
     const d = await res.json();
@@ -254,7 +260,7 @@ async function loadApiUsage() {
     document.getElementById('platformBody').innerHTML = platforms.length
       ? platforms.map(p => `
           <tr>
-            <td><span class="badge badge-primary">${p.platform}</span></td>
+            <td><span class="badge badge-primary">${esc(p.platform)}</span></td>
             <td>${p.count}</td>
             <td>
               <div class="bar-wrap">
@@ -272,7 +278,7 @@ async function loadApiUsage() {
     document.getElementById('opBody').innerHTML = ops.length
       ? ops.map(([op, tok]) => `
           <tr>
-            <td><code style="font-size:.75rem;">${op}</code></td>
+            <td><code style="font-size:.75rem;">${esc(op)}</code></td>
             <td>${fmtNum(tok)}</td>
             <td>${fmtUsd(costByOp[op])}</td>
           </tr>`).join('')
@@ -320,7 +326,7 @@ async function loadAnalytics() {
     // Top workspaces
     if (d.top_workspaces && d.top_workspaces.length) {
       const wsHtml = '<div class="col-12" style="margin-top:.5rem;"><div style="font-size:.78rem;font-weight:600;color:var(--gray);margin-bottom:.4rem;">Top Workspaces</div><div style="display:flex;flex-wrap:wrap;gap:.4rem;">'
-        + d.top_workspaces.map(w => `<span class="badge badge-primary">${w.workspace_id.slice(0,12)}… — ${w.count} bots</span>`).join('')
+        + d.top_workspaces.map(w => `<span class="badge badge-primary">${esc(String(w.workspace_id||'').slice(0,12))}… — ${esc(w.count)} bots</span>`).join('')
         + '</div></div>';
       document.getElementById('analyticsGrid').innerHTML += wsHtml;
     }

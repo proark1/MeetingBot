@@ -1637,3 +1637,12 @@ async def run_bot_lifecycle(bot_id: str) -> None:
                 os.remove(audio_path)
         except Exception:
             pass
+        # Delete any orphaned video file. A successful video recording is kept
+        # locally (current_bot.video_path points at it); only remove the .mp4
+        # when it was never persisted (e.g. the run failed before saving) so a
+        # crashed/aborted bot can't leave large .mp4 files filling the disk.
+        try:
+            if video_path and os.path.exists(video_path) and not (current_bot and getattr(current_bot, "video_path", None)):
+                os.remove(video_path)
+        except Exception:
+            pass

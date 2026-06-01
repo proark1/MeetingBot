@@ -2547,6 +2547,9 @@ document.querySelectorAll('[data-delete-cal]').forEach(btn => btn.addEventListen
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const btn = submitBtn;
+    // In-flight guard: ignore repeat submits (rapid Enter / double-click)
+    // while a create request is already running.
+    if (btn.dataset.submitting === '1') return;
     const status = document.getElementById('sbStatus');
     const meetingUrl = document.getElementById('sbMeetingUrl').value.trim();
     const isScheduled = scheduleToggle.checked;
@@ -2567,7 +2570,15 @@ document.querySelectorAll('[data-delete-cal]').forEach(btn => btn.addEventListen
     }
 
     const payload = { meeting_url: meetingUrl, template };
-    if (isScheduled) payload.join_at = new Date(joinAt).toISOString();
+    if (isScheduled) {
+      const when = new Date(joinAt);
+      if (isNaN(when.getTime())) {
+        status.textContent = 'Schedule date & time is invalid.';
+        status.style.color = '#ef4444';
+        return;
+      }
+      payload.join_at = when.toISOString();
+    }
     if (botName) payload.bot_name = botName;
     if (webhookUrl) payload.webhook_url = webhookUrl;
     if (document.getElementById('sbRecordVideo')?.checked) payload.record_video = true;
@@ -2602,6 +2613,7 @@ document.querySelectorAll('[data-delete-cal]').forEach(btn => btn.addEventListen
     const kwRaw = document.getElementById('sbKeywordAlerts')?.value.trim();
     if (kwRaw) payload.keyword_alerts = kwRaw.split(',').map(s => s.trim()).filter(Boolean).map(k => ({keyword: k}));
 
+    btn.dataset.submitting = '1';
     btn.disabled = true;
     status.textContent = '';
     status.style.color = '';
@@ -2614,14 +2626,18 @@ document.querySelectorAll('[data-delete-cal]').forEach(btn => btn.addEventListen
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
+      if (resp.status === 401) {
+        if (window.jhtlHandleUnauthorized) { window.jhtlHandleUnauthorized(); return; }
+      }
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({ detail: resp.statusText }));
         throw new Error(err.detail || resp.statusText);
       }
       const bot = await resp.json();
+      const shortId = String(bot.id || '').slice(0,8);
       status.textContent = isScheduled
-        ? `Bot scheduled (ID: ${bot.id.slice(0,8)}…)`
-        : `Bot sent (ID: ${bot.id.slice(0,8)}…)`;
+        ? `Bot scheduled (ID: ${shortId}…)`
+        : `Bot sent (ID: ${shortId}…)`;
       status.style.color = '#22c55e';
       form.reset();
       scheduleToggle.checked = false;
@@ -2637,6 +2653,7 @@ document.querySelectorAll('[data-delete-cal]').forEach(btn => btn.addEventListen
       status.style.color = '#ef4444';
     } finally {
       btn.disabled = false;
+      delete btn.dataset.submitting;
     }
   });
 
