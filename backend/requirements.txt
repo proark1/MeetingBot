@@ -80,3 +80,7 @@ fakeredis>=2.20.0   # in-memory Redis for RedisBotStateStore tests (no real Redi
 
 # Error tracking (optional — graceful no-op if SENTRY_DSN unset)
 sentry-sdk[fastapi]>=2.0.0
+
+# Schema migrations (Alembic). The legacy in-app _migrate_schema in db.py still
+# runs by default; Alembic is the forward path for new schema changes.
+alembic>=1.13.0
