@@ -929,28 +929,14 @@ async def delete_account(
     except Exception as exc:
         logger.warning("GDPR: cloud recording cleanup failed for %s: %s", account_id, exc)
 
-    # GDPR right-to-be-forgotten: purge tables that aren't reachable via the
-    # ORM cascade on Account (no FK relationship declared). Without this,
-    # transcripts in BotSnapshot.data + webhook secrets + action items would
-    # silently survive account deletion. AuditLog rows are intentionally
-    # retained for regulatory traceability; only the user-identifying details
-    # are scrubbed via the account row's removal (FK is null-able).
-    from sqlalchemy import delete as _sa_delete
-    from app.models.account import (
-        BotSnapshot as _BotSnapshot,
-        Webhook as _WebhookModel,
-        ActionItem as _ActionItem,
-        IdempotencyKey as _IdempotencyKey,
-        WorkspaceMember as _WorkspaceMember,
-    )
-    for _model in (_BotSnapshot, _WebhookModel, _ActionItem, _IdempotencyKey, _WorkspaceMember):
-        try:
-            await db.execute(_sa_delete(_model).where(_model.account_id == account_id))
-        except Exception as _exc:
-            logger.warning(
-                "GDPR: could not purge %s for account %s: %s",
-                _model.__tablename__, account_id, _exc,
-            )
+    # GDPR right-to-be-forgotten: purge every per-account table that isn't
+    # reachable via the ORM cascade on Account (those without a declared FK
+    # relationship). Discovered reflectively so newly-added per-account tables
+    # are covered automatically — the old hand-maintained list had silently
+    # missed meeting_summaries and retention_policies. AuditLog rows are
+    # intentionally retained for regulatory traceability.
+    from app.services.gdpr_service import purge_account_owned_rows
+    await purge_account_owned_rows(account_id, db)
 
     # Delete the account row — cascades to api_keys, transactions, stripe_topups,
     # usdc_deposit, integrations, calendar_feeds, oauth_accounts, keyword_alerts,

@@ -4,9 +4,14 @@ All notable changes to JustHereToListen.io are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.57.0 — **Last updated:** 2026-06-01
+> **Latest version:** 2.57.1 — **Last updated:** 2026-06-01
 
 ---
+
+## [2.57.1] - 2026-06-01
+
+### Fixed
+- **GDPR erasure gap:** `DELETE /api/v1/auth/account` now purges *every* per-account table by reflecting over the ORM (`gdpr_service.purge_account_owned_rows`). The previous hand-maintained list silently left `meeting_summaries` and `retention_policies` behind, so those rows survived account deletion. `audit_logs` are intentionally retained for regulatory traceability. New tests in `tests/test_gdpr_erasure.py` (suite 104 → 107).
 
 ## [2.57.0] - 2026-06-01
 
