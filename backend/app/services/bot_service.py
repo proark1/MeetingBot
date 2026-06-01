@@ -24,6 +24,10 @@ from app.services import intelligence_service, webhook_service
 from app.services.browser_bot import run_browser_bot
 from app.services.transcription_service import transcribe_audio, _normalise_speakers
 from app.services.intelligence_service import set_usage_sink
+from app.api.metrics import (
+    record_bot_created, record_bot_completed,
+    record_join_attempt, record_join_result,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1069,6 +1073,7 @@ async def run_bot_lifecycle(bot_id: str) -> None:
     video_path = str(_RECORDINGS_DIR / f"{bot_id}.mp4") if bot.record_video else None
     use_real_bot = bot.meeting_platform in _REAL_PLATFORMS
     _credits_deducted = False
+    record_bot_created(bot.meeting_platform)
 
     try:
         # ── 0. Scheduled bots are deferred by bots.py call_later — no sleep needed.
@@ -1297,6 +1302,7 @@ async def run_bot_lifecycle(bot_id: str) -> None:
             last_error: str = ""
 
             for attempt in range(max_retries + 1):
+                record_join_attempt(bot.meeting_platform)
                 if attempt > 0:
                     logger.info("Bot %s join attempt %d/%d…", bot_id, attempt + 1, max_retries + 1)
                     await asyncio.sleep(retry_delay)
@@ -1358,7 +1364,11 @@ async def run_bot_lifecycle(bot_id: str) -> None:
                     raise RuntimeError(last_error)
 
             if not bot_result["success"] and not admitted:
+                record_join_result(bot.meeting_platform, success=False)
                 raise RuntimeError(last_error or "Browser bot failed after all retries")
+
+            # Bot got into the meeting (or completed the call) — count a join success.
+            record_join_result(bot.meeting_platform, success=True)
 
             # ── 2. call_ended → transcribe ────────────────────────────────
             scraped_participants: list[str] = bot_result.get("participants") or []
@@ -1512,6 +1522,7 @@ async def run_bot_lifecycle(bot_id: str) -> None:
 
         # ── 6. Done ───────────────────────────────────────────────────────
         await store.mark_terminal(bot_id, "done", ended_at=bot.ended_at or _now())
+        record_bot_completed("done")
         bot = await store.get_bot(bot_id)
 
         # Deduct credits for the completed bot run
@@ -1553,6 +1564,7 @@ async def run_bot_lifecycle(bot_id: str) -> None:
                 logger.exception("Bot %s: error during cancellation cleanup", bot_id)
             try:
                 await store.mark_terminal(bot_id, "cancelled", ended_at=bot.ended_at or _now())
+                record_bot_completed("cancelled")
                 bot = await store.get_bot(bot_id)
                 if not _credits_deducted:
                     from app.services.credit_service import deduct_credits_for_bot
@@ -1585,6 +1597,7 @@ async def run_bot_lifecycle(bot_id: str) -> None:
                     error_message=str(exc)[:2000],
                     ended_at=bot.ended_at if bot else _now(),
                 )
+                record_bot_completed("error")
                 bot = await store.get_bot(bot_id)
                 if bot:
                     # Refund the reserved monthly quota slot if the bot never
