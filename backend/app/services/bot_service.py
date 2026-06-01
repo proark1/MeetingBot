@@ -1019,7 +1019,7 @@ async def _post_completion_notifications(account_id: str, bot_data: dict, bot=No
 
             canonical_url = _canonical_meeting_url(bot.meeting_url)
 
-            recent_bots, _ = await store.list_bots(limit=500, account_id=account_id)
+            recent_bots, _, _ = await store.list_bots(limit=500, account_id=account_id)
             matching = [
                 b for b in recent_bots
                 if b.id != bot.id
@@ -1438,11 +1438,14 @@ async def run_bot_lifecycle(bot_id: str) -> None:
             if transcript:
                 _bot_fresh = await store.get_bot(bot_id) or bot
                 _carry_map = dict(getattr(_bot_fresh, "speaker_name_map", None) or {})
-                transcript, _final_map = _normalise_speakers(
-                    transcript, scraped_participants, prior_map=_carry_map,
-                )
-                if _final_map:
-                    await store.update_bot(bot_id, speaker_name_map=_final_map)
+                try:
+                    transcript, _final_map = _normalise_speakers(
+                        transcript, scraped_participants, prior_map=_carry_map,
+                    )
+                    if _final_map:
+                        await store.update_bot(bot_id, speaker_name_map=_final_map)
+                except Exception:
+                    logger.exception("Bot %s: speaker normalisation failed — proceeding with raw labels", bot_id)
 
             if not transcript:
                 _fresh = await store.get_bot(bot_id) or bot

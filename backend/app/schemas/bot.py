@@ -813,6 +813,7 @@ class BotListResponse(BaseModel):
     total: int
     limit: int
     offset: int
+    next_cursor: Optional[str] = None
 
     model_config = {"json_schema_extra": {"example": {
         "results": [{
@@ -839,6 +840,7 @@ class BotListResponse(BaseModel):
         "total": 1,
         "limit": 50,
         "offset": 0,
+        "next_cursor": None,
     }}}
 
 

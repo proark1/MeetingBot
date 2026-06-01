@@ -80,7 +80,7 @@ async def retrieve_related(
     account_id = bot.account_id
     filter_account = account_id if (account_id and account_id != SUPERADMIN_ACCOUNT_ID) else None
 
-    candidates, _ = await store.list_bots(limit=10000, account_id=filter_account)
+    candidates, _, _ = await store.list_bots(limit=10000, account_id=filter_account)
 
     # Apply scope filter
     bot_workspace = getattr(bot, "workspace_id", None)

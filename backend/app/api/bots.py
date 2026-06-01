@@ -86,6 +86,8 @@ _bot_queue: deque[str] = deque()
 _scheduled_timers: dict[str, asyncio.TimerHandle] = {}
 
 _ACTIVE_STATUSES = ("ready", "scheduled", "queued", "joining", "in_call", "call_ended")
+_TERMINAL_STATUSES = ("done", "error", "cancelled")
+_ALL_STATUSES = _ACTIVE_STATUSES + _TERMINAL_STATUSES
 _queue_event = asyncio.Event()
 
 # Serialises the "count active bots → spawn or queue" sequence so concurrent
@@ -772,7 +774,7 @@ async def get_stats(request: Request):
     account_id: Optional[str] = getattr(request.state, "account_id", None)
     sub_user_id = _get_sub_user_from_request(request)
     filter_account = account_id if (account_id and account_id != SUPERADMIN_ACCOUNT_ID) else None
-    all_bots, _ = await store.list_bots(
+    all_bots, _, _ = await store.list_bots(
         limit=10000, account_id=filter_account, sub_user_id=sub_user_id,
         account_id_is_null=(account_id is None),
     )
@@ -796,10 +798,21 @@ async def get_stats(request: Request):
 async def list_bots(
     request: Request,
     limit: int = Query(default=20, ge=1, le=100),
-    offset: int = Query(default=0, ge=0),
+    offset: int = Query(default=0, ge=0, le=50000),
     status: Optional[str] = Query(default=None, description="Filter by status"),
+    cursor: Optional[str] = Query(default=None, description="Cursor from a previous response's next_cursor for stable pagination"),
 ):
-    """List bots (lightweight summaries, no transcript/analysis)."""
+    """List bots (lightweight summaries, no transcript/analysis).
+
+    Supports both offset-based and cursor-based pagination.  Pass the
+    ``next_cursor`` value from a response as ``cursor`` in the next request
+    for stable, efficient page-through of large result sets.
+    """
+    if status is not None and status not in _ALL_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown status {status!r}. Valid values: {', '.join(_ALL_STATUSES)}",
+        )
     account_id: Optional[str] = getattr(request.state, "account_id", None)
     sub_user_id = _get_sub_user_from_request(request)
     # Superadmin sees all bots; per-user accounts see only their own;
@@ -808,20 +821,112 @@ async def list_bots(
         account_id if (account_id and account_id != SUPERADMIN_ACCOUNT_ID) else None
     )
     if account_id is None:
-        # Unauth dev mode: select only legacy anonymous bots (account_id IS NULL)
-        # directly in the store so we paginate without materialising everything.
-        bots, total = await store.list_bots(
+        bots, total, next_cursor = await store.list_bots(
             status=status, limit=limit, offset=offset,
             account_id_is_null=True, sub_user_id=sub_user_id,
+            after_cursor=cursor,
         )
     else:
-        bots, total = await store.list_bots(status=status, limit=limit, offset=offset, account_id=filter_account, sub_user_id=sub_user_id)
+        bots, total, next_cursor = await store.list_bots(
+            status=status, limit=limit, offset=offset,
+            account_id=filter_account, sub_user_id=sub_user_id,
+            after_cursor=cursor,
+        )
     return BotListResponse(
         results=[_to_summary(b) for b in bots],
         total=total,
         limit=limit,
         offset=offset,
+        next_cursor=next_cursor,
     )
+
+
+# ── POST /api/v1/bot/bulk/cancel ─────────────────────────────────────────────
+
+class BulkCancelRequest(BaseModel):
+    bot_ids: list[str] = Field(..., min_length=1, max_length=50)
+
+
+class BulkCancelResponse(BaseModel):
+    cancelled: list[str]
+    not_found: list[str]
+    already_terminal: list[str]
+
+
+@router.post("/bulk/cancel", response_model=BulkCancelResponse)
+async def bulk_cancel_bots(payload: BulkCancelRequest, request: Request):
+    """Cancel up to 50 bots in a single request.
+
+    Only the authenticated account's bots are affected. Bots already in a
+    terminal state (done / error / cancelled) are reported in
+    ``already_terminal`` but are not treated as errors.
+    """
+    account_id: Optional[str] = getattr(request.state, "account_id", None)
+    cancelled, not_found, already_terminal = [], [], []
+
+    for bot_id in payload.bot_ids:
+        bot = await store.get_bot(bot_id)
+        if bot is None:
+            not_found.append(bot_id)
+            continue
+        if account_id and account_id != SUPERADMIN_ACCOUNT_ID and bot.account_id != account_id:
+            not_found.append(bot_id)  # 404 prevents info leakage
+            continue
+        if bot.status in _TERMINAL_STATUSES:
+            already_terminal.append(bot_id)
+            continue
+        # Signal graceful leave then mark cancelled.
+        leave_event = getattr(bot, "leave_event", None)
+        if leave_event is not None:
+            leave_event.set()
+        await store.mark_terminal(bot_id, "cancelled", error_message="Bulk cancel requested")
+        cancelled.append(bot_id)
+
+    return BulkCancelResponse(
+        cancelled=cancelled,
+        not_found=not_found,
+        already_terminal=already_terminal,
+    )
+
+
+# ── DELETE /api/v1/bot/bulk ───────────────────────────────────────────────────
+
+class BulkDeleteRequest(BaseModel):
+    bot_ids: list[str] = Field(..., min_length=1, max_length=50)
+
+
+class BulkDeleteResponse(BaseModel):
+    deleted: list[str]
+    not_found: list[str]
+    active: list[str]
+
+
+@router.delete("/bulk", response_model=BulkDeleteResponse)
+async def bulk_delete_bots(payload: BulkDeleteRequest, request: Request):
+    """Delete up to 50 terminal bots in a single request.
+
+    Only bots in a terminal state (done / error / cancelled) may be bulk
+    deleted.  Active bots are reported in ``active`` and must be cancelled
+    first.  Only the authenticated account's bots are affected.
+    """
+    account_id: Optional[str] = getattr(request.state, "account_id", None)
+    deleted, not_found, active = [], [], []
+
+    for bot_id in payload.bot_ids:
+        bot = await store.get_bot(bot_id)
+        if bot is None:
+            not_found.append(bot_id)
+            continue
+        if account_id and account_id != SUPERADMIN_ACCOUNT_ID and bot.account_id != account_id:
+            not_found.append(bot_id)
+            continue
+        if bot.status not in _TERMINAL_STATUSES:
+            active.append(bot_id)
+            continue
+        await store.delete_bot(bot_id)
+        deleted.append(bot_id)
+
+    return BulkDeleteResponse(deleted=deleted, not_found=not_found, active=active)
 
 
 # ── GET /api/v1/bot/{id} ──────────────────────────────────────────────────────

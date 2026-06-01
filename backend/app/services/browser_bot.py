@@ -1683,13 +1683,13 @@ async def _join_onepizza(page: Page, url: str, bot_name: str, start_muted: bool 
 
 # ── Admission & end detection ─────────────────────────────────────────────────
 # Per-platform body-text signals live in browser.platform_texts (the documented
-# extension point). Aliased to the historical private names so all the logic
-# below — and any external reference — keeps working unchanged.
-from app.services.browser.platform_texts import (
-    IN_CALL_TEXTS as _IN_CALL_TEXTS,
-    WAITING_TEXTS as _WAITING_TEXTS,
-    END_TEXTS as _END_TEXTS,
-    ALONE_TEXTS as _ALONE_TEXTS,
+# extension point).  Pure matching functions live in browser.text_matchers.
+from app.services.browser.platform_texts import ALONE_TEXTS
+from app.services.browser.text_matchers import (
+    text_signals_in_call as _text_in_call,
+    text_signals_waiting as _text_waiting,
+    text_signals_ended as _text_ended,
+    text_signals_alone as _text_alone,
 )
 
 
@@ -1704,7 +1704,7 @@ async def _is_bot_alone(page: Page, platform: str, body_text: str | None = None)
     """
     try:
         body = body_text if body_text is not None else (await page.inner_text("body")).lower()
-        text_alone = any(t in body for t in _ALONE_TEXTS.get(platform, []))
+        text_alone = _text_alone(body, platform)
 
         # DOM participant tile count — only trust count == 1 (just the bot's
         # own tile); count == 0 may mean the DOM hasn't rendered yet.
@@ -1726,7 +1726,7 @@ async def _is_bot_alone(page: Page, platform: str, body_text: str | None = None)
 
         # Require both signals when text patterns exist; tile-only for platforms
         # without text patterns (e.g. onepizza).
-        if not _ALONE_TEXTS.get(platform):
+        if not ALONE_TEXTS.get(platform):
             return tile_alone
         return text_alone and tile_alone
     except Exception:
@@ -1740,15 +1740,13 @@ async def _wait_for_admission(
     timeout_s: int,
     on_admitted: Optional[Callable[[], Awaitable[None]]],
 ) -> bool:
-    in_call  = _IN_CALL_TEXTS.get(platform, [])
-    waiting  = _WAITING_TEXTS.get(platform, [])
     deadline = time.monotonic() + timeout_s
 
     while time.monotonic() < deadline:
         try:
             body = (await page.inner_text("body")).lower()
-            in_lobby = any(t in body for t in waiting)
-            admitted = any(t in body for t in in_call)
+            in_lobby = _text_waiting(body, platform)
+            admitted = _text_in_call(body, platform)
 
             if admitted and not in_lobby:
                 logger.info("Bot admitted to %s meeting", platform)
@@ -4005,7 +4003,6 @@ async def _wait_for_meeting_end(
 
     Returns one of: "ended" | "max_duration" | "alone_timeout"
     """
-    end_texts = _END_TEXTS.get(platform, [])
     deadline  = time.monotonic() + max_s
 
     alone_since: Optional[float] = None
@@ -4018,7 +4015,7 @@ async def _wait_for_meeting_end(
     while time.monotonic() < deadline:
         try:
             body = (await page.inner_text("body")).lower()
-            if any(t in body for t in end_texts):
+            if _text_ended(body, platform):
                 if _end_text_seen_at is not None:
                     # Confirmed: end text present on two consecutive polls (~10s apart)
                     logger.info("Meeting end confirmed (%s)", platform)
