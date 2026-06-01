@@ -1682,46 +1682,15 @@ async def _join_onepizza(page: Page, url: str, bot_name: str, start_muted: bool 
 
 
 # ── Admission & end detection ─────────────────────────────────────────────────
-
-_IN_CALL_TEXTS = {
-    "google_meet": ["leave call", "you're in the call", "turn on camera", "everyone in this call"],
-    "zoom": ["stop video", "audio connected", "end meeting"],
-    "microsoft_teams": ["you're in the meeting", "leave", "raise your hand"],
-    "onepizza": [],  # rely on DOM checks only (no reliable in-call text)
-}
-_WAITING_TEXTS = {
-    "google_meet": ["waiting to be admitted", "waiting room", "someone will let you in"],
-    "zoom": ["waiting for the host", "waiting room"],
-    "microsoft_teams": ["waiting for others", "someone in the meeting should let you in", "lobby"],
-    "onepizza": [],  # waiting room detected via #waitingRoomOverlay DOM check
-}
-_END_TEXTS = {
-    "google_meet": ["you left the meeting", "call has ended", "meeting ended", "you've been removed"],
-    "zoom": ["meeting has been ended", "meeting is ended", "this meeting has ended"],
-    "microsoft_teams": ["the meeting has ended", "call ended", "you left"],
-    "onepizza": ["meeting ended", "meeting has ended", "you left", "the meeting has ended"],
-}
-
-# Text signals that the bot is the only one in the meeting
-_ALONE_TEXTS = {
-    "google_meet": [
-        "no one else is here",
-        "you're the only one",
-        "you are the only one",
-        "no one else has joined",
-        "add others to this call",
-    ],
-    "zoom": [
-        "you are the only participant",
-        "waiting for others to join",
-    ],
-    "microsoft_teams": [
-        "you're the only one here",
-        "you are the only one here",
-        "no one else is here",
-    ],
-    "onepizza": [],  # detected via tile count below
-}
+# Per-platform body-text signals live in browser.platform_texts (the documented
+# extension point). Aliased to the historical private names so all the logic
+# below — and any external reference — keeps working unchanged.
+from app.services.browser.platform_texts import (
+    IN_CALL_TEXTS as _IN_CALL_TEXTS,
+    WAITING_TEXTS as _WAITING_TEXTS,
+    END_TEXTS as _END_TEXTS,
+    ALONE_TEXTS as _ALONE_TEXTS,
+)
 
 
 async def _is_bot_alone(page: Page, platform: str, body_text: str | None = None) -> bool:
