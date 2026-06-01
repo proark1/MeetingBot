@@ -4,7 +4,23 @@ All notable changes to JustHereToListen.io are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.64.0 — **Last updated:** 2026-06-01
+> **Latest version:** 2.64.1 — **Last updated:** 2026-06-01
+
+---
+
+## [2.64.1] - 2026-06-01
+
+UI/UX hardening pass (continued) — session resilience and accessibility.
+
+### Added
+- **Global `fetch` 401 interceptor** — every authenticated page that extends `base.html` (dashboard, bot detail, admin, top-up) now redirects to `/login?next=…` whenever any `fetch` returns `401`, instead of surfacing a cryptic "Failed to…" error. The response is still returned so per-caller error handling runs normally. Standalone pages (API dashboard, login) are unaffected.
+
+### Changed
+- **Smarter bot-detail auto-refresh** — the bot detail page previously did a single hard `location.reload()` after 8s for any active bot. It now polls on an interval that (a) skips the reload while an `<input>`/`<textarea>`/contenteditable is focused so it can't discard what the user is typing, and (b) defers reloading a backgrounded tab until it becomes visible again, refreshing immediately on return.
+
+### Fixed (accessibility)
+- Decorative SVG icons in the top bar (hamburger, sun/moon theme toggle) are now `aria-hidden="true" focusable="false"` so screen readers announce only the button's `aria-label`, not the icon paths.
+- Removed the incorrect `role="status"` live-region from the reusable empty-state partial, which caused screen readers to re-announce static empty states on every render.
 
 ---
 

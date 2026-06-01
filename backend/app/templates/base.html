@@ -1089,14 +1089,14 @@
     <header class="app-topbar" role="banner">
       <div class="d-flex align-items-center" style="gap:0.5rem;min-width:0">
         <button class="sidebar-toggle" onclick="openAppSidebar()" aria-label="Open navigation" aria-controls="appSidebar">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+          <svg aria-hidden="true" focusable="false" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
         </button>
         <h1 class="topbar-title">{% block page_title %}Dashboard{% endblock %}</h1>
       </div>
       <div class="topbar-actions">
         <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle dark mode" title="Toggle dark mode">
-          <svg class="icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-          <svg class="icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+          <svg class="icon-moon" aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+          <svg class="icon-sun" aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
         </button>
         {% block primary_action %}{% endblock %}
       </div>
@@ -1152,6 +1152,22 @@
     setTimeout(() => { window.location.href = '/login?next=' + next; }, 600);
   }
   window.jhtlHandleUnauthorized = jhtlHandleUnauthorized;
+
+  // Global safety net: any fetch() on an authenticated page that comes back
+  // 401 means the session expired. Trigger the login redirect once, but still
+  // return the response so individual callers' error handling runs normally.
+  // (Standalone pages like the API dashboard / login don't extend base.html,
+  // so their own 401 handling is unaffected.)
+  if (window.fetch && !window.__jhtlFetchPatched) {
+    const _origFetch = window.fetch.bind(window);
+    window.fetch = function (...args) {
+      return _origFetch(...args).then((resp) => {
+        if (resp && resp.status === 401) jhtlHandleUnauthorized();
+        return resp;
+      });
+    };
+    window.__jhtlFetchPatched = true;
+  }
 
   /**
    * apiFetch — shared async helper for all dashboard mutations.
