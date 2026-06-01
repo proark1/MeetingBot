@@ -4,7 +4,21 @@ All notable changes to JustHereToListen.io are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.63.0 — **Last updated:** 2026-06-01
+> **Latest version:** 2.63.1 — **Last updated:** 2026-06-01
+
+---
+
+## [2.63.1] - 2026-06-01
+
+Payment-path bug fix and external-call timeout hardening.
+
+### Fixed
+- **UI top-up was completely broken** — `topup_stripe_submit` (`POST /topup/stripe`) called the async `create_checkout_session` **without `await`**, unpacking a coroutine object and raising `TypeError` on every UI-initiated top-up. Added the missing `await` plus a graceful redirect to `?error=payment_unavailable` on failure. Covered by new regression tests in `test_stripe_checkout.py`.
+
+### Reliability
+- **SendGrid send timeout** — the SendGrid email path now wraps its blocking send in `asyncio.wait_for(timeout=30)`, matching the SMTP path. The SendGrid SDK has no default socket timeout, so a hung API call previously stalled the caller (e.g. the bot-completion notification loop) indefinitely.
+- **Stripe checkout timeout** — `create_checkout_session` bounds the blocking SDK call at 30s so a slow/hung Stripe API returns a clean error instead of holding the request open.
+- **Graceful payment-provider failure** — `POST /api/v1/billing/checkout` now converts any Stripe error into a `503` ("Payment provider is temporarily unavailable") rather than a raw `500`.
 
 ---
 

@@ -212,7 +212,10 @@ async def _send_sendgrid(to_address: str, subject: str, html_body: str) -> None:
         sg = sendgrid.SendGridAPIClient(api_key)
         sg.send(message)
 
-    await asyncio.to_thread(_send)
+    # Bound the blocking send like the SMTP path (30s). The SendGrid SDK has no
+    # default socket timeout, so without this a hung API call would stall the
+    # caller (e.g. the bot-completion notification loop) indefinitely.
+    await asyncio.wait_for(asyncio.to_thread(_send), timeout=30.0)
 
 
 async def send_email(to_address: str, subject: str, html_body: str) -> bool:

@@ -55,7 +55,9 @@ async def create_checkout_session(
             metadata={"account_id": account_id, "amount_usd": str(amount_usd)},
         )
 
-    session = await asyncio.to_thread(_create)
+    # Bound the blocking SDK call so a slow/hung Stripe API returns a clean error
+    # to the checkout handler instead of holding the request open indefinitely.
+    session = await asyncio.wait_for(asyncio.to_thread(_create), timeout=30.0)
     return session.id, session.url
 
 

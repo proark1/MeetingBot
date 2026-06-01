@@ -747,12 +747,16 @@ async def topup_stripe_submit(
 
     base_url = str(request.base_url).rstrip("/")
     from app.services.stripe_service import create_checkout_session
-    _, checkout_url = create_checkout_session(
-        account_id=account.id,
-        amount_usd=amount_usd,
-        success_url=f"{base_url}/dashboard?payment=success",
-        cancel_url=f"{base_url}/topup?payment=cancelled",
-    )
+    try:
+        _, checkout_url = await create_checkout_session(
+            account_id=account.id,
+            amount_usd=amount_usd,
+            success_url=f"{base_url}/dashboard?payment=success",
+            cancel_url=f"{base_url}/topup?payment=cancelled",
+        )
+    except Exception:
+        logger.exception("Stripe checkout session creation failed for account %s", account.id)
+        return RedirectResponse("/topup?error=payment_unavailable", status_code=303)
     return RedirectResponse(checkout_url, status_code=303)
 
 
