@@ -438,6 +438,17 @@ async def lifespan(app: FastAPI):
         canary_task = asyncio.create_task(_supervised("canary", canary_loop))
         logger.info("Synthetic canary enabled (interval %ds)", settings.CANARY_INTERVAL_S)
 
+    # Action-item due-date reminders — fire action_item.due_soon / .overdue
+    # webhook events for open items with a parseable due_date.
+    reminder_task = None
+    if settings.ACTION_ITEM_REMINDERS_ENABLED:
+        from app.services.action_item_reminder_service import reminder_loop
+        reminder_task = asyncio.create_task(_supervised("action_item_reminders", reminder_loop))
+        logger.info(
+            "Action-item reminders enabled (interval %ds)",
+            settings.ACTION_ITEM_REMINDER_INTERVAL_S,
+        )
+
     logger.info("JustHereToListen.io ready — API docs at /api/docs")
     yield
 
@@ -451,6 +462,8 @@ async def lifespan(app: FastAPI):
     digest_task.cancel()
     if canary_task is not None:
         canary_task.cancel()
+    if reminder_task is not None:
+        reminder_task.cancel()
 
     if _running_tasks:
         logger.info("Cancelling %d running bot task(s)…", len(_running_tasks))

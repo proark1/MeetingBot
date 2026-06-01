@@ -170,6 +170,13 @@ class Settings(BaseSettings):
     # ── Calendar auto-join ─────────────────────────────────────────────────────
     CALENDAR_POLL_INTERVAL_S: int = 300     # how often to poll iCal feeds (5 min)
 
+    # ── Action-item due-date reminders ─────────────────────────────────────────
+    # Background loop fires action_item.due_soon / action_item.overdue webhook
+    # events for open items with a parseable due_date. Disabled by default.
+    ACTION_ITEM_REMINDERS_ENABLED: bool = False
+    ACTION_ITEM_REMINDER_INTERVAL_S: int = 3600   # how often to scan (1h)
+    ACTION_ITEM_DUE_SOON_HOURS: int = 24          # "due_soon" window before the due date
+
     # ── Subscription plans ────────────────────────────────────────────────────
     # Plan bot limits: -1 = unlimited.  Enforced at bot creation.
     PLAN_FREE_BOTS_PER_MONTH: int = 5

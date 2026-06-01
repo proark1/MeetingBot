@@ -489,6 +489,11 @@ class ActionItem(Base):
     status: Mapped[str] = mapped_column(String(20), default="open", index=True)  # open | done
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Due-date reminders: the highest reminder stage already dispatched for this
+    # item ("due_soon" → "overdue"), so the reminder loop never double-fires the
+    # same stage. NULL = no reminder sent yet.
+    reminder_stage: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    reminder_sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class MeetingSummary(Base):

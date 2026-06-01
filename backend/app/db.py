@@ -113,6 +113,9 @@ def _migrate_schema(conn) -> None:
             f"ALTER TABLE webhooks ADD COLUMN IF NOT EXISTS consecutive_failures INTEGER NOT NULL DEFAULT 0",
             # action_items columns added after initial deployment
             f"ALTER TABLE action_items ADD COLUMN IF NOT EXISTS sub_user_id VARCHAR(255)",
+            # due-date reminder tracking
+            f"ALTER TABLE action_items ADD COLUMN IF NOT EXISTS reminder_stage VARCHAR(20)",
+            f"ALTER TABLE action_items ADD COLUMN IF NOT EXISTS reminder_sent_at TIMESTAMP WITH TIME ZONE",
             # round-2 fix #5: idempotency keys are now scoped per sub-user
             f"ALTER TABLE idempotency_keys ADD COLUMN IF NOT EXISTS sub_user_id VARCHAR(255)",
             # round-2 fix #14: persist the original signed timestamp on each delivery
@@ -274,6 +277,17 @@ def _migrate_schema(conn) -> None:
         if "signed_ts" not in existing:
             _log.info("Adding column webhook_deliveries.signed_ts")
             conn.execute(text("ALTER TABLE webhook_deliveries ADD COLUMN signed_ts VARCHAR(20)"))
+
+    # SQLite: action-item due-date reminder tracking
+    if "action_items" in inspector.get_table_names():
+        existing = {col["name"] for col in inspector.get_columns("action_items")}
+        for col_name, col_def in [
+            ("reminder_stage", "VARCHAR(20)"),
+            ("reminder_sent_at", _dt_type),
+        ]:
+            if col_name not in existing:
+                _log.info("Adding column action_items.%s", col_name)
+                conn.execute(text(f"ALTER TABLE action_items ADD COLUMN {col_name} {col_def}"))
 
     # SQLite: round-2 fix #8 — same email backfill as PG above. NULL-handling
     # works the same; the correlated NOT EXISTS guards against unique collisions.

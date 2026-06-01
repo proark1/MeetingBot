@@ -38,6 +38,8 @@ WEBHOOK_EVENTS: list[str] = [
     "bot.coaching_tip",
     "bot.speaker_analytics",
     "bot.agentic_action",
+    "action_item.due_soon",
+    "action_item.overdue",
     "bot.test",
 ]
 
