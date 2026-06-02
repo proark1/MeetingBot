@@ -475,7 +475,7 @@ async def _tool_create_bot(args: dict, account_id: Optional[str]) -> dict:
 
     import uuid
     from app.store import BotSession
-    from app.config import settings
+    from app.deps import SUPERADMIN_ACCOUNT_ID
 
     bot_id = str(uuid.uuid4())
     platform = bot_service.detect_platform(str(payload.meeting_url))
@@ -484,17 +484,26 @@ async def _tool_create_bot(args: dict, account_id: Optional[str]) -> dict:
         meeting_url=str(payload.meeting_url),
         meeting_platform=platform,
         bot_name=payload.bot_name,
-        account_id=account_id,
+        status="ready",
+        account_id=account_id if account_id != SUPERADMIN_ACCOUNT_ID else None,
         template=payload.template,
         respond_on_mention=payload.respond_on_mention,
     )
     await store.create_bot(bot)
-    use_real_bot = bool(settings.USE_REAL_BOT)
-    import asyncio as _asyncio
-    task = _asyncio.create_task(bot_service.run_bot_lifecycle(bot_id, use_real_bot))
-    from app.api.bots import _running_tasks
-    _running_tasks[bot_id] = task
-    return {"bot_id": bot_id, "status": bot.status, "platform": platform}
+    # Route through the shared slot-admission path so MCP-created bots respect
+    # MAX_CONCURRENT_BOTS and are tracked exactly like HTTP-created bots. The
+    # previous direct create_task(run_bot_lifecycle(bot_id, use_real_bot)) call
+    # passed a second positional arg the coroutine does not accept, raising
+    # TypeError and leaving the bot stuck in "ready" forever.
+    from app.api.bots import _start_or_queue_bot
+
+    await _start_or_queue_bot(bot_id)
+    started = await store.get_bot(bot_id)
+    return {
+        "bot_id": bot_id,
+        "status": started.status if started else bot.status,
+        "platform": platform,
+    }
 
 
 async def _tool_cancel_bot(args: dict, account_id: Optional[str]) -> dict:

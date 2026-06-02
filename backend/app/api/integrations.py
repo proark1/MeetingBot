@@ -161,6 +161,17 @@ def _validate_integration_config(type_: str, config: dict) -> None:
             raise HTTPException(status_code=422, detail="Notion integration requires config.database_id")
 
 
+async def _block_integration_ssrf(type_: str, config: dict) -> None:
+    """Reject internal/private targets for URL-bearing integrations at
+    registration time — defense-in-depth matching the webhook/calendar guards
+    (delivery-time still re-validates). Currently the Slack webhook URL."""
+    if type_ == "slack":
+        url = config.get("webhook_url")
+        if url:
+            from app.api.webhooks import _block_ssrf
+            await _block_ssrf(url)
+
+
 @router.post("", response_model=IntegrationResponse, status_code=201)
 async def create_integration(
     payload: IntegrationCreate,
@@ -178,6 +189,7 @@ async def create_integration(
         )
 
     _validate_integration_config(payload.type, payload.config)
+    await _block_integration_ssrf(payload.type, payload.config)
 
     from app.services.secrets_at_rest import encrypt_json
     integration = Integration(
@@ -221,6 +233,7 @@ async def update_integration(
         raise HTTPException(status_code=422, detail=f"Unsupported integration type '{payload.type}'")
 
     _validate_integration_config(payload.type, payload.config)
+    await _block_integration_ssrf(payload.type, payload.config)
 
     integration.type = payload.type
     from app.services.secrets_at_rest import encrypt_json
