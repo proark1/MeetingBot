@@ -4,7 +4,26 @@ All notable changes to JustHereToListen.io are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.66.0 — **Last updated:** 2026-06-02
+> **Latest version:** 2.66.1 — **Last updated:** 2026-06-02
+
+---
+
+## [2.66.1] - 2026-06-02
+
+Audit follow-ups — internal hardening, no API surface change.
+
+### Fixed
+- **Webhook delivery counters are now updated atomically** under the store lock
+  (`store.record_webhook_delivery` does the read-modify-write internally and
+  returns the new state). Delivery code no longer mutates the shared
+  `WebhookEntry`, closing the last-writer-wins / lost-increment race across
+  concurrent deliveries and a concurrent PATCH. Adds counter + concurrency
+  tests.
+- **SSRF positive-DNS cache is size-capped** (`_DNS_CACHE_MAX=1024`, oldest
+  evicted) so it can't grow unbounded across many distinct webhook hostnames.
+
+### Documentation
+- `CLAUDE.md`: corrected `browser_bot.py` size note (3,700 → ~5,800 lines).
 
 ---
 

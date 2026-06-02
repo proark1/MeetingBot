@@ -22,7 +22,7 @@ backend/app/
 ├── schemas/webhook.py        # WebhookCreate, WebhookResponse
 ├── api/                      # FastAPI routers (bots, auth, billing, analytics, webhooks, ...)
 ├── services/
-│   ├── browser_bot.py        # 3700-line Playwright automation — DO NOT casually edit
+│   ├── browser_bot.py        # ~5800-line Playwright automation — DO NOT casually edit
 │   ├── bot_service.py        # Bot lifecycle: queue → join → transcribe → analyse → notify
 │   ├── intelligence_service.py  # AI prompts, Claude/Gemini calls, token/cost tracking
 │   ├── transcription_service.py # Gemini Speech-to-Text + local Whisper fallback
