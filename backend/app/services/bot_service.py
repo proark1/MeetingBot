@@ -1114,6 +1114,19 @@ async def run_bot_lifecycle(bot_id: str) -> None:
             _live_coaching_last_fired: dict[str, float] = {}
             _live_fired_alert_keys: set[str] = set()
 
+            # Bound concurrent per-entry AI/IO fan-out so a fast, long meeting
+            # can't pile up unbounded translate/extract/decision/coaching/
+            # agentic tasks (each does network/AI work). Lightweight WS/SSE
+            # broadcasts are not gated — only the heavy spawned coroutines below
+            # go through _spawn_bounded.
+            _live_sem = asyncio.Semaphore(settings.LIVE_ENTRY_MAX_CONCURRENCY)
+
+            def _spawn_bounded(coro):
+                async def _runner():
+                    async with _live_sem:
+                        await coro
+                return _tracked_task(_runner())
+
             # ── Opt-in feature engines (constructed only when enabled) ────────
             _speaker_aggregator = None
             if getattr(bot, "enable_speaker_analytics", False):
@@ -1208,7 +1221,7 @@ async def run_bot_lifecycle(bot_id: str) -> None:
 
                 # ── Real-time translation ─────────────────────────────────────
                 if getattr(bot, "translation_language", None):
-                    _tracked_task(
+                    _spawn_bounded(
                         _translate_and_broadcast(bot_id, bot.account_id, entry, bot.translation_language)
                     )
 
@@ -1261,7 +1274,7 @@ async def run_bot_lifecycle(bot_id: str) -> None:
                     async with _live_lock:
                         slice_start = max(0, buf_len - 10)
                         transcript_slice = list(_live_buffer[slice_start:buf_len])
-                    _tracked_task(
+                    _spawn_bounded(
                         _extract_and_broadcast_action_items(bot_id, bot.account_id, transcript_slice)
                     )
 
@@ -1275,27 +1288,27 @@ async def run_bot_lifecycle(bot_id: str) -> None:
                 # ── Opt-in features ────────────────────────────────────────────
                 # #5 — In-meeting @bot chat Q&A
                 if _is_chat and getattr(bot, "enable_chat_qa", False):
-                    _tracked_task(_handle_chat_qa(bot_id, bot.account_id, entry))
+                    _spawn_bounded(_handle_chat_qa(bot_id, bot.account_id, entry))
 
                 # #8 — Decision / action detection
                 if getattr(bot, "enable_decision_detection", False) and not _is_chat:
-                    _tracked_task(_handle_decision_detection(bot_id, bot.account_id, entry))
+                    _spawn_bounded(_handle_decision_detection(bot_id, bot.account_id, entry))
 
                 # #7 — Live speaker analytics
                 if _speaker_aggregator is not None and not _is_chat:
-                    _tracked_task(
+                    _spawn_bounded(
                         _handle_speaker_analytics(bot_id, bot.account_id, entry, _speaker_aggregator)
                     )
 
                 # #13 — Host coaching
                 if _coaching_engine is not None and not _is_chat:
-                    _tracked_task(
+                    _spawn_bounded(
                         _handle_coaching(bot_id, bot.account_id, entry, _coaching_engine)
                     )
 
                 # #15 — Agentic delegation (per-entry on_topic eval)
                 if _agentic_engine is not None and not _is_chat:
-                    _tracked_task(_handle_agentic(bot_id, bot.account_id, entry, _agentic_engine))
+                    _spawn_bounded(_handle_agentic(bot_id, bot.account_id, entry, _agentic_engine))
 
             max_retries = settings.BOT_JOIN_MAX_RETRIES
             retry_delay = settings.BOT_JOIN_RETRY_DELAY_S

@@ -414,7 +414,14 @@ async def dispatch_event(
             wh.delivery_attempts += 1
             wh.last_delivery_at = now
             wh.last_delivery_status = status_code
-            await store._persist_webhook(wh)
+            await store.record_webhook_delivery(
+                wh.id,
+                delivery_attempts=wh.delivery_attempts,
+                last_delivery_at=wh.last_delivery_at,
+                last_delivery_status=wh.last_delivery_status,
+                consecutive_failures=wh.consecutive_failures,
+                is_active=wh.is_active,
+            )
 
     await asyncio.gather(
         *(_deliver_one(wh) for wh in await store.active_webhooks(account_id=account_id)),
@@ -561,7 +568,14 @@ async def _process_retries() -> None:
             wh.delivery_attempts += 1
             wh.last_delivery_at = retry_now
             wh.last_delivery_status = status_code
-            await store._persist_webhook(wh)
+            await store.record_webhook_delivery(
+                wh.id,
+                delivery_attempts=wh.delivery_attempts,
+                last_delivery_at=wh.last_delivery_at,
+                last_delivery_status=wh.last_delivery_status,
+                consecutive_failures=wh.consecutive_failures,
+                is_active=wh.is_active,
+            )
 
     await asyncio.gather(*(_retry_one(d) for d in pending), return_exceptions=True)
 

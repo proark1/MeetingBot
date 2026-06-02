@@ -48,6 +48,11 @@ class Settings(BaseSettings):
     # Concurrency — max simultaneous browser bots
     MAX_CONCURRENT_BOTS: int = 3
 
+    # Max concurrent per-entry AI/IO fan-out tasks per live bot (translation,
+    # action-item extraction, decision detection, coaching, agentic, etc.).
+    # Bounds memory/connection use on fast or long meetings with features on.
+    LIVE_ENTRY_MAX_CONCURRENCY: int = 8
+
     # Join retry
     BOT_JOIN_MAX_RETRIES: int = 2
     BOT_JOIN_RETRY_DELAY_S: int = 30
@@ -146,6 +151,12 @@ class Settings(BaseSettings):
     # window. Round-2 fix #15 lowers the default from 10000 to 2000 to bound
     # worst-case latency on the /analytics endpoints.
     ANALYTICS_BOT_SCAN_LIMIT: int = 2000
+
+    # Admin platform-analytics: total terminal-bot snapshots aggregated, and how
+    # many are fetched+parsed per batch. Batching bounds peak memory — instead of
+    # holding all snapshot JSON blobs in RAM at once, only one batch is resident.
+    ADMIN_ANALYTICS_SNAPSHOT_LIMIT: int = 50000
+    ADMIN_ANALYTICS_BATCH: int = 2000
 
     # When False (default): if any Account row exists at startup and there are
     # no auth indicators (API_KEY unset), the auth dependency requires a Bearer

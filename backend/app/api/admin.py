@@ -709,6 +709,60 @@ def _aggregate_bot_snapshots(snaps, d30, d7) -> dict:
     }
 
 
+def _merge_agg(into: dict, part: dict) -> None:
+    """Merge one batch's aggregation result into the running accumulator.
+
+    The per-row aggregation is associative, so batched aggregation produces the
+    same result as one pass over all rows — this lets platform_analytics stream
+    snapshots in batches instead of holding every JSON blob in RAM at once.
+    """
+    # Flat sum-by-key counters.
+    for k in (
+        "status_counts", "platform_counts", "daily_bots", "daily_errors",
+        "features", "template_counts", "transcription_counts",
+        "error_messages", "error_by_platform",
+    ):
+        dst = into[k]
+        for key, val in part[k].items():
+            dst[key] = dst.get(key, 0) + val
+    # Scalars.
+    into["total_ai_tokens"] += part["total_ai_tokens"]
+    into["total_ai_cost"] += part["total_ai_cost"]
+    # List.
+    into["duration_samples"].extend(part["duration_samples"])
+    # Nested {key: {tokens, cost, calls}} buckets.
+    for k in ("ai_by_model", "ai_by_operation"):
+        dst = into[k]
+        for key, sub in part[k].items():
+            tgt = dst.setdefault(key, {"tokens": 0, "cost": 0.0, "calls": 0})
+            tgt["tokens"] += sub["tokens"]
+            tgt["cost"] += sub["cost"]
+            tgt["calls"] += sub["calls"]
+    # Nested {day: {tokens, cost}}.
+    dst = into["ai_daily"]
+    for day, sub in part["ai_daily"].items():
+        tgt = dst.setdefault(day, {"tokens": 0, "cost": 0.0})
+        tgt["tokens"] += sub["tokens"]
+        tgt["cost"] += sub["cost"]
+    # Per-user stats.
+    dst = into["user_stats"]
+    for acct, src in part["user_stats"].items():
+        tgt = dst.get(acct)
+        if tgt is None:
+            dst[acct] = src
+            continue
+        tgt["total_bots"] += src["total_bots"]
+        tgt["bots_30d"] += src["bots_30d"]
+        tgt["bots_7d"] += src["bots_7d"]
+        tgt["ai_tokens"] += src["ai_tokens"]
+        tgt["ai_cost"] += src["ai_cost"]
+        if src["last_active"] and (not tgt["last_active"] or src["last_active"] > tgt["last_active"]):
+            tgt["last_active"] = src["last_active"]
+        for p, c in src["platform_pref"].items():
+            tgt["platform_pref"][p] = tgt["platform_pref"].get(p, 0) + c
+        tgt["features_used"] |= src["features_used"]
+
+
 @router.get(
     "/platform-analytics",
     tags=["Admin"],
@@ -763,21 +817,33 @@ async def platform_analytics(
         await db.rollback()
         total_accounts, new_30d_accts, plan_counts = 0, 0, {}
 
-    # ── Load bot snapshots (terminal bots, capped at 50k for memory safety) ───
-    snaps_q = await db.execute(
-        select(
-            BotSnapshot.status, BotSnapshot.meeting_url,
-            BotSnapshot.created_at, BotSnapshot.account_id, BotSnapshot.data
-        ).order_by(BotSnapshot.created_at.desc()).limit(50000)
-    )
-    snaps = snaps_q.all()
+    # ── Load + aggregate bot snapshots in batches (terminal bots) ─────────────
+    # Streaming in batches keeps peak memory to one batch of JSON blobs rather
+    # than materializing every snapshot at once. Aggregation is associative, so
+    # merging per-batch results equals a single pass over all rows.
+    from app.config import settings as _cfg_admin
+    _total_limit = _cfg_admin.ADMIN_ANALYTICS_SNAPSHOT_LIMIT
+    _batch = max(1, _cfg_admin.ADMIN_ANALYTICS_BATCH)
+    agg = _aggregate_bot_snapshots([], d30, d7)  # zero-initialised accumulator
+    _fetched = 0
+    while _fetched < _total_limit:
+        _take = min(_batch, _total_limit - _fetched)
+        rows = (await db.execute(
+            select(
+                BotSnapshot.status, BotSnapshot.meeting_url,
+                BotSnapshot.created_at, BotSnapshot.account_id, BotSnapshot.data
+            ).order_by(BotSnapshot.created_at.desc()).limit(_take).offset(_fetched)
+        )).all()
+        if not rows:
+            break
+        part = await asyncio.to_thread(_aggregate_bot_snapshots, rows, d30, d7)
+        _merge_agg(agg, part)
+        _fetched += len(rows)
+        if len(rows) < _take:
+            break
 
     # Active / live bots from in-memory store
-    from app.config import settings as _cfg_admin
     active_bots, _, _ = await _store.list_bots(limit=_cfg_admin.ANALYTICS_BOT_SCAN_LIMIT)
-
-    # ── Aggregate (CPU-bound JSON parsing offloaded to a thread) ────────────────
-    agg = await asyncio.to_thread(_aggregate_bot_snapshots, snaps, d30, d7)
     status_counts = agg["status_counts"]
     platform_counts = agg["platform_counts"]
     daily_bots = agg["daily_bots"]
