@@ -4,7 +4,22 @@ All notable changes to JustHereToListen.io are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.65.3 — **Last updated:** 2026-06-01
+> **Latest version:** 2.65.4 — **Last updated:** 2026-06-02
+
+---
+
+## [2.65.4] - 2026-06-02
+
+Documentation sync — no API behaviour change (only embedded OpenAPI prose updated).
+
+### Fixed (documentation)
+- **Webhook signature format corrected.** `docs/API.md` and `docs/SDKs.md` documented a Stripe-style `X-MeetingBot-Signature: t=<unix>,v1=<hex>` header with a hand-rolled verifier that does **not** match the wire format. The real header is `sha256=<hmac_sha256_hex>` (HMAC-SHA256 over `"{timestamp}.{body}"`, timestamp in `X-MeetingBot-Timestamp`). The SDK docs now point at the shipped `verify_webhook` / `verifyWebhook` helpers, which were already correct.
+- **Swagger/OpenAPI description refreshed.** The embedded API description in `main.py` (rendered at `/api/docs`) listed only the 8 lifecycle webhook events and 5 MCP tools; it now reflects all 20 events and notes the 16-tool MCP surface. Snapshots in `api/` regenerated.
+
+### Documentation
+- **Webhook events: 14 → 20.** The six advanced/reminder events shipped in the v2.3x–v2.5x feature waves were never reflected in the public docs. Documented `bot.decision_detected`, `bot.coaching_tip`, `bot.speaker_analytics`, `bot.agentic_action`, `action_item.due_soon`, and `action_item.overdue` — including their payload shapes and opt-in flags — across `README.md`, `docs/API.md`, `INTEGRATION_GUIDE.md`, and `CLAUDE.md`.
+- **OpenAPI operation counts refreshed** to the current surface (**116 public + 135 admin**, was 114 + 133) in `README.md`, `docs/API.md`, and `docs/README.md`. The committed snapshots in `api/` were already current — only the prose was stale.
+- **`CLAUDE.md` model-layer note** corrected from 23 → 24 SQLAlchemy ORM models (`MeetingSummary` was uncounted).
 
 ---
 
