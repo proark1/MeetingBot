@@ -7,7 +7,7 @@ Base URLs:
 | Local dev | `http://localhost:8000` |
 | Production | `https://api.justheretolisten.io` |
 
-All endpoints live under `/api/v1`. The full machine-readable surface — 114 public + 133 admin operations, every one with summary, description, tags, request example, and a 2xx response example — is at [`/api/docs`](http://localhost:8000/api/docs) (Swagger UI) and [`/api/redoc`](http://localhost:8000/api/redoc) (ReDoc).
+All endpoints live under `/api/v1`. The full machine-readable surface — 116 public + 135 admin operations, every one with summary, description, tags, request example, and a 2xx response example — is at [`/api/docs`](http://localhost:8000/api/docs) (Swagger UI) and [`/api/redoc`](http://localhost:8000/api/redoc) (ReDoc).
 
 ---
 
@@ -144,21 +144,41 @@ curl -X POST https://api.justheretolisten.io/api/v1/webhook \
 Every delivery carries two headers:
 
 ```http
-X-MeetingBot-Signature: t=<unix>,v1=<hmac_sha256_hex>
+X-MeetingBot-Signature: sha256=<hmac_sha256_hex>
 X-MeetingBot-Timestamp: 1730000000
 ```
 
-Verify in any language by HMAC-SHA256 over `f"{timestamp}.{raw_body}"` with your `secret`. Reject deliveries older than 5 minutes (replay protection).
+Verify in any language by computing HMAC-SHA256 over `f"{timestamp}.{raw_body}"` with your `secret` and comparing (constant-time) against the hex after the `sha256=` prefix. Reject deliveries older than 5 minutes (replay protection). The official SDKs ship a ready-made verifier — `verify_webhook` (Python) / `verifyWebhook` (TypeScript); see [SDKs.md](./SDKs.md#webhook-signature-verification).
 
-Available events (14 total):
+Available events (20 total):
 
 ```
+# Lifecycle
 bot.joining               bot.in_call               bot.call_ended
 bot.transcript_ready      bot.analysis_ready        bot.done
-bot.error                 bot.cancelled             bot.keyword_alert
-bot.live_transcript       bot.live_transcript_translated
-bot.live_chat_message     bot.recurring_intel_ready bot.test
+bot.error                 bot.cancelled
+
+# Live (streamed during the meeting)
+bot.keyword_alert         bot.live_transcript       bot.live_transcript_translated
+bot.live_chat_message
+
+# Advanced features (require the matching per-bot opt-in flag)
+bot.decision_detected     bot.coaching_tip          bot.speaker_analytics
+bot.agentic_action        bot.recurring_intel_ready
+
+# Action-item reminders (fired by the background scheduler)
+action_item.due_soon      action_item.overdue
+
+# Test
+bot.test
 ```
+
+The five advanced events only fire when the bot was created with the
+corresponding opt-in (`enable_decision_detection`, `enable_coaching`,
+`enable_speaker_analytics`, agentic instructions, or a recurring meeting key).
+The two `action_item.*` events come from the reminder scheduler, not a live bot,
+so their payloads carry an `action_item_id` / `task` / `due_date` / `stage`
+instead of a `bot` block.
 
 Failed deliveries retry with exponential backoff up to ~24 h. Inspect attempts at `GET /api/v1/webhook/{id}/deliveries`.
 

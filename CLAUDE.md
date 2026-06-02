@@ -17,7 +17,7 @@ backend/app/
 ├── store.py                  # In-memory BotSession dataclass + Store singleton (asyncio.Lock)
 ├── deps.py                   # Auth dependencies: require_auth, require_admin, get_current_account_id
 ├── db.py                     # AsyncSessionLocal factory, create_all_tables, schema migrations
-├── models/account.py         # 23 SQLAlchemy ORM models (Account, BotSnapshot, Webhook, ActionItem, ...)
+├── models/account.py         # 24 SQLAlchemy ORM models (Account, BotSnapshot, Webhook, ActionItem, ...)
 ├── schemas/bot.py            # Pydantic: BotCreate, BotResponse, MeetingAnalysis
 ├── schemas/webhook.py        # WebhookCreate, WebhookResponse
 ├── api/                      # FastAPI routers (bots, auth, billing, analytics, webhooks, ...)
@@ -146,7 +146,7 @@ All templates return JSON matching `MeetingAnalysis` schema:
 
 ---
 
-## Webhook Events (14 total)
+## Webhook Events (20 total)
 
 Defined in `WEBHOOK_EVENTS` in `api/webhooks.py`. Signed with HMAC-SHA256.
 
@@ -154,13 +154,24 @@ Defined in `WEBHOOK_EVENTS` in `api/webhooks.py`. Signed with HMAC-SHA256.
 bot.joining  bot.in_call  bot.call_ended  bot.transcript_ready  bot.analysis_ready
 bot.done  bot.error  bot.cancelled  bot.keyword_alert
 bot.live_transcript  bot.live_transcript_translated  bot.live_chat_message
-bot.recurring_intel_ready  bot.test
+bot.recurring_intel_ready
+bot.decision_detected  bot.coaching_tip  bot.speaker_analytics  bot.agentic_action
+action_item.due_soon  action_item.overdue  bot.test
 ```
 
 `bot.live_transcript` payload carries `entry.source = "voice"`;
 `bot.live_chat_message` carries `entry.source = "chat"` plus a `message_id`.
 Both flow through `bot_service.on_live_entry` — voice goes WS+SSE only,
 chat additionally fans out via `webhook_service.dispatch_event`.
+
+The four advanced events (`bot.decision_detected`, `bot.coaching_tip`,
+`bot.speaker_analytics`, `bot.agentic_action`) are emitted from the per-entry
+handlers in `bot_service.py` and only fire when the matching opt-in flag is set
+(`enable_decision_detection`, `enable_coaching`, `enable_speaker_analytics`,
+agentic instructions). `bot.speaker_analytics` is WS+SSE only; the other three
+also fan out via webhook. The two `action_item.*` events are dispatched by
+`action_item_reminder_service.py` (background scheduler, not a live bot) and
+carry an `action_item_id` / `task` / `due_date` / `stage` payload.
 
 **Do not rename** `X-MeetingBot-Signature` / `X-MeetingBot-Timestamp` headers — SDK consumers depend on them.
 

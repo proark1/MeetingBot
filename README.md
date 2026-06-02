@@ -1,8 +1,8 @@
 # JustHereToListen.io API
 
-**Version 2.65.3** — A stateless meeting bot API service with multi-tenant billing, business account support, Google/Microsoft SSO, Python & JS SDKs, webhook retry/delivery logs, bot persona customization, video recording, Prometheus metrics, idempotency keys, cloud storage, email notifications, calendar auto-join, Slack/Notion integrations, GDPR compliance, an opt-in advanced-features layer (in-meeting @bot Q&A, live speaker analytics, smart decision detection, cross-meeting memory, host coaching, agentic delegation), **and a fully usable OpenAPI 3.1 surface with 100% example coverage — every one of the 114 public + 133 admin operations now has summary, description, tags, request example (where applicable), and a 2xx response example**.
+**Version 2.65.4** — A stateless meeting bot API service with multi-tenant billing, business account support, Google/Microsoft SSO, Python & JS SDKs, webhook retry/delivery logs, bot persona customization, video recording, Prometheus metrics, idempotency keys, cloud storage, email notifications, calendar auto-join, Slack/Notion integrations, GDPR compliance, an opt-in advanced-features layer (in-meeting @bot Q&A, live speaker analytics, smart decision detection, cross-meeting memory, host coaching, agentic delegation), **and a fully usable OpenAPI 3.1 surface with 100% example coverage — every one of the 116 public + 135 admin operations now has summary, description, tags, request example (where applicable), and a 2xx response example**.
 
-> **Last updated:** 2026-06-01 · **API version in Swagger UI:** 2.65.3 · **Build:** Live char-counter on the custom-analysis-prompt field (with `for`/`aria-describedby` label wiring), plus `docs/redis-scale-out.md` — the executable design for the horizontal scale-out cutover (distributed live-state, global concurrency cap, control-op routing, rollout/fallback). Previous build (2.65.2): table-header `scope` + admin `aria-current`. <!-- auto-updated on each release -->
+> **Last updated:** 2026-06-02 · **API version in Swagger UI:** 2.65.4 · **Build:** Documentation sync — webhook events 14→20 (the advanced + action-item-reminder events are now documented with payloads), OpenAPI operation counts refreshed to 116 public + 135 admin, and the ORM-model count corrected. Previous build (2.65.3): live char-counter on the custom-analysis-prompt field + `docs/redis-scale-out.md`. <!-- auto-updated on each release -->
 
 
 Send bots into **Zoom**, **Google Meet**, **Microsoft Teams**, and **onepizza.io** meetings to record, transcribe, and analyse them with **Claude** (Anthropic) or **Gemini** (Google) AI.
@@ -424,7 +424,13 @@ The `ai_usage` field on every bot response provides full cost and token tracking
 | `bot.live_transcript` | New voice transcript entry (~1 s after speech ends). `data.entry = {speaker, text, timestamp, source: "voice"}` |
 | `bot.live_transcript_translated` | Translated entry (when `translation_language` is set) |
 | `bot.live_chat_message` | New chat message captured from the meeting chat panel. `data.entry = {speaker, text, timestamp, source: "chat", message_id}` |
+| `bot.decision_detected` | A decision/commitment moment was detected (requires `enable_decision_detection`). `data.decision = {text, speaker, timestamp, kind}` |
+| `bot.coaching_tip` | Real-time host coaching tip (requires `enable_coaching` with `deliver_via: "webhook"`/`"both"`). `data.tip = {type, message, ts}` |
+| `bot.speaker_analytics` | Live speaker-analytics snapshot (requires `enable_speaker_analytics`). `data.snapshot = {per-speaker talk time, sentiment, filler counts}` |
+| `bot.agentic_action` | An agentic instruction fired and was delivered (requires agentic instructions). `data = {action, delivered}` |
 | `bot.recurring_intel_ready` | Recurring-meeting intelligence finished |
+| `action_item.due_soon` | An open action item is approaching its `due_date` (fired by the reminder scheduler). `data = {action_item_id, bot_id, task, assignee, due_date, status, stage: "due_soon"}` |
+| `action_item.overdue` | An open action item passed its `due_date`. Same payload as `due_soon` with `stage: "overdue"` |
 | `bot.test` | Sent by `POST /api/v1/webhook/{id}/test` |
 
 Subscribe via `POST /api/v1/webhook` with `events: ["bot.done", "bot.live_chat_message", ...]`, or use `["*"]` for everything.

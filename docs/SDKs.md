@@ -133,43 +133,56 @@ For the full tool catalogue see [MCP.md](./MCP.md).
 
 ## Webhook signature verification
 
+Every delivery carries two headers:
+
+```http
+X-MeetingBot-Signature: sha256=<hmac_sha256_hex>
+X-MeetingBot-Timestamp: 1730000000
+```
+
+The signature is HMAC-SHA256 over the string `"{timestamp}.{raw_body}"`, keyed by your webhook secret. Reject any delivery whose timestamp is more than 5 minutes old (replay protection).
+
+Both SDKs ship a built-in verifier — prefer it over hand-rolling the check:
+
 ### Python
 
 ```python
-import hmac, hashlib, time
+from meetingbot import verify_webhook, WebhookVerificationError
 
-def verify(signature_header: str, timestamp_header: str, raw_body: bytes, secret: str) -> bool:
-    # Replay protection: reject deliveries older than 5 minutes
-    if abs(time.time() - int(timestamp_header)) > 300:
-        return False
-
-    expected = hmac.new(
-        secret.encode(),
-        f"{timestamp_header}.".encode() + raw_body,
-        hashlib.sha256,
-    ).hexdigest()
-    # X-MeetingBot-Signature is "t=<unix>,v1=<hex>"
-    parts = dict(p.split("=", 1) for p in signature_header.split(",") if "=" in p)
-    return hmac.compare_digest(expected, parts.get("v1", ""))
+# In your webhook handler, with the RAW request body (do not re-serialize):
+try:
+    verify_webhook(
+        body=raw_body,                                  # str or bytes, exactly as received
+        timestamp=request.headers["X-MeetingBot-Timestamp"],
+        signature=request.headers["X-MeetingBot-Signature"],  # "sha256=<hex>"
+        secret="whsec_your_secret",
+        max_age_seconds=300,                            # replay window (default 300)
+    )
+except WebhookVerificationError:
+    return Response(status_code=400)                    # reject: bad signature or stale timestamp
 ```
+
+`verify_webhook` raises `WebhookVerificationError` on a bad signature, a missing/malformed `sha256=` header, or a timestamp outside the freshness window; it returns `None` on success.
 
 ### TypeScript
 
 ```ts
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { verifyWebhook, WebhookVerificationError } from "meetingbot-sdk";
 
-export function verify(signatureHeader: string, timestampHeader: string, rawBody: string, secret: string): boolean {
-  // Replay protection: reject deliveries older than 5 minutes
-  if (Math.abs(Date.now() / 1000 - Number(timestampHeader)) > 300) {
-    return false;
-  }
-
-  const expected = createHmac("sha256", secret).update(`${timestampHeader}.${rawBody}`).digest("hex");
-  const parts = Object.fromEntries(
-    signatureHeader.split(",").filter(p => p.includes("=")).map(p => p.split("=", 2)),
+try {
+  verifyWebhook(
+    rawBody,                                  // string or Buffer, exactly as received
+    req.headers["x-meetingbot-timestamp"] as string,
+    req.headers["x-meetingbot-signature"] as string,  // "sha256=<hex>"
+    "whsec_your_secret",
+    { maxAgeSeconds: 300 },                   // replay window (default 300)
   );
-  const v1 = parts.v1 ?? "";
-  return v1.length === expected.length && timingSafeEqual(Buffer.from(v1), Buffer.from(expected));
+} catch (err) {
+  if (err instanceof WebhookVerificationError) {
+    res.status(400).end();                    // reject: bad signature or stale timestamp
+    return;
+  }
+  throw err;
 }
 ```
 

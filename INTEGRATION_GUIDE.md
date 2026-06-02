@@ -63,8 +63,16 @@ The bot sends webhook POST requests to your `webhook_url` at each status change:
 | `bot.error` | Something failed | Show error, offer retry |
 | `bot.cancelled` | Bot was deleted/cancelled | Clean up |
 | `bot.live_transcript` | New voice transcript entry (~1 s after speech ends) | Stream into your UI / agent |
+| `bot.live_transcript_translated` | Translated entry (when `translation_language` is set) | Stream the translation |
 | `bot.live_chat_message` | New chat message captured from the meeting chat panel | Stream into your UI / agent |
 | `bot.keyword_alert` | A configured keyword was spoken or typed | Trigger your alert workflow |
+| `bot.decision_detected` | A decision/commitment moment was detected (`enable_decision_detection`) | Log the decision, notify stakeholders |
+| `bot.coaching_tip` | Real-time host coaching tip (`enable_coaching`, webhook delivery) | Surface to the meeting host |
+| `bot.speaker_analytics` | Live speaker-analytics snapshot (`enable_speaker_analytics`) | Update live dashboards |
+| `bot.agentic_action` | An agentic instruction fired and was delivered | Reflect the action in your app |
+| `bot.recurring_intel_ready` | Recurring-meeting intelligence finished | Fetch the recurring summary |
+| `action_item.due_soon` | An open action item is approaching its due date | Remind the assignee |
+| `action_item.overdue` | An open action item passed its due date | Escalate / re-assign |
 
 **Webhook payload example:**
 ```json
