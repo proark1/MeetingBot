@@ -48,6 +48,11 @@ class Settings(BaseSettings):
     # Concurrency — max simultaneous browser bots
     MAX_CONCURRENT_BOTS: int = 3
 
+    # Max concurrent per-entry AI/IO fan-out tasks per live bot (translation,
+    # action-item extraction, decision detection, coaching, agentic, etc.).
+    # Bounds memory/connection use on fast or long meetings with features on.
+    LIVE_ENTRY_MAX_CONCURRENCY: int = 8
+
     # Join retry
     BOT_JOIN_MAX_RETRIES: int = 2
     BOT_JOIN_RETRY_DELAY_S: int = 30
@@ -95,6 +100,14 @@ class Settings(BaseSettings):
     CRYPTO_HD_SEED: str = ""          # hex seed for HD wallet (generate once, keep secret)
     CRYPTO_RPC_URL: str = ""          # Infura/Alchemy endpoint, e.g. https://mainnet.infura.io/v3/...
     USDC_CONTRACT: str = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+    # Require a wallet-ownership signature when linking a USDC deposit address.
+    # When True, PUT /auth/wallet must include a `signature` over the challenge
+    # message (GET /auth/wallet/challenge) proving control of the private key —
+    # this prevents an attacker from front-running registration of a victim's
+    # publicly-known address and stealing their deposits. Recommended ON for any
+    # deployment where USDC top-ups are enabled; a signed request is always
+    # verified regardless of this flag.
+    REQUIRE_WALLET_SIGNATURE: bool = False
 
     # Billing
     CREDIT_MARKUP: float = 3.0        # multiply raw AI cost by this factor when deducting credits (unused when flat fee is enabled)
@@ -146,6 +159,12 @@ class Settings(BaseSettings):
     # window. Round-2 fix #15 lowers the default from 10000 to 2000 to bound
     # worst-case latency on the /analytics endpoints.
     ANALYTICS_BOT_SCAN_LIMIT: int = 2000
+
+    # Admin platform-analytics: total terminal-bot snapshots aggregated, and how
+    # many are fetched+parsed per batch. Batching bounds peak memory — instead of
+    # holding all snapshot JSON blobs in RAM at once, only one batch is resident.
+    ADMIN_ANALYTICS_SNAPSHOT_LIMIT: int = 50000
+    ADMIN_ANALYTICS_BATCH: int = 2000
 
     # When False (default): if any Account row exists at startup and there are
     # no auth indicators (API_KEY unset), the auth dependency requires a Bearer

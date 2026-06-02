@@ -96,15 +96,20 @@ _slot_lock = asyncio.Lock()
 
 
 def _get_sub_user_from_request(request: Request) -> Optional[str]:
-    """Extract sub_user_id from X-Sub-User header."""
-    val = request.headers.get("X-Sub-User", "").strip()[:255]
-    return val or None
+    """Extract & validate sub_user_id from X-Sub-User header.
+
+    Delegates to ``deps.validate_sub_user`` so the scoping key is validated
+    identically to the FastAPI dependency (no unvalidated/control-char keys).
+    """
+    from app.deps import validate_sub_user
+    return validate_sub_user(request.headers.get("X-Sub-User"))
 
 
 def _start_scheduled_bot(bot_id: str) -> None:
     """Timer callback: move a scheduled bot into the normal start/queue flow."""
     _scheduled_timers.pop(bot_id, None)
-    asyncio.create_task(_start_or_queue_bot(bot_id))
+    from app.services.background_tasks import tracked_task
+    tracked_task(_start_or_queue_bot(bot_id), name=f"start-scheduled-{bot_id}")
 
 
 async def _start_or_queue_bot(bot_id: str) -> None:
@@ -1057,13 +1062,14 @@ async def leave_bot(bot_id: str, request: Request):
     logger.info("Graceful leave triggered for bot %s via API", bot_id)
 
     from app.services.audit_log_service import log_event as _audit
-    asyncio.create_task(_audit(
+    from app.services.background_tasks import tracked_task as _tracked
+    _tracked(_audit(
         account_id=account_id,
         action="bot.leave",
         resource_type="bot",
         resource_id=bot_id,
         ip_address=request.client.host if request.client else None,
-    ))
+    ), name=f"audit-bot-leave-{bot_id}")
 
     return {"id": bot_id, "status": bot.status, "message": "Bot is leaving the meeting gracefully."}
 

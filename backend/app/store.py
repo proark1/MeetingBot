@@ -722,6 +722,53 @@ class Store:
                 if w.is_active and (w.account_id == account_id or w.account_id is None)
             ]
 
+    async def record_webhook_delivery(
+        self,
+        webhook_id: str,
+        *,
+        delivery_attempts: int,
+        last_delivery_at,
+        last_delivery_status,
+        consecutive_failures: int,
+        is_active: bool,
+    ) -> None:
+        """Persist only the delivery-counter columns (targeted UPDATE).
+
+        Used on the hot delivery path instead of ``_persist_webhook`` (which
+        does a SELECT-then-rewrite of the whole row). It never touches
+        url/events/secret, so it can't clobber a concurrent ``update_webhook``
+        (PATCH); the in-memory counters are updated under the store lock for the
+        same reason.
+        """
+        async with self._lock:
+            wh = self._webhooks.get(webhook_id)
+            if wh is not None:
+                wh.delivery_attempts = delivery_attempts
+                wh.last_delivery_at = last_delivery_at
+                wh.last_delivery_status = last_delivery_status
+                wh.consecutive_failures = consecutive_failures
+                wh.is_active = is_active
+        try:
+            from app.db import AsyncSessionLocal
+            from app.models.account import Webhook as WebhookModel
+            from sqlalchemy import update as _update
+
+            async with AsyncSessionLocal() as db:
+                await db.execute(
+                    _update(WebhookModel)
+                    .where(WebhookModel.id == webhook_id)
+                    .values(
+                        delivery_attempts=delivery_attempts,
+                        last_delivery_at=last_delivery_at,
+                        last_delivery_status=last_delivery_status,
+                        consecutive_failures=consecutive_failures,
+                        is_active=is_active,
+                    )
+                )
+                await db.commit()
+        except Exception:
+            logger.exception("Failed to record webhook delivery for %s", webhook_id)
+
     async def _persist_webhook(self, wh: "WebhookEntry") -> None:
         """Upsert a webhook into the database (best-effort)."""
         try:

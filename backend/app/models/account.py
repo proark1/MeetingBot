@@ -474,6 +474,8 @@ class ActionItem(Base):
     __table_args__ = (
         # Main listing query: filter by account_id, order by created_at desc.
         Index("ix_action_items_account_created", "account_id", "created_at"),
+        # Reminder sweep: filter open items by due_date (status + due_date).
+        Index("ix_action_items_status_due", "status", "due_date"),
     )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True, default=_uuid)
@@ -502,6 +504,10 @@ class MeetingSummary(Base):
     """
 
     __tablename__ = "meeting_summaries"
+    __table_args__ = (
+        # /analytics/trends filters by account_id and orders by created_at.
+        Index("ix_meeting_summaries_account_created", "account_id", "created_at"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     account_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)

@@ -189,6 +189,27 @@ import re as _re
 _SUB_USER_RE = _re.compile(r"^[a-zA-Z0-9_\-\.@]{1,255}$")
 
 
+def validate_sub_user(raw: Optional[str]) -> Optional[str]:
+    """Validate and normalise an X-Sub-User value (single source of truth).
+
+    Returns the stripped value, ``None`` if absent/empty, or raises 400 if the
+    value doesn't match the documented format. Used by both the FastAPI
+    dependency and the sync header readers in the bots/exports routers so the
+    sub-user scoping key is validated identically everywhere.
+    """
+    if not raw:
+        return None
+    raw = raw.strip()
+    if not raw:
+        return None
+    if not _SUB_USER_RE.match(raw):
+        raise HTTPException(
+            status_code=400,
+            detail="X-Sub-User must be 1–255 characters: alphanumeric, underscore, dash, dot, or @",
+        )
+    return raw
+
+
 async def get_sub_user_id(request: Request) -> Optional[str]:
     """Extract X-Sub-User header for business account data isolation.
 
@@ -196,16 +217,9 @@ async def get_sub_user_id(request: Request) -> Optional[str]:
     Returns None for personal accounts or when the header is absent.
     Validates format: alphanumeric, underscore, dash, dot, or @ (max 255 chars).
     """
-    sub_user = request.headers.get("X-Sub-User")
-    if sub_user:
-        sub_user = sub_user.strip()
-        if not _SUB_USER_RE.match(sub_user):
-            raise HTTPException(
-                status_code=400,
-                detail="X-Sub-User must be 1–255 characters: alphanumeric, underscore, dash, dot, or @",
-            )
-    request.state.sub_user_id = sub_user or None
-    return sub_user or None
+    sub_user = validate_sub_user(request.headers.get("X-Sub-User"))
+    request.state.sub_user_id = sub_user
+    return sub_user
 
 
 async def require_auth(

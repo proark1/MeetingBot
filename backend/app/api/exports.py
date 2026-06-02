@@ -50,9 +50,13 @@ async def _get_or_404(bot_id: str, account_id=None, sub_user_id=None) -> BotSess
 
 
 def _get_sub_user_from_request(request) -> "Optional[str]":
-    """Extract sub_user_id from X-Sub-User header."""
-    val = request.headers.get("X-Sub-User", "").strip()[:255]
-    return val or None
+    """Extract & validate sub_user_id from X-Sub-User header.
+
+    Delegates to ``deps.validate_sub_user`` so the scoping key is validated
+    identically to the FastAPI dependency (no unvalidated/control-char keys).
+    """
+    from app.deps import validate_sub_user
+    return validate_sub_user(request.headers.get("X-Sub-User"))
 
 
 # ── Markdown export ───────────────────────────────────────────────────────────

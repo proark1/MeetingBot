@@ -22,6 +22,9 @@ logger = logging.getLogger(__name__)
 # Reminder stages in ascending order, so we never regress a fired stage.
 _STAGE_ORDER = {None: 0, "due_soon": 1, "overdue": 2}
 
+# Max open items examined per sweep — bounds memory when a backlog accumulates.
+_REMINDER_SCAN_LIMIT = 2000
+
 # Accepted explicit date formats (date-only and a couple of common ones).
 _DATE_FORMATS = ("%Y-%m-%d", "%Y/%m/%d", "%m/%d/%Y", "%d/%m/%Y", "%B %d, %Y", "%b %d, %Y")
 
@@ -93,6 +96,10 @@ async def scan_and_dispatch(now: Optional[datetime] = None) -> int:
         # working set without bound as open-but-overdue items accumulate.
         # NULL stages MUST stay included (a plain `!= "overdue"` would drop them
         # since SQL `!=` is NULL for NULL operands).
+        # Bound the working set per cycle so a large backlog can't load an
+        # ever-growing result into memory in one sweep (the loop runs often, so
+        # the remainder is picked up on subsequent cycles). Oldest-first so no
+        # item is starved. Backed by the ix_action_items_status_due index.
         result = await db.execute(
             select(ActionItem).where(
                 ActionItem.status == "open",
@@ -101,7 +108,7 @@ async def scan_and_dispatch(now: Optional[datetime] = None) -> int:
                     ActionItem.reminder_stage.is_(None),
                     ActionItem.reminder_stage != "overdue",
                 ),
-            )
+            ).order_by(ActionItem.created_at).limit(_REMINDER_SCAN_LIMIT)
         )
         items = result.scalars().all()
 

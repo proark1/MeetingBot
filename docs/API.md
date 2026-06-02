@@ -7,7 +7,7 @@ Base URLs:
 | Local dev | `http://localhost:8000` |
 | Production | `https://api.justheretolisten.io` |
 
-All endpoints live under `/api/v1`. The full machine-readable surface — 116 public + 135 admin operations, every one with summary, description, tags, request example, and a 2xx response example — is at [`/api/docs`](http://localhost:8000/api/docs) (Swagger UI) and [`/api/redoc`](http://localhost:8000/api/redoc) (ReDoc).
+All endpoints live under `/api/v1`. The full machine-readable surface — 117 public + 136 admin operations, every one with summary, description, tags, request example, and a 2xx response example — is at [`/api/docs`](http://localhost:8000/api/docs) (Swagger UI) and [`/api/redoc`](http://localhost:8000/api/redoc) (ReDoc).
 
 ---
 

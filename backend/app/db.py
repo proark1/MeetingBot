@@ -161,6 +161,12 @@ def _migrate_schema(conn) -> None:
             # The hourly monthly-reset sweep filters accounts on monthly_reset_at;
             # index it so the sweep isn't a full table scan as accounts grow.
             "CREATE INDEX IF NOT EXISTS ix_accounts_monthly_reset_at ON accounts (monthly_reset_at)",
+            # audit pass — /analytics/trends filters MeetingSummary by account_id
+            # and orders by created_at; serve both from one composite index.
+            "CREATE INDEX IF NOT EXISTS ix_meeting_summaries_account_created ON meeting_summaries (account_id, created_at)",
+            # audit pass — the action-item reminder sweep filters open items by
+            # due_date; back it with a (status, due_date) composite index.
+            "CREATE INDEX IF NOT EXISTS ix_action_items_status_due ON action_items (status, due_date)",
         ]
         existing_tables = set(inspect(conn).get_table_names())
         for idx_sql in _pg_indexes:
@@ -330,6 +336,12 @@ def _migrate_schema(conn) -> None:
         # hardening pass — index the hourly monthly-reset sweep predicate
         ("ix_accounts_monthly_reset_at",
          "CREATE INDEX IF NOT EXISTS ix_accounts_monthly_reset_at ON accounts (monthly_reset_at)"),
+        # audit pass — /analytics/trends (account_id filter + created_at sort)
+        ("ix_meeting_summaries_account_created",
+         "CREATE INDEX IF NOT EXISTS ix_meeting_summaries_account_created ON meeting_summaries (account_id, created_at)"),
+        # audit pass — action-item reminder sweep (status filter + due_date)
+        ("ix_action_items_status_due",
+         "CREATE INDEX IF NOT EXISTS ix_action_items_status_due ON action_items (status, due_date)"),
     ]
     existing_tables = set(inspector.get_table_names())
     for _idx_name, _idx_sql in _indexes:

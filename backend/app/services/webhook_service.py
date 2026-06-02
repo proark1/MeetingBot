@@ -41,7 +41,12 @@ _WEBHOOK_DELIVERY_CONCURRENCY = 10
 # re-resolving the same endpoint on every delivery attempt during a live
 # meeting. Only safe results are cached — blocked/failed resolutions are never
 # cached, so SSRF protection is never weakened.
-_DNS_CACHE_TTL_S = 60.0
+# TTL is kept short so a DNS-rebind to a private IP is re-detected quickly on
+# subsequent deliveries (the positive cache otherwise re-approves a host for its
+# whole TTL). It still covers a single event's webhook fan-out, which fires
+# within milliseconds. Full TOCTOU closure would require pinning the validated
+# IP into the connection (careful TLS-SNI handling) — a separate hardening step.
+_DNS_CACHE_TTL_S = 10.0
 _dns_cache: "dict[str, float]" = {}
 
 
@@ -414,7 +419,14 @@ async def dispatch_event(
             wh.delivery_attempts += 1
             wh.last_delivery_at = now
             wh.last_delivery_status = status_code
-            await store._persist_webhook(wh)
+            await store.record_webhook_delivery(
+                wh.id,
+                delivery_attempts=wh.delivery_attempts,
+                last_delivery_at=wh.last_delivery_at,
+                last_delivery_status=wh.last_delivery_status,
+                consecutive_failures=wh.consecutive_failures,
+                is_active=wh.is_active,
+            )
 
     await asyncio.gather(
         *(_deliver_one(wh) for wh in await store.active_webhooks(account_id=account_id)),
@@ -561,7 +573,14 @@ async def _process_retries() -> None:
             wh.delivery_attempts += 1
             wh.last_delivery_at = retry_now
             wh.last_delivery_status = status_code
-            await store._persist_webhook(wh)
+            await store.record_webhook_delivery(
+                wh.id,
+                delivery_attempts=wh.delivery_attempts,
+                last_delivery_at=wh.last_delivery_at,
+                last_delivery_status=wh.last_delivery_status,
+                consecutive_failures=wh.consecutive_failures,
+                is_active=wh.is_active,
+            )
 
     await asyncio.gather(*(_retry_one(d) for d in pending), return_exceptions=True)
 
