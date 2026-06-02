@@ -726,28 +726,41 @@ class Store:
         self,
         webhook_id: str,
         *,
-        delivery_attempts: int,
-        last_delivery_at,
-        last_delivery_status,
-        consecutive_failures: int,
-        is_active: bool,
-    ) -> None:
-        """Persist only the delivery-counter columns (targeted UPDATE).
+        success: bool,
+        status_code,
+        now,
+        disable_threshold: int = 5,
+    ) -> "tuple[int, bool, bool]":
+        """Atomically apply a delivery outcome to a webhook's counters.
 
-        Used on the hot delivery path instead of ``_persist_webhook`` (which
-        does a SELECT-then-rewrite of the whole row). It never touches
-        url/events/secret, so it can't clobber a concurrent ``update_webhook``
-        (PATCH); the in-memory counters are updated under the store lock for the
-        same reason.
+        Under the store lock: bump ``delivery_attempts``, set
+        ``last_delivery_at`` / ``last_delivery_status``, reset
+        ``consecutive_failures`` on success, or increment it (and auto-disable at
+        ``disable_threshold``) on failure. Returns
+        ``(consecutive_failures, is_active, just_auto_disabled)``.
+
+        Doing the read-modify-write under the lock removes the
+        last-writer-wins / lost-increment race that existed when callers mutated
+        the shared ``WebhookEntry`` directly. Only the counter columns are
+        persisted (targeted UPDATE), so a concurrent ``update_webhook`` (PATCH)
+        on url/events/secret is never clobbered.
         """
         async with self._lock:
             wh = self._webhooks.get(webhook_id)
-            if wh is not None:
-                wh.delivery_attempts = delivery_attempts
-                wh.last_delivery_at = last_delivery_at
-                wh.last_delivery_status = last_delivery_status
-                wh.consecutive_failures = consecutive_failures
-                wh.is_active = is_active
+            if wh is None:
+                return (0, False, False)
+            wh.delivery_attempts += 1
+            wh.last_delivery_at = now
+            wh.last_delivery_status = status_code
+            auto_disabled = False
+            if success:
+                wh.consecutive_failures = 0
+            else:
+                wh.consecutive_failures = (wh.consecutive_failures or 0) + 1
+                if wh.is_active and wh.consecutive_failures >= disable_threshold:
+                    wh.is_active = False
+                    auto_disabled = True
+            cf, active, attempts = wh.consecutive_failures, wh.is_active, wh.delivery_attempts
         try:
             from app.db import AsyncSessionLocal
             from app.models.account import Webhook as WebhookModel
@@ -758,16 +771,17 @@ class Store:
                     _update(WebhookModel)
                     .where(WebhookModel.id == webhook_id)
                     .values(
-                        delivery_attempts=delivery_attempts,
-                        last_delivery_at=last_delivery_at,
-                        last_delivery_status=last_delivery_status,
-                        consecutive_failures=consecutive_failures,
-                        is_active=is_active,
+                        delivery_attempts=attempts,
+                        last_delivery_at=now,
+                        last_delivery_status=status_code,
+                        consecutive_failures=cf,
+                        is_active=active,
                     )
                 )
                 await db.commit()
         except Exception:
             logger.exception("Failed to record webhook delivery for %s", webhook_id)
+        return (cf, active, auto_disabled)
 
     async def _persist_webhook(self, wh: "WebhookEntry") -> None:
         """Upsert a webhook into the database (best-effort)."""

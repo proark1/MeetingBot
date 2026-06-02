@@ -47,6 +47,10 @@ _WEBHOOK_DELIVERY_CONCURRENCY = 10
 # within milliseconds. Full TOCTOU closure would require pinning the validated
 # IP into the connection (careful TLS-SNI handling) — a separate hardening step.
 _DNS_CACHE_TTL_S = 10.0
+# Cap the positive DNS cache so it can't grow without bound across many distinct
+# webhook hostnames (it was previously only TTL-evicted on re-lookup of the same
+# host). Insertion-ordered dict → evict oldest entries when over the cap.
+_DNS_CACHE_MAX = 1024
 _dns_cache: "dict[str, float]" = {}
 
 
@@ -292,7 +296,12 @@ async def check_url_ssrf(url: str) -> "str | None":
             continue
         if _is_blocked_ip(addr):
             return f"resolves to private/reserved address ({sockaddr[0]})"
+    # Bound the cache: drop the oldest entries once over the cap (refreshing an
+    # existing host first so re-resolved hosts move to the end / stay hot).
+    _dns_cache.pop(host, None)
     _dns_cache[host] = now_mono + _DNS_CACHE_TTL_S
+    while len(_dns_cache) > _DNS_CACHE_MAX:
+        _dns_cache.pop(next(iter(_dns_cache)), None)
     return None
 
 
@@ -370,7 +379,6 @@ async def dispatch_event(
                     delivered_at=now,
                 )
                 logger.info("Webhook delivered  wh=%s  url=%s  status=%d", wh.id, wh.url, status_code)
-                wh.consecutive_failures = 0
             elif outcome == "retry":
                 delays = _RETRY_DELAYS
                 next_retry_at = now + timedelta(seconds=delays[0]) if delays else None
@@ -385,7 +393,6 @@ async def dispatch_event(
                     "Webhook delivery failed  wh=%s  url=%s  status=%s — retry at %s",
                     wh.id, wh.url, status_code, next_retry_at,
                 )
-                wh.consecutive_failures = (wh.consecutive_failures or 0) + 1
             else:  # "fail" — permanent client error (4xx other than 408/429)
                 await _log_delivery(
                     webhook_id=wh.id, bot_id=bot_id, event=event,
@@ -397,10 +404,13 @@ async def dispatch_event(
                     "Webhook permanently rejected  wh=%s  url=%s  status=%s",
                     wh.id, wh.url, status_code,
                 )
-                wh.consecutive_failures = (wh.consecutive_failures or 0) + 1
 
-            if outcome != "success" and wh.consecutive_failures >= 5:
-                wh.is_active = False
+            # Atomically bump counters + maybe auto-disable (no shared-object
+            # mutation → no lost-increment race across deliveries/PATCH).
+            cf, _active, auto_disabled = await store.record_webhook_delivery(
+                wh.id, success=(outcome == "success"), status_code=status_code, now=now,
+            )
+            if auto_disabled:
                 logger.warning("Webhook %s auto-disabled (5 consecutive failures)", wh.id)
                 try:
                     from app.services.audit_log_service import log_event as _audit_log
@@ -409,24 +419,12 @@ async def dispatch_event(
                         action="webhook.auto_disabled",
                         resource_type="webhook",
                         resource_id=wh.id,
-                        details={"url": wh.url, "consecutive_failures": wh.consecutive_failures},
+                        details={"url": wh.url, "consecutive_failures": cf},
                     ))
                     _bg_audit_tasks.add(_bg)
                     _bg.add_done_callback(_bg_audit_tasks.discard)
                 except Exception:
                     pass
-
-            wh.delivery_attempts += 1
-            wh.last_delivery_at = now
-            wh.last_delivery_status = status_code
-            await store.record_webhook_delivery(
-                wh.id,
-                delivery_attempts=wh.delivery_attempts,
-                last_delivery_at=wh.last_delivery_at,
-                last_delivery_status=wh.last_delivery_status,
-                consecutive_failures=wh.consecutive_failures,
-                is_active=wh.is_active,
-            )
 
     await asyncio.gather(
         *(_deliver_one(wh) for wh in await store.active_webhooks(account_id=account_id)),
@@ -535,7 +533,6 @@ async def _process_retries() -> None:
                 )
                 logger.info("Webhook retry succeeded  id=%s  attempt=%d  status=%d",
                             delivery.id, next_attempt, status_code)
-                wh.consecutive_failures = 0
             elif outcome == "fail" or next_attempt >= max_attempts:
                 err_msg = (
                     f"Receiver rejected with HTTP {status_code} (not retried)"
@@ -551,7 +548,6 @@ async def _process_retries() -> None:
                 )
                 logger.error("Webhook permanently failed  id=%s  after %d attempts",
                              delivery.id, next_attempt)
-                wh.consecutive_failures = (wh.consecutive_failures or 0) + 1
             else:
                 delay_idx = min(next_attempt - 1, len(delays) - 1)
                 next_retry = retry_now + timedelta(seconds=delays[delay_idx])
@@ -564,23 +560,13 @@ async def _process_retries() -> None:
                 )
                 logger.warning("Webhook retry scheduled  id=%s  attempt=%d/%d  next=%s",
                                delivery.id, next_attempt, max_attempts, next_retry)
-                wh.consecutive_failures = (wh.consecutive_failures or 0) + 1
 
-            if outcome != "success" and wh.consecutive_failures >= 5:
-                wh.is_active = False
-                logger.warning("Webhook %s auto-disabled (5 consecutive failures)", wh.id)
-
-            wh.delivery_attempts += 1
-            wh.last_delivery_at = retry_now
-            wh.last_delivery_status = status_code
-            await store.record_webhook_delivery(
-                wh.id,
-                delivery_attempts=wh.delivery_attempts,
-                last_delivery_at=wh.last_delivery_at,
-                last_delivery_status=wh.last_delivery_status,
-                consecutive_failures=wh.consecutive_failures,
-                is_active=wh.is_active,
+            # Atomic counter update + auto-disable (see dispatch_event above).
+            _cf, _active, auto_disabled = await store.record_webhook_delivery(
+                wh.id, success=(outcome == "success"), status_code=status_code, now=retry_now,
             )
+            if auto_disabled:
+                logger.warning("Webhook %s auto-disabled (5 consecutive failures)", wh.id)
 
     await asyncio.gather(*(_retry_one(d) for d in pending), return_exceptions=True)
 
