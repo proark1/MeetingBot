@@ -41,7 +41,12 @@ _WEBHOOK_DELIVERY_CONCURRENCY = 10
 # re-resolving the same endpoint on every delivery attempt during a live
 # meeting. Only safe results are cached — blocked/failed resolutions are never
 # cached, so SSRF protection is never weakened.
-_DNS_CACHE_TTL_S = 60.0
+# TTL is kept short so a DNS-rebind to a private IP is re-detected quickly on
+# subsequent deliveries (the positive cache otherwise re-approves a host for its
+# whole TTL). It still covers a single event's webhook fan-out, which fires
+# within milliseconds. Full TOCTOU closure would require pinning the validated
+# IP into the connection (careful TLS-SNI handling) — a separate hardening step.
+_DNS_CACHE_TTL_S = 10.0
 _dns_cache: "dict[str, float]" = {}
 
 

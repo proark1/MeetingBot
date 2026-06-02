@@ -40,6 +40,40 @@ _ERC20_TRANSFER_ABI = [
 _USDC_DECIMALS = Decimal("1000000")
 
 
+def wallet_challenge_message(account_id: str, address: str) -> str:
+    """Deterministic message the user signs to prove they control ``address``.
+
+    Bound to the authenticated account so a captured signature can't be used to
+    link the address to a *different* account (the verifier re-derives this exact
+    string from the request's authenticated account_id). No server-side nonce is
+    needed: the only thing a replay achieves is re-linking the same address to
+    the same account, which is a no-op.
+    """
+    return (
+        "JustHereToListen.io wallet verification\n"
+        f"Account: {account_id}\n"
+        f"Wallet: {address.lower()}"
+    )
+
+
+def verify_wallet_signature(address: str, message: str, signature: str) -> bool:
+    """Return True iff ``signature`` over ``message`` recovers to ``address``.
+
+    Uses EIP-191 personal_sign recovery (eth_account). Any malformed input or
+    recovery failure returns False rather than raising.
+    """
+    try:
+        from eth_account import Account as EthAccount
+        from eth_account.messages import encode_defunct
+
+        recovered = EthAccount.recover_message(
+            encode_defunct(text=message), signature=signature
+        )
+        return recovered.lower() == address.strip().lower()
+    except Exception:
+        return False
+
+
 def derive_address(seed_hex: str, index: int) -> str:
     """
     Derive a deterministic Ethereum address from a hex seed and index.

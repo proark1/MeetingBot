@@ -50,16 +50,18 @@ def generate_api_key(mode: str = "live") -> str:
 
 
 def api_key_storage_fields(plaintext: str) -> dict:
-    """Return ``{"key", "key_prefix", "key_hash"}`` for a fresh plaintext API key.
+    """Return ``{"key", "key_prefix", "key_hash"}`` for a fresh API key.
 
-    Round-3 fix #6: every new key writes ``key_prefix`` and ``key_hash`` so
-    auth lookups can use a peppered HMAC instead of the plaintext column.
-    The plaintext column is still populated during the migration window so
-    legacy rows + warm caches keep working.
+    The plaintext key is **never persisted**: only the peppered HMAC
+    (``key_hash``, keyed by ``JWT_SECRET``) and a 16-char prefix are stored, and
+    auth (deps.py / ws.py) matches on those. The legacy ``key`` column is left
+    NULL so a DB leak can no longer disclose live keys. The plaintext is shown
+    to the caller exactly once at creation (from the in-memory value, not the
+    DB), as before.
     """
     from app.services.token_hash import hash_token
     return {
-        "key": plaintext,
+        "key": None,
         "key_prefix": plaintext[:16],
         "key_hash": hash_token(plaintext),
     }
@@ -199,6 +201,15 @@ class WalletRequest(BaseModel):
     wallet_address: str = Field(
         description="Your Ethereum wallet address (0x..., 42 characters). USDC sent from this address to the platform wallet will be credited to your account.",
         examples=["0xAbCdEf0123456789AbCdEf0123456789AbCdEf01"],
+    )
+    signature: Optional[str] = Field(
+        default=None,
+        description=(
+            "EIP-191 personal_sign signature over the challenge message from "
+            "GET /auth/wallet/challenge, proving you control the address. "
+            "Required when REQUIRE_WALLET_SIGNATURE is enabled; always verified "
+            "when supplied."
+        ),
     )
 
     model_config = {"json_schema_extra": {"example": {
@@ -661,6 +672,31 @@ async def get_wallet(
     )
 
 
+@router.get("/wallet/challenge")
+async def wallet_challenge(
+    wallet_address: str,
+    account_id: Optional[str] = Depends(get_current_account_id),
+):
+    """Return the message to sign (EIP-191 personal_sign) to prove wallet ownership.
+
+    Sign the returned `message` with the given address, then submit the
+    signature to `PUT /auth/wallet` to link the address securely.
+    """
+    if not account_id or account_id == SUPERADMIN_ACCOUNT_ID:
+        raise HTTPException(status_code=403, detail="Use per-user authentication")
+    address = wallet_address.strip().lower()
+    if not _ETH_ADDRESS_RE.match(address):
+        raise HTTPException(
+            status_code=422,
+            detail="Invalid Ethereum address. Must be 0x followed by 40 hex characters.",
+        )
+    from app.services import crypto_service
+    return {
+        "wallet_address": address,
+        "message": crypto_service.wallet_challenge_message(account_id, address),
+    }
+
+
 @router.put("/wallet", response_model=WalletResponse)
 async def set_wallet(
     payload: WalletRequest,
@@ -685,6 +721,27 @@ async def set_wallet(
             status_code=422,
             detail="Invalid Ethereum address. Must be 0x followed by 40 hex characters.",
         )
+
+    # Ownership proof: prevents an attacker front-running registration of a
+    # victim's publicly-known address and stealing their USDC deposits. A
+    # signature is always verified when supplied, and required when the
+    # REQUIRE_WALLET_SIGNATURE flag is on.
+    from app.services import crypto_service
+    if payload.signature or settings.REQUIRE_WALLET_SIGNATURE:
+        if not payload.signature:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Wallet ownership signature required. Sign the message from "
+                    "GET /api/v1/auth/wallet/challenge and resend it as `signature`."
+                ),
+            )
+        challenge = crypto_service.wallet_challenge_message(account_id, address)
+        if not crypto_service.verify_wallet_signature(address, challenge, payload.signature):
+            raise HTTPException(
+                status_code=400,
+                detail="Signature does not prove control of this wallet address.",
+            )
 
     # Check uniqueness — no other account should have this wallet
     existing = await db.execute(

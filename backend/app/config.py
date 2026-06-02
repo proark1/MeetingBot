@@ -100,6 +100,14 @@ class Settings(BaseSettings):
     CRYPTO_HD_SEED: str = ""          # hex seed for HD wallet (generate once, keep secret)
     CRYPTO_RPC_URL: str = ""          # Infura/Alchemy endpoint, e.g. https://mainnet.infura.io/v3/...
     USDC_CONTRACT: str = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+    # Require a wallet-ownership signature when linking a USDC deposit address.
+    # When True, PUT /auth/wallet must include a `signature` over the challenge
+    # message (GET /auth/wallet/challenge) proving control of the private key —
+    # this prevents an attacker from front-running registration of a victim's
+    # publicly-known address and stealing their deposits. Recommended ON for any
+    # deployment where USDC top-ups are enabled; a signed request is always
+    # verified regardless of this flag.
+    REQUIRE_WALLET_SIGNATURE: bool = False
 
     # Billing
     CREDIT_MARKUP: float = 3.0        # multiply raw AI cost by this factor when deducting credits (unused when flat fee is enabled)

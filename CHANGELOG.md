@@ -4,7 +4,57 @@ All notable changes to JustHereToListen.io are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.65.4 — **Last updated:** 2026-06-02
+> **Latest version:** 2.66.0 — **Last updated:** 2026-06-02
+
+---
+
+## [2.66.0] - 2026-06-02
+
+Code-audit remediation — bug fixes, security hardening, and performance. No
+breaking changes to existing successful API calls (new API keys simply stop
+storing a plaintext copy; auth already preferred the peppered HMAC).
+
+### Fixed
+- **MCP `create_bot` was completely broken.** It constructed `BotSession`
+  without the required `status` (HTTP 400 on every call) and then invoked
+  `run_bot_lifecycle(bot_id, use_real_bot)` with an arg the coroutine doesn't
+  accept (TypeError, swallowed) — bots never started and bypassed
+  `MAX_CONCURRENT_BOTS`. Now routes through the shared `_start_or_queue_bot`
+  admission path. Adds the first MCP tool-execution tests.
+- **Untracked fire-and-forget tasks** (`_start_scheduled_bot`, the `bot.leave`
+  audit write) could be garbage-collected mid-flight; both now use
+  `tracked_task`.
+
+### Security
+- **USDC wallet-ownership proof.** Linking a deposit address can now require an
+  EIP-191 signature proving control of the private key
+  (`GET /api/v1/auth/wallet/challenge` + `signature` on `PUT /auth/wallet`,
+  enforced by `REQUIRE_WALLET_SIGNATURE`). Closes a front-running attack where
+  an attacker registered a victim's public address to capture their deposits. A
+  supplied signature is always verified; enforcement defaults off for
+  backwards-compatibility.
+- **API keys are never persisted in plaintext** — only the peppered HMAC
+  (`key_hash`) + prefix are stored; the legacy `key` column is left NULL for new
+  keys. Auth already matched on the HMAC.
+- **`X-Sub-User` is now validated identically everywhere** via
+  `deps.validate_sub_user` (the bots/exports routers previously accepted
+  unvalidated values as scoping keys).
+- **Integration URLs (Slack) are SSRF-checked at registration** (create +
+  update), matching the webhook/calendar guards. Webhook DNS-rebind cache TTL
+  shortened 60s→10s.
+
+### Performance
+- **Live per-entry AI/IO fan-out is bounded** by a per-bot semaphore
+  (`LIVE_ENTRY_MAX_CONCURRENCY`, default 8).
+- **Webhook delivery uses a targeted counter UPDATE** (`record_webhook_delivery`)
+  instead of a SELECT-then-rewrite of the whole row, and can no longer clobber a
+  concurrent PATCH.
+- **Admin `/platform-analytics` streams snapshots in batches** instead of
+  loading up to 50k JSON blobs into RAM at once (batched aggregation proven
+  equal to single-pass).
+- **New composite indexes**: `meeting_summaries(account_id, created_at)` and
+  `action_items(status, due_date)`; the action-item reminder sweep is now
+  ordered + LIMITed.
 
 ---
 
