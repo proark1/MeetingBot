@@ -13845,7 +13845,7 @@
             "anyOf": [
               {
                 "type": "string",
-                "pattern": "password"
+                "pattern": "^password$"
               },
               {
                 "type": "null"
@@ -13859,6 +13859,7 @@
           },
           "password": {
             "type": "string",
+            "format": "password",
             "title": "Password"
           },
           "scope": {
@@ -13886,6 +13887,7 @@
                 "type": "null"
               }
             ],
+            "format": "password",
             "title": "Client Secret"
           }
         },
@@ -14259,6 +14261,7 @@
             "default": "off"
           },
           "metadata": {
+            "additionalProperties": true,
             "type": "object",
             "title": "Metadata",
             "description": "Arbitrary key-value pairs stored with the bot and echoed in all responses. Max 20 keys, 64 char keys, 256 char string values.",
@@ -14458,6 +14461,7 @@
           },
           "transcript": {
             "items": {
+              "additionalProperties": true,
               "type": "object"
             },
             "type": "array",
@@ -14478,6 +14482,7 @@
           },
           "chapters": {
             "items": {
+              "additionalProperties": true,
               "type": "object"
             },
             "type": "array",
@@ -14486,6 +14491,7 @@
           },
           "speaker_stats": {
             "items": {
+              "additionalProperties": true,
               "type": "object"
             },
             "type": "array",
@@ -14551,6 +14557,7 @@
             "description": "BCP-47 language the stored transcript was translated to (if post-meeting translation was applied)."
           },
           "metadata": {
+            "additionalProperties": true,
             "type": "object",
             "title": "Metadata",
             "default": {}
@@ -14617,6 +14624,7 @@
           },
           "detected_decisions": {
             "items": {
+              "additionalProperties": true,
               "type": "object"
             },
             "type": "array",
@@ -14626,6 +14634,7 @@
           },
           "related_meetings": {
             "items": {
+              "additionalProperties": true,
               "type": "object"
             },
             "type": "array",
@@ -14908,6 +14917,7 @@
             "description": "Business account sub-user identifier (if set)."
           },
           "metadata": {
+            "additionalProperties": true,
             "type": "object",
             "title": "Metadata",
             "default": {}
@@ -15556,6 +15566,7 @@
             "title": "Text"
           },
           "detail": {
+            "additionalProperties": true,
             "type": "object",
             "title": "Detail",
             "default": {}
@@ -15626,6 +15637,7 @@
             "default": ""
           },
           "config": {
+            "additionalProperties": true,
             "type": "object",
             "title": "Config",
             "description": "Integration config dict.  **Slack:** `{webhook_url: str}`.  **Notion:** `{api_token: str, database_id: str}`."
@@ -15674,6 +15686,7 @@
             "title": "Is Active"
           },
           "config_preview": {
+            "additionalProperties": true,
             "type": "object",
             "title": "Config Preview",
             "description": "Config with secrets redacted."
@@ -15918,6 +15931,7 @@
             "description": "Name of the tool to execute."
           },
           "arguments": {
+            "additionalProperties": true,
             "type": "object",
             "title": "Arguments",
             "description": "Tool input arguments.",
@@ -15967,6 +15981,7 @@
           },
           "action_items": {
             "items": {
+              "additionalProperties": true,
               "type": "object"
             },
             "type": "array",
@@ -15996,6 +16011,7 @@
           },
           "topics": {
             "items": {
+              "additionalProperties": true,
               "type": "object"
             },
             "type": "array",
@@ -16428,6 +16444,7 @@
             "title": "Idp Metadata Xml"
           },
           "attribute_mapping": {
+            "additionalProperties": true,
             "type": "object",
             "title": "Attribute Mapping",
             "default": {
@@ -17016,6 +17033,13 @@
           "type": {
             "type": "string",
             "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
           }
         },
         "type": "object",
@@ -17316,6 +17340,7 @@
             "description": "URL-safe identifier (auto-generated from name if omitted)."
           },
           "settings": {
+            "additionalProperties": true,
             "type": "object",
             "title": "Settings",
             "description": "Optional workspace settings (e.g. default_bot_name, require_consent).",
@@ -17394,6 +17419,7 @@
           "settings": {
             "anyOf": [
               {
+                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -17417,6 +17443,7 @@
         "properties": {
           "instructions": {
             "items": {
+              "additionalProperties": true,
               "type": "object"
             },
             "type": "array",
@@ -17520,6 +17547,7 @@
           },
           "transcript": {
             "items": {
+              "additionalProperties": true,
               "type": "object"
             },
             "type": "array",
@@ -17528,6 +17556,7 @@
           "analysis": {
             "anyOf": [
               {
+                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -17538,6 +17567,7 @@
           },
           "chapters": {
             "items": {
+              "additionalProperties": true,
               "type": "object"
             },
             "type": "array",
@@ -17545,6 +17575,7 @@
           },
           "speaker_stats": {
             "items": {
+              "additionalProperties": true,
               "type": "object"
             },
             "type": "array",
@@ -17593,6 +17624,7 @@
           "metadata": {
             "anyOf": [
               {
+                "additionalProperties": true,
                 "type": "object"
               },
               {

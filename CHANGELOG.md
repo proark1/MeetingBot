@@ -4,7 +4,34 @@ All notable changes to JustHereToListen.io are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.67.0 — **Last updated:** 2026-06-07
+> **Latest version:** 2.67.1 — **Last updated:** 2026-06-07
+
+---
+
+## [2.67.1] - 2026-06-07
+
+Dependency refresh (Dependabot group) with the one breaking change ported.
+
+### Changed
+- **Bumped 13 dependencies** to current releases, including FastAPI
+  `0.115.6 → 0.136.3`, Pydantic `2.10.3 → 2.13.4`, pydantic-settings
+  `2.6.1 → 2.14.1`, uvicorn `0.32.1 → 0.49.0`, Playwright `1.49.1 → 1.60.0`,
+  playwright-stealth `1.0.6 → 2.0.3`, anthropic `0.107.0 → 0.107.1`,
+  google-generativeai `0.8.3 → 0.8.6`, plus python-multipart, aiofiles,
+  python-dotenv, web3, and eth-account.
+- **Ported `browser_bot._apply_stealth` to the playwright-stealth 2.x API**
+  (`Stealth().apply_stealth_async(page)`). The 1.x `stealth_async` function was
+  removed in 2.x; without this the stealth import would have failed silently and
+  fallen back to manual-JS-only, making the bot more detectable. Falls back to
+  the 1.x API and then manual JS for resilience.
+- **Regenerated the OpenAPI snapshots** for the new FastAPI/Pydantic schema
+  output (anchored password patterns, `additionalProperties` on extra-allow
+  models, richer validation-error schema) — additive, non-breaking for SDKs.
+
+### Notes
+- Full test suite (249 passed) and ruff are green under the bumped stack.
+  Browser automation isn't covered by CI — validate a real meeting join before
+  relying on the Playwright/stealth upgrades in production.
 
 ---
 

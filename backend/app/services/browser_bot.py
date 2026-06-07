@@ -945,12 +945,26 @@ async def _fill(page: Page, selectors: list[str], value: str, timeout: int = 600
 
 async def _apply_stealth(page: Page) -> None:
     await page.add_init_script(_STEALTH_JS)
+    # playwright-stealth 2.x replaced the module-level ``stealth_async(page)``
+    # with ``Stealth().apply_stealth_async(page)``. Try the 2.x API first, then
+    # fall back to the 1.x function, then to the manual JS init script above.
+    try:
+        from playwright_stealth import Stealth  # type: ignore
+        await Stealth().apply_stealth_async(page)
+        logger.debug("playwright-stealth applied (2.x)")
+        return
+    except ImportError:
+        pass
+    except Exception as exc:
+        logger.debug("playwright-stealth 2.x apply failed (%s) — trying legacy API", exc)
     try:
         from playwright_stealth import stealth_async  # type: ignore
         await stealth_async(page)
-        logger.debug("playwright-stealth applied")
+        logger.debug("playwright-stealth applied (legacy 1.x)")
     except ImportError:
         logger.debug("playwright-stealth not installed — manual JS stealth only")
+    except Exception as exc:
+        logger.debug("playwright-stealth unavailable (%s) — manual JS stealth only", exc)
 
 
 # ── Platform join logic ───────────────────────────────────────────────────────

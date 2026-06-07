@@ -1,25 +1,25 @@
-fastapi==0.115.6
-uvicorn[standard]==0.32.1
-pydantic==2.10.3
-pydantic-settings==2.6.1
+fastapi==0.136.3
+uvicorn[standard]==0.49.0
+pydantic==2.13.4
+pydantic-settings==2.14.1
 email-validator==2.3.0
 httpx==0.28.1
-python-multipart==0.0.20
-aiofiles==24.1.0
-python-dotenv==1.0.1
+python-multipart==0.0.32
+aiofiles==25.1.0
+python-dotenv==1.2.2
 
 # AI — Claude (Anthropic) for analysis when ANTHROPIC_API_KEY is set
-anthropic==0.107.0
+anthropic==0.107.1
 
 # AI — Gemini for transcription and analysis when GEMINI_API_KEY is set
-google-generativeai==0.8.3
+google-generativeai==0.8.6
 
 # Gemini Live API (real-time bidirectional audio streaming)
 google-genai==2.8.0
 
 # Real browser bot
-playwright==1.49.1
-playwright-stealth==1.0.6
+playwright==1.60.0
+playwright-stealth==2.0.3
 
 # Text-to-speech for voice responses
 edge-tts==7.2.8

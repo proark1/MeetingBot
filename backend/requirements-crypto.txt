@@ -4,5 +4,5 @@
 # build-time failure does not prevent the rest of the application from starting.
 # If this layer fails, USDC payments return HTTP 503 but all other features work.
 
-web3>=7.0.0
-eth-account>=0.13.0
+web3>=7.16.0
+eth-account>=0.13.7
