@@ -28,6 +28,7 @@ jobs:
         env:
           DATABASE_URL: "sqlite+aiosqlite:///./test.db"
           JWT_SECRET: "test-secret-for-ci"
-          API_KEY: "test-api-key"
+          # NB: conftest.py forces API_KEY="" at import so the superadmin-bypass
+          # path doesn't mask per-account auth in tests. Don't set API_KEY here.
           CORS_ORIGINS: "*"
         run: python -m pytest tests/ -v --timeout=120

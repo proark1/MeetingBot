@@ -1,0 +1,36 @@
+name: Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install security tools
+        run: pip install pip-audit bandit
+
+      # Dependency CVE scan against the pinned requirements. Advisory for now
+      # (continue-on-error) so a newly-disclosed CVE doesn't block unrelated
+      # PRs — flip to blocking once the dependency backlog is triaged.
+      - name: pip-audit (dependency CVEs)
+        working-directory: backend
+        continue-on-error: true
+        run: pip-audit -r requirements.txt
+
+      # Static analysis of application code. -ll = medium+ severity,
+      # -ii = medium+ confidence (cuts false positives). Advisory for now.
+      - name: bandit (SAST)
+        working-directory: backend
+        continue-on-error: true
+        run: bandit -r app/ -ll -ii
