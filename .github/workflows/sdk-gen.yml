@@ -63,7 +63,7 @@ jobs:
           echo "Schema downloaded ($(wc -c < openapi.json) bytes)"
 
       - name: Set up Java (for openapi-generator-cli)
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: "temurin"
           java-version: "17"
