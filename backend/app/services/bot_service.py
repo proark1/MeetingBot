@@ -1162,6 +1162,15 @@ async def run_bot_lifecycle(bot_id: str) -> None:
 
             async def on_live_entry(entry: dict) -> None:
                 nonlocal _last_flush
+                # Privacy: when the bot opted into PII redaction, scrub the live
+                # text BEFORE it is broadcast (WS/SSE), persisted, or fanned out
+                # to webhooks. Previously redaction ran only post-meeting, so
+                # emails/SSNs/cards streamed to live consumers in the clear. Work
+                # on a shallow copy so the caller's raw entry (used by the
+                # voice-mention monitor, which tracks absolute indices) is intact.
+                if getattr(bot, "pii_redaction", False) and entry.get("text"):
+                    from app.services.pii_service import redact_pii
+                    entry = {**entry, "text": redact_pii(entry["text"])}
                 async with _live_lock:
                     _live_buffer.append(entry)
                     buf_len = len(_live_buffer)

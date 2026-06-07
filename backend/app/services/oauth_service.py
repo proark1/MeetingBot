@@ -233,9 +233,11 @@ async def upsert_oauth_account(
         oauth_row: Optional[OAuthAccount] = result.scalar_one_or_none()
 
         if oauth_row:
-            # Update tokens
-            oauth_row.access_token     = access_token
-            oauth_row.refresh_token    = refresh_token or oauth_row.refresh_token
+            # Update tokens. Encrypt at rest — these grant access to the user's
+            # Google/Microsoft account; any future reader must decrypt_text().
+            from app.services.secrets_at_rest import encrypt_text as _enc
+            oauth_row.access_token     = _enc(access_token)
+            oauth_row.refresh_token    = _enc(refresh_token) if refresh_token else oauth_row.refresh_token
             oauth_row.token_expires_at = token_expires_at
             account_id = oauth_row.account_id
             await session.commit()
@@ -289,14 +291,17 @@ async def upsert_oauth_account(
             )
             session.add(api_key)
 
-        # 4. Create the OAuth link
+        # 4. Create the OAuth link. Encrypt the SSO tokens at rest (a DB leak
+        # otherwise exposes live Google/Microsoft credentials); readers must
+        # round-trip through secrets_at_rest.decrypt_text().
+        from app.services.secrets_at_rest import encrypt_text as _enc
         oauth_link = OAuthAccount(
             account_id=account.id,
             provider=provider,
             provider_user_id=provider_user_id,
             email=email,
-            access_token=access_token,
-            refresh_token=refresh_token,
+            access_token=_enc(access_token),
+            refresh_token=_enc(refresh_token),
             token_expires_at=token_expires_at,
         )
         session.add(oauth_link)

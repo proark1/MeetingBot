@@ -97,6 +97,18 @@ async def root(request: Request, db: AsyncSession = Depends(get_db)):
     return templates.TemplateResponse("landing.html", {"request": request})
 
 
+# ── Legal pages (public) ────────────────────────────────────────────────────────
+
+@router.get("/privacy", response_class=HTMLResponse, include_in_schema=False)
+async def privacy_policy(request: Request):
+    return templates.TemplateResponse("privacy.html", {"request": request})
+
+
+@router.get("/terms", response_class=HTMLResponse, include_in_schema=False)
+async def terms_of_service(request: Request):
+    return templates.TemplateResponse("terms.html", {"request": request})
+
+
 # ── Register ──────────────────────────────────────────────────────────────────
 
 @router.get("/register", response_class=HTMLResponse, include_in_schema=False)
@@ -426,7 +438,8 @@ async def bot_session_page(
         snap = result.scalar_one_or_none()
         if snap and snap.account_id == account.id:
             try:
-                d = _json.loads(snap.data)
+                from app.services.secrets_at_rest import decrypt_text as _decrypt_text
+                d = _json.loads(_decrypt_text(snap.data) or "{}")
                 # Parse datetime strings back to datetime objects
                 _dt_fields = {"created_at", "updated_at", "started_at", "ended_at", "join_at", "expires_at"}
                 # Fields that must never be None (use empty list/dict instead)
@@ -1592,7 +1605,8 @@ async def meeting_history(request: Request, db: AsyncSession = Depends(get_db)):
     meetings = []
     for snap in snapshots:
         try:
-            d = _json.loads(snap.data)
+            from app.services.secrets_at_rest import decrypt_text as _decrypt_text
+            d = _json.loads(_decrypt_text(snap.data) or "{}")
             meetings.append({
                 "id": snap.id,
                 "meeting_url": d.get("meeting_url", ""),
@@ -2124,7 +2138,8 @@ async def share_meeting(token: str, request: Request):
         if _expired(getattr(snap, "share_token_expires_at", None)):
             return not_found
         try:
-            snapshot_data = _json.loads(snap.data or "{}")
+            from app.services.secrets_at_rest import decrypt_text as _decrypt_text
+            snapshot_data = _json.loads(_decrypt_text(snap.data) or "{}")
         except Exception:
             return not_found
 
