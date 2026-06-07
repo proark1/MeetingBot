@@ -619,8 +619,13 @@ class Store:
                     "ended_at": _dt(bot.ended_at),
                     "expires_at": _dt(bot.expires_at),
                 }
-            # JSON serialization outside lock (can be slow for large transcripts)
-            data = json.dumps(snapshot)
+            # JSON serialization outside lock (can be slow for large transcripts).
+            # Encrypt the blob at rest when a usable key is configured — the
+            # snapshot carries the full transcript + analysis (highly sensitive
+            # meeting content). Falls back to plaintext in dev (no key set);
+            # readers go through decrypt_text, which handles both forms.
+            from app.services.secrets_at_rest import encrypt_text
+            data = encrypt_text(json.dumps(snapshot))
 
             # DB I/O happens outside the lock
             async with AsyncSessionLocal() as db:
@@ -923,10 +928,11 @@ async def load_persisted_bots() -> int:
             )
             snapshots = result.scalars().all()
 
+        from app.services.secrets_at_rest import decrypt_text
         count = 0
         for snap in snapshots:
             try:
-                d = json.loads(snap.data)
+                d = json.loads(decrypt_text(snap.data) or "{}")
                 bot = BotSession(
                     id=d["id"],
                     meeting_url=d["meeting_url"],

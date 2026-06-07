@@ -1,0 +1,106 @@
+{% extends "legal_base.html" %}
+{% block title %}Privacy Policy — JustHereToListen.io{% endblock %}
+{% block legal_body %}
+<h1>Privacy Policy</h1>
+<p class="legal-meta">Effective date: 7 June 2026 · Last updated: 7 June 2026</p>
+
+<div class="legal-callout">
+  <strong>Summary.</strong> JustHereToListen.io sends an AI assistant into your video
+  meetings to record, transcribe, and analyse them on your behalf. This policy
+  explains what we collect, how we use it, who processes it, how long we keep it,
+  and the rights you have over it. We do not sell your personal data.
+</div>
+
+<h2>1. Who we are</h2>
+<p>
+  JustHereToListen.io ("we", "us", "the Service") provides a multi-tenant meeting-bot
+  API that joins Zoom, Google Meet, Microsoft Teams, and compatible meetings to
+  produce recordings, transcripts, and AI-generated summaries. We act as a
+  <strong>data processor</strong> for the meeting content you instruct us to capture, and
+  as a <strong>data controller</strong> for your account and billing information.
+</p>
+
+<h2>2. Information we collect</h2>
+<ul>
+  <li><strong>Account data</strong> — email address, hashed password, API keys (stored only as a salted hash), plan, and admin flags.</li>
+  <li><strong>Billing data</strong> — credit balance and transaction history. Card payments are handled by Stripe; we never see or store full card numbers. Optional USDC payments record only the on-chain deposit address and transaction hash.</li>
+  <li><strong>Meeting content</strong> — audio (and optionally video) recordings, transcripts, chat messages captured during the meeting, participant display names, AI analysis (summaries, action items, decisions), and meeting metadata (URL, platform, start/end time, duration).</li>
+  <li><strong>Integration tokens</strong> — OAuth/access tokens for connected services (Google, Microsoft, Slack, Notion, CRMs), stored <strong>encrypted at rest</strong>.</li>
+  <li><strong>Operational data</strong> — request logs, error reports, and usage metrics used to run and secure the Service.</li>
+</ul>
+
+<h2>3. How we use your information</h2>
+<ul>
+  <li>To join meetings and produce the recordings, transcripts, and analysis you request.</li>
+  <li>To deliver results to your configured webhooks, email, and integrations.</li>
+  <li>To meter usage and bill credits.</li>
+  <li>To secure, debug, and improve the Service.</li>
+  <li>To comply with legal obligations.</li>
+</ul>
+<p>We do <strong>not</strong> use your meeting content to train our own models, and we do not sell personal data.</p>
+
+<h2>4. Sub-processors</h2>
+<p>We share data only with the service providers needed to operate the Service:</p>
+<ul>
+  <li><strong>Anthropic</strong> (Claude) and <strong>Google</strong> (Gemini) — AI transcription and analysis of meeting content.</li>
+  <li><strong>Stripe</strong> — card payment processing.</li>
+  <li><strong>Cloud storage</strong> (e.g. AWS S3 / Cloudflare R2, when configured) — recording storage, encrypted at rest.</li>
+  <li><strong>Email provider</strong> (SMTP / SendGrid, when configured) — notifications and digests.</li>
+  <li><strong>Hosting / error monitoring</strong> — to run the Service and aggregate exceptions (configured without sending personal request bodies).</li>
+</ul>
+
+<h2>5. Recording consent</h2>
+<p>
+  Recording a conversation may require the consent of participants. In many
+  jurisdictions (including "all-party consent" US states and the EU/EEA under GDPR
+  and ePrivacy rules) this is a legal requirement. By default our bot announces in
+  the meeting that it is recording and offers an opt-out. <strong>You are responsible for
+  ensuring you have a lawful basis and any consent required</strong> before sending a bot
+  into a meeting. See our <a href="/terms">Terms of Service</a>.
+</p>
+
+<h2>6. Data retention</h2>
+<p>
+  Retention is configurable per account. By default, recordings are deleted after
+  <strong>30 days</strong> and transcripts/analysis after <strong>90 days</strong>; live bot state expires from
+  memory within 24 hours of completion. You can request a shorter or longer window,
+  or immediate deletion, at any time.
+</p>
+
+<h2>7. Security</h2>
+<ul>
+  <li>Transport encryption (HTTPS/TLS) for data in transit.</li>
+  <li>Encryption at rest for stored meeting transcripts/analysis, integration tokens, and (when cloud storage is used) recordings.</li>
+  <li>API keys and passwords are stored only as salted hashes; tenant data is isolated per account.</li>
+  <li>Optional PII redaction can mask emails, phone numbers, and similar identifiers in transcripts.</li>
+</ul>
+
+<h2>8. Your rights</h2>
+<p>
+  Depending on your jurisdiction you may have rights to access, correct, export, or
+  delete your personal data, and to object to or restrict certain processing. You can:
+</p>
+<ul>
+  <li>Export your meeting data (Markdown, PDF, JSON, SRT) from the dashboard or API.</li>
+  <li>Delete an individual meeting, or your entire account and all associated data, via the dashboard or <code>DELETE /api/v1/auth/account</code>, which cascades to recordings, transcripts, and integration tokens.</li>
+  <li>Contact us to exercise any other right.</li>
+</ul>
+
+<h2>9. International transfers</h2>
+<p>
+  Your data may be processed in countries other than your own, including by the
+  sub-processors listed above. Where required, we rely on appropriate safeguards for
+  such transfers.
+</p>
+
+<h2>10. Children</h2>
+<p>The Service is not directed to children under 16 and we do not knowingly collect their data.</p>
+
+<h2>11. Changes to this policy</h2>
+<p>We may update this policy from time to time. Material changes will be reflected by the "Last updated" date above.</p>
+
+<h2>12. Contact</h2>
+<p>
+  Questions or privacy requests: <a href="mailto:privacy@justheretolisten.io">privacy@justheretolisten.io</a>.
+</p>
+{% endblock %}

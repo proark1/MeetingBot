@@ -74,6 +74,63 @@ def _get_fernet():
     return Fernet(_derive_key(secret))
 
 
+def encryption_available() -> bool:
+    """True when a usable (non-default) secret is configured.
+
+    When this is False (local dev with the insecure default secret), the
+    best-effort helpers below store values as plaintext rather than failing,
+    so development keeps working. In production an explicit ENCRYPTION_KEY /
+    JWT_SECRET makes this True and at-rest encryption activates automatically.
+    """
+    secret = _primary_secret()
+    return bool(secret) and secret != _INSECURE_DEFAULT_SECRET
+
+
+def encrypt_text(plaintext: str | None) -> str | None:
+    """Best-effort Fernet-encrypt an arbitrary string for at-rest storage.
+
+    Unlike ``encrypt_json`` (which fails loudly on the insecure default key),
+    this is used for bulk/optional fields — OAuth tokens, snapshot blobs —
+    where we must never break persistence in dev. When no usable key is
+    configured the value is returned unchanged (plaintext); ``decrypt_text``
+    transparently handles both forms. Returns ``None`` for ``None`` input.
+    """
+    if plaintext is None:
+        return None
+    if not encryption_available():
+        return plaintext
+    return _get_fernet().encrypt(plaintext.encode()).decode()
+
+
+def decrypt_text(stored: str | None) -> str | None:
+    """Inverse of ``encrypt_text``. Accepts Fernet ciphertext or legacy plaintext.
+
+    Tries every candidate key (current ENCRYPTION_KEY, then legacy JWT_SECRET)
+    so values survive a key rotation. Returns ``None`` for ``None`` input and
+    for ciphertext that no configured key can decrypt (so a rotation gap fails
+    closed rather than leaking ciphertext to a caller).
+    """
+    if stored is None:
+        return None
+    raw = stored.encode() if isinstance(stored, str) else stored
+
+    if raw.startswith(_FERNET_PREFIX):
+        from cryptography.fernet import Fernet
+        for secret in _decrypt_secrets():
+            try:
+                return Fernet(_derive_key(secret)).decrypt(raw).decode()
+            except Exception:
+                continue
+        logger.error(
+            "decrypt_text: ciphertext present but no configured key could "
+            "decrypt it (key rotation gap or tampering?)"
+        )
+        return None
+
+    # Legacy plaintext path
+    return stored if isinstance(stored, str) else raw.decode()
+
+
 def encrypt_json(payload: dict[str, Any]) -> str:
     """Serialise ``payload`` to JSON and Fernet-encrypt it for storage."""
     raw = json.dumps(payload).encode()

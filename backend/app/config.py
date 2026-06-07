@@ -127,6 +127,10 @@ class Settings(BaseSettings):
     # Environment — set to "production" to enforce strict security defaults
     ENVIRONMENT: str = "development"
 
+    # Root logging level (DEBUG/INFO/WARNING/ERROR). Production can raise this to
+    # WARNING to cut log volume and shrink the PII surface in aggregated logs.
+    LOG_LEVEL: str = "INFO"
+
     # ── Error tracking (Sentry) — optional, graceful no-op when unset ──────────
     # Set SENTRY_DSN to enable exception aggregation + performance tracing.
     SENTRY_DSN: str = ""
@@ -264,7 +268,11 @@ class Settings(BaseSettings):
     WEBHOOK_DELIVERY_RETENTION_DAYS: int = 30  # prune delivery logs older than N days
 
     # ── Consent announcement ───────────────────────────────────────────────────
-    CONSENT_ANNOUNCEMENT_ENABLED: bool = False  # set True to enable by default
+    # Default ON: recording participants without notice is unlawful in two-party/
+    # all-party-consent US states (CA, FL, IL, PA, WA, …) and under EU GDPR/
+    # ePrivacy. Per-bot `consent_enabled` can override. Set this False only if
+    # your tenants obtain consent out-of-band and you accept the liability.
+    CONSENT_ANNOUNCEMENT_ENABLED: bool = True
     CONSENT_MESSAGE: str = (
         "This meeting is being recorded and transcribed by an AI bot. "
         "To opt out, type 'opt out' in the chat or say 'opt out' clearly."

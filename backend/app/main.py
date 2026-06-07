@@ -6,7 +6,6 @@ Run with:
 
 import asyncio
 import logging
-import signal
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -62,7 +61,7 @@ from app.deps import require_auth
 from typing import Any
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, str(settings.LOG_LEVEL).upper(), logging.INFO),
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
@@ -150,6 +149,41 @@ async def lifespan(app: FastAPI):
                 "random per-process secret; sessions will reset on restart.", exc,
             )
 
+    # ── Hard production guardrails (security audit H1 / C-2 / W-1) ─────────────
+    _prod_like = settings.ENVIRONMENT.lower() in {"production", "prod", "staging"}
+    if _prod_like:
+        # A weak/short secret silently rotates per-restart (logging everyone out)
+        # and is brute-forceable. Fail fast regardless of DB type — the default
+        # JWT guard above only fires for the exact sentinel on a non-sqlite DB.
+        if settings.JWT_SECRET == "change-me-in-production" or len(settings.JWT_SECRET) < 32:
+            raise SystemExit(
+                "FATAL: JWT_SECRET must be a strong value (>=32 chars) in "
+                "production. Generate one with:  export JWT_SECRET=$(openssl rand -hex 32)"
+            )
+        if not settings.ENCRYPTION_KEY:
+            logger.warning(
+                "⚠ ENCRYPTION_KEY is not set — at-rest encryption of SSO/integration "
+                "tokens and meeting snapshots falls back to JWT_SECRET. Set a separate "
+                "ENCRYPTION_KEY (openssl rand -hex 32) for key separation."
+            )
+        # The in-memory bot Store is single-process; >1 worker/replica corrupts
+        # live bot state and breaks the global MAX_CONCURRENT_BOTS cap. Refuse to
+        # boot a multi-worker process while on the memory backend.
+        if settings.BOT_STATE_BACKEND == "memory":
+            import os as _os
+            _workers = 0
+            for _var in ("WEB_CONCURRENCY", "UVICORN_WORKERS", "GUNICORN_WORKERS"):
+                try:
+                    _workers = max(_workers, int(_os.environ.get(_var, "0") or 0))
+                except ValueError:
+                    pass
+            if _workers > 1:
+                raise SystemExit(
+                    f"FATAL: {_workers} workers requested but BOT_STATE_BACKEND=memory. "
+                    "The in-memory bot store is single-process only — run exactly one "
+                    "worker and one replica, or migrate to BOT_STATE_BACKEND=redis."
+                )
+
     if settings.CORS_ORIGINS == "*":
         logger.warning(
             "⚠ CORS_ORIGINS='*' — all browser origins can call this API. "
@@ -222,13 +256,13 @@ async def lifespan(app: FastAPI):
 
     await asyncio.gather(_load_bots(), _load_webhooks(), start_usdc_monitor())
 
-    # Clean up orphaned subprocesses on SIGTERM
-    def _handle_sigterm(signum, frame):
-        from app.services.browser_bot import kill_all_procs
-        logger.info("SIGTERM received — killing active subprocesses")
-        kill_all_procs()
-
-    signal.signal(signal.SIGTERM, _handle_sigterm)
+    # NB: orphaned-subprocess cleanup + DB-pool disposal now happen in the
+    # lifespan shutdown block below (after `yield`). A previous version installed
+    # a custom SIGTERM handler here that *replaced* uvicorn's own — so uvicorn's
+    # graceful shutdown, and this entire teardown block, never ran on a redeploy
+    # (tasks left dangling, webhook HTTP client + DB pool never closed, bots
+    # killed mid-meeting without persisting a terminal snapshot). Letting uvicorn
+    # own SIGTERM means the shutdown block runs reliably on every stop.
 
     async def _supervised(name: str, coro_fn, *args, max_restarts: int = 20, **kwargs) -> None:
         """Run a background coroutine and restart it if it crashes.
@@ -297,12 +331,16 @@ async def lifespan(app: FastAPI):
 
     # Start retention enforcement loop (daily)
     async def _retention_loop():
+        # Small initial delay so retention doesn't compete with startup work,
+        # then run immediately (previously it waited a full 24h before the first
+        # sweep, so a freshly-deployed instance purged nothing for a day).
+        await asyncio.sleep(300)
         while True:
-            await asyncio.sleep(86400)  # every 24 hours
             try:
                 await _enforce_retention_policies()
             except Exception as exc:
                 logger.error("Retention enforcement error: %s", exc)
+            await asyncio.sleep(86400)  # every 24 hours
 
     async def _enforce_retention_policies():
         """Delete recordings and bot snapshots beyond their retention period."""
@@ -317,6 +355,30 @@ async def lifespan(app: FastAPI):
         logger.info("Running retention policy enforcement…")
 
         async with AsyncSessionLocal() as db:
+            from app.services import storage_service as _storage
+            from app.services.secrets_at_rest import decrypt_text as _dec, encrypt_text as _enc
+            _cloud_on = _storage.is_cloud_storage_enabled()
+
+            async def _delete_artifacts(data: dict) -> bool:
+                """Delete a snapshot's recording + video, whether stored as a
+                local file or an S3 object. ``recording_path`` holds the S3 key
+                when cloud storage is on (else a local path); ``video_path`` is
+                always local. Returns True if anything was deleted."""
+                deleted = False
+                for path_key in ("recording_path", "video_path"):
+                    val = data.get(path_key)
+                    if not val:
+                        continue
+                    try:
+                        if os.path.exists(val):
+                            os.remove(val)
+                            deleted = True
+                        elif _cloud_on and await _storage.delete_recording(val):
+                            deleted = True
+                    except Exception as exc:
+                        logger.warning("Retention: failed to delete %s (%s): %s", path_key, val, exc)
+                return deleted
+
             # Load global policy (account_id IS NULL)
             g_result = await db.execute(
                 select(RetentionPolicy).where(RetentionPolicy.account_id.is_(None))
@@ -325,7 +387,8 @@ async def lifespan(app: FastAPI):
             global_bot_days = settings.DEFAULT_BOT_RETENTION_DAYS if not global_policy else global_policy.bot_retention_days
             global_rec_days = settings.DEFAULT_RECORDING_RETENTION_DAYS if not global_policy else global_policy.recording_retention_days
 
-            # Find snapshots past their global retention window
+            ids_to_delete: list = []
+            # ── Snapshot retention: delete the whole record + its recordings ────
             if global_bot_days != -1:
                 cutoff = now - timedelta(days=global_bot_days)
                 result = await db.execute(
@@ -342,7 +405,6 @@ async def lifespan(app: FastAPI):
                     )
                     policies_by_account = {p.account_id: p for p in pol_result.scalars().all()}
 
-                ids_to_delete = []
                 for snap in expired_snaps:
                     acc_policy = policies_by_account.get(snap.account_id)
                     eff_days = acc_policy.bot_retention_days if acc_policy else global_bot_days
@@ -350,18 +412,12 @@ async def lifespan(app: FastAPI):
                     if eff_days == -1:
                         continue  # this account keeps data forever
 
-                    snap_cutoff = now - timedelta(days=eff_days)
-                    if snap.created_at > snap_cutoff:
+                    if snap.created_at > now - timedelta(days=eff_days):
                         continue  # not yet expired under account policy
 
-                    # Try to delete recording files
                     try:
-                        data = _json.loads(snap.data or "{}")
-                        for path_key in ("recording_path", "video_path"):
-                            fpath = data.get(path_key)
-                            if fpath and os.path.exists(fpath):
-                                os.remove(fpath)
-                                logger.debug("Retention: deleted %s", fpath)
+                        data = _json.loads(_dec(snap.data) or "{}")
+                        await _delete_artifacts(data)
                     except Exception as exc:
                         logger.warning("Retention: could not clean up files for snapshot %s: %s", snap.id, exc)
 
@@ -371,19 +427,60 @@ async def lifespan(app: FastAPI):
                 if ids_to_delete:
                     await db.execute(_sqldelete(BotSnapshot).where(BotSnapshot.id.in_(ids_to_delete)))
 
-                # Clean up expired idempotency keys
-                from app.models.account import IdempotencyKey as _IKModel
-                ik_result = await db.execute(
-                    _sqldelete(_IKModel).where(_IKModel.expires_at < now)
+            # ── Recording retention: shorter window, keep transcript/analysis ───
+            # Deletes audio/video for snapshots past the (shorter) *recording*
+            # window while preserving the transcript+analysis until the bot
+            # window. Previously this window was computed but never enforced, so
+            # recordings lived for the full bot-retention period.
+            recs_cleaned = 0
+            if global_rec_days != -1:
+                _already = set(ids_to_delete)
+                rec_cutoff = now - timedelta(days=global_rec_days)
+                rec_result = await db.execute(
+                    select(BotSnapshot).where(BotSnapshot.created_at < rec_cutoff)
                 )
-                ik_deleted = ik_result.rowcount if ik_result.rowcount is not None else 0
+                rec_snaps = [s for s in rec_result.scalars().all() if s.id not in _already]
 
-                await db.commit()
-                logger.info(
-                    "Retention enforcement complete: deleted %d snapshots, %d idempotency keys",
-                    len(ids_to_delete),
-                    ik_deleted,
-                )
+                rec_acct_ids = {s.account_id for s in rec_snaps if s.account_id}
+                rec_policies: dict = {}
+                if rec_acct_ids:
+                    rp = await db.execute(
+                        select(RetentionPolicy).where(RetentionPolicy.account_id.in_(rec_acct_ids))
+                    )
+                    rec_policies = {p.account_id: p for p in rp.scalars().all()}
+
+                for snap in rec_snaps:
+                    pol = rec_policies.get(snap.account_id)
+                    eff = pol.recording_retention_days if pol else global_rec_days
+                    if eff == -1:
+                        continue
+                    if snap.created_at > now - timedelta(days=eff):
+                        continue
+                    try:
+                        sdata = _json.loads(_dec(snap.data) or "{}")
+                    except Exception:
+                        continue
+                    if not (sdata.get("recording_path") or sdata.get("video_path")):
+                        continue
+                    if await _delete_artifacts(sdata):
+                        sdata["recording_path"] = None
+                        sdata["video_path"] = None
+                        snap.data = _enc(_json.dumps(sdata))
+                        recs_cleaned += 1
+
+            # Clean up expired idempotency keys (independent of retention windows)
+            from app.models.account import IdempotencyKey as _IKModel
+            ik_result = await db.execute(
+                _sqldelete(_IKModel).where(_IKModel.expires_at < now)
+            )
+            ik_deleted = ik_result.rowcount if ik_result.rowcount is not None else 0
+
+            await db.commit()
+            logger.info(
+                "Retention enforcement complete: deleted %d snapshots, cleaned recordings "
+                "for %d snapshots, %d idempotency keys",
+                len(ids_to_delete), recs_cleaned, ik_deleted,
+            )
 
     retention_task = asyncio.create_task(_supervised("retention_enforcement", _retention_loop))
 
@@ -483,6 +580,24 @@ async def lifespan(app: FastAPI):
 
     from app.services import webhook_service
     await webhook_service.close_http_client()
+
+    # Final sweep: kill any browser/ffmpeg/Xvfb subprocess that outlived its bot
+    # task so a redeploy doesn't leak processes (formerly done from the SIGTERM
+    # handler that broke graceful shutdown).
+    try:
+        from app.services.browser_bot import kill_all_procs
+        kill_all_procs()
+    except Exception:
+        logger.warning("kill_all_procs during shutdown failed", exc_info=True)
+
+    # Dispose the SQLAlchemy connection pool so Postgres connections are released
+    # promptly instead of being left for the server to time out.
+    try:
+        from app.db import engine
+        await engine.dispose()
+    except Exception:
+        logger.warning("engine.dispose during shutdown failed", exc_info=True)
+
     logger.info("JustHereToListen.io shut down")
 
 
@@ -1019,7 +1134,15 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 _origins = [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
 _wildcard = _origins == ["*"]
-_is_production = settings.ENVIRONMENT.lower() == "production" or bool(settings.API_KEY)
+# Detect prod via ENVIRONMENT, a legacy API_KEY, OR a non-sqlite database
+# (Railway/Heroku/Fly inject a real DB URL). The DB heuristic closes the gap
+# where a JWT-only prod deploy forgets ENVIRONMENT=production and would
+# otherwise run with allow_origins=["*"] + credentialed cookies.
+_is_production = (
+    settings.ENVIRONMENT.lower() == "production"
+    or bool(settings.API_KEY)
+    or not settings.DATABASE_URL.startswith("sqlite")
+)
 if _wildcard and _is_production:
     # Production: restrict CORS to same-origin only. The legacy gate was only
     # API_KEY, but most production deployments use JWT/per-user keys without
@@ -2082,7 +2205,10 @@ async def ready():
             await _db.execute(_text("SELECT 1"))
         checks["database"] = "ok"
     except Exception as exc:
-        checks["database"] = f"error: {exc}"
+        # Don't echo the raw exception (may include DSN host/port/driver
+        # internals) on this unauthenticated probe — log it, return generic.
+        logger.error("Readiness DB check failed: %s", exc)
+        checks["database"] = "error"
         ok = False
 
     # ── AI provider ───────────────────────────────────────────────────────────

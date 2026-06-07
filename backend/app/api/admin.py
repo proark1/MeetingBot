@@ -217,11 +217,24 @@ async def get_all_platform_config(
     """Get all platform configuration values."""
     result = await db.execute(select(PlatformConfig).limit(500))
     configs = result.scalars().all()
+
+    # Mask secret-bearing values (e.g. crypto_rpc_url embeds an Infura/Alchemy
+    # API key) so the admin panel doesn't echo live secrets in plaintext.
+    _SECRET_HINTS = (
+        "secret", "token", "password", "seed", "private",
+        "credential", "rpc_url", "api_key", "apikey", "dsn",
+    )
+
+    def _mask(key: str, value):
+        if value and any(h in (key or "").lower() for h in _SECRET_HINTS):
+            return "••••••• (set)"
+        return value
+
     return PlatformConfigResponse(
         configs=[
             PlatformConfigItem(
                 key=c.key,
-                value=c.value,
+                value=_mask(c.key, c.value),
                 updated_at=c.updated_at.isoformat() if c.updated_at else None,
             )
             for c in configs
@@ -617,7 +630,8 @@ def _aggregate_bot_snapshots(snaps, d30, d7) -> dict:
 
         # Parse JSON blob for feature flags & AI usage
         try:
-            data = json.loads(s.data) if s.data else {}
+            from app.services.secrets_at_rest import decrypt_text
+            data = json.loads(decrypt_text(s.data) or "{}") if s.data else {}
         except Exception:
             data = {}
 

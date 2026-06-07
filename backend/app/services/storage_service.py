@@ -81,7 +81,11 @@ async def upload_recording(local_path: str, bot_id: str, account_id: Optional[st
             local_path,
             bucket,
             key,
-            ExtraArgs={"ContentType": "audio/wav"},
+            # SSE-S3 (AES256) so recordings are encrypted at rest even if the
+            # bucket has no default-encryption policy. Override to aws:kms by
+            # setting a bucket default-encryption rule (boto3 honours it when
+            # no per-object header is sent, but we set AES256 explicitly here).
+            ExtraArgs={"ContentType": "audio/wav", "ServerSideEncryption": "AES256"},
         )
         return key
 

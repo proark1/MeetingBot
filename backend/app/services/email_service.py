@@ -332,7 +332,8 @@ async def send_weekly_digest() -> int:
 
                 for snap in snapshots:
                     try:
-                        data = _json.loads(snap.data or "{}")
+                        from app.services.secrets_at_rest import decrypt_text as _decrypt_text
+                        data = _json.loads(_decrypt_text(snap.data) or "{}")
                     except Exception:
                         continue
                     total_duration += data.get("duration_seconds") or 0

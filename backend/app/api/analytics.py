@@ -521,7 +521,8 @@ async def search_transcripts(
                 if snap.id in seen_bot_ids:
                     continue  # already searched from memory
                 try:
-                    data = json.loads(snap.data)
+                    from app.services.secrets_at_rest import decrypt_text
+                    data = json.loads(decrypt_text(snap.data) or "{}")
                 except Exception:
                     continue
 

@@ -4,7 +4,62 @@ All notable changes to JustHereToListen.io are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.66.1 — **Last updated:** 2026-06-02
+> **Latest version:** 2.67.0 — **Last updated:** 2026-06-07
+
+---
+
+## [2.67.0] - 2026-06-07
+
+Go-live readiness pass — security, privacy, and reliability hardening from a full
+pre-launch audit. No breaking API changes; two new public pages.
+
+### Security
+- **Encryption at rest for sensitive data.** Meeting transcripts + analysis
+  (`BotSnapshot.data`) and SSO OAuth access/refresh tokens are now Fernet-encrypted
+  at rest when a key is configured (`ENCRYPTION_KEY`, else `JWT_SECRET`). Readers
+  decrypt transparently and legacy plaintext rows keep working
+  (`services/secrets_at_rest.py` gains `encrypt_text`/`decrypt_text`).
+- **S3 recordings** are uploaded with `ServerSideEncryption=AES256`.
+- **Production startup guardrails:** fail-fast on a weak/default `JWT_SECRET`
+  (<32 chars) in production regardless of DB type, warn when `ENCRYPTION_KEY` is
+  unset, and refuse to boot with >1 worker while `BOT_STATE_BACKEND=memory` (the
+  in-memory store is single-process). Wildcard CORS lockdown now also triggers on a
+  non-sqlite database.
+- **Admin `GET /config`** masks secret-bearing values (e.g. the Infura RPC URL).
+- `/ready` no longer echoes the raw DB exception (info-leak on an unauthenticated probe).
+
+### Privacy / compliance
+- **Recording-consent announcement defaults ON** (`CONSENT_ANNOUNCEMENT_ENABLED=True`)
+  — recording without notice is unlawful in many jurisdictions.
+- **Live transcript PII redaction:** when a bot opts into PII redaction, emails/
+  phones/SSNs/cards are now scrubbed before WS/SSE/webhook broadcast and live
+  persistence (previously only redacted post-meeting).
+- **Working `/privacy` (Privacy Policy) and `/terms` (Terms of Service) pages** —
+  the landing-page footer linked to these but they 404'd.
+- Transcript text is no longer logged at INFO (PII leak into platform logs).
+
+### Reliability
+- **Graceful shutdown fixed:** removed the custom SIGTERM handler that replaced
+  uvicorn's and skipped lifespan teardown. Subprocess cleanup + `engine.dispose()`
+  now run in the shutdown block on every stop.
+- **Retention loop** now enforces the (shorter) recording-retention window and
+  deletes S3 objects — not just local files — and runs shortly after startup
+  instead of waiting a full 24h.
+- `browser.close()` during teardown is guarded so a crashed browser can't skip
+  ffmpeg/Xvfb/PulseAudio cleanup.
+
+### Build / CI
+- **Pinned all dependencies** to exact versions and removed a duplicate `httpx`
+  constraint (reproducible builds).
+- Added a **Security workflow** (`pip-audit` + `bandit`, advisory) and
+  **Dependabot** (pip + GitHub Actions).
+- Added a configurable `LOG_LEVEL`. Dropped the contradictory `API_KEY` from the
+  test CI env.
+
+### Tests
+- New: at-rest encryption round-trip (`test_secrets_at_rest.py`), cross-account
+  404 isolation (`test_authz_isolation.py`), and the Stripe credit-granting +
+  idempotency path (`test_stripe_webhook.py`). Suite: 248 passing.
 
 ---
 

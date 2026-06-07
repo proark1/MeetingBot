@@ -3130,7 +3130,10 @@ async def _streaming_transcription_loop(
             # mention monitor tracks absolute indices (last_audio_idx) so
             # truncating the list silently breaks voice-mention detection.
             live_transcript.append(text)
-            logger.info("Streaming transcript (t=%.1f s): %r…", timestamp_s, text[:120])
+            # Log only length/timestamp — never the transcript text itself. This
+            # runs for every utterance of every meeting; logging the words would
+            # spill PII / confidential meeting content into platform logs.
+            logger.debug("Streaming transcript (t=%.1f s, %d chars)", timestamp_s, len(text))
             # Structured entry for DB persistence
             entry = {"speaker": "Unknown", "text": text, "timestamp": round(timestamp_s, 2)}
             structured_transcript.append(entry)
@@ -5660,7 +5663,12 @@ async def run_browser_bot(
                 await asyncio.sleep(1.5)
             except Exception as _e:
                 logger.debug("MediaRecorder stop call failed: %s", _e)
-            await browser.close()
+            # Guard browser.close() so a browser that already crashed can't raise
+            # here and skip the ffmpeg / Xvfb / PulseAudio teardown that follows.
+            try:
+                await browser.close()
+            except Exception as _e:
+                logger.debug("browser.close() failed (already closed/crashed?): %s", _e)
             # Close the webm sink (after browser close so any in-flight
             # callbacks have already returned).
             try:
