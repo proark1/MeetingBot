@@ -37,6 +37,8 @@ export interface CreateBotParams {
   start_muted?: boolean;
   /** Enable live transcription. */
   live_transcription?: boolean;
+  /** Allow unsupported platforms to return a demo transcript. */
+  allow_demo_mode?: boolean;
   /** Sub-user identifier for multi-tenant usage. */
   sub_user_id?: string;
   /** Arbitrary key-value metadata. */

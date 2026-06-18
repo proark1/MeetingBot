@@ -5,6 +5,58 @@ import httpx
 
 
 @pytest.mark.asyncio
+async def test_validate_known_unsupported_platform_is_demo_only(auth_client: httpx.AsyncClient):
+    """Validation distinguishes recognized URLs from real browser support."""
+    resp = await auth_client.post(
+        "/api/v1/bot/validate-meeting-url",
+        json={"meeting_url": "https://acme.webex.com/meet/alice"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["valid"] is True
+    assert data["platform"] == "webex"
+    assert data["supported"] is False
+    assert "Demo mode" in data["message"]
+
+
+@pytest.mark.asyncio
+async def test_create_known_unsupported_platform_requires_demo_opt_in(auth_client: httpx.AsyncClient):
+    """POST /bot should not silently create a demo bot for a real recording request."""
+    resp = await auth_client.post(
+        "/api/v1/bot",
+        json={"meeting_url": "https://acme.webex.com/meet/alice", "bot_name": "Webex Test"},
+    )
+    assert resp.status_code == 422
+    assert "allow_demo_mode=true" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_create_known_unsupported_platform_allows_explicit_demo(
+    auth_client: httpx.AsyncClient,
+    monkeypatch,
+):
+    """Demo mode remains available, but only when explicitly requested."""
+    from app.api import bots as bots_api
+
+    async def _noop_lifecycle(bot_id: str) -> None:
+        return None
+
+    monkeypatch.setattr(bots_api.bot_service, "run_bot_lifecycle", _noop_lifecycle)
+
+    resp = await auth_client.post(
+        "/api/v1/bot",
+        json={
+            "meeting_url": "https://acme.webex.com/meet/alice",
+            "bot_name": "Webex Demo",
+            "allow_demo_mode": True,
+        },
+    )
+    assert resp.status_code in (200, 201), resp.text
+    data = resp.json()
+    assert data["meeting_platform"] == "webex"
+
+
+@pytest.mark.asyncio
 async def test_create_bot(auth_client: httpx.AsyncClient):
     """POST /api/v1/bot should create a bot."""
     resp = await auth_client.post(

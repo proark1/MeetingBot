@@ -5006,6 +5006,8 @@ async def run_browser_bot(
         monitor_task:       asyncio.Task | None = None
         chat_capture_task:  asyncio.Task | None = None   # Structured chat capture
         webrtc_stats_task:  asyncio.Task | None = None   # WebRTC stats probe (diagnostic)
+        late_routing_task:  asyncio.Task | None = None   # Periodic PulseAudio/WebRTC routing sync
+        audio_watchdog_task: asyncio.Task | None = None   # Silence remediation watchdog
         webrtc_stats_stop_event = asyncio.Event()
 
         try:
@@ -5237,7 +5239,7 @@ async def run_browser_bot(
                 while True:
                     _tick += 1
                     await _step(f"cont#{_tick}", 15, always_info=False)
-            _tracked_task(_late_routing_syncs(), name="late_routing_syncs")
+            late_routing_task = _tracked_task(_late_routing_syncs(), name="late_routing_syncs")
 
             # ── Audio-health watchdog ──────────────────────────────────────────
             # Periodically sample the tail of the growing WAV file; if Chrome
@@ -5337,7 +5339,7 @@ async def run_browser_bot(
 
                     await asyncio.sleep(20)
 
-            _tracked_task(_audio_health_watchdog(), name="audio_health_watchdog")
+            audio_watchdog_task = _tracked_task(_audio_health_watchdog(), name="audio_health_watchdog")
 
             # Enable live captions so the mention monitor can read them
             if respond_on_mention:
@@ -5587,6 +5589,14 @@ async def run_browser_bot(
                 webrtc_stats_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await webrtc_stats_task
+            if late_routing_task is not None:
+                late_routing_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await late_routing_task
+            if audio_watchdog_task is not None:
+                audio_watchdog_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await audio_watchdog_task
 
             # Clear the runtime handle so /say and /chat stop accepting calls
             if on_runtime_ready is not None:
@@ -5662,6 +5672,14 @@ async def run_browser_bot(
                 monitor_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError, Exception):
                     await monitor_task
+            if late_routing_task is not None and not late_routing_task.done():
+                late_routing_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await late_routing_task
+            if audio_watchdog_task is not None and not audio_watchdog_task.done():
+                audio_watchdog_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await audio_watchdog_task
             # Stop the audio health loop.
             if health_task is not None:
                 health_stop_event.set()

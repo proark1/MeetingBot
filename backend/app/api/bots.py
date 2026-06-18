@@ -377,7 +377,7 @@ class ValidateMeetingUrlRequest(BaseModel):
 
 class ValidateMeetingUrlResponse(BaseModel):
     """Result of meeting URL validation."""
-    valid: bool = Field(description="Whether the URL is a supported meeting platform.")
+    valid: bool = Field(description="Whether the URL is a recognized meeting platform URL.")
     platform: Optional[str] = Field(default=None, description="Detected platform key (e.g. 'zoom', 'google_meet').")
     supported: bool = Field(default=False, description="Whether the platform supports real recording (not demo mode).")
     error_code: Optional[str] = Field(default=None, description="Machine-readable error code if the URL is invalid.")
@@ -443,7 +443,7 @@ async def validate_meeting_url(payload: ValidateMeetingUrlRequest, request: Requ
             message="URL does not match any supported meeting platform.",
         )
 
-    supported = platform in ("google_meet", "zoom", "microsoft_teams", "onepizza")
+    supported = bot_service.supports_real_recording(platform)
     return ValidateMeetingUrlResponse(
         valid=True,
         platform=platform,
@@ -471,7 +471,8 @@ async def create_bot(payload: BotCreate, request: Request):
     `X-Idempotency-Replayed: true`) instead of creating a duplicate.
 
     **Platforms supported for real recording:** Google Meet, Zoom, Microsoft Teams, onepizza.
-    Other platforms run in demo mode (AI-generated sample transcript).
+    Other recognized platforms require `allow_demo_mode=true` and run with an
+    AI-generated sample transcript instead of joining the meeting.
     """
     account_id: Optional[str] = getattr(request.state, "account_id", None)
 
@@ -519,6 +520,18 @@ async def create_bot(payload: BotCreate, request: Request):
             raise
         except Exception:
             logger.exception("Idempotency key lookup failed")
+
+    _normalized_url = bot_service.normalize_meeting_url(str(payload.meeting_url))
+    _detected_platform = bot_service.detect_platform(_normalized_url)
+    if not bot_service.supports_real_recording(_detected_platform) and not payload.allow_demo_mode:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Real recording is only available for Google Meet, Zoom, Microsoft Teams, "
+                "and onepizza.io. Set allow_demo_mode=true to create a demo transcript for "
+                "recognized unsupported platforms."
+            ),
+        )
 
     # Check credits and plan limits for per-user accounts (not superadmin / sandbox)
     is_sandbox = getattr(request.state, "sandbox", False)
@@ -578,12 +591,10 @@ async def create_bot(payload: BotCreate, request: Request):
         if _ka.webhook_url:
             await _block_ssrf(_ka.webhook_url)
 
-    _normalized_url = bot_service.normalize_meeting_url(str(payload.meeting_url))
-
     bot = BotSession(
         id=str(uuid.uuid4()),
         meeting_url=_normalized_url,
-        meeting_platform=bot_service.detect_platform(_normalized_url),
+        meeting_platform=_detected_platform,
         bot_name=payload.bot_name,
         status="scheduled" if is_scheduled else "ready",
         webhook_url=payload.webhook_url,

@@ -91,6 +91,9 @@ if bot.status == "completed":
     print(f"Transcript segments: {len(export.transcript or [])}")
 ```
 
+For recognized platforms without real browser recording support, pass
+`allow_demo_mode=True` to intentionally receive an AI-generated demo transcript.
+
 ### Asynchronous
 
 ```python

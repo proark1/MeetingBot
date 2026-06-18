@@ -2,7 +2,7 @@
 
 **Version 2.68.0** — A stateless meeting bot API service with multi-tenant billing, business account support, Google/Microsoft SSO, Python & JS SDKs, webhook retry/delivery logs, bot persona customization, video recording, Prometheus metrics, idempotency keys, cloud storage, email notifications, calendar auto-join, Slack/Notion integrations, GDPR compliance, an opt-in advanced-features layer (in-meeting @bot Q&A, live speaker analytics, smart decision detection, cross-meeting memory, host coaching, agentic delegation), **and a fully usable OpenAPI 3.1 surface with 100% example coverage — every one of the 117 public + 136 admin operations now has summary, description, tags, request example (where applicable), and a 2xx response example**.
 
-> **Last updated:** 2026-06-18 · **API version in Swagger UI:** 2.68.0 · **Build:** Meeting reliability hardening — persisted admission/exit diagnostics, stricter empty-transcript failure handling, coaching-alert webhook consistency, shutdown guard cleanup, JustHereToListen.io branding fixes, canary env docs, SDK model/build updates, and regenerated OpenAPI snapshots. Previous build (2.67.1): dependency refresh — FastAPI 0.136 / Pydantic 2.13 / uvicorn 0.49 / Playwright 1.60 and related updates. <!-- auto-updated on each release -->
+> **Last updated:** 2026-06-18 · **API version in Swagger UI:** 2.68.0 · **Build:** Meeting reliability hardening — persisted admission/exit diagnostics, explicit demo-mode opt-in, browser maintenance task cleanup, stricter empty-transcript failure handling, transcription retry guard, coaching-alert webhook consistency, shutdown guard cleanup, JustHereToListen.io branding fixes, canary env docs, SDK model/build updates, and regenerated OpenAPI snapshots. Previous build (2.67.1): dependency refresh — FastAPI 0.136 / Pydantic 2.13 / uvicorn 0.49 / Playwright 1.60 and related updates. <!-- auto-updated on each release -->
 
 
 Send bots into **Zoom**, **Google Meet**, **Microsoft Teams**, and **onepizza.io** meetings to record, transcribe, and analyse them with **Claude** (Anthropic) or **Gemini** (Google) AI.
@@ -263,6 +263,9 @@ curl -X POST http://localhost:8000/api/v1/bot \
   }'
 ```
 
+For recognized platforms without real recording support, `POST /api/v1/bot` returns
+HTTP 422 unless you explicitly send `"allow_demo_mode": true`.
+
 Response (HTTP 201):
 ```json
 {
@@ -304,7 +307,7 @@ Returned by `GET /api/v1/bot/{id}` and `POST /api/v1/bot`.
 |-------|------|-------------|
 | `id` | string | Unique bot UUID |
 | `meeting_url` | string | The meeting URL the bot joined |
-| `meeting_platform` | string | Detected platform: `google_meet`, `zoom`, `microsoft_teams`, `onepizza`, or `unknown` |
+| `meeting_platform` | string | Detected platform, such as `google_meet`, `zoom`, `microsoft_teams`, `onepizza`, `webex`, `whereby`, `bluejeans`, `gotomeeting`, or `unknown` |
 | `bot_name` | string | Display name shown in the meeting |
 | `status` | string | Current lifecycle status (see [Bot lifecycle](#bot-lifecycle)) |
 | `error_message` | string\|null | Human-readable error if `status` is `error` |
@@ -320,7 +323,7 @@ Returned by `GET /api/v1/bot/{id}` and `POST /api/v1/bot`.
 | `speaker_stats` | object[] | Array of `{name, talk_time_s, talk_pct, turns}` per speaker |
 | `recording_available` | boolean | `true` when audio can be downloaded via `GET /bot/{id}/recording` |
 | `analysis_mode` | string | `full` or `transcript_only` |
-| `is_demo_transcript` | boolean | `true` when the platform is unsupported and an AI-generated demo transcript was used |
+| `is_demo_transcript` | boolean | `true` when `allow_demo_mode=true` was used for an unsupported platform and an AI-generated demo transcript was returned |
 | `sub_user_id` | string\|null | Business account sub-user identifier (if set via `X-Sub-User` or `sub_user_id` body field) |
 | `metadata` | object | Arbitrary key-value pairs echoed from bot creation |
 | `ai_usage` | object\|null | AI token usage breakdown (see [AI usage object](#ai-usage-object)) |
@@ -1201,7 +1204,13 @@ Connect to `ws://host/api/v1/ws?token=<your-api-key-or-jwt>` for real-time event
 | Google Meet | ✅ | Full recording + transcription |
 | Zoom | ✅ | Full recording + transcription |
 | Microsoft Teams | ✅ | Full recording + transcription |
-| Others | Demo mode | AI-generated sample transcript; `is_demo_transcript: true` in response |
+| onepizza.io | ✅ | Full recording + transcription |
+| Webex, Whereby, BlueJeans, GoToMeeting | Demo opt-in only | Set `allow_demo_mode: true`; AI-generated sample transcript; `is_demo_transcript: true` in response |
+| Unknown hosts | Not supported by default | Use `/api/v1/bot/validate-meeting-url` before creation; demo mode requires explicit opt-in |
+
+Run the synthetic canary (`scripts/canary.py` or `CANARY_ENABLED=true`) against
+persistent test meetings for every real bot platform before treating a deploy as
+meeting-join ready.
 
 ---
 

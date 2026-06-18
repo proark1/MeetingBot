@@ -21,6 +21,8 @@ def test_round_trip_preserves_core_and_datetimes():
         account_id="acct-1",
         transcript=[{"speaker": "A", "text": "hi", "timestamp": 1.0}],
         analysis={"summary": "s"},
+        transcription_failed=True,
+        transcription_failure_reason="Transcription returned no content",
         created_at=datetime(2026, 5, 1, 12, 0, tzinfo=timezone.utc),
         started_at=datetime(2026, 5, 1, 12, 1, tzinfo=timezone.utc),
     )
@@ -33,6 +35,8 @@ def test_round_trip_preserves_core_and_datetimes():
     assert restored.account_id == "acct-1"
     assert restored.transcript == bot.transcript
     assert restored.analysis == {"summary": "s"}
+    assert restored.transcription_failed is True
+    assert restored.transcription_failure_reason == "Transcription returned no content"
     assert restored.created_at == bot.created_at
     assert isinstance(restored.created_at, datetime)
     assert restored.started_at == bot.started_at

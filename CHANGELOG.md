@@ -22,11 +22,20 @@ diagnostics, coaching alerts, SDKs, and canary setup.
 - **Canary environment docs** — `.env.example` and README now document
   `CANARY_*` settings for persistent Meet, Zoom, Teams, and onepizza.io test
   meetings.
+- **Explicit demo-mode opt-in** — `BotCreate.allow_demo_mode` lets callers
+  intentionally request an AI-generated demo transcript for recognized platforms
+  without real browser recording support.
 
 ### Fixed
 - **Empty real-meeting transcripts now fail loudly** — if transcription returns
   no content after a real recorded meeting, the bot enters `error` with recorder
   diagnostics instead of silently finishing as `done`.
+- **No duplicate transcription call after no-content failure** — cleanup analysis
+  now preserves the recorded transcription failure reason instead of retrying the
+  same provider call during error handling.
+- **Per-bot browser maintenance task cleanup** — late PulseAudio/WebRTC routing
+  sync and silence-watchdog tasks are now cancelled when the meeting ends instead
+  of relying on closed-page side effects.
 - **Coaching alert gating** — dominant-speaker alerts now require
   `enable_coaching=true`, matching the rest of the coaching feature contract.
 - **Shutdown with queued reservations** — graceful shutdown now ignores `None`
@@ -39,6 +48,9 @@ diagnostics, coaching alerts, SDKs, and canary setup.
   quickstart examples, API docs, and SDK package descriptions now use the
   product name while preserving compatibility identifiers such as SDK class
   names and webhook headers.
+- **Unsupported real recording requests now fail fast** — `POST /api/v1/bot`
+  returns HTTP 422 for recognized unsupported platforms unless
+  `allow_demo_mode=true` is provided.
 - **OpenAPI snapshots regenerated** for version `2.68.0`.
 
 ## [2.67.1] - 2026-06-07

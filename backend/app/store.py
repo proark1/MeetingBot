@@ -107,6 +107,8 @@ class BotSession:
 
     # ── Transcription provider ─────────────────────────────────────────────────
     transcription_provider: str = "gemini"  # "gemini" | "whisper"
+    transcription_failed: bool = False
+    transcription_failure_reason: Optional[str] = None
 
     # ── Real-time intelligence ─────────────────────────────────────────────────
     translation_language: Optional[str] = None  # BCP-47 (e.g. "es", "fr") for live translation
@@ -573,6 +575,8 @@ class Store:
                     "followup_email": bot.followup_email,
                     "workspace_id": bot.workspace_id,
                     "transcription_provider": bot.transcription_provider,
+                    "transcription_failed": bot.transcription_failed,
+                    "transcription_failure_reason": bot.transcription_failure_reason,
                     "translation_language": bot.translation_language,
                     "pii_redaction": bot.pii_redaction,
                     "pii_detected": bot.pii_detected,
@@ -978,6 +982,8 @@ async def load_persisted_bots() -> int:
                     followup_email=d.get("followup_email"),
                     workspace_id=d.get("workspace_id"),
                     transcription_provider=d.get("transcription_provider", "gemini"),
+                    transcription_failed=d.get("transcription_failed", False),
+                    transcription_failure_reason=d.get("transcription_failure_reason"),
                     translation_language=d.get("translation_language"),
                     pii_redaction=d.get("pii_redaction", False),
                     pii_detected=d.get("pii_detected", False),

@@ -106,6 +106,9 @@ async function main() {
 main().catch(console.error);
 ```
 
+For recognized platforms without real browser recording support, set
+`allow_demo_mode: true` to intentionally receive an AI-generated demo transcript.
+
 ### JavaScript (CommonJS)
 
 ```js

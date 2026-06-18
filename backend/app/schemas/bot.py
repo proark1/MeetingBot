@@ -172,10 +172,22 @@ class BotCreate(BaseModel):
                 "vocabulary": ["JustHereToListen", "JustHereToListen.io", "OKR"],
                 "sub_user_id": "user_42",
             },
+            {
+                "meeting_url": "https://whereby.com/acme-demo-room",
+                "bot_name": "JustHereToListen.io Demo",
+                "allow_demo_mode": True,
+            },
         ],
     }}
 
     meeting_url: AnyHttpUrl = Field(description="Full URL of the Zoom, Google Meet, Teams, or onepizza.io meeting.")
+    allow_demo_mode: bool = Field(
+        default=False,
+        description=(
+            "When true, allow unsupported meeting platforms to run in demo mode with an "
+            "AI-generated sample transcript. Leave false for real recording requests."
+        ),
+    )
     bot_name: str = Field(default="JustHereToListen.io", max_length=100, description="Display name shown in the meeting.")
 
     # Where to deliver results when the bot finishes

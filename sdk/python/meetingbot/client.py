@@ -204,6 +204,7 @@ class MeetingBotClient:
         tts_provider: Optional[str] = None,
         start_muted: Optional[bool] = None,
         live_transcription: Optional[bool] = None,
+        allow_demo_mode: bool = False,
         sub_user_id: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
         record_video: bool = False,
@@ -226,6 +227,7 @@ class MeetingBotClient:
         :param tts_provider: Text-to-speech provider to use.
         :param start_muted: Whether the bot should join muted.
         :param live_transcription: Enable live transcription.
+        :param allow_demo_mode: Allow unsupported platforms to return a demo transcript.
         :param sub_user_id: Sub-user identifier for multi-tenant usage.
         :param metadata: Arbitrary key-value metadata.
         :param record_video: Whether to record video (default: False).
@@ -235,6 +237,7 @@ class MeetingBotClient:
         body: Dict[str, Any] = {
             "meeting_url": meeting_url,
             "bot_name": bot_name,
+            "allow_demo_mode": allow_demo_mode,
             "record_video": record_video,
         }
         if bot_avatar_url is not None:

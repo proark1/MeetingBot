@@ -257,6 +257,11 @@ _PLATFORM_NETLOC: dict[str, set[str]] = {
 _REAL_PLATFORMS = {"google_meet", "zoom", "microsoft_teams", "onepizza"}
 
 
+def supports_real_recording(platform: str) -> bool:
+    """Return True when the platform has a browser join/recording implementation."""
+    return platform in _REAL_PLATFORMS
+
+
 # Query params stripped from meeting URLs before passing to the browser.
 # These are personalization params injected by integrators that can cause
 # unexpected behavior (e.g. auto-filling display-name fields).
@@ -621,8 +626,15 @@ async def _do_analysis_inner(bot: BotSession, audio_path: str, use_real_bot: boo
     # ── transcript ─────────────────────────────────────────────────────────
     if not bot.transcript:
         transcript: list = []
+        prior_transcription_failure = bool(getattr(bot, "transcription_failed", False))
 
-        if use_real_bot and os.path.exists(audio_path) and os.path.getsize(audio_path) > 0:
+        if prior_transcription_failure:
+            logger.warning(
+                "Bot %s: skipping transcription retry during analysis cleanup; previous failure: %s",
+                bot.id,
+                getattr(bot, "transcription_failure_reason", None) or "unknown",
+            )
+        elif use_real_bot and os.path.exists(audio_path) and os.path.getsize(audio_path) > 0:
             logger.info("Bot %s: transcribing partial audio (%d bytes)", bot.id, os.path.getsize(audio_path))
             transcript = await _transcribe_audio_for_bot(bot, audio_path)
 
@@ -630,16 +642,22 @@ async def _do_analysis_inner(bot: BotSession, audio_path: str, use_real_bot: boo
             # Re-fetch so diagnostic fields populated after we snapshotted `bot` are visible.
             _fresh = await store.get_bot(bot.id) or bot
             diag = _build_transcription_diag(_fresh, audio_path)
+            failure_reason = getattr(_fresh, "transcription_failure_reason", None)
+            if not failure_reason:
+                failure_reason = f"No audio was captured or transcription returned no content. diag={diag}"
             logger.warning(
                 "Bot %s: no usable audio captured — transcript will be empty. diag=%s",
                 bot.id, diag,
             )
-            current = bot.error_message or ""
-            await store.update_bot(
-                bot.id,
-                transcript=[],
-                error_message=current + f" No audio was captured or transcription returned no content. diag={diag}",
-            )
+            updates = {"transcript": []}
+            if not prior_transcription_failure:
+                current = bot.error_message or ""
+                updates.update(
+                    error_message=current + f" {failure_reason}",
+                    transcription_failed=True,
+                    transcription_failure_reason=failure_reason,
+                )
+            await store.update_bot(bot.id, **updates)
         else:
             # ── Consent processing ────────────────────────────────────────
             if bot.consent_enabled:
@@ -677,7 +695,12 @@ async def _do_analysis_inner(bot: BotSession, audio_path: str, use_real_bot: boo
                 except Exception as exc:
                     logger.warning("Bot %s: post-meeting translation failed: %s", bot.id, exc)
 
-            await store.update_bot(bot.id, transcript=transcript)
+            await store.update_bot(
+                bot.id,
+                transcript=transcript,
+                transcription_failed=False,
+                transcription_failure_reason=None,
+            )
             bot.transcript = transcript
 
         await webhook_service.dispatch_event(
@@ -1487,6 +1510,8 @@ async def run_bot_lifecycle(bot_id: str) -> None:
                 await store.update_bot(
                     bot_id,
                     error_message=current + f" {message}",
+                    transcription_failed=True,
+                    transcription_failure_reason=message,
                 )
                 raise RuntimeError(message)
 
@@ -1518,7 +1543,13 @@ async def run_bot_lifecycle(bot_id: str) -> None:
                 seen_lower.add(key)
                 unique_names.append(name.strip())
 
-        await store.update_bot(bot_id, transcript=transcript, participants=sorted(unique_names))
+        await store.update_bot(
+            bot_id,
+            transcript=transcript,
+            participants=sorted(unique_names),
+            transcription_failed=False,
+            transcription_failure_reason=None,
+        )
         bot.transcript = transcript
         bot.participants = sorted(unique_names)
 
