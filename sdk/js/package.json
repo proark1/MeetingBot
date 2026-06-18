@@ -1,7 +1,7 @@
 {
   "name": "meetingbot-sdk",
   "version": "1.0.0",
-  "description": "JavaScript/TypeScript client for the MeetingBot API",
+  "description": "JavaScript/TypeScript client for the JustHereToListen.io API",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
@@ -34,6 +34,7 @@
   },
   "dependencies": {},
   "devDependencies": {
+    "@types/node": "^20.0.0",
     "typescript": "^5.0.0"
   }
 }

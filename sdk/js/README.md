@@ -143,7 +143,7 @@ main();
 // Create a bot
 const bot = await client.createBot({
   meeting_url: "https://zoom.us/j/...",
-  bot_name: "MeetingBot",              // optional, default "MeetingBot"
+  bot_name: "JustHereToListen.io",     // optional, default "JustHereToListen.io"
   bot_avatar_url: "https://...",       // optional
   webhook_url: "https://...",          // optional
   join_at: "2026-03-16T15:00:00Z",    // optional ISO 8601

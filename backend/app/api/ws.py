@@ -158,7 +158,8 @@ async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = None) 
     - `bot.live_transcript` — real-time transcript entries during the call
     - `bot.live_transcript_translated` — translated entries (when translation_language is set)
     - `bot.keyword_alert` — keyword/phrase detected in live transcript
-    - `bot.coaching_alert` — dominant speaker or other coaching signals
+    - `bot.coaching_tip` — host coaching tip
+    - `bot.coaching_alert` — dominant-speaker coaching alert
     - `bot.action_item` — live-extracted action items
 
     Events are scoped to the authenticated account's bots.

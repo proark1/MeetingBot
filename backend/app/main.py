@@ -571,9 +571,10 @@ async def lifespan(app: FastAPI):
 
     if _running_tasks:
         logger.info("Cancelling %d running bot task(s)…", len(_running_tasks))
-        for task in list(_running_tasks.values()):
+        running_bot_tasks = [task for task in _running_tasks.values() if task is not None]
+        for task in running_bot_tasks:
             task.cancel()
-        await asyncio.gather(*list(_running_tasks.values()), return_exceptions=True)
+        await asyncio.gather(*running_bot_tasks, return_exceptions=True)
 
     from app.services.background_tasks import cancel_all_tracked_tasks
     await cancel_all_tracked_tasks()
@@ -685,11 +686,11 @@ _PUBLIC_DESCRIPTION = (
     "## Webhooks (global, with retry & delivery logs)\n"
     "Register a global webhook with `POST /api/v1/webhook` to receive events for **all** bots. "
     "For per-bot webhooks, pass `webhook_url` when creating a bot instead.\n\n"
-    "**Events (20):** lifecycle — `bot.joining`, `bot.in_call`, `bot.call_ended`, "
+    "**Events (21):** lifecycle — `bot.joining`, `bot.in_call`, `bot.call_ended`, "
     "`bot.transcript_ready`, `bot.analysis_ready`, `bot.done`, `bot.error`, `bot.cancelled`; "
     "live — `bot.keyword_alert`, `bot.live_transcript`, `bot.live_transcript_translated`, "
     "`bot.live_chat_message`; advanced (opt-in) — `bot.decision_detected`, `bot.coaching_tip`, "
-    "`bot.speaker_analytics`, `bot.agentic_action`, `bot.recurring_intel_ready`; "
+    "`bot.coaching_alert`, `bot.speaker_analytics`, `bot.agentic_action`, `bot.recurring_intel_ready`; "
     "action-item reminders — `action_item.due_soon`, `action_item.overdue`; and `bot.test`. "
     "Use `events: [\"*\"]` to receive all (default).\n\n"
     "**Retry logic:** Failed deliveries are retried up to `WEBHOOK_MAX_ATTEMPTS` times "
@@ -929,11 +930,11 @@ app = FastAPI(
         "## Webhooks (global, with retry & delivery logs)\n"
         "Register a global webhook with `POST /api/v1/webhook` to receive events for **all** bots. "
         "For per-bot webhooks, pass `webhook_url` when creating a bot instead.\n\n"
-        "**Events (20):** lifecycle — `bot.joining`, `bot.in_call`, `bot.call_ended`, "
+        "**Events (21):** lifecycle — `bot.joining`, `bot.in_call`, `bot.call_ended`, "
         "`bot.transcript_ready`, `bot.analysis_ready`, `bot.done`, `bot.error`, `bot.cancelled`; "
         "live — `bot.keyword_alert`, `bot.live_transcript`, `bot.live_transcript_translated`, "
         "`bot.live_chat_message`; advanced (opt-in) — `bot.decision_detected`, `bot.coaching_tip`, "
-        "`bot.speaker_analytics`, `bot.agentic_action`, `bot.recurring_intel_ready`; "
+        "`bot.coaching_alert`, `bot.speaker_analytics`, `bot.agentic_action`, `bot.recurring_intel_ready`; "
         "action-item reminders — `action_item.due_soon`, `action_item.overdue`; and `bot.test`. "
         "Use `events: [\"*\"]` to receive all (default).\n\n"
         "**Retry logic:** Failed deliveries are retried up to `WEBHOOK_MAX_ATTEMPTS` times "
@@ -1888,9 +1889,9 @@ _QUICKSTART_HTML = """<!doctype html>
   }'</code></pre>
 
   <h3>Python</h3>
-  <pre><code>from meetingbot import MeetingBot
+  <pre><code>from meetingbot import MeetingBotClient
 
-mb = MeetingBot(api_key="sk_live_…")
+mb = MeetingBotClient(api_key="sk_live_…")
 bot = mb.create_bot(
     meeting_url="https://meet.google.com/abc-defg-hij",
     template="sales",
@@ -1899,9 +1900,9 @@ bot = mb.create_bot(
 print(bot.id, bot.status)</code></pre>
 
   <h3>JavaScript / TypeScript</h3>
-  <pre><code>import { MeetingBot } from "@meetingbot/sdk";
+  <pre><code>import { MeetingBotClient } from "meetingbot-sdk";
 
-const mb = new MeetingBot({ apiKey: "sk_live_…" });
+const mb = new MeetingBotClient({ apiKey: "sk_live_…" });
 const bot = await mb.createBot({
   meeting_url: "https://meet.google.com/abc-defg-hij",
   template: "sales",

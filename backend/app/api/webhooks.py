@@ -36,6 +36,7 @@ WEBHOOK_EVENTS: list[str] = [
     "bot.recurring_intel_ready",
     "bot.decision_detected",
     "bot.coaching_tip",
+    "bot.coaching_alert",
     "bot.speaker_analytics",
     "bot.agentic_action",
     "action_item.due_soon",

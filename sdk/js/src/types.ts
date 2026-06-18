@@ -1,5 +1,5 @@
 /**
- * TypeScript interfaces for all MeetingBot API types.
+ * TypeScript interfaces for all JustHereToListen.io API types.
  */
 
 // ---------------------------------------------------------------------------
@@ -11,7 +11,7 @@ export type AnalysisMode = "full" | "transcript_only";
 export interface CreateBotParams {
   /** The URL of the meeting to join. */
   meeting_url: string;
-  /** Display name for the bot. Default: "MeetingBot". */
+  /** Display name for the bot. Default: "JustHereToListen.io". */
   bot_name?: string;
   /** Optional URL for the bot's avatar image. */
   bot_avatar_url?: string;
@@ -69,6 +69,11 @@ export interface BotResponse {
   status?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
+  started_at?: string | null;
+  ended_at?: string | null;
+  duration_seconds?: number | null;
+  admitted?: boolean;
+  exit_reason?: string | null;
   [key: string]: unknown;
 }
 
@@ -78,6 +83,12 @@ export interface BotSummary {
   bot_name: string;
   status?: string | null;
   created_at?: string | null;
+  updated_at?: string | null;
+  started_at?: string | null;
+  ended_at?: string | null;
+  duration_seconds?: number | null;
+  admitted?: boolean;
+  exit_reason?: string | null;
   sub_user_id?: string | null;
   metadata?: Record<string, unknown> | null;
   [key: string]: unknown;

@@ -1,4 +1,4 @@
-/* ── MeetingBot Dashboard ──────────────────────────────────────────────────── */
+/* ── JustHereToListen.io Dashboard ─────────────────────────────────────────── */
 
 const API = "/api/v1";
 
@@ -100,7 +100,7 @@ function closeModal(id) {
   document.getElementById(id).classList.add("hidden");
   // Clear form fields
   document.querySelectorAll(`#${id} .input`).forEach((inp) => {
-    if (inp.id === "new-bot-name") inp.value = "MeetingBot";
+    if (inp.id === "new-bot-name") inp.value = "JustHereToListen.io";
     else if (inp.type !== "checkbox") inp.value = "";
   });
   document.querySelectorAll(`#${id} .field-error`).forEach((e) => {
@@ -638,7 +638,7 @@ async function submitCreateBot() {
   const urlInput = document.getElementById("new-bot-url");
   const nameInput = document.getElementById("new-bot-name");
   const url = urlInput.value.trim();
-  const name = nameInput.value.trim() || "MeetingBot";
+  const name = nameInput.value.trim() || "JustHereToListen.io";
 
   // Client-side validation
   if (!url) {
@@ -1240,7 +1240,7 @@ function exportJson(bot) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `meetingbot-${bot.id.slice(0, 8)}.json`;
+  a.download = `justheretolisten-${bot.id.slice(0, 8)}.json`;
   a.click();
   URL.revokeObjectURL(url);
   showToast("Exported as JSON", "success");

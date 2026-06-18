@@ -1,7 +1,7 @@
 [project]
 name = "meetingbot-sdk"
 version = "1.0.0"
-description = "Python client for the MeetingBot API"
+description = "Python client for the JustHereToListen.io API"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }

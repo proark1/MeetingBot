@@ -933,6 +933,8 @@ def _build_done_payload(bot: BotSession) -> dict:
         "chapters":         bot.chapters,
         "speaker_stats":    bot.speaker_stats,
         "duration_seconds": bot.duration_seconds,
+        "admitted":         getattr(bot, "admitted", False),
+        "exit_reason":      getattr(bot, "exit_reason", None),
         "recording_available": bot.recording_available,
         "is_demo_transcript": bot.is_demo_transcript,
         "health_score":     bot.health_score,
@@ -1101,7 +1103,7 @@ async def run_bot_lifecycle(bot_id: str) -> None:
             async def on_admitted() -> None:
                 nonlocal admitted
                 admitted = True
-                await _set_status(bot, "in_call", started_at=_now())
+                await _set_status(bot, "in_call", started_at=_now(), admitted=True)
                 logger.info("Bot %s is now in_call", bot_id)
 
             _live_buffer: list = []
@@ -1249,7 +1251,7 @@ async def run_bot_lifecycle(bot_id: str) -> None:
                 _live_speaker_seconds[speaker] = _live_speaker_seconds.get(speaker, 0.0) + duration
 
                 total_window = sum(_live_speaker_seconds.values())
-                if total_window >= 60:
+                if getattr(bot, "enable_coaching", False) and total_window >= 60:
                     for spkr, secs in _live_speaker_seconds.items():
                         pct = secs / total_window
                         if pct > 0.70:
@@ -1332,7 +1334,7 @@ async def run_bot_lifecycle(bot_id: str) -> None:
                     _live_buffer.clear()
                     # Create a fresh leave event — asyncio.Event is not reusable once set
                     _leave_event = asyncio.Event()
-                    await store.update_bot(bot_id, leave_event=_leave_event)
+                    await store.update_bot(bot_id, leave_event=_leave_event, admitted=False, exit_reason=None)
 
                 async def on_runtime_ready(runtime: Optional[dict]) -> None:
                     """Store/clear the live-interaction runtime handle on the BotSession.
@@ -1372,6 +1374,11 @@ async def run_bot_lifecycle(bot_id: str) -> None:
                     on_runtime_ready=on_runtime_ready,
                     seen_chat_ids=bot.seen_chat_ids,
                     bot_id=bot.id,
+                )
+                await store.update_bot(
+                    bot_id,
+                    admitted=bool(bot_result.get("admitted") or admitted),
+                    exit_reason=bot_result.get("exit_reason"),
                 )
 
                 if bot_result["success"]:
@@ -1472,14 +1479,16 @@ async def run_bot_lifecycle(bot_id: str) -> None:
             if not transcript:
                 _fresh = await store.get_bot(bot_id) or bot
                 diag = _build_transcription_diag(_fresh, audio_path)
+                message = f"Transcription returned no content. diag={diag}"
                 logger.warning(
                     "Bot %s: Gemini returned empty transcript. diag=%s", bot_id, diag,
                 )
                 current = bot.error_message or ""
                 await store.update_bot(
                     bot_id,
-                    error_message=current + f" Transcription returned no content. diag={diag}",
+                    error_message=current + f" {message}",
                 )
+                raise RuntimeError(message)
 
         else:
             # ── Unsupported platform — demo mode ──────────────────────────
@@ -1588,7 +1597,11 @@ async def run_bot_lifecycle(bot_id: str) -> None:
             except Exception:
                 logger.exception("Bot %s: error during cancellation cleanup", bot_id)
             try:
-                await store.mark_terminal(bot_id, "cancelled", ended_at=bot.ended_at or _now())
+                await store.mark_terminal(
+                    bot_id, "cancelled",
+                    ended_at=bot.ended_at or _now(),
+                    exit_reason=getattr(bot, "exit_reason", None) or "cancelled",
+                )
                 record_bot_completed("cancelled")
                 bot = await store.get_bot(bot_id)
                 if not _credits_deducted:
@@ -1621,6 +1634,7 @@ async def run_bot_lifecycle(bot_id: str) -> None:
                     bot_id, "error",
                     error_message=str(exc)[:2000],
                     ended_at=bot.ended_at if bot else _now(),
+                    exit_reason=getattr(bot, "exit_reason", None) or "error",
                 )
                 record_bot_completed("error")
                 bot = await store.get_bot(bot_id)

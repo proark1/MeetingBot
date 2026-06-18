@@ -60,6 +60,8 @@ class BotSession:
     recording_path: Optional[str] = None
     video_path: Optional[str] = None
     error_message: Optional[str] = None
+    admitted: bool = False
+    exit_reason: Optional[str] = None  # ended | max_duration | alone_timeout | leave_command | cancelled | error | None
 
     # Bot configuration
     analysis_mode: str = "full"
@@ -545,6 +547,8 @@ class Store:
                     "recording_path": bot.recording_path,
                     "video_path": bot.video_path,
                     "error_message": bot.error_message,
+                    "admitted": bot.admitted,
+                    "exit_reason": bot.exit_reason,
                     "analysis_mode": bot.analysis_mode,
                     "template": bot.template,
                     "prompt_override": bot.prompt_override,
@@ -948,6 +952,8 @@ async def load_persisted_bots() -> int:
                     recording_path=d.get("recording_path"),
                     video_path=d.get("video_path"),
                     error_message=d.get("error_message"),
+                    admitted=bool(d.get("admitted", False)),
+                    exit_reason=d.get("exit_reason"),
                     analysis_mode=d.get("analysis_mode", "full"),
                     template=d.get("template"),
                     prompt_override=d.get("prompt_override"),

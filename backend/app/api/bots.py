@@ -212,6 +212,8 @@ def _to_summary(bot: BotSession) -> BotSummary:
         started_at=bot.started_at,
         ended_at=bot.ended_at,
         duration_seconds=bot.duration_seconds,
+        admitted=getattr(bot, "admitted", False),
+        exit_reason=getattr(bot, "exit_reason", None),
         participants=bot.participants,
         recording_available=bot.recording_available,
         analysis_mode=bot.analysis_mode,
@@ -298,6 +300,8 @@ def _to_response(bot: BotSession) -> BotResponse:
         started_at=bot.started_at,
         ended_at=bot.ended_at,
         duration_seconds=bot.duration_seconds,
+        admitted=getattr(bot, "admitted", False),
+        exit_reason=getattr(bot, "exit_reason", None),
         participants=bot.participants,
         transcript=bot.transcript,
         analysis=analysis,
@@ -466,7 +470,7 @@ async def create_bot(payload: BotCreate, request: Request):
     A second call with the same key returns the original bot (with header
     `X-Idempotency-Replayed: true`) instead of creating a duplicate.
 
-    **Platforms supported for real recording:** Google Meet, Zoom, Microsoft Teams.
+    **Platforms supported for real recording:** Google Meet, Zoom, Microsoft Teams, onepizza.
     Other platforms run in demo mode (AI-generated sample transcript).
     """
     account_id: Optional[str] = getattr(request.state, "account_id", None)
@@ -961,6 +965,8 @@ async def get_bot(bot_id: str, request: Request):
         "meeting_platform": "google_meet",
         "meeting_url": "https://meet.google.com/abc-defg-hij",
         "error_message": None,
+        "admitted": True,
+        "exit_reason": "ended",
         "started_at": "2026-05-04T15:00:02Z",
         "ended_at": "2026-05-04T15:32:48Z",
         "ffmpeg_exit_code": 0,
@@ -1007,6 +1013,8 @@ async def get_bot_debug(bot_id: str, request: Request):
         "meeting_platform": bot.meeting_platform,
         "meeting_url": bot.meeting_url,
         "error_message": bot.error_message,
+        "admitted": getattr(bot, "admitted", False),
+        "exit_reason": getattr(bot, "exit_reason", None),
         "started_at": bot.started_at.isoformat() if bot.started_at else None,
         "ended_at": bot.ended_at.isoformat() if bot.ended_at else None,
         "ffmpeg_exit_code": getattr(bot, "ffmpeg_exit_code", None),

@@ -372,6 +372,7 @@ def test_new_webhook_events_registered():
     for evt in (
         "bot.decision_detected",
         "bot.coaching_tip",
+        "bot.coaching_alert",
         "bot.speaker_analytics",
         "bot.agentic_action",
     ):

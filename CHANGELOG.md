@@ -4,9 +4,42 @@ All notable changes to JustHereToListen.io are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.67.1 — **Last updated:** 2026-06-07
+> **Latest version:** 2.68.0 — **Last updated:** 2026-06-18
 
 ---
+
+## [2.68.0] - 2026-06-18
+
+Meeting reliability and API contract hardening for live bot joins, transcription
+diagnostics, coaching alerts, SDKs, and canary setup.
+
+### Added
+- **Admission and exit diagnostics** — bot responses, summaries, debug payloads,
+  terminal snapshots, and done webhooks now expose `admitted` and `exit_reason`
+  so canaries and customers can distinguish lobby failures from completed calls.
+- **`bot.coaching_alert` webhook event** — dominant-speaker coaching alerts are
+  now listed in the supported event contract and OpenAPI docs.
+- **Canary environment docs** — `.env.example` and README now document
+  `CANARY_*` settings for persistent Meet, Zoom, Teams, and onepizza.io test
+  meetings.
+
+### Fixed
+- **Empty real-meeting transcripts now fail loudly** — if transcription returns
+  no content after a real recorded meeting, the bot enters `error` with recorder
+  diagnostics instead of silently finishing as `done`.
+- **Coaching alert gating** — dominant-speaker alerts now require
+  `enable_coaching=true`, matching the rest of the coaching feature contract.
+- **Shutdown with queued reservations** — graceful shutdown now ignores `None`
+  queue reservations before cancelling tasks.
+- **SDK build drift** — the TypeScript SDK now includes the missing response
+  imports and Node/browser type configuration required for `npm run build`.
+
+### Changed
+- **JustHereToListen.io branding consistency** — default bot display names,
+  quickstart examples, API docs, and SDK package descriptions now use the
+  product name while preserving compatibility identifiers such as SDK class
+  names and webhook headers.
+- **OpenAPI snapshots regenerated** for version `2.68.0`.
 
 ## [2.67.1] - 2026-06-07
 

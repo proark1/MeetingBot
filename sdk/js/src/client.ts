@@ -1,5 +1,5 @@
 /**
- * MeetingBot API client implementation.
+ * JustHereToListen.io API client implementation.
  *
  * Node.js 18+ includes a native `fetch`. For older Node versions install a
  * polyfill such as `node-fetch` and assign it to `globalThis.fetch` before
@@ -73,6 +73,8 @@ import type {
   SearchMeetingsParams,
   SearchResponse,
   ShareResponse,
+  SubscribeParams,
+  SubscribeResponse,
   TemplateListResponse,
   TranscriptResponse,
   UpdateAccountTypeParams,
@@ -83,6 +85,8 @@ import type {
   UpdateRetentionPolicyParams,
   UpdateWebhookParams,
   UpdateWorkspaceParams,
+  TrendsResponse,
+  UsageResponse,
   WebhookDeliveryListResponse,
   WebhookEventsResponse,
   WebhookListResponse,
@@ -146,7 +150,7 @@ async function throwForStatus(response: Response): Promise<void> {
 // ---------------------------------------------------------------------------
 
 /**
- * JavaScript/TypeScript client for the MeetingBot API.
+ * JavaScript/TypeScript client for the JustHereToListen.io API.
  *
  * @example
  * ```ts
@@ -288,7 +292,7 @@ export class MeetingBotClient {
       (body as Record<string, unknown>)["idempotency_key"] = idempotency_key;
     }
     return this.request<BotResponse>("POST", "/api/v1/bot", {
-      body: { bot_name: "MeetingBot", record_video: false, ...body },
+      body: { bot_name: "JustHereToListen.io", record_video: false, ...body },
       extraHeaders,
     });
   }
@@ -721,7 +725,7 @@ export class MeetingBotClient {
    */
   async searchMeetings(params: SearchMeetingsParams): Promise<SearchResponse> {
     return this.request<SearchResponse>("GET", "/api/v1/search", {
-      params: params as Record<string, string | number | undefined>,
+      params: params as unknown as Record<string, string | number | boolean | undefined>,
     });
   }
 

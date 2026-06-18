@@ -169,7 +169,7 @@ class BotCreate(BaseModel):
                 "join_at": "2026-05-04T15:00:00Z",
                 "analysis_mode": "full",
                 "template": "standup",
-                "vocabulary": ["JustHereToListen", "MeetingBot", "OKR"],
+                "vocabulary": ["JustHereToListen", "JustHereToListen.io", "OKR"],
                 "sub_user_id": "user_42",
             },
         ],
@@ -607,6 +607,14 @@ class BotResponse(BaseModel):
     started_at: Optional[datetime] = None
     ended_at: Optional[datetime] = None
     duration_seconds: Optional[float] = Field(default=None, description="Meeting duration in seconds.")
+    admitted: bool = Field(
+        default=False,
+        description="True once the bot was admitted into the live meeting room.",
+    )
+    exit_reason: Optional[str] = Field(
+        default=None,
+        description="Why the live meeting session ended: `ended`, `max_duration`, `alone_timeout`, `leave_command`, `cancelled`, or `error`.",
+    )
 
     participants: list[str] = []
     transcript: list[dict[str, Any]] = Field(
@@ -698,6 +706,8 @@ class BotResponse(BaseModel):
         "started_at": "2026-05-04T15:00:02Z",
         "ended_at": "2026-05-04T15:32:48Z",
         "duration_seconds": 1966.0,
+        "admitted": True,
+        "exit_reason": "ended",
         "participants": ["Alice", "Bob", "Acme Notes Bot"],
         "transcript": [
             {"speaker": "Alice", "text": "Welcome everyone.", "timestamp": 0.4, "source": "voice"},
@@ -765,6 +775,8 @@ class BotSummary(BaseModel):
     started_at: Optional[datetime] = None
     ended_at: Optional[datetime] = None
     duration_seconds: Optional[float] = None
+    admitted: bool = False
+    exit_reason: Optional[str] = None
     participants: list[str] = []
     recording_available: bool = False
     analysis_mode: str = "full"
@@ -787,6 +799,8 @@ class BotSummary(BaseModel):
         "started_at": "2026-05-04T15:00:02Z",
         "ended_at": "2026-05-04T15:32:48Z",
         "duration_seconds": 1966.0,
+        "admitted": True,
+        "exit_reason": "ended",
         "participants": ["Alice", "Bob", "Acme Notes Bot"],
         "recording_available": True,
         "analysis_mode": "full",

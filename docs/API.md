@@ -150,7 +150,7 @@ X-MeetingBot-Timestamp: 1730000000
 
 Verify in any language by computing HMAC-SHA256 over `f"{timestamp}.{raw_body}"` with your `secret` and comparing (constant-time) against the hex after the `sha256=` prefix. Reject deliveries older than 5 minutes (replay protection). The official SDKs ship a ready-made verifier — `verify_webhook` (Python) / `verifyWebhook` (TypeScript); see [SDKs.md](./SDKs.md#webhook-signature-verification).
 
-Available events (20 total):
+Available events (21 total):
 
 ```
 # Lifecycle
@@ -163,8 +163,8 @@ bot.keyword_alert         bot.live_transcript       bot.live_transcript_translat
 bot.live_chat_message
 
 # Advanced features (require the matching per-bot opt-in flag)
-bot.decision_detected     bot.coaching_tip          bot.speaker_analytics
-bot.agentic_action        bot.recurring_intel_ready
+bot.decision_detected     bot.coaching_tip          bot.coaching_alert
+bot.speaker_analytics     bot.agentic_action        bot.recurring_intel_ready
 
 # Action-item reminders (fired by the background scheduler)
 action_item.due_soon      action_item.overdue
@@ -173,7 +173,7 @@ action_item.due_soon      action_item.overdue
 bot.test
 ```
 
-The five advanced events only fire when the bot was created with the
+The six advanced events only fire when the bot was created with the
 corresponding opt-in (`enable_decision_detection`, `enable_coaching`,
 `enable_speaker_analytics`, agentic instructions, or a recurring meeting key).
 The two `action_item.*` events come from the reminder scheduler, not a live bot,

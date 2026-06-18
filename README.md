@@ -1,8 +1,8 @@
 # JustHereToListen.io API
 
-**Version 2.67.1** — A stateless meeting bot API service with multi-tenant billing, business account support, Google/Microsoft SSO, Python & JS SDKs, webhook retry/delivery logs, bot persona customization, video recording, Prometheus metrics, idempotency keys, cloud storage, email notifications, calendar auto-join, Slack/Notion integrations, GDPR compliance, an opt-in advanced-features layer (in-meeting @bot Q&A, live speaker analytics, smart decision detection, cross-meeting memory, host coaching, agentic delegation), **and a fully usable OpenAPI 3.1 surface with 100% example coverage — every one of the 117 public + 136 admin operations now has summary, description, tags, request example (where applicable), and a 2xx response example**.
+**Version 2.68.0** — A stateless meeting bot API service with multi-tenant billing, business account support, Google/Microsoft SSO, Python & JS SDKs, webhook retry/delivery logs, bot persona customization, video recording, Prometheus metrics, idempotency keys, cloud storage, email notifications, calendar auto-join, Slack/Notion integrations, GDPR compliance, an opt-in advanced-features layer (in-meeting @bot Q&A, live speaker analytics, smart decision detection, cross-meeting memory, host coaching, agentic delegation), **and a fully usable OpenAPI 3.1 surface with 100% example coverage — every one of the 117 public + 136 admin operations now has summary, description, tags, request example (where applicable), and a 2xx response example**.
 
-> **Last updated:** 2026-06-07 · **API version in Swagger UI:** 2.67.1 · **Build:** Dependency refresh — FastAPI 0.136 / Pydantic 2.13 / uvicorn 0.49 / Playwright 1.60 and 11 other bumps, with `browser_bot._apply_stealth` ported to the playwright-stealth 2.x `Stealth()` API (1.x silently disabled stealth) and OpenAPI snapshots regenerated. Previous build (2.67.0): go-live hardening — encryption-at-rest for transcripts/analysis + SSO tokens, default-on consent, live PII redaction, `/privacy`+`/terms`, graceful-shutdown fix, production guardrails, retention S3 purge. <!-- auto-updated on each release -->
+> **Last updated:** 2026-06-18 · **API version in Swagger UI:** 2.68.0 · **Build:** Meeting reliability hardening — persisted admission/exit diagnostics, stricter empty-transcript failure handling, coaching-alert webhook consistency, shutdown guard cleanup, JustHereToListen.io branding fixes, canary env docs, SDK model/build updates, and regenerated OpenAPI snapshots. Previous build (2.67.1): dependency refresh — FastAPI 0.136 / Pydantic 2.13 / uvicorn 0.49 / Playwright 1.60 and related updates. <!-- auto-updated on each release -->
 
 
 Send bots into **Zoom**, **Google Meet**, **Microsoft Teams**, and **onepizza.io** meetings to record, transcribe, and analyse them with **Claude** (Anthropic) or **Gemini** (Google) AI.
@@ -126,13 +126,13 @@ Response:
 
 > **`key_name`** (optional, default `"Default"`) — a label for the first API key created with your account.
 >
-> **`account_type`** (optional, default `"personal"`) — set to `"business"` if you are a platform integrating MeetingBot for multiple end-users. See [Business accounts](#business-accounts-multi-user-data-isolation) below.
+> **`account_type`** (optional, default `"personal"`) — set to `"business"` if you are a platform integrating JustHereToListen.io for multiple end-users. See [Business accounts](#business-accounts-multi-user-data-isolation) below.
 
 **API key format:** All keys are prefixed with `sk_live_` followed by 40 URL-safe characters (e.g. `sk_live_AbCdEfGh...`). The full key is shown **once** at creation — copy it immediately. Subsequent `GET /api/v1/auth/keys` calls return only a preview of the first 16 characters.
 
 ### Business accounts (multi-user data isolation)
 
-Business accounts are designed for **platforms that integrate MeetingBot on behalf of multiple end-users**. A single business account uses one API key and one credit balance, but can completely isolate data between end-users so they never see each other's bots, transcripts, or analyses.
+Business accounts are designed for **platforms that integrate JustHereToListen.io on behalf of multiple end-users**. A single business account uses one API key and one credit balance, but can completely isolate data between end-users so they never see each other's bots, transcripts, or analyses.
 
 #### How it works
 
@@ -426,6 +426,7 @@ The `ai_usage` field on every bot response provides full cost and token tracking
 | `bot.live_chat_message` | New chat message captured from the meeting chat panel. `data.entry = {speaker, text, timestamp, source: "chat", message_id}` |
 | `bot.decision_detected` | A decision/commitment moment was detected (requires `enable_decision_detection`). `data.decision = {text, speaker, timestamp, kind}` |
 | `bot.coaching_tip` | Real-time host coaching tip (requires `enable_coaching` with `deliver_via: "webhook"`/`"both"`). `data.tip = {type, message, ts}` |
+| `bot.coaching_alert` | Dominant-speaker coaching alert when `enable_coaching` is true and one speaker exceeds 70% of recent talk time. `data = {type, speaker, pct}` |
 | `bot.speaker_analytics` | Live speaker-analytics snapshot (requires `enable_speaker_analytics`). `data.snapshot = {per-speaker talk time, sentiment, filler counts}` |
 | `bot.agentic_action` | An agentic instruction fired and was delivered (requires agentic instructions). `data = {action, delivered}` |
 | `bot.recurring_intel_ready` | Recurring-meeting intelligence finished |
@@ -725,7 +726,7 @@ Full set of fields accepted by `POST /api/v1/bot`:
 ```json
 {
   "meeting_url": "https://meet.google.com/...",   // required; blocks private/loopback IPs
-  "bot_name": "MeetingBot",                        // display name in meeting (max 100 chars)
+  "bot_name": "JustHereToListen.io",               // display name in meeting (max 100 chars)
   "webhook_url": "https://your-app.com/hook",      // where to POST results when done
   "join_at": "2026-03-15T14:00:00Z",               // schedule for future join (ISO-8601)
   "analysis_mode": "full",                         // "full" | "transcript_only"
@@ -943,6 +944,10 @@ Pass `Idempotency-Key: <unique-string>` in the `POST /api/v1/bot` request. Repla
 | `BOT_ALONE_TIMEOUT` | `300` | Seconds the bot will remain alone in a meeting before auto-leaving (5 minutes) |
 | `BOT_JOIN_MAX_RETRIES` | `2` | Number of join retry attempts on failure |
 | `TRANSCRIPTION_LANGUAGE` | — | BCP-47 language code for transcription (e.g. `en`, `es`, `fr`). Leave empty for auto-detection |
+| `CANARY_ENABLED` | `false` | Run scheduled synthetic join → audio → transcript canaries against configured test meetings |
+| `CANARY_INTERVAL_S` | `1800` | Seconds between canary sweeps when enabled |
+| `CANARY_BASE_URL` | — | API base URL used by the external canary runner |
+| `CANARY_MEET_URL` / `CANARY_ZOOM_URL` / `CANARY_TEAMS_URL` / `CANARY_ONEPIZZA_URL` | — | Persistent test meeting URLs for each platform canary |
 
 ### Network
 
@@ -1000,7 +1005,7 @@ Per-bot override: set `transcription_provider: "whisper"` in `POST /api/v1/bot`.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `SAML_ENABLED` | `false` | Set `true` to enable SAML 2.0 identity provider support |
-| `SAML_SP_BASE_URL` | — | Base URL of this service (e.g. `https://app.meetingbot.io`) — used in SP metadata and ACS URL |
+| `SAML_SP_BASE_URL` | — | Base URL of this service (e.g. `https://app.justheretolisten.io`) — used in SP metadata and ACS URL |
 
 SAML endpoints (when `SAML_ENABLED=true`):
 - `POST /api/v1/auth/saml/configs` — **(admin only)** register an IdP config for an org slug

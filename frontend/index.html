@@ -190,7 +190,7 @@
   <section>
     <h2>Quick start</h2>
     <p class="code-title">Create a bot</p>
-    <div class="code-block">curl -X POST https://your-meetingbot.com/api/v1/bot \
+    <div class="code-block">curl -X POST https://api.justheretolisten.io/api/v1/bot \
   -H "Content-Type: application/json" \
   -d '{
     "meeting_url":  "https://meet.google.com/abc-defg-hij",
@@ -200,7 +200,7 @@
   }'</div>
 
     <br /><p class="code-title">Poll for status</p>
-    <div class="code-block">curl https://your-meetingbot.com/api/v1/bot/{id}</div>
+    <div class="code-block">curl https://api.justheretolisten.io/api/v1/bot/{id}</div>
 
     <br /><p class="code-title">Webhook payload (POST to your webhook_url when done)</p>
     <div class="code-block">{

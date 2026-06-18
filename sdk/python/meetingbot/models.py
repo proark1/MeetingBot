@@ -1,5 +1,5 @@
 """
-Pydantic response models for the MeetingBot API.
+Pydantic response models for the JustHereToListen.io API.
 """
 from __future__ import annotations
 
@@ -38,6 +38,11 @@ class BotResponse(BaseModel):
     status: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    started_at: Optional[datetime] = None
+    ended_at: Optional[datetime] = None
+    duration_seconds: Optional[float] = None
+    admitted: bool = False
+    exit_reason: Optional[str] = None
 
     model_config = {"extra": "allow"}
 
@@ -50,6 +55,12 @@ class BotSummary(BaseModel):
     bot_name: str = "JustHereToListen.io"
     status: Optional[str] = None
     created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    started_at: Optional[datetime] = None
+    ended_at: Optional[datetime] = None
+    duration_seconds: Optional[float] = None
+    admitted: bool = False
+    exit_reason: Optional[str] = None
     sub_user_id: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
 
