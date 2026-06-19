@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 MCP_SERVER_MANIFEST = {
     "schema_version": "v1",
-    "name": "meetingbot",
+    "name": "justheretolisten.io",
     "description": (
         "Access meeting transcripts, analysis, action items, and search across "
         "all meetings recorded by JustHereToListen.io."
@@ -133,6 +133,7 @@ MCP_SERVER_MANIFEST = {
                     "bot_name": {"type": "string", "description": "Display name for the bot.", "default": "JustHereToListen.io"},
                     "template": {"type": "string", "description": "Analysis template (default, sales, standup, 1on1, retro, etc.)."},
                     "respond_on_mention": {"type": "boolean", "description": "Whether the bot replies when its name is mentioned.", "default": True},
+                    "allow_demo_mode": {"type": "boolean", "description": "Allow a demo transcript for recognized platforms that cannot be recorded live.", "default": False},
                 },
                 "required": ["meeting_url"],
             },
@@ -454,7 +455,7 @@ async def _tool_get_meeting_brief(args: dict, account_id: Optional[str]) -> dict
     return result
 
 
-async def _tool_create_bot(args: dict, account_id: Optional[str]) -> dict:
+async def _tool_create_bot(args: dict, account_id: Optional[str], is_sandbox: bool = False) -> dict:
     from app.schemas.bot import BotCreate
     from app.services import bot_service
     from app.store import store
@@ -469,6 +470,7 @@ async def _tool_create_bot(args: dict, account_id: Optional[str]) -> dict:
             bot_name=args.get("bot_name", "JustHereToListen.io"),
             template=args.get("template"),
             respond_on_mention=args.get("respond_on_mention", True),
+            allow_demo_mode=bool(args.get("allow_demo_mode", False)),
         )
     except Exception as exc:
         return {"error": f"Invalid arguments: {exc}"}
@@ -478,10 +480,29 @@ async def _tool_create_bot(args: dict, account_id: Optional[str]) -> dict:
     from app.deps import SUPERADMIN_ACCOUNT_ID
 
     bot_id = str(uuid.uuid4())
-    platform = bot_service.detect_platform(str(payload.meeting_url))
+    normalized_url = bot_service.normalize_meeting_url(str(payload.meeting_url))
+    platform = bot_service.detect_platform(normalized_url)
+    if not bot_service.supports_real_recording(platform) and not payload.allow_demo_mode:
+        return {
+            "error": (
+                "Real recording is only available for Google Meet, Zoom, Microsoft Teams, "
+                "and onepizza.io. Set allow_demo_mode=true to create a demo transcript for "
+                "recognized unsupported platforms."
+            )
+        }
+
+    billable_account = bool(account_id and account_id != SUPERADMIN_ACCOUNT_ID and not is_sandbox)
+    if billable_account:
+        from app.db import AsyncSessionLocal
+        from app.services.credit_service import check_credits, check_plan_limit
+
+        async with AsyncSessionLocal() as db:
+            await check_credits(account_id, db)
+        await check_plan_limit(account_id)
+
     bot = BotSession(
         id=bot_id,
-        meeting_url=str(payload.meeting_url),
+        meeting_url=normalized_url,
         meeting_platform=platform,
         bot_name=payload.bot_name,
         status="ready",
@@ -490,6 +511,39 @@ async def _tool_create_bot(args: dict, account_id: Optional[str]) -> dict:
         respond_on_mention=payload.respond_on_mention,
     )
     await store.create_bot(bot)
+
+    if billable_account:
+        from app.services.credit_service import increment_monthly_usage
+
+        try:
+            await increment_monthly_usage(account_id)
+        except Exception:
+            await store.delete_bot(bot_id)
+            raise
+
+    if is_sandbox:
+        from app.services import intelligence_service
+
+        demo_transcript = await intelligence_service.generate_demo_transcript(bot.meeting_url)
+        now = datetime.now(timezone.utc)
+        await store.update_bot(
+            bot.id,
+            status="done",
+            transcript=demo_transcript,
+            is_demo_transcript=True,
+            started_at=now,
+            ended_at=now,
+            duration_seconds=0,
+            participants=[e.get("speaker") for e in demo_transcript if e.get("speaker")],
+        )
+        started = await store.get_bot(bot_id)
+        return {
+            "bot_id": bot_id,
+            "status": started.status if started else "done",
+            "platform": platform,
+            "sandbox": True,
+        }
+
     # Route through the shared slot-admission path so MCP-created bots respect
     # MAX_CONCURRENT_BOTS and are tracked exactly like HTTP-created bots. The
     # previous direct create_task(run_bot_lifecycle(bot_id, use_real_bot)) call
@@ -753,13 +807,21 @@ _TOOL_HANDLERS = {
 }
 
 
-async def execute_tool(tool_name: str, args: dict, account_id: Optional[str]) -> dict:
+async def execute_tool(tool_name: str, args: dict, account_id: Optional[str], is_sandbox: bool = False) -> dict:
     """Execute an MCP tool by name and return the result."""
     handler = _TOOL_HANDLERS.get(tool_name)
     if handler is None:
         return {"error": f"Unknown tool: {tool_name!r}"}
     try:
+        if tool_name == "create_bot":
+            return await handler(args, account_id, is_sandbox)
         return await handler(args, account_id)
     except Exception as exc:
+        try:
+            from fastapi import HTTPException
+            if isinstance(exc, HTTPException):
+                return {"error": str(exc.detail)}
+        except Exception:
+            pass
         logger.error("MCP tool %s error: %s", tool_name, exc)
         return {"error": f"Tool execution failed: {exc}"}

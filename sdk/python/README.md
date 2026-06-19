@@ -17,8 +17,8 @@ pip install meetingbot-sdk
 Or install from source:
 
 ```bash
-git clone https://github.com/proark1/MeetingBot
-cd MeetingBot/sdk/python
+git clone <repo>
+cd <repo>/sdk/python
 pip install .
 ```
 
@@ -211,7 +211,7 @@ with httpx.stream("GET", f"{base}/api/v1/bot/{bot_id}/stream", headers=headers) 
 Both POST endpoints return 202 immediately and run the actual work in the
 background behind a per-bot `asyncio.Lock`. Pass `"interrupt": true` to `/say`
 to cancel any in-flight speech and jump ahead. Requires the bot to be
-`in_call`. See the [API Reference](https://github.com/proark1/meetingbot#bots) for full schemas.
+`in_call`. See the API reference for full schemas.
 
 ### Webhooks
 

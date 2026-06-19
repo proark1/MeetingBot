@@ -67,6 +67,9 @@ redis==8.0.0
 # SSO — Google & Microsoft OAuth2 (httpx is pinned once near the top of this file)
 authlib==1.7.2
 
+# SSO — SAML 2.0 enterprise identity provider support
+python3-saml==1.16.0
+
 # USDC/ERC-20 crypto payments — installed separately (see requirements-crypto.txt)
 # web3 and eth-account are large packages; they are installed in a dedicated Docker
 # layer so a build timeout does not break the rest of the application.

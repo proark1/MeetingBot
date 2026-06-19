@@ -24,7 +24,7 @@ from app.schemas.bot import (
     SayRequest, SayResponse, ChatRequest, ChatResponse,
 )
 from app.services import bot_service, intelligence_service
-from app.store import store, BotSession, _now
+from app.store import store, BotSession, _now, decode_list_cursor, encode_list_cursor
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/bot", tags=["Bots"])
@@ -279,6 +279,89 @@ async def _check_workspace_role(bot: BotSession, account_id: Optional[str], min_
         raise HTTPException(status_code=503, detail="Authorization check temporarily unavailable")
 
 
+async def _workspace_ids_for_account(account_id: Optional[str]) -> set[str]:
+    if not account_id or account_id == SUPERADMIN_ACCOUNT_ID:
+        return set()
+
+    try:
+        from app.db import AsyncSessionLocal
+        from app.models.account import Workspace, WorkspaceMember
+
+        async with AsyncSessionLocal() as db:
+            member_rows = await db.execute(
+                select(WorkspaceMember.workspace_id).where(
+                    WorkspaceMember.account_id == account_id,
+                )
+            )
+            owner_rows = await db.execute(
+                select(Workspace.id).where(
+                    Workspace.owner_account_id == account_id,
+                    Workspace.is_active == True,  # noqa: E712
+                )
+            )
+        return {str(v) for v in member_rows.scalars().all()} | {str(v) for v in owner_rows.scalars().all()}
+    except SQLAlchemyError as exc:
+        logger.error("Workspace visibility lookup failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Workspace visibility check temporarily unavailable")
+
+
+async def _list_visible_bots(
+    *,
+    account_id: Optional[str],
+    sub_user_id: Optional[str],
+    status: Optional[str],
+    limit: int,
+    offset: int = 0,
+    cursor: Optional[str] = None,
+) -> tuple[list[BotSession], int, Optional[str]]:
+    """List bots visible to a caller, including workspace-shared bots."""
+    if account_id == SUPERADMIN_ACCOUNT_ID:
+        return await store.list_bots(
+            status=status, limit=limit, offset=offset, sub_user_id=sub_user_id,
+            after_cursor=cursor,
+        )
+    if account_id is None:
+        return await store.list_bots(
+            status=status, limit=limit, offset=offset, sub_user_id=sub_user_id,
+            account_id_is_null=True, after_cursor=cursor,
+        )
+
+    workspace_ids = await _workspace_ids_for_account(account_id)
+    all_bots, _, _ = await store.list_bots(status=status, limit=50000)
+    visible: dict[str, BotSession] = {}
+    for bot in all_bots:
+        if sub_user_id is not None and bot.sub_user_id != sub_user_id:
+            continue
+        if bot.account_id == account_id or (bot.workspace_id and bot.workspace_id in workspace_ids):
+            visible[bot.id] = bot
+
+    bots = sorted(visible.values(), key=lambda b: (-b.created_at.timestamp(), b.id))
+    total = len(bots)
+
+    if cursor:
+        try:
+            cursor_ts, cursor_id = decode_list_cursor(cursor)
+            start = 0
+            for i, bot in enumerate(bots):
+                if bot.created_at == cursor_ts and bot.id == cursor_id:
+                    start = i + 1
+                    break
+                if bot.created_at < cursor_ts:
+                    start = i
+                    break
+        except ValueError:
+            start = 0
+    else:
+        start = offset
+
+    page = bots[start:start + limit]
+    next_cursor = None
+    if start + limit < total and page:
+        last = page[-1]
+        next_cursor = encode_list_cursor(last.created_at, last.id)
+    return page, total, next_cursor
+
+
 def _to_response(bot: BotSession) -> BotResponse:
     try:
         analysis = MeetingAnalysis(**bot.analysis) if bot.analysis else None
@@ -350,7 +433,13 @@ async def _get_or_404(
         pass  # superadmin sees all
     elif account_id:
         if bot.account_id != account_id:
-            raise HTTPException(status_code=404, detail=f"Bot {bot_id!r} not found")
+            if bot.workspace_id:
+                try:
+                    await _check_workspace_role(bot, account_id, "viewer")
+                except HTTPException:
+                    raise HTTPException(status_code=404, detail=f"Bot {bot_id!r} not found")
+            else:
+                raise HTTPException(status_code=404, detail=f"Bot {bot_id!r} not found")
     else:
         # Unauthenticated dev-mode caller — only legacy unowned bots are visible.
         # Prevents tenant data exposure if ALLOW_UNAUTHENTICATED_DEV_MODE is left
@@ -793,10 +882,11 @@ async def get_stats(request: Request):
     """
     account_id: Optional[str] = getattr(request.state, "account_id", None)
     sub_user_id = _get_sub_user_from_request(request)
-    filter_account = account_id if (account_id and account_id != SUPERADMIN_ACCOUNT_ID) else None
-    all_bots, _, _ = await store.list_bots(
-        limit=10000, account_id=filter_account, sub_user_id=sub_user_id,
-        account_id_is_null=(account_id is None),
+    all_bots, _, _ = await _list_visible_bots(
+        account_id=account_id,
+        sub_user_id=sub_user_id,
+        status=None,
+        limit=10000,
     )
     counts: dict[str, int] = {}
     for b in all_bots:
@@ -835,23 +925,16 @@ async def list_bots(
         )
     account_id: Optional[str] = getattr(request.state, "account_id", None)
     sub_user_id = _get_sub_user_from_request(request)
-    # Superadmin sees all bots; per-user accounts see only their own;
-    # unauthenticated dev-mode callers see only legacy anonymous bots.
-    filter_account = (
-        account_id if (account_id and account_id != SUPERADMIN_ACCOUNT_ID) else None
+    # Superadmin sees all bots; per-user accounts see owned and workspace-shared
+    # bots; unauthenticated dev-mode callers see only legacy anonymous bots.
+    bots, total, next_cursor = await _list_visible_bots(
+        account_id=account_id,
+        sub_user_id=sub_user_id,
+        status=status,
+        limit=limit,
+        offset=offset,
+        cursor=cursor,
     )
-    if account_id is None:
-        bots, total, next_cursor = await store.list_bots(
-            status=status, limit=limit, offset=offset,
-            account_id_is_null=True, sub_user_id=sub_user_id,
-            after_cursor=cursor,
-        )
-    else:
-        bots, total, next_cursor = await store.list_bots(
-            status=status, limit=limit, offset=offset,
-            account_id=filter_account, sub_user_id=sub_user_id,
-            after_cursor=cursor,
-        )
     return BotListResponse(
         results=[_to_summary(b) for b in bots],
         total=total,

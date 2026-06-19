@@ -715,7 +715,7 @@ export interface ListAllDeliveriesParams {
 // ---------------------------------------------------------------------------
 
 export interface MeetingBotClientConfig {
-  /** Your MeetingBot API key (Bearer token). */
+  /** Your JustHereToListen.io API key (Bearer token). */
   apiKey: string;
   /** Base URL for the API. Defaults to https://api.yourserver.com */
   baseUrl?: string;

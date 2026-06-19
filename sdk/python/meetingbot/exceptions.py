@@ -1,11 +1,11 @@
 """
-Exceptions raised by the MeetingBot SDK.
+Exceptions raised by the JustHereToListen.io SDK.
 """
 from __future__ import annotations
 
 
 class MeetingBotError(Exception):
-    """Base exception for all MeetingBot SDK errors."""
+    """Base exception for all JustHereToListen.io SDK errors."""
 
     def __init__(self, message: str, status_code: int | None = None, detail: str | None = None):
         super().__init__(message)

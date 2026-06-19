@@ -98,7 +98,7 @@ def _raise_for_status(response: httpx.Response) -> None:
 
 class MeetingBotClient:
     """
-    Synchronous client for the MeetingBot API.
+    Synchronous client for the JustHereToListen.io API.
 
     Usage::
 

@@ -1,8 +1,8 @@
 """
-MeetingBot Python SDK
-=====================
+JustHereToListen.io Python SDK
+==============================
 
-Provides both synchronous and asynchronous clients for the MeetingBot API.
+Provides both synchronous and asynchronous clients for the JustHereToListen.io API.
 
 Quickstart (sync)::
 

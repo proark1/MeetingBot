@@ -1,5 +1,5 @@
 /**
- * Typed error classes for the MeetingBot SDK.
+ * Typed error classes for the JustHereToListen.io SDK.
  */
 
 export class MeetingBotError extends Error {

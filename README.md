@@ -1,8 +1,8 @@
 # JustHereToListen.io API
 
-**Version 2.68.0** — A stateless meeting bot API service with multi-tenant billing, business account support, Google/Microsoft SSO, Python & JS SDKs, webhook retry/delivery logs, bot persona customization, video recording, Prometheus metrics, idempotency keys, cloud storage, email notifications, calendar auto-join, Slack/Notion integrations, GDPR compliance, an opt-in advanced-features layer (in-meeting @bot Q&A, live speaker analytics, smart decision detection, cross-meeting memory, host coaching, agentic delegation), **and a fully usable OpenAPI 3.1 surface with 100% example coverage — every one of the 117 public + 136 admin operations now has summary, description, tags, request example (where applicable), and a 2xx response example**.
+**Version 2.68.1** — A stateless meeting bot API service with multi-tenant billing, business account support, Google/Microsoft SSO, Python & JS SDKs, webhook retry/delivery logs, bot persona customization, video recording, Prometheus metrics, idempotency keys, cloud storage, email notifications, calendar auto-join, Slack/Notion integrations, GDPR compliance, an opt-in advanced-features layer (in-meeting @bot Q&A, live speaker analytics, smart decision detection, cross-meeting memory, host coaching, agentic delegation), **and a fully usable OpenAPI 3.1 surface with 100% example coverage — every one of the 117 public + 136 admin operations now has summary, description, tags, request example (where applicable), and a 2xx response example**.
 
-> **Last updated:** 2026-06-18 · **API version in Swagger UI:** 2.68.0 · **Build:** Meeting reliability hardening — persisted admission/exit diagnostics, explicit demo-mode opt-in, browser maintenance task cleanup, stricter empty-transcript failure handling, transcription retry guard, coaching-alert webhook consistency, shutdown guard cleanup, JustHereToListen.io branding fixes, canary env docs, SDK model/build updates, and regenerated OpenAPI snapshots. Previous build (2.67.1): dependency refresh — FastAPI 0.136 / Pydantic 2.13 / uvicorn 0.49 / Playwright 1.60 and related updates. <!-- auto-updated on each release -->
+> **Last updated:** 2026-06-19 · **API version in Swagger UI:** 2.68.1 · **Build:** Security and platform hardening — consistent hashed API keys, guarded MCP bot creation, working SAML admin setup, workspace-shared bot access, calendar join-time scheduling, wallet ownership proof by default, Sentry release tagging, JS lockfile, and docs/SDK drift cleanup. Previous build (2.68.0): meeting reliability hardening and regenerated OpenAPI snapshots. <!-- auto-updated on each release -->
 
 
 Send bots into **Zoom**, **Google Meet**, **Microsoft Teams**, and **onepizza.io** meetings to record, transcribe, and analyse them with **Claude** (Anthropic) or **Gemini** (Google) AI.
@@ -89,7 +89,7 @@ Send bots into **Zoom**, **Google Meet**, **Microsoft Teams**, and **onepizza.io
 
 ```bash
 git clone <repo>
-cd MeetingBot
+cd <repo>
 
 # Set your API keys
 export ANTHROPIC_API_KEY=sk-ant-...   # or GEMINI_API_KEY
@@ -221,11 +221,14 @@ curl http://localhost:8000/api/v1/billing/balance \
 ### 3. Register your USDC wallet (for crypto top-ups)
 
 ```bash
-# Register the Ethereum wallet you'll send USDC from
+# Fetch the ownership message, sign it with the wallet, then register the wallet.
+curl "http://localhost:8000/api/v1/auth/wallet/challenge?wallet_address=0xYourEthereumWalletAddress..." \
+  -H "Authorization: Bearer sk_live_..."
+
 curl -X PUT http://localhost:8000/api/v1/auth/wallet \
   -H "Authorization: Bearer sk_live_..." \
   -H "Content-Type: application/json" \
-  -d '{"wallet_address": "0xYourEthereumWalletAddress..."}'
+  -d '{"wallet_address": "0xYourEthereumWalletAddress...", "signature": "0xSignatureFromYourWallet"}'
 ```
 
 ### 4. Top up credits
@@ -516,7 +519,8 @@ Full payload posted to `webhook_url` when a bot finishes.
 | `GET` | `/api/v1/auth/keys` | List active API keys. Returns array of `{id, name, key_preview, is_active, created_at, last_used_at}` |
 | `DELETE` | `/api/v1/auth/keys/{id}` | Revoke an API key. Returns HTTP 204 |
 | `GET` | `/api/v1/auth/wallet` | Get your registered Ethereum wallet address. Returns `{wallet_address, message}` |
-| `PUT` | `/api/v1/auth/wallet` | Set or update your Ethereum wallet address. Body: `{wallet_address}`. Each address can only be linked to one account (returns 409 if already taken). Validates `0x` + 40 hex chars format |
+| `GET` | `/api/v1/auth/wallet/challenge` | Get the ownership message to sign before linking a USDC wallet |
+| `PUT` | `/api/v1/auth/wallet` | Set or update your Ethereum wallet address. Body: `{wallet_address, signature}`. Each address can only be linked to one account (returns 409 if already taken). Validates `0x` + 40 hex chars format and signature ownership proof |
 | `GET` | `/api/v1/auth/notify` | Get email notification preferences. Returns `{notify_on_done, notify_email}` |
 | `PUT` | `/api/v1/auth/notify` | Update notification preferences. Body: `{notify_on_done, notify_email?}` |
 | `GET` | `/api/v1/auth/plan` | Get subscription plan and monthly usage. Returns `{plan, monthly_bots_used, monthly_limit, monthly_reset_at}` |
@@ -860,6 +864,7 @@ SSO endpoints:
 | `CRYPTO_HD_SEED` | — | 64-char hex seed for HD wallet derivation (generate once, keep secret). Not required if the admin sets a platform wallet via `/admin` |
 | `CRYPTO_RPC_URL` | — | Infura/Alchemy Ethereum RPC endpoint for USDC monitoring. Can also be set via `PUT /api/v1/admin/rpc-url` (no restart required) |
 | `USDC_CONTRACT` | `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48` | USDC ERC-20 contract address (Ethereum mainnet) |
+| `REQUIRE_WALLET_SIGNATURE` | `true` | Require users to prove wallet ownership with the `/auth/wallet/challenge` message before linking a USDC wallet |
 
 > **USDC wallet configuration:** The platform USDC collection wallet can be set by an admin via `PUT /api/v1/admin/wallet` or the `/admin` web UI. When set, this wallet address is returned to all users at `GET /api/v1/billing/usdc/address`, overriding the HD-derived per-user addresses. This means you can accept USDC without configuring `CRYPTO_HD_SEED` — just set the wallet via the admin panel.
 
@@ -1013,7 +1018,7 @@ Per-bot override: set `transcription_provider: "whisper"` in `POST /api/v1/bot`.
 SAML endpoints (when `SAML_ENABLED=true`):
 - `POST /api/v1/auth/saml/configs` — **(admin only)** register an IdP config for an org slug
 - `GET /api/v1/auth/saml/{org_slug}/authorize` — redirect users to the IdP login
-- `POST /api/v1/auth/saml/{org_slug}/acs` — SAML assertion consumer service (ACS) callback
+- `POST /api/v1/auth/saml/{org_slug}/callback` — SAML assertion consumer service (ACS) callback
 
 ### MCP server
 
@@ -1164,7 +1169,7 @@ Pass `webhook_url` when creating a bot. A single POST with full results is sent 
 
 Register via `POST /api/v1/webhook` to receive all events for all bots. Webhook registrations are persisted to the database and survive server restarts.
 
-**Events:** `bot.joining`, `bot.in_call`, `bot.call_ended`, `bot.transcript_ready`, `bot.analysis_ready`, `bot.done`, `bot.error`, `bot.cancelled`
+**Events:** `bot.joining`, `bot.in_call`, `bot.call_ended`, `bot.transcript_ready`, `bot.analysis_ready`, `bot.done`, `bot.error`, `bot.cancelled`, `bot.keyword_alert`, `bot.live_transcript`, `bot.live_transcript_translated`, `bot.live_chat_message`, `bot.recurring_intel_ready`, `bot.decision_detected`, `bot.coaching_tip`, `bot.coaching_alert`, `bot.speaker_analytics`, `bot.agentic_action`, `action_item.due_soon`, `action_item.overdue`, `bot.test`
 
 **Registration:**
 ```bash

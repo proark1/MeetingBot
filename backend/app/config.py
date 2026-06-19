@@ -107,7 +107,7 @@ class Settings(BaseSettings):
     # publicly-known address and stealing their deposits. Recommended ON for any
     # deployment where USDC top-ups are enabled; a signed request is always
     # verified regardless of this flag.
-    REQUIRE_WALLET_SIGNATURE: bool = False
+    REQUIRE_WALLET_SIGNATURE: bool = True
 
     # Billing
     CREDIT_MARKUP: float = 3.0        # multiply raw AI cost by this factor when deducting credits (unused when flat fee is enabled)

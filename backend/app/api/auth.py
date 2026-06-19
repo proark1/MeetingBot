@@ -67,6 +67,17 @@ def api_key_storage_fields(plaintext: str) -> dict:
     }
 
 
+def api_key_preview(api_key: ApiKey) -> str:
+    """Return a display-safe API key preview for hashed and legacy rows."""
+    prefix = getattr(api_key, "key_prefix", None)
+    if prefix:
+        return prefix + "..."
+    legacy = getattr(api_key, "key", None)
+    if legacy:
+        return legacy[:16] + "..."
+    return "unavailable"
+
+
 # ── Schemas ───────────────────────────────────────────────────────────────────
 
 class RegisterRequest(BaseModel):
@@ -501,7 +512,7 @@ async def list_api_keys(
         ApiKeyResponse(
             id=k.id,
             name=k.name,
-            key_preview=k.key[:16] + "...",
+            key_preview=api_key_preview(k),
             mode=getattr(k, "mode", "live"),
             is_active=k.is_active,
             created_at=k.created_at,
@@ -631,7 +642,7 @@ async def list_test_keys(
         ApiKeyResponse(
             id=k.id,
             name=k.name,
-            key_preview=k.key[:16] + "...",
+            key_preview=api_key_preview(k),
             mode="test",
             is_active=k.is_active,
             created_at=k.created_at,

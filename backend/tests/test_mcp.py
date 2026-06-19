@@ -66,6 +66,21 @@ async def test_mcp_create_bot_starts_lifecycle(auth_client: httpx.AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_mcp_create_bot_rejects_unsupported_real_recording(auth_client: httpx.AsyncClient):
+    resp = await auth_client.post(
+        "/api/v1/mcp/call",
+        json={
+            "tool": "create_bot",
+            "arguments": {
+                "meeting_url": "https://whereby.com/team-room",
+            },
+        },
+    )
+    assert resp.status_code == 400
+    assert "allow_demo_mode=true" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
 async def test_mcp_unknown_tool_returns_error(auth_client: httpx.AsyncClient):
     """An unknown tool name returns a 400 with a structured detail, not a 500."""
     resp = await auth_client.post(

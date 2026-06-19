@@ -1937,10 +1937,11 @@ console.log(bot.id, bot.status);</code></pre>
     <li><code>bot.transcript_ready</code> · <code>bot.analysis_ready</code> · <code>bot.done</code></li>
     <li><code>bot.error</code> · <code>bot.cancelled</code> · <code>bot.keyword_alert</code></li>
     <li><code>bot.live_transcript</code> · <code>bot.live_transcript_translated</code> · <code>bot.live_chat_message</code></li>
-    <li><code>bot.recurring_intel_ready</code> · <code>bot.test</code></li>
+    <li><code>bot.recurring_intel_ready</code> · <code>bot.decision_detected</code> · <code>bot.coaching_tip</code> · <code>bot.coaching_alert</code></li>
+    <li><code>bot.speaker_analytics</code> · <code>bot.agentic_action</code> · <code>action_item.due_soon</code> · <code>action_item.overdue</code> · <code>bot.test</code></li>
   </ul>
 
-  <p><small>Need help? Open an issue at <a href="https://github.com/proark1/meetingbot">github.com/proark1/meetingbot</a>.</small></p>
+  <p><small>Need help? Contact JustHereToListen.io support.</small></p>
 </main>
 </body>
 </html>

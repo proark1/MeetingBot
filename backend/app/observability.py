@@ -9,8 +9,20 @@ FastAPI, asyncio, and logging without any further wiring.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+
+def _app_version() -> str:
+    for candidate in (
+        Path(__file__).resolve().parent.parent.parent / "VERSION",
+        Path(__file__).resolve().parent.parent / "VERSION",
+        Path("/app/VERSION"),
+    ):
+        if candidate.exists():
+            return candidate.read_text().strip()
+    return "dev"
 
 
 def init_sentry() -> bool:
@@ -35,7 +47,7 @@ def init_sentry() -> bool:
         sentry_sdk.init(
             dsn=dsn,
             environment=settings.ENVIRONMENT,
-            release=f"justheretolisten@{getattr(settings, 'APP_VERSION', '') or 'dev'}",
+            release=f"justheretolisten@{_app_version()}",
             traces_sample_rate=settings.SENTRY_TRACES_SAMPLE_RATE,
             profiles_sample_rate=settings.SENTRY_PROFILES_SAMPLE_RATE,
             # Capture WARNING+ as breadcrumbs and ERROR+ as events.

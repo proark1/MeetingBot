@@ -4,9 +4,41 @@ All notable changes to JustHereToListen.io are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.68.0 — **Last updated:** 2026-06-18
+> **Latest version:** 2.68.1 — **Last updated:** 2026-06-19
 
 ---
+
+## [2.68.1] - 2026-06-19
+
+Security, platform-access, and documentation hardening from a full UX/security/
+efficiency/feature review. No breaking API changes.
+
+### Security
+- **API keys are consistently hashed at rest** across JSON API, dashboard,
+  registration, and SSO paths. Key listing now uses the stored prefix preview
+  instead of assuming plaintext key rows.
+- **MCP bot creation now follows the guarded create path** for supported-platform
+  checks, credit and plan checks, quota reservation, and sandbox demo behavior.
+- **Wallet linking requires ownership proof by default** via the
+  `/auth/wallet/challenge` signature flow.
+
+### Fixed
+- **SAML admin configuration endpoints are reachable for real admins** by using
+  the shared admin dependency, and SAML runtime dependencies are now declared.
+- **Workspace-shared bots are visible to workspace members** in detail, list, and
+  stats endpoints while outsiders still receive 404.
+- **Calendar auto-join now respects `join_at`** instead of immediately queuing
+  every meeting found inside the lookahead window.
+- **Sentry release tags now use the project `VERSION` file** instead of a missing
+  settings attribute.
+
+### Changed
+- **SAML Docker support** now includes XML security runtime libraries required by
+  `python3-saml`.
+- **SDK and docs drift cleanup** updated wallet signature examples, SAML callback
+  paths, webhook event lists, JS lockfile/audit reproducibility, and
+  JustHereToListen.io-facing SDK prose while preserving compatibility names and
+  webhook headers.
 
 ## [2.68.0] - 2026-06-18
 

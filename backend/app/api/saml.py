@@ -18,12 +18,13 @@ import json
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
 from app.config import settings
 from app._limiter import limiter as _limiter
+from app.deps import require_admin
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth/saml", tags=["SSO — SAML"])
@@ -408,23 +409,8 @@ class SamlConfigResponse(BaseModel):
         "created_at": "2026-04-15T12:00:00Z",
     }]}}}},
 )
-async def list_saml_configs(request: Request):
+async def list_saml_configs(_admin_account_id: str = Depends(require_admin)):
     """List all SAML organisation configurations. Admin only."""
-    # Inline admin check (same logic as require_admin dependency)
-    account_id = getattr(request.state, "account_id", None)
-    if not account_id:
-        raise HTTPException(status_code=403, detail="Admin access required")
-    from app.db import AsyncSessionLocal
-    from app.models.account import Account
-    from sqlalchemy import select as _sel
-    from app.deps import SUPERADMIN_ACCOUNT_ID, _admin_emails
-    if account_id != SUPERADMIN_ACCOUNT_ID:
-        async with AsyncSessionLocal() as _db:
-            _res = await _db.execute(_sel(Account).where(Account.id == account_id))
-            _acc = _res.scalar_one_or_none()
-        if not _acc or (not _acc.is_admin and _acc.email.lower() not in _admin_emails()):
-            raise HTTPException(status_code=403, detail="Admin access required")
-
     from app.db import AsyncSessionLocal
     from app.models.account import SamlConfig
     from sqlalchemy import select
@@ -461,23 +447,11 @@ async def list_saml_configs(request: Request):
         "created_at": "2026-04-15T12:00:00Z",
     }}}}},
 )
-async def create_saml_config(payload: SamlConfigCreate, request: Request):
+async def create_saml_config(
+    payload: SamlConfigCreate,
+    _admin_account_id: str = Depends(require_admin),
+):
     """Register a new SAML organisation. Admin only."""
-    # Inline admin check (same logic as require_admin dependency)
-    account_id = getattr(request.state, "account_id", None)
-    if not account_id:
-        raise HTTPException(status_code=403, detail="Admin access required")
-    from app.db import AsyncSessionLocal
-    from app.models.account import Account
-    from sqlalchemy import select as _sel
-    from app.deps import SUPERADMIN_ACCOUNT_ID, _admin_emails
-    if account_id != SUPERADMIN_ACCOUNT_ID:
-        async with AsyncSessionLocal() as _db:
-            _res = await _db.execute(_sel(Account).where(Account.id == account_id))
-            _acc = _res.scalar_one_or_none()
-        if not _acc or (not _acc.is_admin and _acc.email.lower() not in _admin_emails()):
-            raise HTTPException(status_code=403, detail="Admin access required")
-
     if not _saml_enabled():
         raise HTTPException(status_code=501, detail="SAML SSO is not enabled (set SAML_ENABLED=true)")
 

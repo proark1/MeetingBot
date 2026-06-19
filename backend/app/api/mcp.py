@@ -83,9 +83,10 @@ async def call_mcp_tool(payload: McpToolCall, request: Request):
         raise HTTPException(status_code=501, detail="MCP server is not enabled (set MCP_ENABLED=true)")
 
     account_id: Optional[str] = getattr(request.state, "account_id", None)
+    is_sandbox = bool(getattr(request.state, "sandbox", False))
 
     from app.services.mcp_service import execute_tool
-    result = await execute_tool(payload.tool, payload.arguments, account_id)
+    result = await execute_tool(payload.tool, payload.arguments, account_id, is_sandbox=is_sandbox)
 
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])

@@ -357,8 +357,8 @@ try {
 ## Building from Source
 
 ```bash
-git clone https://github.com/proark1/MeetingBot
-cd MeetingBot/sdk/js
+git clone <repo>
+cd <repo>/sdk/js
 npm install
 npm run build
 # Compiled output is in ./dist/

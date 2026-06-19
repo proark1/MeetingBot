@@ -146,7 +146,7 @@ All templates return JSON matching `MeetingAnalysis` schema:
 
 ---
 
-## Webhook Events (20 total)
+## Webhook Events (21 total)
 
 Defined in `WEBHOOK_EVENTS` in `api/webhooks.py`. Signed with HMAC-SHA256.
 
@@ -155,7 +155,8 @@ bot.joining  bot.in_call  bot.call_ended  bot.transcript_ready  bot.analysis_rea
 bot.done  bot.error  bot.cancelled  bot.keyword_alert
 bot.live_transcript  bot.live_transcript_translated  bot.live_chat_message
 bot.recurring_intel_ready
-bot.decision_detected  bot.coaching_tip  bot.speaker_analytics  bot.agentic_action
+bot.decision_detected  bot.coaching_tip  bot.coaching_alert  bot.speaker_analytics
+bot.agentic_action
 action_item.due_soon  action_item.overdue  bot.test
 ```
 
@@ -164,8 +165,8 @@ action_item.due_soon  action_item.overdue  bot.test
 Both flow through `bot_service.on_live_entry` — voice goes WS+SSE only,
 chat additionally fans out via `webhook_service.dispatch_event`.
 
-The four advanced events (`bot.decision_detected`, `bot.coaching_tip`,
-`bot.speaker_analytics`, `bot.agentic_action`) are emitted from the per-entry
+The five advanced events (`bot.decision_detected`, `bot.coaching_tip`,
+`bot.coaching_alert`, `bot.speaker_analytics`, `bot.agentic_action`) are emitted from the per-entry
 handlers in `bot_service.py` and only fire when the matching opt-in flag is set
 (`enable_decision_detection`, `enable_coaching`, `enable_speaker_analytics`,
 agentic instructions). `bot.speaker_analytics` is WS+SSE only; the other three

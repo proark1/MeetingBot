@@ -47,4 +47,4 @@ The SDKs follow the API version. The current API version is in [`VERSION`](../VE
 - API docs (ReDoc): `https://api.justheretolisten.io/api/redoc`
 - Quickstart guide: `https://api.justheretolisten.io/api/quickstart`
 - Webhook playground: `https://api.justheretolisten.io/webhook-playground`
-- Issues / source: <https://github.com/proark1/MeetingBot>
+- Issues / source: your JustHereToListen.io source repository

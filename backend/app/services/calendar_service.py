@@ -210,7 +210,7 @@ async def _process_feed(feed, account_id: str) -> int:
             import uuid as _uuid
             from app.store import store, BotSession
             from app.services import bot_service as _bot_service
-            from app.api.bots import _bot_queue, _queue_event
+            from app.api.bots import _scheduled_timers, _start_or_queue_bot, _start_scheduled_bot
 
             meeting_url = event["meeting_url"]
             bot = BotSession(
@@ -224,8 +224,12 @@ async def _process_feed(feed, account_id: str) -> int:
                 metadata={"calendar_event": event["summary"], "calendar_feed_id": feed.id},
             )
             await store.create_bot(bot)
-            _bot_queue.append(bot.id)
-            _queue_event.set()
+            delay = max(0, (join_at - now).total_seconds())
+            if delay < 1:
+                await _start_or_queue_bot(bot.id)
+            else:
+                loop = asyncio.get_running_loop()
+                _scheduled_timers[bot.id] = loop.call_later(delay, _start_scheduled_bot, bot.id)
             _dispatched[cache_key] = _time.monotonic()
             dispatched += 1
             logger.info(

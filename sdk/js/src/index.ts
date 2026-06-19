@@ -1,5 +1,5 @@
 /**
- * MeetingBot JavaScript/TypeScript SDK
+ * JustHereToListen.io JavaScript/TypeScript SDK
  *
  * @example
  * ```ts

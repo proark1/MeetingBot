@@ -129,7 +129,7 @@ async def register_submit(
     account_type: str = Form(default="personal"),
     db: AsyncSession = Depends(get_db),
 ):
-    from app.api.auth import _hash_password, generate_api_key
+    from app.api.auth import _hash_password, generate_api_key, api_key_storage_fields
     import uuid
     from decimal import Decimal
 
@@ -167,8 +167,8 @@ async def register_submit(
     api_key = ApiKey(
         id=str(uuid.uuid4()),
         account_id=account.id,
-        key=api_key_value,
         name="Default",
+        **api_key_storage_fields(api_key_value),
     )
     db.add(api_key)
     await db.commit()
@@ -241,11 +241,12 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
         .where(ApiKey.account_id == account.id, ApiKey.is_active == True)  # noqa: E712
         .order_by(ApiKey.created_at.desc())
     )
+    from app.api.auth import api_key_preview
     api_keys = [
         {
             "id": k.id,
             "name": k.name,
-            "key_preview": k.key[:16] + "...",
+            "key_preview": api_key_preview(k),
             "last_used_at": k.last_used_at.strftime("%Y-%m-%d %H:%M") if k.last_used_at else None,
         }
         for k in keys_result.scalars().all()
@@ -552,15 +553,15 @@ async def create_key_ui(
         except Exception:
             pass
 
-    from app.api.auth import generate_api_key
+    from app.api.auth import generate_api_key, api_key_storage_fields
     import uuid
     key_value = generate_api_key(mode=mode)
     api_key = ApiKey(
         id=str(uuid.uuid4()),
         account_id=account.id,
-        key=key_value,
         name=key_name,
         mode=mode,
+        **api_key_storage_fields(key_value),
     )
     db.add(api_key)
     await db.commit()

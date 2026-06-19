@@ -31,6 +31,24 @@ class OAuthEmailNotVerifiedError(Exception):
     existing local account (prevents cross-provider account takeover)."""
 
 
+def _legacy_plaintext_key(api_key) -> str:
+    """Return a legacy plaintext key when one exists; hashed rows are one-shot."""
+    return getattr(api_key, "key", None) or ""
+
+
+async def _create_sso_api_key(session, account_id: str, name: str) -> str:
+    from app.api.auth import api_key_storage_fields, generate_api_key
+    from app.models.account import ApiKey
+
+    key_value = generate_api_key(mode="live")
+    session.add(ApiKey(
+        account_id=account_id,
+        name=name,
+        **api_key_storage_fields(key_value),
+    ))
+    return key_value
+
+
 def email_is_verified(provider: str, userinfo: dict) -> bool:
     """Whether the provider asserts this email address is verified.
 
@@ -247,7 +265,11 @@ async def upsert_oauth_account(
                 select(ApiKey).where(ApiKey.account_id == account_id, ApiKey.is_active == True)
             )
             key_row = result2.scalars().first()
-            return account_id, key_row.key if key_row else ""
+            api_key_value = _legacy_plaintext_key(key_row)
+            if not api_key_value:
+                api_key_value = await _create_sso_api_key(session, account_id, f"{provider.title()} SSO")
+                await session.commit()
+            return account_id, api_key_value
 
         # 2. No existing OAuth link — check if an account with this email already exists.
         # Email is matched case-insensitively so a user who registered as
@@ -282,14 +304,7 @@ async def upsert_oauth_account(
             await session.flush()  # get account.id
 
             # Issue a new API key (round-3 fix #6: also persist key_prefix + key_hash)
-            new_key_plaintext = f"sk_live_{''.join(secrets.token_urlsafe(30)[:40])}"
-            from app.api.auth import api_key_storage_fields as _api_key_fields
-            api_key = ApiKey(
-                account_id=account.id,
-                name="Default",
-                **_api_key_fields(new_key_plaintext),
-            )
-            session.add(api_key)
+            new_key_plaintext = await _create_sso_api_key(session, account.id, "Default")
 
         # 4. Create the OAuth link. Encrypt the SSO tokens at rest (a DB leak
         # otherwise exposes live Google/Microsoft credentials); readers must
@@ -313,6 +328,9 @@ async def upsert_oauth_account(
                 select(ApiKey).where(ApiKey.account_id == account.id, ApiKey.is_active == True)
             )
             key_row2 = result4.scalars().first()
-            new_key_plaintext = key_row2.key if key_row2 else ""
+            new_key_plaintext = _legacy_plaintext_key(key_row2)
+            if not new_key_plaintext:
+                new_key_plaintext = await _create_sso_api_key(session, account.id, f"{provider.title()} SSO")
+                await session.commit()
 
         return account.id, new_key_plaintext

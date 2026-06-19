@@ -1,5 +1,5 @@
 """
-Asynchronous MeetingBot API client.
+Asynchronous JustHereToListen.io API client.
 """
 from __future__ import annotations
 
@@ -98,7 +98,7 @@ def _raise_for_status(response: httpx.Response) -> None:
 
 class AsyncMeetingBotClient:
     """
-    Asynchronous client for the MeetingBot API.
+    Asynchronous client for the JustHereToListen.io API.
 
     Usage::
 

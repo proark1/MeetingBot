@@ -31,6 +31,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libx11-xcb1 \
     libxcb1 \
     libxext6 \
+    libxmlsec1 \
+    libxmlsec1-openssl \
     fonts-liberation \
     ca-certificates \
     curl \

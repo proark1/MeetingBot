@@ -83,6 +83,14 @@ async def test_wallet_link_requires_signature_when_enforced(auth_client, monkeyp
     assert "signature" in resp.json()["detail"].lower()
 
 
+@pytest.mark.asyncio
+async def test_wallet_link_requires_signature_by_default(auth_client: httpx.AsyncClient):
+    address = "0x1111111111111111111111111111111111111111"
+    resp = await auth_client.put("/api/v1/auth/wallet", json={"wallet_address": address})
+    assert resp.status_code == 400
+    assert "signature" in resp.json()["detail"].lower()
+
+
 # ── S2: API keys never persisted in plaintext ───────────────────────────────
 
 @pytest.mark.asyncio
@@ -100,3 +108,13 @@ async def test_api_keys_not_stored_in_plaintext(auth_client: httpx.AsyncClient):
         assert row.key is None, "plaintext key must not be persisted"
         assert row.key_hash and row.key_hash.startswith("h2:")
         assert row.key_prefix
+
+
+@pytest.mark.asyncio
+async def test_hashed_api_keys_list_with_prefix_preview(auth_client: httpx.AsyncClient):
+    resp = await auth_client.get("/api/v1/auth/keys")
+    assert resp.status_code == 200, resp.text
+    keys = resp.json()
+    assert keys
+    assert keys[0]["key_preview"].startswith("sk_live_")
+    assert keys[0]["key_preview"].endswith("...")
