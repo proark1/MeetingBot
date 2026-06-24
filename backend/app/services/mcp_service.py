@@ -15,6 +15,7 @@ Supported tools:
 """
 
 import logging
+import json
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -132,6 +133,7 @@ MCP_SERVER_MANIFEST = {
                     "meeting_url": {"type": "string", "description": "Full Zoom/Meet/Teams URL."},
                     "bot_name": {"type": "string", "description": "Display name for the bot.", "default": "JustHereToListen.io"},
                     "template": {"type": "string", "description": "Analysis template (default, sales, standup, 1on1, retro, etc.)."},
+                    "workspace_id": {"type": "string", "description": "Optional workspace ID; caller must have member role or higher."},
                     "respond_on_mention": {"type": "boolean", "description": "Whether the bot replies when its name is mentioned.", "default": True},
                     "allow_demo_mode": {"type": "boolean", "description": "Allow a demo transcript for recognized platforms that cannot be recorded live.", "default": False},
                 },
@@ -257,61 +259,23 @@ MCP_SERVER_MANIFEST = {
 }
 
 
-# ── Tool implementations ───────────────────────────────────────────────────────
+# ── Visibility helpers ────────────────────────────────────────────────────────
 
-async def _tool_list_meetings(args: dict, account_id: Optional[str]) -> dict:
-    from app.store import store
-    from app.deps import SUPERADMIN_ACCOUNT_ID
-
-    limit = min(max(int(args.get("limit", 10)), 1), 50)
-    status_filter = args.get("status")
-    filter_account = account_id if (account_id and account_id != SUPERADMIN_ACCOUNT_ID) else None
-
-    bots, total, _ = await store.list_bots(
-        limit=limit,
-        status=status_filter,
-        account_id=filter_account,
-    )
-
-    meetings = []
-    for bot in bots:
-        meetings.append({
-            "id": bot.id,
-            "meeting_url": bot.meeting_url,
-            "platform": bot.meeting_platform,
-            "status": bot.status,
-            "bot_name": bot.bot_name,
-            "participants": bot.participants[:10],
-            "duration_seconds": bot.duration_seconds,
-            "created_at": bot.created_at.isoformat() if bot.created_at else None,
-            "summary": (bot.analysis or {}).get("summary", "") if bot.analysis else "",
-        })
-
-    return {"meetings": meetings, "total": total}
+def _bot_to_meeting_summary(bot) -> dict:
+    return {
+        "id": bot.id,
+        "meeting_url": bot.meeting_url,
+        "platform": bot.meeting_platform,
+        "status": bot.status,
+        "bot_name": bot.bot_name,
+        "participants": bot.participants[:10],
+        "duration_seconds": bot.duration_seconds,
+        "created_at": bot.created_at.isoformat() if bot.created_at else None,
+        "summary": (bot.analysis or {}).get("summary", "") if bot.analysis else "",
+    }
 
 
-async def _tool_get_meeting(args: dict, account_id: Optional[str]) -> dict:
-    from app.store import store
-    from app.deps import SUPERADMIN_ACCOUNT_ID
-
-    bot_id = args.get("bot_id", "").strip()
-    if not bot_id:
-        return {"error": "bot_id is required"}
-
-    bot = await store.get_bot(bot_id)
-    if bot is None:
-        return {"error": f"Meeting {bot_id!r} not found"}
-
-    # Ownership check
-    # Strict equality: bots with bot.account_id=None are superadmin/legacy and
-    # must not be visible to authenticated tenants.
-    if (
-        account_id
-        and account_id != SUPERADMIN_ACCOUNT_ID
-        and bot.account_id != account_id
-    ):
-        return {"error": f"Meeting {bot_id!r} not found"}
-
+def _bot_to_meeting_detail(bot) -> dict:
     return {
         "id": bot.id,
         "meeting_url": bot.meeting_url,
@@ -327,19 +291,173 @@ async def _tool_get_meeting(args: dict, account_id: Optional[str]) -> dict:
     }
 
 
-async def _tool_search_meetings(args: dict, account_id: Optional[str]) -> dict:
-    from app.store import store
-    from app.deps import SUPERADMIN_ACCOUNT_ID
+def _snapshot_to_bot(snap):
+    from app.store import BotSession
+    from app.services.secrets_at_rest import decrypt_text
 
+    data = json.loads(decrypt_text(snap.data) or "{}")
+    bot = BotSession.from_state_dict(data)
+    # Older snapshots may predate lifted query columns; trust scalar columns for
+    # access fields if the blob did not carry them.
+    bot.account_id = bot.account_id if bot.account_id is not None else snap.account_id
+    bot.sub_user_id = bot.sub_user_id if bot.sub_user_id is not None else getattr(snap, "sub_user_id", None)
+    bot.workspace_id = bot.workspace_id if bot.workspace_id is not None else getattr(snap, "workspace_id", None)
+    return bot
+
+
+async def _visible_snapshot_conditions(account_id: Optional[str], status: Optional[str] = None):
+    from app.api.bots import _workspace_ids_for_account
+    from app.deps import SUPERADMIN_ACCOUNT_ID
+    from app.models.account import BotSnapshot
+    from sqlalchemy import or_
+
+    conditions = []
+    if status:
+        conditions.append(BotSnapshot.status == status)
+    if account_id == SUPERADMIN_ACCOUNT_ID:
+        return conditions
+    if not account_id:
+        conditions.append(BotSnapshot.account_id.is_(None))
+        return conditions
+
+    visible = [BotSnapshot.account_id == account_id]
+    workspace_ids = await _workspace_ids_for_account(account_id)
+    if workspace_ids:
+        visible.append(BotSnapshot.workspace_id.in_(workspace_ids))
+    conditions.append(or_(*visible))
+    return conditions
+
+
+async def _visible_snapshot_bots(
+    account_id: Optional[str],
+    *,
+    status: Optional[str] = None,
+    limit: int = 1000,
+) -> list:
+    from app.db import AsyncSessionLocal
+    from app.models.account import BotSnapshot
+    from sqlalchemy import select
+
+    conditions = await _visible_snapshot_conditions(account_id, status)
+    query = select(BotSnapshot)
+    for condition in conditions:
+        query = query.where(condition)
+    query = query.order_by(BotSnapshot.created_at.desc()).limit(limit)
+
+    bots = []
+    async with AsyncSessionLocal() as db:
+        rows = (await db.execute(query)).scalars().all()
+    for snap in rows:
+        try:
+            bots.append(_snapshot_to_bot(snap))
+        except Exception as exc:
+            logger.warning("MCP skipped unreadable bot snapshot %s: %s", getattr(snap, "id", "?"), exc)
+    return bots
+
+
+async def _visible_bots(
+    account_id: Optional[str],
+    *,
+    status: Optional[str] = None,
+    limit: int = 10000,
+) -> list:
+    from app.api.bots import _list_visible_bots
+
+    live_bots, _, _ = await _list_visible_bots(
+        account_id=account_id,
+        sub_user_id=None,
+        status=status,
+        limit=limit,
+    )
+    visible: dict[str, object] = {bot.id: bot for bot in live_bots}
+
+    # Add terminal snapshots that have fallen out of the in-memory 24h window.
+    snapshot_bots = await _visible_snapshot_bots(account_id, status=status, limit=limit)
+    for bot in snapshot_bots:
+        visible.setdefault(bot.id, bot)
+
+    bots = sorted(
+        visible.values(),
+        key=lambda b: (-(b.created_at.timestamp() if b.created_at else 0), b.id),
+    )
+    return bots[:limit]
+
+
+async def _resolve_visible_bot(bot_id: str, account_id: Optional[str]):
+    from app.api.bots import _get_or_404
+    from app.db import AsyncSessionLocal
+    from app.models.account import BotSnapshot
+    from fastapi import HTTPException
+    from sqlalchemy import select
+
+    try:
+        return await _get_or_404(bot_id, account_id)
+    except HTTPException:
+        pass
+
+    conditions = await _visible_snapshot_conditions(account_id)
+    query = select(BotSnapshot).where(BotSnapshot.id == bot_id)
+    for condition in conditions:
+        query = query.where(condition)
+    async with AsyncSessionLocal() as db:
+        snap = (await db.execute(query)).scalar_one_or_none()
+    if snap is None:
+        return None
+    try:
+        return _snapshot_to_bot(snap)
+    except Exception as exc:
+        logger.warning("MCP could not read bot snapshot %s: %s", bot_id, exc)
+        return None
+
+
+async def _resolve_live_bot_for_mutation(
+    bot_id: str,
+    account_id: Optional[str],
+    *,
+    workspace_role: str = "admin",
+):
+    from app.api.bots import _check_workspace_role, _get_or_404
+    from fastapi import HTTPException
+
+    try:
+        bot = await _get_or_404(bot_id, account_id)
+        await _check_workspace_role(bot, account_id, workspace_role)
+        return bot, None
+    except HTTPException as exc:
+        return None, str(exc.detail)
+
+
+# ── Tool implementations ───────────────────────────────────────────────────────
+
+async def _tool_list_meetings(args: dict, account_id: Optional[str]) -> dict:
+    limit = min(max(int(args.get("limit", 10)), 1), 50)
+    status_filter = args.get("status")
+    bots = await _visible_bots(account_id, status=status_filter, limit=limit)
+    meetings = [_bot_to_meeting_summary(bot) for bot in bots]
+
+    return {"meetings": meetings, "total": len(meetings)}
+
+
+async def _tool_get_meeting(args: dict, account_id: Optional[str]) -> dict:
+    bot_id = args.get("bot_id", "").strip()
+    if not bot_id:
+        return {"error": "bot_id is required"}
+
+    bot = await _resolve_visible_bot(bot_id, account_id)
+    if bot is None:
+        return {"error": f"Meeting {bot_id!r} not found"}
+
+    return _bot_to_meeting_detail(bot)
+
+
+async def _tool_search_meetings(args: dict, account_id: Optional[str]) -> dict:
     query = args.get("query", "").strip()
     if not query:
         return {"error": "query is required"}
 
     limit = min(max(int(args.get("limit", 20)), 1), 50)
     semantic = bool(args.get("semantic", False))
-    filter_account = account_id if (account_id and account_id != SUPERADMIN_ACCOUNT_ID) else None
-
-    all_bots, _ = (lambda r: r[:2])((await store.list_bots(limit=10000, account_id=filter_account)))
+    all_bots = await _visible_bots(account_id, limit=10000)
 
     if semantic:
         from app.services.intelligence_service import embed_text
@@ -395,14 +513,10 @@ async def _tool_search_meetings(args: dict, account_id: Optional[str]) -> dict:
 
 
 async def _tool_get_action_items(args: dict, account_id: Optional[str]) -> dict:
-    from app.store import store
-    from app.deps import SUPERADMIN_ACCOUNT_ID
-
     limit = min(max(int(args.get("limit", 50)), 1), 100)
     assignee_filter = (args.get("assignee") or "").lower().strip()
-    filter_account = account_id if (account_id and account_id != SUPERADMIN_ACCOUNT_ID) else None
 
-    all_bots, _ = (lambda r: r[:2])((await store.list_bots(limit=10000, account_id=filter_account)))
+    all_bots = await _visible_bots(account_id, limit=10000)
     items = []
 
     for bot in all_bots:
@@ -439,10 +553,7 @@ async def _tool_get_meeting_brief(args: dict, account_id: Optional[str]) -> dict
     # Gather recent summaries for context
     previous_summaries: list[str] = []
     try:
-        from app.store import store
-        from app.deps import SUPERADMIN_ACCOUNT_ID
-        filter_account = account_id if (account_id and account_id != SUPERADMIN_ACCOUNT_ID) else None
-        recent_bots, _ = (lambda r: r[:2])((await store.list_bots(limit=5, status="done", account_id=filter_account)))
+        recent_bots = await _visible_bots(account_id, status="done", limit=5)
         for bot in recent_bots:
             if bot.analysis:
                 s = bot.analysis.get("summary", "")
@@ -469,6 +580,7 @@ async def _tool_create_bot(args: dict, account_id: Optional[str], is_sandbox: bo
             meeting_url=meeting_url,  # type: ignore[arg-type]
             bot_name=args.get("bot_name", "JustHereToListen.io"),
             template=args.get("template"),
+            workspace_id=args.get("workspace_id"),
             respond_on_mention=args.get("respond_on_mention", True),
             allow_demo_mode=bool(args.get("allow_demo_mode", False)),
         )
@@ -491,6 +603,9 @@ async def _tool_create_bot(args: dict, account_id: Optional[str], is_sandbox: bo
             )
         }
 
+    from app.api.bots import _validate_workspace_for_create
+    await _validate_workspace_for_create(payload.workspace_id, account_id)
+
     billable_account = bool(account_id and account_id != SUPERADMIN_ACCOUNT_ID and not is_sandbox)
     if billable_account:
         from app.db import AsyncSessionLocal
@@ -507,6 +622,7 @@ async def _tool_create_bot(args: dict, account_id: Optional[str], is_sandbox: bo
         bot_name=payload.bot_name,
         status="ready",
         account_id=account_id if account_id != SUPERADMIN_ACCOUNT_ID else None,
+        workspace_id=payload.workspace_id,
         template=payload.template,
         respond_on_mention=payload.respond_on_mention,
     )
@@ -562,24 +678,15 @@ async def _tool_create_bot(args: dict, account_id: Optional[str], is_sandbox: bo
 
 async def _tool_cancel_bot(args: dict, account_id: Optional[str]) -> dict:
     from app.store import store
-    from app.deps import SUPERADMIN_ACCOUNT_ID
     from app.api.bots import _running_tasks
 
     bot_id = args.get("bot_id", "").strip()
     if not bot_id:
         return {"error": "bot_id is required"}
 
-    bot = await store.get_bot(bot_id)
+    bot, err = await _resolve_live_bot_for_mutation(bot_id, account_id, workspace_role="admin")
     if bot is None:
-        return {"error": f"Bot {bot_id!r} not found"}
-    # Strict equality: bots with bot.account_id=None are superadmin/legacy and
-    # must not be visible to authenticated tenants.
-    if (
-        account_id
-        and account_id != SUPERADMIN_ACCOUNT_ID
-        and bot.account_id != account_id
-    ):
-        return {"error": f"Bot {bot_id!r} not found"}
+        return {"error": err or f"Bot {bot_id!r} not found"}
 
     task = _running_tasks.pop(bot_id, None)
     if task and not task.done():
@@ -589,23 +696,12 @@ async def _tool_cancel_bot(args: dict, account_id: Optional[str]) -> dict:
 
 
 async def _tool_get_speaker_analytics(args: dict, account_id: Optional[str]) -> dict:
-    from app.store import store
-    from app.deps import SUPERADMIN_ACCOUNT_ID
-
     bot_id = args.get("bot_id", "").strip()
     if not bot_id:
         return {"error": "bot_id is required"}
 
-    bot = await store.get_bot(bot_id)
+    bot = await _resolve_visible_bot(bot_id, account_id)
     if bot is None:
-        return {"error": f"Bot {bot_id!r} not found"}
-    # Strict equality: bots with bot.account_id=None are superadmin/legacy and
-    # must not be visible to authenticated tenants.
-    if (
-        account_id
-        and account_id != SUPERADMIN_ACCOUNT_ID
-        and bot.account_id != account_id
-    ):
         return {"error": f"Bot {bot_id!r} not found"}
 
     return {
@@ -617,14 +713,11 @@ async def _tool_get_speaker_analytics(args: dict, account_id: Optional[str]) -> 
 
 
 async def _tool_get_meeting_cost_summary(args: dict, account_id: Optional[str]) -> dict:
-    from app.store import store
-    from app.deps import SUPERADMIN_ACCOUNT_ID
     from datetime import timedelta
 
     days = min(max(int(args.get("days", 30)), 1), 90)
-    filter_account = account_id if (account_id and account_id != SUPERADMIN_ACCOUNT_ID) else None
 
-    all_bots, _ = (lambda r: r[:2])((await store.list_bots(limit=10000, account_id=filter_account)))
+    all_bots = await _visible_bots(account_id, limit=10000)
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
     total_meeting_cost = 0.0
@@ -652,19 +745,8 @@ async def _tool_get_meeting_cost_summary(args: dict, account_id: Optional[str]) 
 
 
 async def _resolve_owned_bot(bot_id: str, account_id: Optional[str]):
-    """Look up a bot, returning None when missing or not owned by the caller."""
-    from app.store import store
-    from app.deps import SUPERADMIN_ACCOUNT_ID
-    bot = await store.get_bot(bot_id)
-    if bot is None:
-        return None
-    if (
-        account_id
-        and account_id != SUPERADMIN_ACCOUNT_ID
-        and bot.account_id != account_id
-    ):
-        return None
-    return bot
+    """Look up a bot, including workspace-visible live bots and snapshots."""
+    return await _resolve_visible_bot(bot_id, account_id)
 
 
 async def _tool_get_decisions(args: dict, account_id: Optional[str]) -> dict:
@@ -734,9 +816,9 @@ async def _tool_set_agentic_instructions(args: dict, account_id: Optional[str]) 
     bot_id = (args.get("bot_id") or "").strip()
     if not bot_id:
         return {"error": "bot_id is required"}
-    bot = await _resolve_owned_bot(bot_id, account_id)
+    bot, err = await _resolve_live_bot_for_mutation(bot_id, account_id, workspace_role="admin")
     if bot is None:
-        return {"error": f"Bot {bot_id!r} not found"}
+        return {"error": err or f"Bot {bot_id!r} not found"}
     instructions = args.get("instructions") or []
     if not isinstance(instructions, list) or len(instructions) > 20:
         return {"error": "instructions must be a list of at most 20 items"}
@@ -755,9 +837,9 @@ async def _tool_trigger_agentic_instruction(args: dict, account_id: Optional[str
     index = args.get("index")
     if not bot_id or not isinstance(index, int):
         return {"error": "bot_id and integer index are required"}
-    bot = await _resolve_owned_bot(bot_id, account_id)
+    bot, err = await _resolve_live_bot_for_mutation(bot_id, account_id, workspace_role="admin")
     if bot is None:
-        return {"error": f"Bot {bot_id!r} not found"}
+        return {"error": err or f"Bot {bot_id!r} not found"}
     if (getattr(bot, "agentic_autonomy", "off") or "off") == "off":
         return {"error": "Agentic autonomy is off for this bot"}
     instructions = list(getattr(bot, "agentic_instructions", []) or [])

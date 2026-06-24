@@ -36,6 +36,23 @@ def _legacy_plaintext_key(api_key) -> str:
     return getattr(api_key, "key", None) or ""
 
 
+async def _existing_plaintext_api_key(session, account_id: str) -> str:
+    """Return a legacy plaintext key if one exists; never mint on repeat SSO."""
+    from app.models.account import ApiKey
+    from sqlalchemy import select
+
+    result = await session.execute(
+        select(ApiKey)
+        .where(ApiKey.account_id == account_id, ApiKey.is_active == True)  # noqa: E712
+        .order_by(ApiKey.created_at.desc())
+    )
+    for row in result.scalars().all():
+        plaintext = _legacy_plaintext_key(row)
+        if plaintext:
+            return plaintext
+    return ""
+
+
 async def _create_sso_api_key(session, account_id: str, name: str) -> str:
     from app.api.auth import api_key_storage_fields, generate_api_key
     from app.models.account import ApiKey
@@ -214,11 +231,12 @@ async def upsert_oauth_account(
     """Find-or-create an Account for this OAuth identity.
 
     Returns ``(account_id, api_key_plaintext)``.
-    The API key is only returned on *first* login (when creating a new account);
-    on subsequent logins the existing key is re-used.
+    The API key is only returned when it is newly created for a new account, or
+    when a legacy plaintext key already exists. Existing hashed-key accounts do
+    not get a new SSO key on every login; they manage keys from the dashboard.
     """
     from app.db import AsyncSessionLocal
-    from app.models.account import Account, ApiKey, OAuthAccount
+    from app.models.account import Account, OAuthAccount
     from sqlalchemy import select
     import bcrypt
 
@@ -260,16 +278,7 @@ async def upsert_oauth_account(
             account_id = oauth_row.account_id
             await session.commit()
 
-            # Return any active API key (first one)
-            result2 = await session.execute(
-                select(ApiKey).where(ApiKey.account_id == account_id, ApiKey.is_active == True)
-            )
-            key_row = result2.scalars().first()
-            api_key_value = _legacy_plaintext_key(key_row)
-            if not api_key_value:
-                api_key_value = await _create_sso_api_key(session, account_id, f"{provider.title()} SSO")
-                await session.commit()
-            return account_id, api_key_value
+            return account_id, await _existing_plaintext_api_key(session, account_id)
 
         # 2. No existing OAuth link — check if an account with this email already exists.
         # Email is matched case-insensitively so a user who registered as
@@ -323,14 +332,9 @@ async def upsert_oauth_account(
         await session.commit()
 
         if not new_key_plaintext:
-            # Existing account — return their first active key
-            result4 = await session.execute(
-                select(ApiKey).where(ApiKey.account_id == account.id, ApiKey.is_active == True)
-            )
-            key_row2 = result4.scalars().first()
-            new_key_plaintext = _legacy_plaintext_key(key_row2)
-            if not new_key_plaintext:
-                new_key_plaintext = await _create_sso_api_key(session, account.id, f"{provider.title()} SSO")
-                await session.commit()
+            # Existing account — only legacy plaintext keys can be re-displayed.
+            # Hashed keys are intentionally one-shot; avoid minting a fresh SSO
+            # key on every login.
+            new_key_plaintext = await _existing_plaintext_api_key(session, account.id)
 
         return account.id, new_key_plaintext

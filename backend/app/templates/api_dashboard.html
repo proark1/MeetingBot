@@ -185,9 +185,17 @@
 
 <script>
 const API = '/api/v1';
+let accessToken = '';
+
+function getAccessToken() {
+  if (accessToken) return accessToken;
+  const entered = window.prompt('Enter your JustHereToListen.io API key for this tab only:');
+  accessToken = (entered || '').trim();
+  return accessToken;
+}
 
 function authHeaders() {
-  const t = localStorage.getItem('access_token') || '';
+  const t = getAccessToken();
   return t ? { 'Authorization': 'Bearer ' + t } : {};
 }
 

@@ -102,7 +102,7 @@ async def process_consent(bot_id: str, transcript: list[dict]) -> list[dict]:
         return transcript
 
     s = _get_settings()
-    opt_out_phrase = s.CONSENT_OPT_OUT_PHRASE
+    opt_out_phrase = getattr(bot, "consent_opt_out_phrase", None) or s.CONSENT_OPT_OUT_PHRASE
 
     # Find new opt-outs in this transcript
     new_optouts = scan_transcript_for_optouts(transcript, opt_out_phrase)

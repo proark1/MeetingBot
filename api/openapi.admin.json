@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "JustHereToListen.io Admin API",
-    "description": "A **multi-tenant meeting bot API** service. Send bots into **Zoom**, **Google Meet**, **Microsoft Teams**, and **onepizza.io** meetings to record, transcribe, and analyse them with **Claude** (Anthropic) or **Gemini** (Google) AI.\n\n## How it works\n1. Register an account (email/password or Google/Microsoft SSO) → receive an `sk_live_...` API key\n2. Top up credits via **Stripe card** or **USDC (ERC-20)**\n3. `POST /api/v1/bot` with your `meeting_url` and optional `webhook_url`\n4. A headless Chromium bot joins the meeting, records audio (and optionally video), and transcribes it\n5. Results are POSTed to your `webhook_url` when done (or poll `GET /api/v1/bot/{id}`)\n6. Results persist in the database — browse past meetings via the **Meeting History** tab in the dashboard\n\n## Authentication\nAll API calls (except `/api/v1/auth/register` and `/api/v1/auth/login`) require:\n```\nAuthorization: Bearer sk_live_<your-api-key>\n```\nAPI keys are prefixed with `sk_live_` and shown **once** at creation — copy immediately. The legacy `API_KEY` environment variable acts as a superadmin bypass and skips per-user account checks. Leave it unset to enforce per-user auth.\n\n## Accounts & API keys\nRegister at `POST /api/v1/auth/register` to receive your first `sk_live_...` key. Generate additional named keys with `POST /api/v1/auth/keys`. Revoke individual keys with `DELETE /api/v1/auth/keys/{id}`.\n\n**Account types:** Pass `account_type: \"personal\"` (default) or `\"business\"` at registration. See the **Business accounts** section below.\n\n**USDC wallet:** Register your Ethereum wallet with `PUT /api/v1/auth/wallet` so the platform can automatically attribute USDC deposits to your account.\n\n**Notification preferences:** Configure email alerts with `GET/PUT /api/v1/auth/notify`. Enable `notify_on_done` to receive an email when each bot finishes analysis.\n\n**Subscription plan:** View your plan and monthly usage with `GET /api/v1/auth/plan`. Plans: `free` (5 bots/mo), `starter` (50), `pro` (500), `business` (unlimited).\n\n**GDPR erasure:** Permanently delete your account and all data with `DELETE /api/v1/auth/account`.\n\n## SSO — Google & Microsoft OAuth2\nSign in or register with an existing Google or Microsoft account (when configured by the platform admin via `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` or `MICROSOFT_CLIENT_ID`/`MICROSOFT_CLIENT_SECRET`).\n\n- `GET /api/v1/auth/oauth/{provider}/authorize` — redirect to provider login (`provider`: `google` or `microsoft`). Pass `?redirect=1` to use the cookie flow for the web UI.\n- `GET /api/v1/auth/oauth/{provider}/callback` — OAuth2 callback; returns `{account_id, email, api_key, access_token, is_new_account}`.\nOn first login the response includes a new `sk_live_...` API key. Subsequent logins return an empty `api_key` — use your existing key.\n\n## Business accounts (multi-user data isolation)\nBusiness accounts are for **platforms integrating JustHereToListen.io on behalf of multiple end-users**. A single business account uses one API key and one shared credit balance, but isolates all bot data between end-users.\n\n**How to use:** Pass the `X-Sub-User: <user-id>` header on every request to scope data to a specific end-user. Users with different sub-user IDs cannot see each other's bots, transcripts, or analyses. Omit the header for an account-wide view of all bots.\n\n**Alternatively**, pass `sub_user_id` in the `POST /api/v1/bot` request body — the body field takes precedence over the header.\n\n`X-Sub-User` is an opaque string (max 255 chars): user ID, email, UUID, etc.\n\n## Credits & billing\nCredits are deducted per bot run. Default: `BOT_FLAT_FEE_USD` = $0.10 flat fee per bot. When flat fee is disabled (`BOT_FLAT_FEE_USD=0`), billing uses raw AI cost × `CREDIT_MARKUP` (default 3×). A minimum balance of `MIN_CREDITS_USD` (default $0.10) is required to create a bot (HTTP 402 if below this threshold).\n\n**Top up via Stripe card:** `POST /api/v1/billing/stripe/checkout` — returns a Stripe Checkout URL. Credits are applied automatically once payment is confirmed via the Stripe webhook. Valid amounts are set by `STRIPE_TOP_UP_AMOUNTS` (default: 10, 25, 50, 100 USD).\n\n**Top up via USDC (ERC-20):** First register your Ethereum wallet via `PUT /api/v1/auth/wallet`. Then `GET /api/v1/billing/usdc/address` returns the platform deposit address. Send USDC **from your registered wallet** — the system matches the `from` address to your account. 1 USDC = $1 credit, credited automatically within ~1 minute of on-chain confirmation.\n\n**Subscribe to a plan:** `POST /api/v1/billing/subscribe` — create a Stripe Checkout session for a subscription plan (`starter`, `pro`, or `business`). Returns `{session_id, checkout_url, plan}`. Pass optional `success_url` and `cancel_url`.\n\n**Check balance:** `GET /api/v1/billing/balance` — returns current `credits_usd` and the last 50 transactions. Transaction `type` values: `stripe_topup`, `usdc_topup`, `bot_usage`.\n\n## Webhooks (global, with retry & delivery logs)\nRegister a global webhook with `POST /api/v1/webhook` to receive events for **all** bots. For per-bot webhooks, pass `webhook_url` when creating a bot instead.\n\n**Events (21):** lifecycle — `bot.joining`, `bot.in_call`, `bot.call_ended`, `bot.transcript_ready`, `bot.analysis_ready`, `bot.done`, `bot.error`, `bot.cancelled`; live — `bot.keyword_alert`, `bot.live_transcript`, `bot.live_transcript_translated`, `bot.live_chat_message`; advanced (opt-in) — `bot.decision_detected`, `bot.coaching_tip`, `bot.coaching_alert`, `bot.speaker_analytics`, `bot.agentic_action`, `bot.recurring_intel_ready`; action-item reminders — `action_item.due_soon`, `action_item.overdue`; and `bot.test`. Use `events: [\"*\"]` to receive all (default).\n\n**Retry logic:** Failed deliveries are retried up to `WEBHOOK_MAX_ATTEMPTS` times (default 5) with exponential backoff: 1 min, 5 min, 25 min, 2 h, 10 h.\n\n**Signatures:** Set a `secret` when registering — each delivery includes an `X-MeetingBot-Signature: sha256=<hmac>` header for verification.\n\n**Delivery logs:** `GET /api/v1/webhook/{id}/deliveries` — paginated delivery history with status, HTTP response code, error message, and next retry time.\n\n**Test endpoint:** `POST /api/v1/webhook/{id}/test` — send a test event immediately.\n\n## Integrations (Slack & Notion)\nPush meeting notes automatically to third-party tools after each bot session.\n\n- `POST /api/v1/integrations` — create an integration (`type`: `slack` or `notion`)\n- **Slack:** provide `config.webhook_url` (Incoming Webhook URL)\n- **Notion:** provide `config.api_token` and `config.database_id`\n- `GET /api/v1/integrations` — list all integrations (secrets redacted)\n- `PATCH /api/v1/integrations/{id}` — update config\n- `DELETE /api/v1/integrations/{id}` — remove integration\n\nAfter bot analysis completes, summaries and action items are pushed to all active integrations for that account.\n\n## Calendar auto-join\nConnect an iCal feed so JustHereToListen.io automatically dispatches bots to upcoming meetings.\n\n- `POST /api/v1/calendar` — add an iCal feed (`ical_url`, `name`, `bot_name?`, `auto_record`)\n- `GET /api/v1/calendar` — list all calendar feeds\n- `PATCH /api/v1/calendar/{id}` — update a feed\n- `DELETE /api/v1/calendar/{id}` — remove a feed\n- `POST /api/v1/calendar/{id}/sync` — manually trigger an immediate sync\n\nThe background service polls all active feeds every `CALENDAR_POLL_INTERVAL_S` seconds (default 5 min) and auto-creates bots for meetings starting within the next 10 minutes.\n\n## Idempotency keys\nPrevent duplicate bots from network retries by passing a unique key on bot creation:\n```\nIdempotency-Key: <your-unique-key>\n```\nIf a second request with the same key arrives within `IDEMPOTENCY_TTL_HOURS` (default 24 h), the original bot is returned instead of creating a new one. Keys are scoped to your account.\n\n## Bot persona\nCustomize how the bot appears in meetings with `bot_name` and `bot_avatar_url` fields on `POST /api/v1/bot`. The platform default avatar is set via `DEFAULT_BOT_AVATAR_URL`.\n\n## Video recording\nWhen `VIDEO_RECORDING_ENABLED=true` (default), the bot captures a screen recording alongside audio. Video is encoded with ffmpeg (configurable `VIDEO_CRF`, `VIDEO_FPS`, `VIDEO_SCALE`). Download the recording via `GET /api/v1/bot/{id}/recording`.\n\n## Cloud storage\nSet `STORAGE_BACKEND=s3` to upload recordings to S3-compatible storage (AWS S3, Cloudflare R2, MinIO). Configure with `S3_BUCKET`, `S3_ENDPOINT_URL`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`. Set `S3_PUBLIC_URL` for CDN-served links.\nDefault: `local` — recordings are stored on disk with automatic cleanup after `RECORDING_RETENTION_DAYS` days.\n\n## Consent & recording announcement\nSet `consent_enabled: true` on bot creation to announce recording at join. Transcripts are scanned for the opt-out phrase — opted-out participants' content is redacted. Configure globally via `CONSENT_ANNOUNCEMENT_ENABLED` and `CONSENT_OPT_OUT_PHRASE` env vars.\n\n## Data retention policies\n`GET/PUT /api/v1/retention` — configure per-account retention days for bots, recordings, and transcripts. Use `-1` for keep-forever. Platform defaults: `DEFAULT_BOT_RETENTION_DAYS` (90 days), `DEFAULT_RECORDING_RETENTION_DAYS` (30 days). A background task enforces policies nightly.\n\n## Keyword alerts\n`POST /api/v1/keyword-alerts` — register a keyword. When detected in a completed transcript a `bot.keyword_alert` webhook event fires. Set per-bot via `keyword_alerts: [{keyword, webhook_url?}]` at creation.\n\n## Workspaces\n`POST /api/v1/workspaces` — create a shared workspace. Invite members with roles (`admin` / `member` / `viewer`). Tag bots with `workspace_id` to share with workspace members. Enable/disable with `WORKSPACES_ENABLED` (default `true`).\n\n## MCP (Model Context Protocol)\n`GET /api/v1/mcp/schema` returns the server manifest. `POST /api/v1/mcp/call` executes one of 16 tools (read, write, and reasoning) — e.g. `list_meetings`, `get_meeting`, `search_meetings`, `get_action_items`, `create_bot`, `cancel_bot`, `ask_chat_qa`, `get_meeting_brief`. Enable/disable with `MCP_ENABLED` (default `true`).\n\n## SAML 2.0 SSO\nSet `SAML_ENABLED=true` and `SAML_SP_BASE_URL`. Admins register IdP configs at `POST /api/v1/auth/saml/configs`. Users authenticate at `GET /api/v1/auth/saml/{org_slug}/authorize`.\n\n## Exports\nExport meeting reports in multiple formats:\n- `GET /api/v1/bot/{id}/export/markdown` — Markdown report with transcript, summary, and action items\n- `GET /api/v1/bot/{id}/export/pdf` — PDF report (same content)\n- `GET /api/v1/bot/{id}/export/json` — Full session as structured JSON\n- `GET /api/v1/bot/{id}/export/srt` — Transcript as SRT subtitle file\n\n## Analytics\n`GET /api/v1/analytics` — platform-wide bot statistics including sentiment distribution, meetings per day, top topics, top participants, and platform breakdown.\n\n`GET /api/v1/analytics/usage` — per-account usage dashboard: `bots_used`, `bots_limit`, `plan`, `credits_balance`, `credits_spent_this_month`, `avg_cost_per_bot`, `billing_cycle_reset`, and `daily_usage[]` (last 30 days).\n\n`GET /api/v1/analytics/trends?days=30` — longitudinal meeting trends: `total_meetings`, `total_hours`, `meetings_per_day[]`, `sentiment_trend[]`, `health_trend[]`, `top_topics[]`, `cost_trend[]`.\n\n## Analysis templates\nUse predefined templates to customize analysis output:\n- `GET /api/v1/templates` — list all templates (default, sales, standup, 1:1, retro, etc.)\n- Pass `template: \"<seed>\"` when creating a bot, or `prompt_override` for a one-off prompt\n- `GET /api/v1/templates/default-prompt` — get the raw default analysis prompt\n\n## Admin\nAdmin endpoints are restricted to accounts in `ADMIN_EMAILS` (env var) or with `is_admin=true` in the database. All others receive HTTP 403. Full interactive docs at `GET /api/v1/admin/docs`.\n\n**USDC & billing:**\n- `GET/PUT /api/v1/admin/wallet` — view or set the platform USDC collection wallet\n- `GET/PUT /api/v1/admin/rpc-url` — view or set the Ethereum RPC URL (no restart needed)\n- `GET /api/v1/admin/config` — list all platform configuration values\n- `POST /api/v1/admin/credit` — manually credit a user account\n- `GET /api/v1/admin/usdc/unmatched` — list USDC transfers that couldn't be attributed\n- `POST /api/v1/admin/usdc/unmatched/{tx_hash}/resolve` — mark unmatched transfer resolved\n- `POST /api/v1/admin/usdc/rescan` — reset USDC monitor block pointer for rescan\n\n**Account management:**\n- `POST /api/v1/admin/accounts/{account_id}/set-account-type` — change any account's type\n- `POST /api/v1/auth/saml/configs` — register SAML IdP config (admin only)\n\n**Admin web UI** at `/admin` provides:\n- Platform stats (accounts, credits, revenue, unmatched transfers)\n- Subscription plan breakdown (Free/Starter/Pro/Business counts)\n- Bot activity stats + platform feature counters (webhooks, integrations, calendar feeds, SSO)\n- System status indicators (Stripe, RPC, HD seed, Email, Storage, Video, Google SSO, Microsoft SSO, SAML, Whisper)\n- Inline plan management — change any account's plan via a dropdown\n- Monthly bot usage per account\n- Manual credit form, USDC rescan, wallet & RPC configuration\n- Unmatched USDC transfer resolution\n- User account enable/disable/admin-toggle/account-type-switch\n\n## Prometheus metrics\n`GET /metrics` — Prometheus-compatible metrics endpoint (unauthenticated). Includes HTTP request counts/latencies, active bot counts, and billing totals.\n\n## Bot response & analysis\nBot responses include: `id`, `status`, `meeting_platform`, `participants`, `transcript` (`[{speaker, text, timestamp}]`), `analysis` (`{summary, key_points, action_items, decisions, next_steps, sentiment, topics}`), `chapters` (`[{title, start_time, summary}]`), `speaker_stats` (`[{name, talk_time_s, talk_pct, turns}]`), `recording_available`, `is_demo_transcript`, `sub_user_id`, `metadata`, and `ai_usage` (`{total_tokens, total_cost_usd, primary_model, operations: [{operation, provider, model, input_tokens, output_tokens, total_tokens, cost_usd, duration_s}]}`).\n\n## AI providers\nSet `ANTHROPIC_API_KEY` for Claude (preferred) or `GEMINI_API_KEY` for Gemini. When both are set, Claude takes precedence for transcription and analysis.\n\n## Bot lifecycle\n`ready` / `scheduled` / `queued` → `joining` → `in_call` → `call_ended` → `transcribing` → `done` (or `error` / `cancelled`)\n\n- **`scheduled`** — bot has a future `join_at` time and is waiting\n- **`queued`** — `MAX_CONCURRENT_BOTS` limit reached; waiting for a free slot\n- **`done`** — transcript + analysis complete; results available for 24 hours\n\n## Rate limits\n- `POST /api/v1/auth/register` — 3 requests/min per IP\n- `POST /api/v1/auth/login` — 5 requests/min per IP\n- `POST /api/v1/bot` — 20 requests/min per IP\n\nExceeded limits return HTTP 429.\n\n## Real-time events (WebSocket)\nConnect to `ws://<host>/api/v1/ws` for live bot status updates. The server broadcasts events whenever a bot's status changes.\n\n## Auto-leave\nThe bot leaves automatically when it has been the only participant for `BOT_ALONE_TIMEOUT` seconds (default 5 min).\n\n## Web UI\n| Path | Description |\n|------|-------------|\n| `/register` | Create account (Personal or Business); Google/Microsoft SSO sign-up |\n| `/login` | Login with email/password or SSO |\n| `/dashboard` | Balance, API keys, plan & usage, notification prefs, USDC wallet, linked SSO accounts, integrations summary, calendar feeds, transactions |\n| `/topup` | Add credits via Stripe card or USDC |\n| `/bot/{id}` | Session viewer — transcript, AI analysis (summary, key points, action items, decisions, next steps, sentiment, topics), speaker breakdown, chapters, meeting metadata, and download links for audio/video/markdown/PDF |\n| `/admin` | Platform admin — plan stats, bot activity, system status, user accounts with inline plan management, unmatched USDC transfers, manual credit |\n",
-    "version": "2.68.1",
+    "description": "A **multi-tenant meeting bot API** service. Send bots into **Zoom**, **Google Meet**, **Microsoft Teams**, and **onepizza.io** meetings to record, transcribe, and analyse them with **Claude** (Anthropic) or **Gemini** (Google) AI.\n\n## How it works\n1. Register an account (email/password or Google/Microsoft SSO) \u2192 receive an `sk_live_...` API key\n2. Top up credits via **Stripe card** or **USDC (ERC-20)**\n3. `POST /api/v1/bot` with your `meeting_url` and optional `webhook_url`\n4. A headless Chromium bot joins the meeting, records audio (and optionally video), and transcribes it\n5. Results are POSTed to your `webhook_url` when done (or poll `GET /api/v1/bot/{id}`)\n6. Results persist in the database \u2014 browse past meetings via the **Meeting History** tab in the dashboard\n\n## Authentication\nAll API calls (except `/api/v1/auth/register` and `/api/v1/auth/login`) require:\n```\nAuthorization: Bearer sk_live_<your-api-key>\n```\nAPI keys are prefixed with `sk_live_` and shown **once** at creation \u2014 copy immediately. The legacy `API_KEY` environment variable acts as a superadmin bypass and skips per-user account checks. Leave it unset to enforce per-user auth.\n\n## Accounts & API keys\nRegister at `POST /api/v1/auth/register` to receive your first `sk_live_...` key. Generate additional named keys with `POST /api/v1/auth/keys`. Revoke individual keys with `DELETE /api/v1/auth/keys/{id}`.\n\n**Account types:** Pass `account_type: \"personal\"` (default) or `\"business\"` at registration. See the **Business accounts** section below.\n\n**USDC wallet:** Register your Ethereum wallet with `PUT /api/v1/auth/wallet` so the platform can automatically attribute USDC deposits to your account.\n\n**Notification preferences:** Configure email alerts with `GET/PUT /api/v1/auth/notify`. Enable `notify_on_done` to receive an email when each bot finishes analysis.\n\n**Subscription plan:** View your plan and monthly usage with `GET /api/v1/auth/plan`. Plans: `free` (5 bots/mo), `starter` (50), `pro` (500), `business` (unlimited).\n\n**GDPR erasure:** Permanently delete your account and all data with `DELETE /api/v1/auth/account`.\n\n## SSO \u2014 Google & Microsoft OAuth2\nSign in or register with an existing Google or Microsoft account (when configured by the platform admin via `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` or `MICROSOFT_CLIENT_ID`/`MICROSOFT_CLIENT_SECRET`).\n\n- `GET /api/v1/auth/oauth/{provider}/authorize` \u2014 redirect to provider login (`provider`: `google` or `microsoft`). Pass `?redirect=1` to use the cookie flow for the web UI.\n- `GET /api/v1/auth/oauth/{provider}/callback` \u2014 OAuth2 callback; returns `{account_id, email, api_key, access_token, is_new_account}`.\nOn first login the response includes a new `sk_live_...` API key. Subsequent logins return an empty `api_key` \u2014 use your existing key.\n\n## Business accounts (multi-user data isolation)\nBusiness accounts are for **platforms integrating JustHereToListen.io on behalf of multiple end-users**. A single business account uses one API key and one shared credit balance, but isolates all bot data between end-users.\n\n**How to use:** Pass the `X-Sub-User: <user-id>` header on every request to scope data to a specific end-user. Users with different sub-user IDs cannot see each other's bots, transcripts, or analyses. Omit the header for an account-wide view of all bots.\n\n**Alternatively**, pass `sub_user_id` in the `POST /api/v1/bot` request body \u2014 the body field takes precedence over the header.\n\n`X-Sub-User` is an opaque string (max 255 chars): user ID, email, UUID, etc.\n\n## Credits & billing\nCredits are deducted per bot run. Default: `BOT_FLAT_FEE_USD` = $0.10 flat fee per bot. When flat fee is disabled (`BOT_FLAT_FEE_USD=0`), billing uses raw AI cost \u00d7 `CREDIT_MARKUP` (default 3\u00d7). A minimum balance of `MIN_CREDITS_USD` (default $0.10) is required to create a bot (HTTP 402 if below this threshold).\n\n**Top up via Stripe card:** `POST /api/v1/billing/stripe/checkout` \u2014 returns a Stripe Checkout URL. Credits are applied automatically once payment is confirmed via the Stripe webhook. Valid amounts are set by `STRIPE_TOP_UP_AMOUNTS` (default: 10, 25, 50, 100 USD).\n\n**Top up via USDC (ERC-20):** First register your Ethereum wallet via `PUT /api/v1/auth/wallet`. Then `GET /api/v1/billing/usdc/address` returns the platform deposit address. Send USDC **from your registered wallet** \u2014 the system matches the `from` address to your account. 1 USDC = $1 credit, credited automatically within ~1 minute of on-chain confirmation.\n\n**Subscribe to a plan:** `POST /api/v1/billing/subscribe` \u2014 create a Stripe Checkout session for a subscription plan (`starter`, `pro`, or `business`). Returns `{session_id, checkout_url, plan}`. Pass optional `success_url` and `cancel_url`.\n\n**Check balance:** `GET /api/v1/billing/balance` \u2014 returns current `credits_usd` and the last 50 transactions. Transaction `type` values: `stripe_topup`, `usdc_topup`, `bot_usage`.\n\n## Webhooks (global, with retry & delivery logs)\nRegister a global webhook with `POST /api/v1/webhook` to receive events for **all** bots. For per-bot webhooks, pass `webhook_url` when creating a bot instead.\n\n**Events (21):** lifecycle \u2014 `bot.joining`, `bot.in_call`, `bot.call_ended`, `bot.transcript_ready`, `bot.analysis_ready`, `bot.done`, `bot.error`, `bot.cancelled`; live \u2014 `bot.keyword_alert`, `bot.live_transcript`, `bot.live_transcript_translated`, `bot.live_chat_message`; advanced (opt-in) \u2014 `bot.decision_detected`, `bot.coaching_tip`, `bot.coaching_alert`, `bot.speaker_analytics`, `bot.agentic_action`, `bot.recurring_intel_ready`; action-item reminders \u2014 `action_item.due_soon`, `action_item.overdue`; and `bot.test`. Use `events: [\"*\"]` to receive all (default).\n\n**Retry logic:** Failed deliveries are retried up to `WEBHOOK_MAX_ATTEMPTS` times (default 5) with exponential backoff: 1 min, 5 min, 25 min, 2 h, 10 h.\n\n**Signatures:** Set a `secret` when registering \u2014 each delivery includes an `X-MeetingBot-Signature: sha256=<hmac>` header for verification.\n\n**Delivery logs:** `GET /api/v1/webhook/{id}/deliveries` \u2014 paginated delivery history with status, HTTP response code, error message, and next retry time.\n\n**Test endpoint:** `POST /api/v1/webhook/{id}/test` \u2014 send a test event immediately.\n\n## Integrations (Slack & Notion)\nPush meeting notes automatically to third-party tools after each bot session.\n\n- `POST /api/v1/integrations` \u2014 create an integration (`type`: `slack`, `notion`, `linear`, `jira`, `google_drive`, `hubspot`, or `salesforce`)\n- **Slack:** provide `config.webhook_url` (Incoming Webhook URL)\n- **Notion:** provide `config.api_token` and `config.database_id`\n- `GET /api/v1/integrations` \u2014 list all integrations (secrets redacted)\n- `PATCH /api/v1/integrations/{id}` \u2014 update config\n- `DELETE /api/v1/integrations/{id}` \u2014 remove integration\n\nAfter bot analysis completes, summaries and action items are pushed to all active integrations for that account.\n\n## Calendar auto-join\nConnect an iCal feed so JustHereToListen.io automatically dispatches bots to upcoming meetings.\n\n- `POST /api/v1/calendar` \u2014 add an iCal feed (`ical_url`, `name`, `bot_name?`, `auto_record`)\n- `GET /api/v1/calendar` \u2014 list all calendar feeds\n- `PATCH /api/v1/calendar/{id}` \u2014 update a feed\n- `DELETE /api/v1/calendar/{id}` \u2014 remove a feed\n- `POST /api/v1/calendar/{id}/sync` \u2014 manually trigger an immediate sync\n\nThe background service polls all active feeds every `CALENDAR_POLL_INTERVAL_S` seconds (default 5 min) and auto-creates bots for meetings starting within the next 10 minutes.\n\n## Idempotency keys\nPrevent duplicate bots from network retries by passing a unique key on bot creation:\n```\nIdempotency-Key: <your-unique-key>\n```\nIf a second request with the same key arrives within `IDEMPOTENCY_TTL_HOURS` (default 24 h), the original bot is returned instead of creating a new one. Keys are scoped to your account.\n\n## Bot persona\nCustomize how the bot appears in meetings with `bot_name` and `bot_avatar_url` fields on `POST /api/v1/bot`. The platform default avatar is set via `DEFAULT_BOT_AVATAR_URL`.\n\n## Video recording\nWhen `VIDEO_RECORDING_ENABLED=true` (default), the bot captures a screen recording alongside audio. Video is encoded with ffmpeg (configurable `VIDEO_CRF`, `VIDEO_FPS`, `VIDEO_SCALE`). Download the recording via `GET /api/v1/bot/{id}/recording`.\n\n## Cloud storage\nSet `STORAGE_BACKEND=s3` to upload recordings to S3-compatible storage (AWS S3, Cloudflare R2, MinIO). Configure with `S3_BUCKET`, `S3_ENDPOINT_URL`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`. Set `S3_PUBLIC_URL` for CDN-served links.\nDefault: `local` \u2014 recordings are stored on disk with automatic cleanup after `RECORDING_RETENTION_DAYS` days.\n\n## Consent & recording announcement\nSet `consent_enabled: true` on bot creation to announce recording at join. Transcripts are scanned for the opt-out phrase \u2014 opted-out participants' content is redacted. Configure globally via `CONSENT_ANNOUNCEMENT_ENABLED` and `CONSENT_OPT_OUT_PHRASE` env vars.\n\n## Data retention policies\n`GET/PUT /api/v1/retention` \u2014 configure per-account retention days for bots, recordings, and transcripts. Use `-1` for keep-forever. Platform defaults: `DEFAULT_BOT_RETENTION_DAYS` (90 days), `DEFAULT_RECORDING_RETENTION_DAYS` (30 days). A background task enforces policies nightly.\n\n## Keyword alerts\n`POST /api/v1/keyword-alerts` \u2014 register a keyword. When detected in a completed transcript a `bot.keyword_alert` webhook event fires. Set per-bot via `keyword_alerts: [{keyword, webhook_url?}]` at creation.\n\n## Workspaces\n`POST /api/v1/workspaces` \u2014 create a shared workspace. Invite members with roles (`admin` / `member` / `viewer`). Tag bots with `workspace_id` to share with workspace members. Enable/disable with `WORKSPACES_ENABLED` (default `true`).\n\n## MCP (Model Context Protocol)\n`GET /api/v1/mcp/schema` returns the server manifest. `POST /api/v1/mcp/call` executes one of 16 tools (read, write, and reasoning) \u2014 e.g. `list_meetings`, `get_meeting`, `search_meetings`, `get_action_items`, `create_bot`, `cancel_bot`, `ask_chat_qa`, `get_meeting_brief`. Enable with `MCP_ENABLED=true` (default `false`).\n\n## SAML 2.0 SSO\nSet `SAML_ENABLED=true` and `SAML_SP_BASE_URL`. Admins register IdP configs at `POST /api/v1/auth/saml/configs`. Users authenticate at `GET /api/v1/auth/saml/{org_slug}/authorize`.\n\n## Exports\nExport meeting reports in multiple formats:\n- `GET /api/v1/bot/{id}/export/markdown` \u2014 Markdown report with transcript, summary, and action items\n- `GET /api/v1/bot/{id}/export/pdf` \u2014 PDF report (same content)\n- `GET /api/v1/bot/{id}/export/json` \u2014 Full session as structured JSON\n- `GET /api/v1/bot/{id}/export/srt` \u2014 Transcript as SRT subtitle file\n\n## Analytics\n`GET /api/v1/analytics` \u2014 platform-wide bot statistics including sentiment distribution, meetings per day, top topics, top participants, and platform breakdown.\n\n`GET /api/v1/analytics/usage` \u2014 per-account usage dashboard: `bots_used`, `bots_limit`, `plan`, `credits_balance`, `credits_spent_this_month`, `avg_cost_per_bot`, `billing_cycle_reset`, and `daily_usage[]` (last 30 days).\n\n`GET /api/v1/analytics/trends?days=30` \u2014 longitudinal meeting trends: `total_meetings`, `total_hours`, `meetings_per_day[]`, `sentiment_trend[]`, `health_trend[]`, `top_topics[]`, `cost_trend[]`.\n\n## Analysis templates\nUse predefined templates to customize analysis output:\n- `GET /api/v1/templates` \u2014 list all templates (default, sales, standup, 1:1, retro, etc.)\n- Pass `template: \"<seed>\"` when creating a bot, or `prompt_override` for a one-off prompt\n- `GET /api/v1/templates/default-prompt` \u2014 get the raw default analysis prompt\n\n## Admin\nAdmin endpoints are restricted to accounts in `ADMIN_EMAILS` (env var) or with `is_admin=true` in the database. All others receive HTTP 403. Full interactive docs at `GET /api/v1/admin/docs`.\n\n**USDC & billing:**\n- `GET/PUT /api/v1/admin/wallet` \u2014 view or set the platform USDC collection wallet\n- `GET/PUT /api/v1/admin/rpc-url` \u2014 view or set the Ethereum RPC URL (no restart needed)\n- `GET /api/v1/admin/config` \u2014 list all platform configuration values\n- `POST /api/v1/admin/credit` \u2014 manually credit a user account\n- `GET /api/v1/admin/usdc/unmatched` \u2014 list USDC transfers that couldn't be attributed\n- `POST /api/v1/admin/usdc/unmatched/{tx_hash}/resolve` \u2014 mark unmatched transfer resolved\n- `POST /api/v1/admin/usdc/rescan` \u2014 reset USDC monitor block pointer for rescan\n\n**Account management:**\n- `POST /api/v1/admin/accounts/{account_id}/set-account-type` \u2014 change any account's type\n- `POST /api/v1/auth/saml/configs` \u2014 register SAML IdP config (admin only)\n\n**Admin web UI** at `/admin` provides:\n- Platform stats (accounts, credits, revenue, unmatched transfers)\n- Subscription plan breakdown (Free/Starter/Pro/Business counts)\n- Bot activity stats + platform feature counters (webhooks, integrations, calendar feeds, SSO)\n- System status indicators (Stripe, RPC, HD seed, Email, Storage, Video, Google SSO, Microsoft SSO, SAML, Whisper)\n- Inline plan management \u2014 change any account's plan via a dropdown\n- Monthly bot usage per account\n- Manual credit form, USDC rescan, wallet & RPC configuration\n- Unmatched USDC transfer resolution\n- User account enable/disable/admin-toggle/account-type-switch\n\n## Prometheus metrics\n`GET /metrics` \u2014 Prometheus-compatible metrics endpoint (unauthenticated). Includes HTTP request counts/latencies, active bot counts, and billing totals.\n\n## Bot response & analysis\nBot responses include: `id`, `status`, `meeting_platform`, `participants`, `transcript` (`[{speaker, text, timestamp}]`), `analysis` (`{summary, key_points, action_items, decisions, next_steps, sentiment, topics}`), `chapters` (`[{title, start_time, summary}]`), `speaker_stats` (`[{name, talk_time_s, talk_pct, turns}]`), `recording_available`, `is_demo_transcript`, `sub_user_id`, `metadata`, and `ai_usage` (`{total_tokens, total_cost_usd, primary_model, operations: [{operation, provider, model, input_tokens, output_tokens, total_tokens, cost_usd, duration_s}]}`).\n\n## AI providers\nSet `ANTHROPIC_API_KEY` for Claude (preferred) or `GEMINI_API_KEY` for Gemini. When both are set, Claude takes precedence for transcription and analysis.\n\n## Bot lifecycle\n`ready` / `scheduled` / `queued` \u2192 `joining` \u2192 `in_call` \u2192 `call_ended` \u2192 `transcribing` \u2192 `done` (or `error` / `cancelled`)\n\n- **`scheduled`** \u2014 bot has a future `join_at` time and is waiting\n- **`queued`** \u2014 `MAX_CONCURRENT_BOTS` limit reached; waiting for a free slot\n- **`done`** \u2014 transcript + analysis complete; results available for 24 hours\n\n## Rate limits\n- `POST /api/v1/auth/register` \u2014 3 requests/min per IP\n- `POST /api/v1/auth/login` \u2014 5 requests/min per IP\n- `POST /api/v1/bot` \u2014 20 requests/min per IP\n\nExceeded limits return HTTP 429.\n\n## Real-time events (WebSocket)\nConnect to `ws://<host>/api/v1/ws` for live bot status updates. The server broadcasts events whenever a bot's status changes.\n\n## Auto-leave\nThe bot leaves automatically when it has been the only participant for `BOT_ALONE_TIMEOUT` seconds (default 5 min).\n\n## Web UI\n| Path | Description |\n|------|-------------|\n| `/register` | Create account (Personal or Business); Google/Microsoft SSO sign-up |\n| `/login` | Login with email/password or SSO |\n| `/dashboard` | Balance, API keys, plan & usage, notification prefs, USDC wallet, linked SSO accounts, integrations summary, calendar feeds, transactions |\n| `/topup` | Add credits via Stripe card or USDC |\n| `/bot/{id}` | Session viewer \u2014 transcript, AI analysis (summary, key points, action items, decisions, next steps, sentiment, topics), speaker breakdown, chapters, meeting metadata, and download links for audio/video/markdown/PDF |\n| `/admin` | Platform admin \u2014 plan stats, bot activity, system status, user accounts with inline plan management, unmatched USDC transfers, manual credit |\n",
+    "version": "2.69.0",
     "contact": {
       "name": "JustHereToListen.io",
       "url": "https://justheretolisten.io"
@@ -58,7 +58,7 @@
           "Auth"
         ],
         "summary": "Log in (email + password)",
-        "description": "Authenticate and receive a JWT for web UI sessions.\n\n**Request format:** `application/x-www-form-urlencoded` (OAuth2 password flow).\nSend `username` (your email) and `password` as form fields — **not** JSON.\n\nThe returned JWT is only for the browser-based web UI (`/dashboard`, `/topup`).\nFor API calls, use your `sk_live_...` API key with `Authorization: Bearer <key>`.",
+        "description": "Authenticate and receive a JWT for web UI sessions.\n\n**Request format:** `application/x-www-form-urlencoded` (OAuth2 password flow).\nSend `username` (your email) and `password` as form fields \u2014 **not** JSON.\n\nThe returned JWT is only for the browser-based web UI (`/dashboard`, `/topup`).\nFor API calls, use your `sk_live_...` API key with `Authorization: Bearer <key>`.",
         "operationId": "login_api_v1_auth_login_post",
         "requestBody": {
           "content": {
@@ -503,7 +503,7 @@
           "Auth",
           "Auth"
         ],
-        "summary": "List sandbox `sk_test_…` API keys",
+        "summary": "List sandbox `sk_test_\u2026` API keys",
         "description": "List all active sandbox (`sk_test_...`) API keys for the current account.",
         "operationId": "list_test_keys_api_v1_auth_test_keys_get",
         "responses": {
@@ -605,8 +605,8 @@
           "Auth",
           "Auth"
         ],
-        "summary": "Create a sandbox `sk_test_…` API key",
-        "description": "Generate a sandbox API key (`sk_test_...`).\n\nTest keys behave like live keys except:\n- Bot creation returns a mock bot with a demo transcript immediately.\n- Credits are **not** deducted.\n- Useful for local development and CI/CD pipelines.\n\nThe full key is returned once — store it securely.",
+        "summary": "Create a sandbox `sk_test_\u2026` API key",
+        "description": "Generate a sandbox API key (`sk_test_...`).\n\nTest keys behave like live keys except:\n- Bot creation returns a mock bot with a demo transcript immediately.\n- Credits are **not** deducted.\n- Useful for local development and CI/CD pipelines.\n\nThe full key is returned once \u2014 store it securely.",
         "operationId": "create_test_key_api_v1_auth_test_keys_post",
         "requestBody": {
           "content": {
@@ -1304,7 +1304,7 @@
           "Auth"
         ],
         "summary": "Switch between personal and business account",
-        "description": "Switch the current account between `personal` and `business` types.\n\n- **personal** — standard single-user account (default).\n- **business** — multi-tenant mode; pass `X-Sub-User: <id>` on every request\n  to isolate bots, transcripts, and analyses per end-user.\n\nSwitching type does **not** affect existing bot data or credits.",
+        "description": "Switch the current account between `personal` and `business` types.\n\n- **personal** \u2014 standard single-user account (default).\n- **business** \u2014 multi-tenant mode; pass `X-Sub-User: <id>` on every request\n  to isolate bots, transcripts, and analyses per end-user.\n\nSwitching type does **not** affect existing bot data or credits.",
         "operationId": "set_account_type_api_v1_auth_account_type_put",
         "requestBody": {
           "content": {
@@ -1505,7 +1505,7 @@
           "Auth"
         ],
         "summary": "Mint a short-lived support-access key",
-        "description": "Generate a support access key.\n\nThe plaintext key is returned **once** and never stored — only its SHA-256\nhash is persisted. Share the plaintext key with support during a session,\nthen revoke it immediately after. The admin cannot recover the key from the\ndatabase.",
+        "description": "Generate a support access key.\n\nThe plaintext key is returned **once** and never stored \u2014 only its SHA-256\nhash is persisted. Share the plaintext key with support during a session,\nthen revoke it immediately after. The admin cannot recover the key from the\ndatabase.",
         "operationId": "create_support_key_api_v1_auth_support_key_post",
         "requestBody": {
           "content": {
@@ -1824,7 +1824,7 @@
     "/api/v1/auth/oauth/{provider}/authorize": {
       "get": {
         "tags": [
-          "Auth — SSO"
+          "Auth \u2014 SSO"
         ],
         "summary": "Authorize",
         "description": "Redirect the user to the OAuth2 provider login page.\n\nAfter the user grants consent, the provider redirects to\n`GET /api/v1/auth/oauth/{provider}/callback`.\n\nPass `?redirect=1` if you want the callback to set a session cookie and\nredirect to the web UI instead of returning JSON.",
@@ -1940,10 +1940,10 @@
     "/api/v1/auth/oauth/{provider}/callback": {
       "get": {
         "tags": [
-          "Auth — SSO"
+          "Auth \u2014 SSO"
         ],
         "summary": "Callback",
-        "description": "Handle the OAuth2 callback from the provider.\n\nOn success returns:\n```json\n{\n  \"account_id\": \"...\",\n  \"email\": \"...\",\n  \"api_key\": \"sk_live_...\",\n  \"access_token\": \"<JWT for web UI>\",\n  \"token_type\": \"bearer\",\n  \"is_new_account\": true\n}\n```\n\n`api_key` is the `sk_live_...` key for API calls.\n`access_token` is a short-lived JWT for the web UI (same as `POST /auth/login`).\nOn subsequent logins `api_key` will be empty — use your existing key.",
+        "description": "Handle the OAuth2 callback from the provider.\n\nOn success returns:\n```json\n{\n  \"account_id\": \"...\",\n  \"email\": \"...\",\n  \"api_key\": \"sk_live_...\",\n  \"access_token\": \"<JWT for web UI>\",\n  \"token_type\": \"bearer\",\n  \"is_new_account\": true\n}\n```\n\n`api_key` is the `sk_live_...` key for API calls.\n`access_token` is a short-lived JWT for the web UI (same as `POST /auth/login`).\nOn subsequent logins `api_key` will be empty \u2014 use your existing key.",
         "operationId": "callback_api_v1_auth_oauth__provider__callback_get",
         "parameters": [
           {
@@ -2119,7 +2119,7 @@
     "/api/v1/auth/saml/{org_slug}/metadata": {
       "get": {
         "tags": [
-          "SSO — SAML"
+          "SSO \u2014 SAML"
         ],
         "summary": "SP metadata",
         "description": "Return the SAML Service Provider metadata XML for this org.\n\nShare this URL with your Identity Provider when configuring the SP.",
@@ -2222,7 +2222,7 @@
     "/api/v1/auth/saml/{org_slug}/authorize": {
       "get": {
         "tags": [
-          "SSO — SAML"
+          "SSO \u2014 SAML"
         ],
         "summary": "Initiate SAML login",
         "description": "Redirect the user to the IdP for SAML authentication.\n\nPass `?redirect=1` to use cookie-based flow for the web UI.",
@@ -2330,7 +2330,7 @@
     "/api/v1/auth/saml/{org_slug}/callback": {
       "post": {
         "tags": [
-          "SSO — SAML"
+          "SSO \u2014 SAML"
         ],
         "summary": "SAML callback",
         "description": "Handle SAML assertion from the IdP.\n\nCreates or retrieves the user account and returns a JWT + API key.",
@@ -2441,7 +2441,7 @@
     "/api/v1/auth/saml/configs": {
       "get": {
         "tags": [
-          "SSO — SAML"
+          "SSO \u2014 SAML"
         ],
         "summary": "List SAML configs (admin)",
         "description": "List all SAML organisation configurations. Admin only.",
@@ -2534,11 +2534,16 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
       },
       "post": {
         "tags": [
-          "SSO — SAML"
+          "SSO \u2014 SAML"
         ],
         "summary": "Create SAML config (admin)",
         "description": "Register a new SAML organisation. Admin only.",
@@ -2641,7 +2646,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
       }
     },
     "/api/v1/billing/stripe/checkout": {
@@ -2650,7 +2660,7 @@
           "Billing"
         ],
         "summary": "Create a Stripe Checkout session for a top-up",
-        "description": "Create a Stripe Checkout session to top up your credit balance via card payment.\n\n`amount_usd` must be one of the values in `STRIPE_TOP_UP_AMOUNTS` (default: 10, 25, 50, 100).\n\nReturns a `checkout_url` — redirect your user to that URL to complete payment.\nAfter a successful payment, credits are added to your balance automatically via\nthe Stripe webhook (`POST /api/v1/billing/stripe/webhook`).\n\nOptional `success_url` and `cancel_url` override the default redirect destinations.",
+        "description": "Create a Stripe Checkout session to top up your credit balance via card payment.\n\n`amount_usd` must be one of the values in `STRIPE_TOP_UP_AMOUNTS` (default: 10, 25, 50, 100).\n\nReturns a `checkout_url` \u2014 redirect your user to that URL to complete payment.\nAfter a successful payment, credits are added to your balance automatically via\nthe Stripe webhook (`POST /api/v1/billing/stripe/webhook`).\n\nOptional `success_url` and `cancel_url` override the default redirect destinations.",
         "operationId": "create_stripe_checkout_api_v1_billing_stripe_checkout_post",
         "requestBody": {
           "content": {
@@ -2957,7 +2967,7 @@
           "Billing"
         ],
         "summary": "Get credit balance and recent transactions",
-        "description": "Get current credit balance and transaction history.\n\nReturns `credits_usd` (current balance) and the last 50 transactions ordered\nmost-recent-first. Transaction `type` values:\n- `stripe_topup` — credits added via Stripe card payment\n- `usdc_topup` — credits added via USDC on-chain deposit\n- `bot_usage` — credits deducted on bot completion (raw AI cost × `CREDIT_MARKUP`)",
+        "description": "Get current credit balance and transaction history.\n\nReturns `credits_usd` (current balance) and the last 50 transactions ordered\nmost-recent-first. Transaction `type` values:\n- `stripe_topup` \u2014 credits added via Stripe card payment\n- `usdc_topup` \u2014 credits added via USDC on-chain deposit\n- `bot_usage` \u2014 credits deducted on bot completion (raw AI cost \u00d7 `CREDIT_MARKUP`)",
         "operationId": "get_balance_api_v1_billing_balance_get",
         "responses": {
           "200": {
@@ -3943,7 +3953,7 @@
           "Bots"
         ],
         "summary": "Internal debug view of a bot session",
-        "description": "Return the diagnostic bundle for a bot.\n\nSurfaces forensic data captured during the bot's run — ffmpeg stderr,\nPulseAudio state at key lifecycle moments, audio-file growth samples,\nbrowser console / page errors / failed network requests, and Gemini's\nfinish_reason / safety blocks. Used to triage transcription failures\nwithout having to repro the meeting.",
+        "description": "Return the diagnostic bundle for a bot.\n\nSurfaces forensic data captured during the bot's run \u2014 ffmpeg stderr,\nPulseAudio state at key lifecycle moments, audio-file growth samples,\nbrowser console / page errors / failed network requests, and Gemini's\nfinish_reason / safety blocks. Used to triage transcription failures\nwithout having to repro the meeting.",
         "operationId": "get_bot_debug_api_v1_bot__bot_id__debug_get",
         "security": [
           {
@@ -4805,7 +4815,7 @@
                 "example": {
                   "bot_id": "bot_8a72c5e1",
                   "question": "Did anyone commit to a specific deadline for the v2 onboarding rollout?",
-                  "answer": "Yes — Alice committed to wiring up the A/B test by 2026-05-18."
+                  "answer": "Yes \u2014 Alice committed to wiring up the A/B test by 2026-05-18."
                 }
               }
             }
@@ -4891,7 +4901,7 @@
           "Bots"
         ],
         "summary": "Ask the bot a question while the meeting is live",
-        "description": "Ask a free-form question about a bot that is currently in a call.\n\nWorks during `in_call` status using whatever transcript has been captured\nso far (from the live buffer). Also works on completed bots.\n\nThis is distinct from ``POST /ask`` in that it does NOT require the bot to\nbe in a terminal state — you can query the meeting while it is still going.",
+        "description": "Ask a free-form question about a bot that is currently in a call.\n\nWorks during `in_call` status using whatever transcript has been captured\nso far (from the live buffer). Also works on completed bots.\n\nThis is distinct from ``POST /ask`` in that it does NOT require the bot to\nbe in a terminal state \u2014 you can query the meeting while it is still going.",
         "operationId": "ask_live_bot_api_v1_bot__bot_id__ask_live_post",
         "security": [
           {
@@ -5042,8 +5052,8 @@
                 "schema": {},
                 "example": {
                   "bot_id": "bot_8a72c5e1",
-                  "subject": "Recap — Sales sync (May 4)",
-                  "body": "Hi team,\n\nQuick recap of today's call...\n\nNext steps:\n- Alice — wire A/B test by May 18\n- Bob — draft TOS update by May 11\n\nThanks!",
+                  "subject": "Recap \u2014 Sales sync (May 4)",
+                  "body": "Hi team,\n\nQuick recap of today's call...\n\nNext steps:\n- Alice \u2014 wire A/B test by May 18\n- Bob \u2014 draft TOS update by May 11\n\nThanks!",
                   "to": [
                     "alice@acme.com",
                     "bob@acme.com"
@@ -5133,7 +5143,7 @@
           "Bots"
         ],
         "summary": "Rename or merge speakers in the transcript",
-        "description": "Rename speaker labels in the transcript.\n\nIterates every transcript entry and replaces matching `speaker` fields.\nUpdates `participants` list accordingly. Does not re-run AI analysis —\ncall `POST /{id}/analyze` afterwards if you want refreshed analysis.",
+        "description": "Rename speaker labels in the transcript.\n\nIterates every transcript entry and replaces matching `speaker` fields.\nUpdates `participants` list accordingly. Does not re-run AI analysis \u2014\ncall `POST /{id}/analyze` afterwards if you want refreshed analysis.",
         "operationId": "rename_speakers_api_v1_bot__bot_id__speakers_patch",
         "security": [
           {
@@ -5490,7 +5500,7 @@
           "Bots"
         ],
         "summary": "Make the bot speak text into the meeting (TTS)",
-        "description": "Make the bot speak arbitrary text in the live meeting via TTS.\n\nRequires the bot to be in `in_call` status. Returns 202 immediately after\nthe speak task is queued — synthesis and playback run in the background.\nConcurrent calls serialise behind an asyncio.Lock (`queue`). Pass\n`interrupt=true` to cancel an in-flight speak task and jump ahead.",
+        "description": "Make the bot speak arbitrary text in the live meeting via TTS.\n\nRequires the bot to be in `in_call` status. Returns 202 immediately after\nthe speak task is queued \u2014 synthesis and playback run in the background.\nConcurrent calls serialise behind an asyncio.Lock (`queue`). Pass\n`interrupt=true` to cancel an in-flight speak task and jump ahead.",
         "operationId": "say_in_meeting_api_v1_bot__bot_id__say_post",
         "security": [
           {
@@ -5610,7 +5620,7 @@
           "Bots"
         ],
         "summary": "Make the bot post a chat message into the meeting",
-        "description": "Post arbitrary text into the live meeting's chat panel.\n\nRequires `in_call` status. Returns 202 immediately — the keyboard typing\nruns in the background. Concurrent calls serialise behind an asyncio.Lock\nto avoid racing the per-platform chat DOM selectors.",
+        "description": "Post arbitrary text into the live meeting's chat panel.\n\nRequires `in_call` status. Returns 202 immediately \u2014 the keyboard typing\nruns in the background. Concurrent calls serialise behind an asyncio.Lock\nto avoid racing the per-platform chat DOM selectors.",
         "operationId": "chat_in_meeting_api_v1_bot__bot_id__chat_post",
         "security": [
           {
@@ -6153,12 +6163,12 @@
                     {
                       "ts": "2026-05-04T15:08:00Z",
                       "metric": "talk_time",
-                      "tip": "You've spoken 68% of the last 5 minutes — invite Bob in."
+                      "tip": "You've spoken 68% of the last 5 minutes \u2014 invite Bob in."
                     },
                     {
                       "ts": "2026-05-04T15:14:30Z",
                       "metric": "filler_words",
-                      "tip": "10 'um's in 2 minutes — try a brief pause instead."
+                      "tip": "10 'um's in 2 minutes \u2014 try a brief pause instead."
                     }
                   ],
                   "total": 8
@@ -7131,7 +7141,7 @@
           "Bots"
         ],
         "summary": "Ask a question against the meeting chat history",
-        "description": "Ask a transcript-grounded question. Always available — does NOT require\n`enable_chat_qa` (that flag controls auto-trigger from in-meeting chat).",
+        "description": "Ask a transcript-grounded question. Always available \u2014 does NOT require\n`enable_chat_qa` (that flag controls auto-trigger from in-meeting chat).",
         "operationId": "chat_qa_ask_api_v1_bot__bot_id__chat_qa_ask_post",
         "security": [
           {
@@ -7168,7 +7178,7 @@
                 "example": {
                   "bot_id": "bot_8a72c5e1",
                   "question": "Who owns the TOS update action item?",
-                  "answer": "Bob owns the TOS update — due May 11.",
+                  "answer": "Bob owns the TOS update \u2014 due May 11.",
                   "delivered": true
                 }
               }
@@ -9455,7 +9465,7 @@
           "Analytics"
         ],
         "summary": "Get Api Usage",
-        "description": "Account-level API usage summary for the current 24-hour window.\n\nReturns bot counts, token consumption, cost breakdown, error rate,\nand top platforms — useful for building a usage dashboard.",
+        "description": "Account-level API usage summary for the current 24-hour window.\n\nReturns bot counts, token consumption, cost breakdown, error rate,\nand top platforms \u2014 useful for building a usage dashboard.",
         "operationId": "get_api_usage_api_v1_analytics_api_usage_get",
         "responses": {
           "200": {
@@ -9572,10 +9582,10 @@
             "schema": {
               "type": "string",
               "minLength": 1,
-              "description": "Search query — matched case-insensitively against transcript text.",
+              "description": "Search query \u2014 matched case-insensitively against transcript text.",
               "title": "Q"
             },
-            "description": "Search query — matched case-insensitively against transcript text."
+            "description": "Search query \u2014 matched case-insensitively against transcript text."
           },
           {
             "name": "limit",
@@ -10396,7 +10406,7 @@
         "tags": [
           "Integrations"
         ],
-        "summary": "Create an integration (Slack/Notion)",
+        "summary": "Create an integration",
         "description": "Create a new integration for the current account.",
         "operationId": "create_integration_api_v1_integrations_post",
         "security": [
@@ -13165,7 +13175,7 @@
                 "schema": {},
                 "example": {
                   "name": "justheretolisten.io",
-                  "version": "2.51.0",
+                  "version": "2.69.0",
                   "description": "MCP server for JustHereToListen.io meeting bots.",
                   "tools": [
                     {
@@ -13561,6 +13571,391 @@
         }
       }
     },
+    "/api/v1/action-items/approvals": {
+      "get": {
+        "tags": [
+          "Action Items"
+        ],
+        "summary": "List Action Item Approvals",
+        "description": "List queued CRM/task approvals for the authenticated account.",
+        "operationId": "list_action_item_approvals_api_v1_action_items_approvals_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by approval status",
+              "default": "pending",
+              "title": "Status"
+            },
+            "description": "Filter by approval status"
+          },
+          {
+            "name": "integration_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by integration type",
+              "title": "Integration Type"
+            },
+            "description": "Filter by integration type"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ActionItemApprovalResponse"
+                  },
+                  "title": "Response List Action Item Approvals Api V1 Action Items Approvals Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid Authorization header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted (e.g. admin-only resource, sandbox limits).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found, or not owned by the calling account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate-limit exceeded. Retry after the seconds in the `Retry-After` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Remaining": {
+                "description": "Requests remaining in the current rate-limit window.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-RateLimit-Reset": {
+                "description": "Unix epoch seconds at which the current window resets.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds the caller should wait before retrying. Honour this on 429 and 503 responses; it overrides any backoff your client computes.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/action-items/approvals/{approval_id}/approve": {
+      "post": {
+        "tags": [
+          "Action Items"
+        ],
+        "summary": "Approve Action Item",
+        "description": "Approve and dispatch a queued CRM/task action.",
+        "operationId": "approve_action_item_api_v1_action_items_approvals__approval_id__approve_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "approval_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Approval Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionItemApprovalResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid Authorization header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted (e.g. admin-only resource, sandbox limits).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found, or not owned by the calling account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate-limit exceeded. Retry after the seconds in the `Retry-After` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Remaining": {
+                "description": "Requests remaining in the current rate-limit window.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-RateLimit-Reset": {
+                "description": "Unix epoch seconds at which the current window resets.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds the caller should wait before retrying. Honour this on 429 and 503 responses; it overrides any backoff your client computes.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/action-items/approvals/{approval_id}/reject": {
+      "post": {
+        "tags": [
+          "Action Items"
+        ],
+        "summary": "Reject Action Item",
+        "description": "Reject a queued CRM/task action without dispatching it.",
+        "operationId": "reject_action_item_api_v1_action_items_approvals__approval_id__reject_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "approval_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Approval Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionItemApprovalResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid Authorization header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted (e.g. admin-only resource, sandbox limits).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found, or not owned by the calling account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate-limit exceeded. Retry after the seconds in the `Retry-After` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Remaining": {
+                "description": "Requests remaining in the current rate-limit window.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-RateLimit-Reset": {
+                "description": "Unix epoch seconds at which the current window resets.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds the caller should wait before retrying. Honour this on 429 and 503 responses; it overrides any backoff your client computes.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/action-items/{item_id}": {
       "patch": {
         "tags": [
@@ -13602,6 +13997,658 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ActionItemResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid Authorization header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted (e.g. admin-only resource, sandbox limits).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found, or not owned by the calling account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate-limit exceeded. Retry after the seconds in the `Retry-After` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Remaining": {
+                "description": "Requests remaining in the current rate-limit window.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-RateLimit-Reset": {
+                "description": "Unix epoch seconds at which the current window resets.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds the caller should wait before retrying. Honour this on 429 and 503 responses; it overrides any backoff your client computes.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/privacy/consent-policy": {
+      "get": {
+        "tags": [
+          "Privacy"
+        ],
+        "summary": "Get Consent Policy",
+        "description": "Get account-level recording consent defaults.",
+        "operationId": "get_consent_policy_api_v1_privacy_consent_policy_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsentPolicyResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid Authorization header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted (e.g. admin-only resource, sandbox limits).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found, or not owned by the calling account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate-limit exceeded. Retry after the seconds in the `Retry-After` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Remaining": {
+                "description": "Requests remaining in the current rate-limit window.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-RateLimit-Reset": {
+                "description": "Unix epoch seconds at which the current window resets.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds the caller should wait before retrying. Honour this on 429 and 503 responses; it overrides any backoff your client computes.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "Privacy"
+        ],
+        "summary": "Update Consent Policy",
+        "description": "Update account-level recording consent defaults.",
+        "operationId": "update_consent_policy_api_v1_privacy_consent_policy_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsentPolicyUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsentPolicyResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid Authorization header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted (e.g. admin-only resource, sandbox limits).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found, or not owned by the calling account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate-limit exceeded. Retry after the seconds in the `Retry-After` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Remaining": {
+                "description": "Requests remaining in the current rate-limit window.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-RateLimit-Reset": {
+                "description": "Unix epoch seconds at which the current window resets.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds the caller should wait before retrying. Honour this on 429 and 503 responses; it overrides any backoff your client computes.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/privacy/deletion-requests": {
+      "post": {
+        "tags": [
+          "Privacy"
+        ],
+        "summary": "Create Deletion Request",
+        "description": "Submit a participant data deletion request.\n\nThis endpoint intentionally does not reveal whether the supplied bot_id\nexists or belongs to a customer account.",
+        "operationId": "create_deletion_request_api_v1_privacy_deletion_requests_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeletionRequestCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicDeletionRequestResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid Authorization header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted (e.g. admin-only resource, sandbox limits).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found, or not owned by the calling account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate-limit exceeded. Retry after the seconds in the `Retry-After` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Remaining": {
+                "description": "Requests remaining in the current rate-limit window.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-RateLimit-Reset": {
+                "description": "Unix epoch seconds at which the current window resets.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds the caller should wait before retrying. Honour this on 429 and 503 responses; it overrides any backoff your client computes.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Privacy"
+        ],
+        "summary": "List Deletion Requests",
+        "description": "List deletion requests for the authenticated account.",
+        "operationId": "list_deletion_requests_api_v1_privacy_deletion_requests_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 100,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DeletionRequestResponse"
+                  },
+                  "title": "Response List Deletion Requests Api V1 Privacy Deletion Requests Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid Authorization header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted (e.g. admin-only resource, sandbox limits).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found, or not owned by the calling account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate-limit exceeded. Retry after the seconds in the `Retry-After` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Remaining": {
+                "description": "Requests remaining in the current rate-limit window.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-RateLimit-Reset": {
+                "description": "Unix epoch seconds at which the current window resets.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds the caller should wait before retrying. Honour this on 429 and 503 responses; it overrides any backoff your client computes.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/privacy/deletion-requests/{request_id}": {
+      "get": {
+        "tags": [
+          "Privacy"
+        ],
+        "summary": "Get Deletion Request Status",
+        "description": "Check public status for a deletion request without exposing meeting data.",
+        "operationId": "get_deletion_request_status_api_v1_privacy_deletion_requests__request_id__get",
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Request Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicDeletionRequestResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid Authorization header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted (e.g. admin-only resource, sandbox limits).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found, or not owned by the calling account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate-limit exceeded. Retry after the seconds in the `Retry-After` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Remaining": {
+                "description": "Requests remaining in the current rate-limit window.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-RateLimit-Reset": {
+                "description": "Unix epoch seconds at which the current window resets.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds the caller should wait before retrying. Honour this on 429 and 503 responses; it overrides any backoff your client computes.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Privacy"
+        ],
+        "summary": "Update Deletion Request",
+        "description": "Resolve a deletion request and optionally erase the associated meeting data.",
+        "operationId": "update_deletion_request_api_v1_privacy_deletion_requests__request_id__patch",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Request Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeletionRequestUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeletionRequestResponse"
                 }
               }
             }
@@ -14623,7 +15670,7 @@
           "Admin"
         ],
         "summary": "Set Account Type",
-        "description": "Set the account type (`personal` or `business`) for any user account.\n\n- **personal** — standard single-user account.\n- **business** — multi-tenant mode; the account can use `X-Sub-User` to\n  isolate data per end-user.",
+        "description": "Set the account type (`personal` or `business`) for any user account.\n\n- **personal** \u2014 standard single-user account.\n- **business** \u2014 multi-tenant mode; the account can use `X-Sub-User` to\n  isolate data per end-user.",
         "operationId": "set_account_type_api_v1_admin_accounts__account_id__set_account_type_post",
         "security": [
           {
@@ -14744,7 +15791,7 @@
           "Admin"
         ],
         "summary": "Platform Analytics",
-        "description": "Aggregated platform analytics — no private user data.\n\nReturns counts, trends, feature-adoption rates, and AI token/cost breakdowns.\nTranscript content, meeting URLs, and analysis text are never included.\nResults are cached for 5 minutes.",
+        "description": "Aggregated platform analytics \u2014 no private user data.\n\nReturns counts, trends, feature-adoption rates, and AI token/cost breakdowns.\nTranscript content, meeting URLs, and analysis text are never included.\nResults are cached for 5 minutes.",
         "operationId": "platform_analytics_api_v1_admin_platform_analytics_get",
         "responses": {
           "200": {
@@ -14854,7 +15901,7 @@
           "Admin"
         ],
         "summary": "Support Lookup",
-        "description": "Look up a user via their support key.\n\nThe user generates the key in their dashboard Settings → Support Access.\nAdmin enters the plaintext key here; the system verifies against the stored\nhash and returns limited account + bot activity data for that user.\nNo transcript content is returned — only metadata.",
+        "description": "Look up a user via their support key.\n\nThe user generates the key in their dashboard Settings \u2192 Support Access.\nAdmin enters the plaintext key here; the system verifies against the stored\nhash and returns limited account + bot activity data for that user.\nNo transcript content is returned \u2014 only metadata.",
         "operationId": "support_lookup_api_v1_admin_support_lookup_get",
         "security": [
           {
@@ -14989,7 +16036,7 @@
           "Health"
         ],
         "summary": "Liveness probe",
-        "description": "Liveness probe — returns 200 when the process is running.\n\nDoes NOT check external dependencies (use /ready for that).\nKubernetes: use this as the `livenessProbe`.\nIncludes background task heartbeat status.",
+        "description": "Liveness probe \u2014 returns 200 when the process is running.\n\nDoes NOT check external dependencies (use /ready for that).\nKubernetes: use this as the `livenessProbe`.\nIncludes background task heartbeat status.",
         "operationId": "health_api_health_get",
         "responses": {
           "200": {
@@ -15083,7 +16130,7 @@
           "Health"
         ],
         "summary": "Liveness probe (legacy path)",
-        "description": "Liveness probe — returns 200 when the process is running.\n\nDoes NOT check external dependencies (use /ready for that).\nKubernetes: use this as the `livenessProbe`.\nIncludes background task heartbeat status.",
+        "description": "Liveness probe \u2014 returns 200 when the process is running.\n\nDoes NOT check external dependencies (use /ready for that).\nKubernetes: use this as the `livenessProbe`.\nIncludes background task heartbeat status.",
         "operationId": "health_health_get",
         "responses": {
           "200": {
@@ -15182,7 +16229,7 @@
           "Health"
         ],
         "summary": "Readiness probe",
-        "description": "Readiness probe — returns 200 only when all critical dependencies are healthy.\n\nChecks:\n- Database connectivity (SELECT 1)\n- At least one AI provider key is configured\n\nKubernetes: use this as the `readinessProbe` to stop routing traffic to\ninstances that can't serve requests.",
+        "description": "Readiness probe \u2014 returns 200 only when all critical dependencies are healthy.\n\nChecks:\n- Database connectivity (SELECT 1)\n- At least one AI provider key is configured\n\nKubernetes: use this as the `readinessProbe` to stop routing traffic to\ninstances that can't serve requests.",
         "operationId": "ready_api_ready_get",
         "responses": {
           "200": {
@@ -15285,7 +16332,7 @@
           "Health"
         ],
         "summary": "Readiness probe (legacy path)",
-        "description": "Readiness probe — returns 200 only when all critical dependencies are healthy.\n\nChecks:\n- Database connectivity (SELECT 1)\n- At least one AI provider key is configured\n\nKubernetes: use this as the `readinessProbe` to stop routing traffic to\ninstances that can't serve requests.",
+        "description": "Readiness probe \u2014 returns 200 only when all critical dependencies are healthy.\n\nChecks:\n- Database connectivity (SELECT 1)\n- At least one AI provider key is configured\n\nKubernetes: use this as the `readinessProbe` to stop routing traffic to\ninstances that can't serve requests.",
         "operationId": "ready_ready_get",
         "responses": {
           "200": {
@@ -15614,6 +16661,140 @@
           "message": "Switched to Business account. Pass X-Sub-User: <user-id> on each request to isolate data per end-user."
         }
       },
+      "ActionItemApprovalResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "account_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Id"
+          },
+          "bot_id": {
+            "type": "string",
+            "title": "Bot Id"
+          },
+          "action_item_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Action Item Id"
+          },
+          "integration_id": {
+            "type": "string",
+            "title": "Integration Id"
+          },
+          "integration_type": {
+            "type": "string",
+            "title": "Integration Type"
+          },
+          "destination_type": {
+            "type": "string",
+            "title": "Destination Type"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Payload"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "reviewed_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewed By"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "reviewed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewed At"
+          },
+          "delivered_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delivered At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "bot_id",
+          "integration_id",
+          "integration_type",
+          "destination_type",
+          "payload",
+          "status",
+          "created_at"
+        ],
+        "title": "ActionItemApprovalResponse",
+        "example": {
+          "account_id": "550e8400-e29b-41d4-a716-446655440000",
+          "action_item_id": "ai_8a72c5e1abcd1234ef567890abcdef12",
+          "bot_id": "bot_8a72c5e1",
+          "created_at": "2026-06-24T10:00:00Z",
+          "destination_type": "task",
+          "id": "apr_8a72c5e1",
+          "integration_id": "int_4cb812aa",
+          "integration_type": "linear",
+          "payload": {
+            "assignee": "Alex",
+            "due_date": "2026-06-30",
+            "task": "Send the proposal"
+          },
+          "status": "pending"
+        }
+      },
       "ActionItemPatch": {
         "properties": {
           "status": {
@@ -15780,7 +16961,7 @@
               "manual"
             ],
             "title": "Trigger",
-            "description": "When the bot should evaluate this instruction. `on_topic` — when the relevant topic comes up. `on_silence` — after N seconds of silence. `on_interval` — every N seconds. `manual` — only when triggered via the API.",
+            "description": "When the bot should evaluate this instruction. `on_topic` \u2014 when the relevant topic comes up. `on_silence` \u2014 after N seconds of silence. `on_interval` \u2014 every N seconds. `manual` \u2014 only when triggered via the API.",
             "default": "on_topic"
           },
           "interval_seconds": {
@@ -15795,7 +16976,7 @@
               }
             ],
             "title": "Interval Seconds",
-            "description": "For trigger=on_interval / on_silence — seconds between evaluations."
+            "description": "For trigger=on_interval / on_silence \u2014 seconds between evaluations."
           },
           "speak": {
             "type": "boolean",
@@ -15878,7 +17059,7 @@
           "key_preview": {
             "type": "string",
             "title": "Key Preview",
-            "description": "First 16 characters of the key followed by `...` — the full key is only shown once at creation."
+            "description": "First 16 characters of the key followed by `...` \u2014 the full key is only shown once at creation."
           },
           "mode": {
             "type": "string",
@@ -16196,7 +17377,7 @@
               "transcript_only"
             ],
             "title": "Analysis Mode",
-            "description": "`full` — AI summary, key points, action items, decisions, sentiment, topics, chapters. `transcript_only` — skip all AI analysis, return only the raw transcript.",
+            "description": "`full` \u2014 AI summary, key points, action items, decisions, sentiment, topics, chapters. `transcript_only` \u2014 skip all AI analysis, return only the raw transcript.",
             "default": "full"
           },
           "template": {
@@ -16266,7 +17447,7 @@
               "both"
             ],
             "title": "Mention Response Mode",
-            "description": "`text` — chat message. `voice` — TTS. `both` — chat + TTS.",
+            "description": "`text` \u2014 chat message. `voice` \u2014 TTS. `both` \u2014 chat + TTS.",
             "default": "text"
           },
           "tts_provider": {
@@ -16276,7 +17457,7 @@
               "gemini"
             ],
             "title": "Tts Provider",
-            "description": "`edge` — Microsoft Edge TTS (fast, free). `gemini` — Google Gemini TTS (more natural).",
+            "description": "`edge` \u2014 Microsoft Edge TTS (fast, free). `gemini` \u2014 Google Gemini TTS (more natural).",
             "default": "edge"
           },
           "start_muted": {
@@ -16342,6 +17523,19 @@
             "title": "Consent Message",
             "description": "Custom consent announcement text. Overrides the platform default when set."
           },
+          "consent_opt_out_phrase": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consent Opt Out Phrase",
+            "description": "Phrase participants can say or type to opt out of recording. Overrides the account/workspace/global default for this bot."
+          },
           "keyword_alerts": {
             "items": {
               "$ref": "#/components/schemas/KeywordAlertConfig"
@@ -16378,7 +17572,7 @@
               "whisper"
             ],
             "title": "Transcription Provider",
-            "description": "`gemini` — Gemini Files API (default, requires GEMINI_API_KEY). `whisper` — local OpenAI Whisper model (privacy-preserving, requires WHISPER_ENABLED=true).",
+            "description": "`gemini` \u2014 Gemini Files API (default, requires GEMINI_API_KEY). `whisper` \u2014 local OpenAI Whisper model (privacy-preserving, requires WHISPER_ENABLED=true).",
             "default": "gemini"
           },
           "translation_language": {
@@ -16411,7 +17605,7 @@
               }
             ],
             "title": "Avg Hourly Rate Usd",
-            "description": "Average attendee hourly rate in USD. When provided, `meeting_cost_usd` is calculated as `attendee_count × rate × duration_hours` and included in the bot response."
+            "description": "Average attendee hourly rate in USD. When provided, `meeting_cost_usd` is calculated as `attendee_count \u00d7 rate \u00d7 duration_hours` and included in the bot response."
           },
           "enable_chat_qa": {
             "type": "boolean",
@@ -16544,9 +17738,9 @@
             ]
           },
           {
-            "meeting_url": "https://whereby.com/acme-demo-room",
+            "allow_demo_mode": true,
             "bot_name": "JustHereToListen.io Demo",
-            "allow_demo_mode": true
+            "meeting_url": "https://whereby.com/acme-demo-room"
           }
         ]
       },
@@ -16646,7 +17840,7 @@
           "status": {
             "type": "string",
             "title": "Status",
-            "description": "Current lifecycle status:\n- `ready` — created, about to join immediately\n- `scheduled` — waiting for the scheduled `join_at` time\n- `queued` — waiting for a free bot slot (`MAX_CONCURRENT_BOTS` reached)\n- `joining` — Chromium browser launching and joining the meeting\n- `in_call` — recording in progress\n- `call_ended` — meeting ended, audio saved\n- `transcribing` — audio being transcribed by AI\n- `done` — transcript and analysis complete ✓\n- `error` — unrecoverable error (see `error_message`)\n- `cancelled` — stopped via DELETE /api/v1/bot/{id}\n\nPoll this endpoint until `done` or `error`, or use `webhook_url` for push delivery."
+            "description": "Current lifecycle status:\n- `ready` \u2014 created, about to join immediately\n- `scheduled` \u2014 waiting for the scheduled `join_at` time\n- `queued` \u2014 waiting for a free bot slot (`MAX_CONCURRENT_BOTS` reached)\n- `joining` \u2014 Chromium browser launching and joining the meeting\n- `in_call` \u2014 recording in progress\n- `call_ended` \u2014 meeting ended, audio saved\n- `transcribing` \u2014 audio being transcribed by AI\n- `done` \u2014 transcript and analysis complete \u2713\n- `error` \u2014 unrecoverable error (see `error_message`)\n- `cancelled` \u2014 stopped via DELETE /api/v1/bot/{id}\n\nPoll this endpoint until `done` or `error`, or use `webhook_url` for push delivery."
           },
           "error_message": {
             "anyOf": [
@@ -16844,7 +18038,7 @@
               }
             ],
             "title": "Health Score",
-            "description": "Meeting quality score from 0–100, computed from participation balance, decision count, action item count, and meeting length. Available once status is `done`."
+            "description": "Meeting quality score from 0\u2013100, computed from participation balance, decision count, action item count, and meeting length. Available once status is `done`."
           },
           "meeting_cost_usd": {
             "anyOf": [
@@ -16856,7 +18050,7 @@
               }
             ],
             "title": "Meeting Cost Usd",
-            "description": "Estimated meeting cost in USD (attendee_count × avg_hourly_rate_usd × duration_hours). Only populated when `avg_hourly_rate_usd` was provided at bot creation."
+            "description": "Estimated meeting cost in USD (attendee_count \u00d7 avg_hourly_rate_usd \u00d7 duration_hours). Only populated when `avg_hourly_rate_usd` was provided at bot creation."
           },
           "pii_detected": {
             "type": "boolean",
@@ -17557,7 +18751,7 @@
         "title": "ChatRequest",
         "description": "Post a message into the live meeting's chat panel.",
         "example": {
-          "text": "Heads up — recording started. Reply STOP if you'd like to opt out."
+          "text": "Heads up \u2014 recording started. Reply STOP if you'd like to opt out."
         }
       },
       "ChatResponse": {
@@ -17728,6 +18922,121 @@
         "title": "CoachingConfig",
         "description": "Per-bot host-coaching configuration."
       },
+      "ConsentPolicyResponse": {
+        "properties": {
+          "account_id": {
+            "type": "string",
+            "title": "Account Id"
+          },
+          "require_consent": {
+            "type": "boolean",
+            "title": "Require Consent"
+          },
+          "consent_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consent Message"
+          },
+          "opt_out_phrase": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Opt Out Phrase"
+          },
+          "auto_redact_opt_outs": {
+            "type": "boolean",
+            "title": "Auto Redact Opt Outs"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "account_id",
+          "require_consent",
+          "auto_redact_opt_outs"
+        ],
+        "title": "ConsentPolicyResponse"
+      },
+      "ConsentPolicyUpdate": {
+        "properties": {
+          "require_consent": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Require Consent"
+          },
+          "consent_message": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consent Message"
+          },
+          "opt_out_phrase": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Opt Out Phrase"
+          },
+          "auto_redact_opt_outs": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auto Redact Opt Outs"
+          }
+        },
+        "type": "object",
+        "title": "ConsentPolicyUpdate",
+        "example": {
+          "auto_redact_opt_outs": true,
+          "consent_message": "This call is being recorded and transcribed by Acme Notes. Say 'opt out' to be redacted.",
+          "opt_out_phrase": "opt out",
+          "require_consent": true
+        }
+      },
       "CreateKeyRequest": {
         "properties": {
           "name": {
@@ -17783,6 +19092,190 @@
         "type": "object",
         "title": "CrossMeetingMemoryConfig",
         "description": "Per-bot cross-meeting memory retrieval configuration."
+      },
+      "DeletionRequestCreate": {
+        "properties": {
+          "bot_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 36
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bot Id"
+          },
+          "requester_email": {
+            "type": "string",
+            "format": "email",
+            "title": "Requester Email"
+          },
+          "participant_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Participant Name"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "requester_email"
+        ],
+        "title": "DeletionRequestCreate",
+        "example": {
+          "bot_id": "bot_8a72c5e1",
+          "participant_name": "Alex",
+          "reason": "Please remove my contribution from the transcript.",
+          "requester_email": "participant@example.com"
+        }
+      },
+      "DeletionRequestResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "account_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Id"
+          },
+          "bot_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bot Id"
+          },
+          "requester_email": {
+            "type": "string",
+            "title": "Requester Email"
+          },
+          "participant_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Participant Name"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "resolution_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution Note"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "requester_email",
+          "status",
+          "created_at"
+        ],
+        "title": "DeletionRequestResponse"
+      },
+      "DeletionRequestUpdate": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "pending | approved | rejected | completed"
+          },
+          "resolution_note": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution Note"
+          },
+          "erase_meeting_data": {
+            "type": "boolean",
+            "title": "Erase Meeting Data",
+            "description": "When true, wipe transcript, analysis, chapters, speaker stats, and recording links for the bot.",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "DeletionRequestUpdate"
       },
       "DriveExportRequest": {
         "properties": {
@@ -17840,7 +19333,7 @@
         "title": "DriveExportResponse",
         "example": {
           "file_id": "1XyZaB2CdEfGhIjKlMnOpQrStUv",
-          "file_name": "Acme Notes Bot — 2026-05-04.md",
+          "file_name": "Acme Notes Bot \u2014 2026-05-04.md",
           "web_view_link": "https://drive.google.com/file/d/1XyZaB2CdEfGhIjKlMnOpQrStUv/view"
         }
       },
@@ -17929,7 +19422,7 @@
           "type": {
             "type": "string",
             "title": "Type",
-            "description": "Integration type: `slack` or `notion`."
+            "description": "Integration type: `slack`, `notion`, `linear`, `jira`, `google_drive`, `hubspot`, or `salesforce`."
           },
           "name": {
             "type": "string",
@@ -17942,7 +19435,7 @@
             "additionalProperties": true,
             "type": "object",
             "title": "Config",
-            "description": "Integration config dict.  **Slack:** `{webhook_url: str}`.  **Notion:** `{api_token: str, database_id: str}`."
+            "description": "Integration config dict.  **Slack:** `{webhook_url: str}`.  **Notion:** `{api_token: str, database_id: str}`.  **Linear:** `{api_key: str, team_id: str, approval_required?: bool}`.  **Jira:** `{base_url: str, email: str, token: str, project_key: str, approval_required?: bool}`.  **HubSpot:** `{access_token: str, approval_required?: bool}`.  **Salesforce:** `{instance_url: str, access_token: str, approval_required?: bool}`."
           }
         },
         "type": "object",
@@ -17966,6 +19459,15 @@
             },
             "name": "Meeting notes",
             "type": "notion"
+          },
+          {
+            "config": {
+              "api_key": "lin_api_...",
+              "approval_required": true,
+              "team_id": "team_123"
+            },
+            "name": "Product tasks",
+            "type": "linear"
           }
         ]
       },
@@ -18444,7 +19946,7 @@
               "Sunset the legacy wizard once v2 reaches 95% completion."
             ],
             "key_points": [
-              "Onboarding completion is currently 71% — target 90%.",
+              "Onboarding completion is currently 71% \u2014 target 90%.",
               "Engineering capacity confirmed for two devs through August.",
               "Legal sign-off on new TOS is expected next week."
             ],
@@ -18647,6 +20149,30 @@
             }
           ]
         }
+      },
+      "PublicDeletionRequestResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "created_at"
+        ],
+        "title": "PublicDeletionRequestResponse"
       },
       "RegisterRequest": {
         "properties": {
@@ -19041,7 +20567,7 @@
               "edge"
             ],
             "title": "Voice",
-            "description": "TTS provider. `gemini` — Google Gemini TTS (natural, ~1–2 s). `edge` — Microsoft Edge TTS (faster, ~300–500 ms, slightly robotic).",
+            "description": "TTS provider. `gemini` \u2014 Google Gemini TTS (natural, ~1\u20132 s). `edge` \u2014 Microsoft Edge TTS (faster, ~300\u2013500 ms, slightly robotic).",
             "default": "gemini"
           },
           "interrupt": {
@@ -19059,7 +20585,7 @@
         "description": "Speak arbitrary text in the live meeting via TTS + virtual microphone.",
         "example": {
           "interrupt": false,
-          "text": "Hi everyone — quick reminder that this meeting is being recorded.",
+          "text": "Hi everyone \u2014 quick reminder that this meeting is being recorded.",
           "voice": "gemini"
         }
       },
@@ -19190,7 +20716,7 @@
             },
             "type": "object",
             "title": "Renames",
-            "description": "Map of original speaker label → new display name. E.g. {'Speaker 1': 'Alice'}."
+            "description": "Map of original speaker label \u2192 new display name. E.g. {'Speaker 1': 'Alice'}."
           }
         },
         "type": "object",
@@ -19384,7 +20910,7 @@
           "key": {
             "type": "string",
             "title": "Key",
-            "description": "Full test key — shown once. Use as Bearer token for sandbox mode."
+            "description": "Full test key \u2014 shown once. Use as Bearer token for sandbox mode."
           },
           "mode": {
             "type": "string",
@@ -19428,7 +20954,7 @@
           "type": {
             "type": "string",
             "title": "Type",
-            "description": "Transaction type. One of:\n- `stripe_topup` — credits added via Stripe card payment\n- `usdc_topup` — credits added via USDC deposit\n- `bot_usage` — credits deducted on bot completion (raw AI cost × `CREDIT_MARKUP`)"
+            "description": "Transaction type. One of:\n- `stripe_topup` \u2014 credits added via Stripe card payment\n- `usdc_topup` \u2014 credits added via USDC deposit\n- `bot_usage` \u2014 credits deducted on bot completion (raw AI cost \u00d7 `CREDIT_MARKUP`)"
           },
           "description": {
             "type": "string",
@@ -19481,7 +21007,7 @@
           "from_address": {
             "type": "string",
             "title": "From Address",
-            "description": "Sender's Ethereum address (unrecognized — not registered on any account)."
+            "description": "Sender's Ethereum address (unrecognized \u2014 not registered on any account)."
           },
           "to_address": {
             "type": "string",
@@ -20120,7 +21646,7 @@
         "type": "object",
         "title": "WorkspaceUpdate",
         "example": {
-          "name": "Acme Sales Team — EMEA",
+          "name": "Acme Sales Team \u2014 EMEA",
           "settings": {
             "default_bot_name": "Acme EMEA Bot",
             "require_consent": true
@@ -20596,8 +22122,8 @@
       "BearerAuth": {
         "type": "http",
         "scheme": "bearer",
-        "bearerFormat": "sk_live_… or sk_test_… or JWT",
-        "description": "Per-user API key (`sk_live_…` for production, `sk_test_…` for sandbox), or a JWT issued by `/api/v1/auth/login`. Pass as `Authorization: Bearer <token>`."
+        "bearerFormat": "sk_live_\u2026 or sk_test_\u2026 or JWT",
+        "description": "Per-user API key (`sk_live_\u2026` for production, `sk_test_\u2026` for sandbox), or a JWT issued by `/api/v1/auth/login`. Pass as `Authorization: Bearer <token>`."
       },
       "SubUserHeader": {
         "type": "apiKey",
@@ -20652,7 +22178,7 @@
       "description": "Account registration, login, API key management, plan, notification prefs, GDPR erasure."
     },
     {
-      "name": "Auth — SSO",
+      "name": "Auth \u2014 SSO",
       "description": "Google / Microsoft OAuth2 sign-in and sign-up."
     },
     {
@@ -20677,7 +22203,7 @@
     },
     {
       "name": "Calendar",
-      "description": "iCal feeds — auto-dispatch bots to upcoming meetings."
+      "description": "iCal feeds \u2014 auto-dispatch bots to upcoming meetings."
     },
     {
       "name": "Action Items",
@@ -20701,7 +22227,7 @@
     },
     {
       "name": "MCP",
-      "description": "Model Context Protocol — expose bot data to AI agents."
+      "description": "Model Context Protocol \u2014 expose bot data to AI agents."
     }
   ]
 }

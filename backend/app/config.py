@@ -251,12 +251,20 @@ class Settings(BaseSettings):
     STORE_MAX_BOTS: int = 10000           # max bots in memory before LRU eviction
 
     # ── Bot-state backend (distributed-state groundwork) ──────────────────────
-    # "memory" (default) = in-process Store singleton. "redis" = shared
-    # RedisBotStateStore (requires REDIS_URL) so multiple workers can share live
-    # bot state. See app.store.get_bot_state_store — selecting "redis" is inert
-    # until call sites are migrated to that accessor and validated on staging.
+    # "memory" (default) = in-process Store singleton. "redis" = shared live
+    # bot state + distributed queue/lease/heartbeat orchestration (requires
+    # REDIS_URL). Runtime handles such as Playwright pages remain process-local
+    # to the worker that owns the lease.
     BOT_STATE_BACKEND: str = "memory"     # "memory" | "redis"
     REDIS_URL: str = ""                   # e.g. redis://localhost:6379/0
+    BOT_WORKER_LEASE_SECONDS: int = 90    # active bot worker lease TTL
+    BOT_SCHEDULER_LOCK_SECONDS: int = 10  # distributed scheduler critical-section TTL
+
+    # ── Capture provider ──────────────────────────────────────────────────────
+    # Built-in real-meeting provider: "playwright". The abstraction also lets
+    # future adapters (Recall.ai, Meeting BaaS, botless desktop, uploads, native
+    # platform transcript imports) feed the same transcript/analysis pipeline.
+    CAPTURE_PROVIDER: str = "playwright"
 
     # ── Idempotency ───────────────────────────────────────────────────────────
     IDEMPOTENCY_TTL_HOURS: int = 24       # how long to cache key → bot_id mappings
@@ -315,7 +323,7 @@ class Settings(BaseSettings):
     SAML_SP_BASE_URL: str = ""          # e.g. https://app.meetingbot.io (used in SP metadata)
 
     # ── MCP server ─────────────────────────────────────────────────────────────
-    MCP_ENABLED: bool = True
+    MCP_ENABLED: bool = False
 
     # ── PostgreSQL connection pool ─────────────────────────────────────────────
     # Tune these for your deployment's expected concurrency.

@@ -92,6 +92,7 @@ class BotSession:
     # ── Consent / opt-out ──────────────────────────────────────────────────────
     consent_enabled: bool = False       # announce recording and honour opt-out requests
     consent_message: Optional[str] = None   # custom consent announcement text
+    consent_opt_out_phrase: Optional[str] = None  # per-bot/account opt-out phrase override
     opted_out_participants: list = field(default_factory=list)  # names of participants who opted out
 
     # ── Keyword alerts ─────────────────────────────────────────────────────────
@@ -347,11 +348,52 @@ class Store:
         # Maintained alongside _bots whenever share_token_hash is set, cleared,
         # or a bot is evicted. /share/{token} no longer scans every live bot.
         self._share_token_index: dict[str, str] = {}
+        self._local_bot_fields: dict[str, dict] = {}
+        self._external_bot_backend = None
         self._lock = asyncio.Lock()
+
+    def _bot_backend(self):
+        """Return the shared live-bot backend when Redis mode is enabled."""
+        if _settings.BOT_STATE_BACKEND != "redis" or not _settings.REDIS_URL:
+            return None
+        if self._external_bot_backend is None:
+            import redis.asyncio as _aioredis
+            from app.redis_store import RedisBotStateStore
+
+            client = _aioredis.from_url(_settings.REDIS_URL, decode_responses=True)
+            self._external_bot_backend = RedisBotStateStore(client)
+        return self._external_bot_backend
+
+    @staticmethod
+    def _split_local_fields(kwargs: dict) -> tuple[dict, dict]:
+        local = {k: v for k, v in kwargs.items() if k in _NON_SERIALIZABLE_FIELDS}
+        shared = {k: v for k, v in kwargs.items() if k not in _NON_SERIALIZABLE_FIELDS}
+        return shared, local
+
+    def _overlay_local_fields(self, bot: Optional[BotSession]) -> Optional[BotSession]:
+        if bot is None:
+            return None
+        local = self._local_bot_fields.get(bot.id)
+        if local:
+            for k, v in local.items():
+                setattr(bot, k, v)
+        return bot
 
     # ── Bots ──────────────────────────────────────────────────────────────────
 
     async def create_bot(self, session: BotSession) -> None:
+        backend = self._bot_backend()
+        if backend is not None:
+            await backend.create_bot(session)
+            local = {
+                k: getattr(session, k)
+                for k in _NON_SERIALIZABLE_FIELDS
+                if getattr(session, k, None)
+            }
+            if local:
+                async with self._lock:
+                    self._local_bot_fields[session.id] = local
+            return
         async with self._lock:
             self._bots[session.id] = session
             # If the bot is being created with a share token already set
@@ -384,6 +426,10 @@ class Store:
                     )
 
     async def get_bot(self, bot_id: str) -> Optional[BotSession]:
+        backend = self._bot_backend()
+        if backend is not None:
+            bot = await backend.get_bot(bot_id)
+            return self._overlay_local_fields(bot)
         async with self._lock:
             return self._bots.get(bot_id)
 
@@ -401,6 +447,18 @@ class Store:
             raise ValueError(
                 f"update_bot cannot mutate immutable field(s): {sorted(forbidden)!r}"
             )
+        backend = self._bot_backend()
+        if backend is not None:
+            shared, local = self._split_local_fields(kwargs)
+            if local:
+                async with self._lock:
+                    fields = self._local_bot_fields.setdefault(bot_id, {})
+                    fields.update(local)
+            if shared:
+                bot = await backend.update_bot(bot_id, **shared)
+            else:
+                bot = await backend.get_bot(bot_id)
+            return self._overlay_local_fields(bot)
         async with self._lock:
             bot = self._bots.get(bot_id)
             if bot is None:
@@ -419,6 +477,10 @@ class Store:
 
     async def get_bot_by_share_hash(self, share_hash: str) -> Optional[BotSession]:
         """O(1) lookup of a live bot by its stored share-token hash."""
+        backend = self._bot_backend()
+        if backend is not None:
+            bot = await backend.get_bot_by_share_hash(share_hash)
+            return self._overlay_local_fields(bot)
         async with self._lock:
             bot_id = self._share_token_index.get(share_hash)
             if not bot_id:
@@ -442,6 +504,18 @@ class Store:
         ``after_cursor`` in the next call.  Offset-based pagination still works
         (``offset`` is ignored when ``after_cursor`` is provided).
         """
+        backend = self._bot_backend()
+        if backend is not None:
+            bots, total, next_cursor = await backend.list_bots(
+                status=status,
+                limit=limit,
+                offset=offset,
+                account_id=account_id,
+                sub_user_id=sub_user_id,
+                account_id_is_null=account_id_is_null,
+                after_cursor=after_cursor,
+            )
+            return [self._overlay_local_fields(b) for b in bots], total, next_cursor
         async with self._lock:
             # Filter inside the lock to avoid copying unneeded bots.
             # account_id_is_null lets unauth dev-mode select only legacy
@@ -486,6 +560,12 @@ class Store:
         return page, total, next_cursor
 
     async def delete_bot(self, bot_id: str) -> None:
+        backend = self._bot_backend()
+        if backend is not None:
+            await backend.delete_bot(bot_id)
+            async with self._lock:
+                self._local_bot_fields.pop(bot_id, None)
+            return
         async with self._lock:
             removed = self._bots.pop(bot_id, None)
             if removed and removed.share_token_hash:
@@ -498,6 +578,10 @@ class Store:
         Used by the stuck-bot reaper. Returns a copied list so the caller can
         cancel tasks / mutate state without holding the store lock.
         """
+        backend = self._bot_backend()
+        if backend is not None:
+            bots = await backend.list_live_bots(statuses)
+            return [self._overlay_local_fields(b) for b in bots]
         async with self._lock:
             return [b for b in self._bots.values() if b.status in statuses]
 
@@ -528,6 +612,7 @@ class Store:
                 bot_id = bot.id
                 bot_account_id = bot.account_id
                 bot_sub_user_id = bot.sub_user_id
+                bot_workspace_id = bot.workspace_id
                 bot_status = bot.status
                 bot_meeting_url = bot.meeting_url
                 bot_created_at = bot.created_at
@@ -569,6 +654,7 @@ class Store:
                     "sub_user_id": bot.sub_user_id,
                     "consent_enabled": bot.consent_enabled,
                     "consent_message": bot.consent_message,
+                    "consent_opt_out_phrase": bot.consent_opt_out_phrase,
                     "opted_out_participants": bot.opted_out_participants,
                     "keyword_alerts": bot.keyword_alerts,
                     "auto_followup_email": bot.auto_followup_email,
@@ -646,6 +732,7 @@ class Store:
                         id=bot_id,
                         account_id=bot_account_id,
                         sub_user_id=bot_sub_user_id,
+                        workspace_id=bot_workspace_id,
                         status=bot_status,
                         meeting_url=bot_meeting_url,
                         created_at=bot_created_at,
@@ -656,6 +743,9 @@ class Store:
                     )
                     db.add(snap)
                 else:
+                    snap.account_id = bot_account_id
+                    snap.sub_user_id = bot_sub_user_id
+                    snap.workspace_id = bot_workspace_id
                     snap.status = bot_status
                     snap.expires_at = bot_expires_at
                     snap.share_token_hash = bot_share_token_hash
@@ -854,6 +944,49 @@ class Store:
         """Remove expired bots (and their recording files) from memory and DB."""
         import os
         now = _now()
+        backend = self._bot_backend()
+        if backend is not None:
+            all_bots, _, _ = await backend.list_bots(limit=_settings.STORE_MAX_BOTS)
+            expired_bots = [
+                bot for bot in all_bots
+                if bot.expires_at and bot.expires_at < now
+            ]
+            paths_to_delete = []
+            for bot in expired_bots:
+                if bot.recording_path:
+                    paths_to_delete.append(bot.recording_path)
+                if bot.video_path:
+                    paths_to_delete.append(bot.video_path)
+                await backend.delete_bot(bot.id)
+                async with self._lock:
+                    self._local_bot_fields.pop(bot.id, None)
+
+            def _remove_files(paths: list[str]) -> None:
+                for p in paths:
+                    try:
+                        if p and os.path.exists(p):
+                            os.remove(p)
+                    except Exception as exc:
+                        logger.warning("Could not delete file %s: %s", p, exc)
+
+            if paths_to_delete:
+                await asyncio.to_thread(_remove_files, paths_to_delete)
+
+            if expired_bots:
+                try:
+                    from app.db import AsyncSessionLocal
+                    from app.models.account import BotSnapshot
+                    from sqlalchemy import delete as _delete
+                    async with AsyncSessionLocal() as db:
+                        await db.execute(
+                            _delete(BotSnapshot).where(BotSnapshot.expires_at < now)
+                        )
+                        await db.commit()
+                except Exception:
+                    logger.exception("Failed to purge expired bot snapshots from database")
+                logger.info("Cleaned up %d expired bot(s) from Redis state", len(expired_bots))
+            return len(expired_bots)
+
         # Collect file paths to delete inside the lock, but perform the blocking
         # os.remove() calls OUTSIDE it — file I/O can stall, and holding the
         # global store lock during it freezes every other store operation.
@@ -976,6 +1109,7 @@ async def load_persisted_bots() -> int:
                     sub_user_id=d.get("sub_user_id"),
                     consent_enabled=d.get("consent_enabled", False),
                     consent_message=d.get("consent_message"),
+                    consent_opt_out_phrase=d.get("consent_opt_out_phrase"),
                     opted_out_participants=d.get("opted_out_participants") or [],
                     keyword_alerts=d.get("keyword_alerts") or [],
                     auto_followup_email=d.get("auto_followup_email", False),
@@ -1090,30 +1224,11 @@ async def load_persisted_webhooks() -> int:
 # Module-level singleton
 store = Store()
 
-_shared_store = None
-
-
 def get_bot_state_store() -> "BotStateStore":
-    """Return the active bot-state store behind the ``BotStateStore`` contract.
+    """Return the active app-facing bot-state facade.
 
-    Defaults to the in-memory ``Store`` singleton. When ``BOT_STATE_BACKEND`` is
-    ``"redis"`` and ``REDIS_URL`` is set, returns a process-wide
-    ``RedisBotStateStore`` instead so multiple API/worker processes can share
-    live bot state.
-
-    NOTE: most call sites still import the ``store`` singleton directly today, so
-    selecting a shared backend here does NOT by itself migrate the running app —
-    rewiring those call sites to this accessor (and validating on a staging
-    cluster) is the deliberate activation step. Keeping this inert by default
-    means the single-instance product is unaffected.
+    The singleton ``store`` now delegates live bot state to Redis when
+    ``BOT_STATE_BACKEND=redis`` while retaining process-local runtime handles
+    and DB-backed terminal snapshot/webhook behavior.
     """
-    global _shared_store
-    if _settings.BOT_STATE_BACKEND == "redis" and _settings.REDIS_URL:
-        if _shared_store is None:
-            import redis.asyncio as _aioredis
-
-            from app.redis_store import RedisBotStateStore
-            client = _aioredis.from_url(_settings.REDIS_URL, decode_responses=True)
-            _shared_store = RedisBotStateStore(client)
-        return _shared_store
     return store

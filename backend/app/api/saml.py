@@ -71,6 +71,11 @@ async def _load_saml_config(org_slug: str, db):
 def _build_sp_settings(org_slug: str, cfg) -> dict:
     """Build the python3-saml settings dict for the Service Provider."""
     base_url = settings.SAML_SP_BASE_URL.rstrip("/")
+    if not base_url or not base_url.startswith(("https://", "http://")):
+        raise HTTPException(
+            status_code=503,
+            detail="SAML_SP_BASE_URL must be configured to the public service URL before SAML SSO can be used",
+        )
     acs_url = f"{base_url}/api/v1/auth/saml/{org_slug}/callback"
     entity_id = f"{base_url}/api/v1/auth/saml/{org_slug}/metadata"
 

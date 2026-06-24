@@ -16,6 +16,7 @@ os.environ["JWT_SECRET"] = "test-secret-key-do-not-use-in-production"
 os.environ["API_KEY"] = ""  # Disable superadmin bypass
 os.environ["CORS_ORIGINS"] = "*"
 os.environ["ADMIN_EMAILS"] = "admin@test.com"
+os.environ["MCP_ENABLED"] = "true"
 
 
 # ── Disable every slowapi Limiter instance for tests ────────────────────────

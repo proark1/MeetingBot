@@ -57,6 +57,7 @@ from app.api.workspaces import router as workspaces_router
 from app.api.saml import router as saml_router
 from app.api.mcp import router as mcp_router
 from app.api.action_items import router as action_items_router
+from app.api.privacy import router as privacy_router
 from app.deps import require_auth
 from typing import Any
 
@@ -703,7 +704,7 @@ _PUBLIC_DESCRIPTION = (
 
     "## Integrations (Slack & Notion)\n"
     "Push meeting notes automatically to third-party tools after each bot session.\n\n"
-    "- `POST /api/v1/integrations` — create an integration (`type`: `slack` or `notion`)\n"
+    "- `POST /api/v1/integrations` — create an integration (`type`: `slack`, `notion`, `linear`, `jira`, `google_drive`, `hubspot`, or `salesforce`)\n"
     "- **Slack:** provide `config.webhook_url` (Incoming Webhook URL)\n"
     "- **Notion:** provide `config.api_token` and `config.database_id`\n"
     "- `GET /api/v1/integrations` — list all integrations (secrets redacted)\n"
@@ -771,7 +772,7 @@ _PUBLIC_DESCRIPTION = (
     "`POST /api/v1/mcp/call` executes one of 16 tools (read, write, and reasoning) — "
     "e.g. `list_meetings`, `get_meeting`, `search_meetings`, `get_action_items`, "
     "`create_bot`, `cancel_bot`, `ask_chat_qa`, `get_meeting_brief`. "
-    "Enable/disable with `MCP_ENABLED` (default `true`).\n\n"
+    "Enable with `MCP_ENABLED=true` (default `false`).\n\n"
 
     "## SAML 2.0 SSO\n"
     "Set `SAML_ENABLED=true` and `SAML_SP_BASE_URL` to enable enterprise SSO. "
@@ -947,7 +948,7 @@ app = FastAPI(
 
         "## Integrations (Slack & Notion)\n"
         "Push meeting notes automatically to third-party tools after each bot session.\n\n"
-        "- `POST /api/v1/integrations` — create an integration (`type`: `slack` or `notion`)\n"
+        "- `POST /api/v1/integrations` — create an integration (`type`: `slack`, `notion`, `linear`, `jira`, `google_drive`, `hubspot`, or `salesforce`)\n"
         "- **Slack:** provide `config.webhook_url` (Incoming Webhook URL)\n"
         "- **Notion:** provide `config.api_token` and `config.database_id`\n"
         "- `GET /api/v1/integrations` — list all integrations (secrets redacted)\n"
@@ -1015,7 +1016,7 @@ app = FastAPI(
         "`POST /api/v1/mcp/call` executes one of 16 tools (read, write, and reasoning) — "
         "e.g. `list_meetings`, `get_meeting`, `search_meetings`, `get_action_items`, "
         "`create_bot`, `cancel_bot`, `ask_chat_qa`, `get_meeting_brief`. "
-        "Enable/disable with `MCP_ENABLED` (default `true`).\n\n"
+        "Enable with `MCP_ENABLED=true` (default `false`).\n\n"
 
         "## SAML 2.0 SSO\n"
         "Set `SAML_ENABLED=true` and `SAML_SP_BASE_URL`. Admins register IdP configs at "
@@ -1166,6 +1167,65 @@ app.add_middleware(
 app.add_middleware(PrometheusMiddleware)
 
 
+# ── UI CSRF / same-origin mutation guard ──────────────────────────────────────
+
+_UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+
+def _request_origin(request: Request) -> str:
+    """Public origin for same-origin checks, proxy-aware but Host-bound."""
+    scheme = (
+        request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip()
+        or request.url.scheme
+        or "http"
+    ).lower()
+    host = (
+        request.headers.get("x-forwarded-host", "").split(",", 1)[0].strip()
+        or request.headers.get("host", "")
+        or request.url.netloc
+    ).lower()
+    return f"{scheme}://{host}"
+
+
+def _origin_header_matches_request(request: Request) -> bool:
+    """Return True when Origin/Referer proves a same-origin UI mutation."""
+    from urllib.parse import urlparse
+
+    expected = _request_origin(request)
+    candidate = request.headers.get("origin") or request.headers.get("referer")
+    if not candidate:
+        return False
+    try:
+        parsed = urlparse(candidate)
+    except Exception:
+        return False
+    if not parsed.scheme or not parsed.netloc:
+        return False
+    return f"{parsed.scheme.lower()}://{parsed.netloc.lower()}" == expected
+
+
+@app.middleware("http")
+async def enforce_ui_same_origin_mutations(request: Request, call_next):
+    """Reject cross-site browser form posts against cookie-authenticated UI routes.
+
+    API routes use Bearer/API-key auth and are intentionally left to CORS/auth
+    policy. The HTML dashboard/admin surface uses a session cookie, so unsafe
+    non-API methods must prove same-origin via Origin or Referer before any
+    route handler mutates account, billing, webhook, or bot state.
+    """
+    path = request.url.path
+    if (
+        request.method.upper() in _UNSAFE_METHODS
+        and not path.startswith("/api/")
+        and not _origin_header_matches_request(request)
+    ):
+        return _JSONResponse(
+            {"detail": "Cross-site form submission rejected"},
+            status_code=403,
+        )
+    return await call_next(request)
+
+
 # ── Security headers ───────────────────────────────────────────────────────────
 
 @app.middleware("http")
@@ -1194,6 +1254,9 @@ async def add_security_headers(request, call_next):
             "font-src 'self' fonts.gstatic.com; "
             "img-src 'self' data: https:; "
             "connect-src 'self' wss: ws:; "
+            "object-src 'none'; "
+            "base-uri 'self'; "
+            "form-action 'self'; "
             "frame-ancestors 'none';"
         )
     # HSTS: tell browsers to always use HTTPS for this domain (1 year)
@@ -1386,7 +1449,7 @@ _ROUTE_SUMMARIES: dict[tuple[str, str], str] = {
     ("get", "/api/v1/action-items"): "List action items across all bots",
     ("patch", "/api/v1/action-items/{item_id}"): "Update an action item (status, assignee, due_date)",
     # — Integrations —
-    ("post", "/api/v1/integrations"): "Create an integration (Slack/Notion)",
+    ("post", "/api/v1/integrations"): "Create an integration",
     ("get", "/api/v1/integrations"): "List integrations",
     ("patch", "/api/v1/integrations/{integration_id}"): "Update an integration",
     ("delete", "/api/v1/integrations/{integration_id}"): "Delete an integration",
@@ -2087,6 +2150,7 @@ app.include_router(keyword_alerts_router, prefix="/api/v1", dependencies=_auth)
 app.include_router(workspaces_router,     prefix="/api/v1", dependencies=_auth)
 app.include_router(mcp_router,            prefix="/api/v1", dependencies=_auth)
 app.include_router(action_items_router,   prefix="/api/v1", dependencies=_auth)
+app.include_router(privacy_router,        prefix="/api/v1")              # public deletion intake + own auth
 app.include_router(admin_router,          prefix="/api/v1")              # admin has its own auth (require_admin)
 app.include_router(ws_router,             prefix="/api/v1")              # WS auth handled separately
 app.include_router(ui_router)                                             # web UI (no prefix)

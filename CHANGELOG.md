@@ -4,7 +4,88 @@ All notable changes to JustHereToListen.io are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.68.1 — **Last updated:** 2026-06-19
+> **Latest version:** 2.69.0 — **Last updated:** 2026-06-24
+
+---
+
+## [2.69.0] - 2026-06-24
+
+Privacy, trust, and workflow-review release. Adds account/workspace consent
+controls, participant deletion request intake, approval-gated CRM/task dispatch,
+and a public Trust & Security page.
+
+### Added
+- **Account consent policy API** at `/api/v1/privacy/consent-policy` for
+  requiring recording announcements, setting default consent wording, defining
+  the opt-out phrase, and controlling opt-out redaction behavior.
+- **Public deletion request intake** at `/api/v1/privacy/deletion-requests`.
+  Requests are non-enumerating and can be reviewed by the owning account.
+- **Owner-reviewed meeting erasure** from deletion requests, wiping transcripts,
+  analysis, chapters, speaker stats, and recording references for the associated
+  bot/snapshot.
+- **CRM/task approval queue** for HubSpot, Salesforce, Linear, and Jira when an
+  integration sets `approval_required: true`.
+- **Approval endpoints** under `/api/v1/action-items/approvals` to list, approve,
+  dispatch, or reject queued external work.
+- **Public `/trust` page** with concrete security, privacy, integration, AI, and
+  responsible-disclosure information. `/security` redirects to `/trust`.
+
+### Changed
+- **Integrations API now accepts the documented CRM/task types**:
+  `linear`, `jira`, `google_drive`, `hubspot`, and `salesforce`, in addition to
+  Slack and Notion.
+- **Workspace settings can force consent defaults** for bots created inside a
+  workspace via `require_consent`, `consent_message`, and
+  `consent_opt_out_phrase`.
+- **UI template rendering now uses the current Starlette signature**, restoring
+  compatibility for landing, legal, dashboard, bot detail, top-up, admin, and
+  share pages.
+
+### Fixed
+- **Linear/Jira task creation now handles dict-shaped action items** emitted by
+  the analyzer, not only plain string action items.
+- **Salesforce CRM delivery no longer follows redirects** from configured URLs
+  and applies SSRF checks to configurable Salesforce endpoints.
+
+---
+
+## [2.68.2] - 2026-06-24
+
+Second-round audit hardening for UI security, workspace access, MCP exposure,
+SSO key behavior, and dependency hygiene. No intentional public API breaking
+changes, but MCP now requires explicit `MCP_ENABLED=true`.
+
+### Security
+- **Cookie-authenticated UI mutations now require same-origin Origin/Referer**
+  before state-changing dashboard/admin form posts are accepted.
+- **Dashboard security headers now add `object-src 'none'`, `base-uri 'self'`,
+  and `form-action 'self'` to the HTML CSP.
+- **Standalone developer tools no longer read API tokens from localStorage**;
+  API keys are held in memory for the current tab only.
+- **MCP is opt-in by default** via `MCP_ENABLED=false`, reducing the default
+  AI-tool execution surface in production.
+
+### Fixed
+- **Workspace bot access now requires active workspaces** for shared visibility
+  and role checks, so soft-deleted workspaces no longer expose stale member
+  access.
+- **Bot creation validates `workspace_id`** and requires member role or higher
+  before attaching a bot to a workspace.
+- **MCP meeting tools now reuse bot visibility rules** and include terminal
+  `BotSnapshot` history, including workspace-visible snapshots through a new
+  indexed `bot_snapshots.workspace_id` column.
+- **Repeated OAuth logins no longer mint fresh API keys** for existing accounts
+  that only have hashed one-shot key rows.
+- **SAML now fails clearly when `SAML_SP_BASE_URL` is missing** instead of
+  generating invalid Service Provider metadata/callback URLs.
+
+### Changed
+- **Production requirements no longer include pytest/fakeredis**; test-only
+  dependencies moved to `backend/requirements-dev.txt`, and CI now installs
+  that dev requirements file.
+- **Regression coverage added** for UI same-origin rejection, workspace create
+  validation, inactive workspace hiding, MCP workspace/snapshot visibility, and
+  repeated SSO key prevention.
 
 ---
 

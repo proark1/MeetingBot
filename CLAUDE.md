@@ -199,6 +199,7 @@ Full list in `backend/app/config.py` (~80 settings).
 ```bash
 cd backend
 pip install -r requirements.txt
+pip install -r requirements-dev.txt  # needed only for local pytest runs
 playwright install chromium
 uvicorn app.main:app --reload --port 8000
 ```

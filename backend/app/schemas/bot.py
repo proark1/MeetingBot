@@ -297,6 +297,14 @@ class BotCreate(BaseModel):
         max_length=500,
         description="Custom consent announcement text. Overrides the platform default when set.",
     )
+    consent_opt_out_phrase: Optional[str] = Field(
+        default=None,
+        max_length=100,
+        description=(
+            "Phrase participants can say or type to opt out of recording. "
+            "Overrides the account/workspace/global default for this bot."
+        ),
+    )
 
     # ── Keyword alerts ─────────────────────────────────────────────────────────
     keyword_alerts: list[KeywordAlertConfig] = Field(
