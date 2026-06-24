@@ -21,9 +21,10 @@ from app.services.background_tasks import (
 )
 from app.api.ws import manager as ws_manager
 from app.services import intelligence_service, webhook_service
-from app.services.browser_bot import run_browser_bot
+from app.services.capture_provider import CaptureCallbacks, get_capture_provider
 from app.services.transcription_service import transcribe_audio, _normalise_speakers
 from app.services.intelligence_service import set_usage_sink
+from app.services.orchestration_service import get_orchestrator
 from app.api.metrics import (
     record_bot_created, record_bot_completed,
     record_join_attempt, record_join_result,
@@ -517,6 +518,7 @@ async def _set_status(bot: BotSession, status: str, **kwargs) -> None:
     """Update bot status in-memory and fire a webhook + WebSocket event."""
     kwargs["status"] = status
     await store.update_bot(bot.id, **kwargs)
+    bot.status = status
     await webhook_service.dispatch_event(
         f"bot.{status}",
         {
@@ -1098,6 +1100,17 @@ async def run_bot_lifecycle(bot_id: str) -> None:
     video_path = str(_RECORDINGS_DIR / f"{bot_id}.mp4") if bot.record_video else None
     use_real_bot = bot.meeting_platform in _REAL_PLATFORMS
     _credits_deducted = False
+    orchestrator = get_orchestrator()
+    if not await orchestrator.try_acquire_lease(bot_id):
+        logger.warning("Bot %s is already leased by another worker; skipping local lifecycle", bot_id)
+        return
+    heartbeat_task = _tracked_task(
+        orchestrator.heartbeat_loop(
+            bot_id,
+            lambda: getattr(bot, "status", None),
+            interval_s=max(5, min(30, settings.BOT_WORKER_LEASE_SECONDS // 3)),
+        )
+    )
     record_bot_created(bot.meeting_platform)
 
     try:
@@ -1373,31 +1386,27 @@ async def run_bot_lifecycle(bot_id: str) -> None:
                     except Exception as exc:
                         logger.debug("Bot %s: runtime registration failed: %s", bot_id, exc)
 
-                bot_result = await run_browser_bot(
-                    meeting_url=bot.meeting_url,
-                    platform=bot.meeting_platform,
-                    bot_name=bot.bot_name or settings.BOT_NAME_DEFAULT,
+                capture_provider = get_capture_provider(bot, use_real_bot=True)
+                capture_result = await capture_provider.capture(
+                    bot=bot,
                     audio_path=audio_path,
-                    admission_timeout=settings.BOT_ADMISSION_TIMEOUT,
-                    max_duration=settings.BOT_MAX_DURATION,
-                    alone_timeout=settings.BOT_ALONE_TIMEOUT,
-                    on_admitted=on_admitted,
-                    respond_on_mention=bot.respond_on_mention,
-                    mention_response_mode=bot.mention_response_mode,
-                    tts_provider=bot.tts_provider,
-                    start_muted=bot.start_muted,
-                    live_transcription=bot.live_transcription,
-                    on_live_transcript_entry=on_live_entry,
-                    gemini_api_key=settings.GEMINI_API_KEY or "",
-                    record_video=bot.record_video,
                     video_path=video_path,
-                    external_leave_event=_leave_event,
-                    consent_enabled=getattr(bot, "consent_enabled", False),
-                    consent_message=getattr(bot, "consent_message", None),
-                    on_runtime_ready=on_runtime_ready,
-                    seen_chat_ids=bot.seen_chat_ids,
-                    bot_id=bot.id,
+                    callbacks=CaptureCallbacks(
+                        on_admitted=on_admitted,
+                        on_live_entry=on_live_entry,
+                        on_runtime_ready=on_runtime_ready,
+                        external_leave_event=_leave_event,
+                        seen_chat_ids=bot.seen_chat_ids,
+                    ),
                 )
+                bot_result = {
+                    "success": capture_result.success,
+                    "error": capture_result.error,
+                    "admitted": capture_result.admitted,
+                    "exit_reason": capture_result.exit_reason,
+                    "participants": capture_result.participants,
+                    "live_transcript": capture_result.live_transcript,
+                }
                 await store.update_bot(
                     bot_id,
                     admitted=bool(bot_result.get("admitted") or admitted),
@@ -1518,12 +1527,22 @@ async def run_bot_lifecycle(bot_id: str) -> None:
         else:
             # ── Unsupported platform — demo mode ──────────────────────────
             logger.info("Platform '%s' not supported — demo mode", bot.meeting_platform)
-            await asyncio.sleep(3)
-            await _set_status(bot, "in_call", started_at=_now())
-            await asyncio.sleep(settings.BOT_SIMULATION_DURATION)
+            async def on_demo_admitted() -> None:
+                await _set_status(bot, "in_call", started_at=_now())
+
+            capture_provider = get_capture_provider(bot, use_real_bot=False)
+            capture_result = await capture_provider.capture(
+                bot=bot,
+                audio_path=audio_path,
+                video_path=video_path,
+                callbacks=CaptureCallbacks(on_admitted=on_demo_admitted),
+            )
+            if not capture_result.success:
+                raise RuntimeError(capture_result.error or "Demo capture failed")
             await _set_status(bot, "call_ended", ended_at=_now())
             await store.update_bot(bot_id, status="transcribing")
-            transcript = await intelligence_service.generate_demo_transcript(bot.meeting_url)
+            bot.status = "transcribing"
+            transcript = capture_result.transcript
             scraped_participants = []
             await store.update_bot(bot_id, is_demo_transcript=True)
             bot.is_demo_transcript = True
@@ -1697,6 +1716,17 @@ async def run_bot_lifecycle(bot_id: str) -> None:
             logger.error("Bot %s: not found during error cleanup — cannot set terminal state", bot_id)
 
     finally:
+        heartbeat_task.cancel()
+        try:
+            await heartbeat_task
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logger.debug("Bot %s heartbeat loop ended with error", bot_id, exc_info=True)
+        try:
+            await orchestrator.release_lease(bot_id)
+        except Exception:
+            logger.debug("Bot %s lease release failed", bot_id, exc_info=True)
         # Delete audio only if it was NOT stored as a persistent recording
         try:
             current_bot = await store.get_bot(bot_id)
@@ -1737,10 +1767,8 @@ async def reap_stuck_bots(max_age_seconds: Optional[int] = None) -> int:
         max_age_seconds = settings.BOT_LIFECYCLE_MAX_SECONDS
 
     now = _now()
-    # Operates on the in-memory store (the default backend). The Redis backend
-    # also implements list_live_bots (protocol parity), but distributed-mode
-    # reaping — where mark_terminal must remove from the shared live-state store
-    # too — lands with the full BOT_STATE_BACKEND=redis cutover.
+    # Operates through the store facade, which is in-memory by default and
+    # Redis-backed when BOT_STATE_BACKEND=redis.
     try:
         candidates = await store.list_live_bots(_ACTIVE_RUNNING_STATUSES)
     except Exception:

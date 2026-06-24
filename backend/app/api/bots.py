@@ -25,6 +25,7 @@ from app.schemas.bot import (
     SayRequest, SayResponse, ChatRequest, ChatResponse,
 )
 from app.services import bot_service, intelligence_service
+from app.services.orchestration_service import get_orchestrator
 from app.store import store, BotSession, _now, decode_list_cursor, encode_list_cursor
 
 logger = logging.getLogger(__name__)
@@ -97,6 +98,12 @@ _slot_lock = asyncio.Lock()
 _ROLE_ORDER = {"viewer": 0, "member": 1, "admin": 2}
 
 
+def _spawn_lifecycle_task(bot_id: str) -> None:
+    task = asyncio.create_task(bot_service.run_bot_lifecycle(bot_id))
+    _running_tasks[bot_id] = task
+    task.add_done_callback(lambda _t, bid=bot_id: _on_task_done(_t, bid))
+
+
 def _get_sub_user_from_request(request: Request) -> Optional[str]:
     """Extract & validate sub_user_id from X-Sub-User header.
 
@@ -120,6 +127,24 @@ async def _start_or_queue_bot(bot_id: str) -> None:
     if bot is None:
         logger.warning("Scheduled bot %s was deleted before join time", bot_id)
         return
+    orchestrator = get_orchestrator()
+    if orchestrator.enabled:
+        async with orchestrator.scheduler_lock():
+            active = await orchestrator.count_active()
+            if active >= settings.MAX_CONCURRENT_BOTS:
+                position = await orchestrator.enqueue(bot_id)
+                await store.update_bot(bot_id, status="queued")
+                logger.info("Bot %s queued in Redis orchestration (position %d)", bot_id, position)
+                return
+            if not await orchestrator.try_acquire_lease(bot_id):
+                position = await orchestrator.enqueue(bot_id)
+                await store.update_bot(bot_id, status="queued")
+                logger.info("Bot %s queued because another worker owns its lease (position %d)", bot_id, position)
+                return
+            _spawn_lifecycle_task(bot_id)
+        await store.update_bot(bot_id, status="joining")
+        logger.info("Bot %s starting now via Redis orchestration", bot_id)
+        return
     async with _slot_lock:
         active = _count_active_locked()
         if active >= settings.MAX_CONCURRENT_BOTS:
@@ -127,9 +152,7 @@ async def _start_or_queue_bot(bot_id: str) -> None:
             _queue_event.set()
             queued = True
         else:
-            task = asyncio.create_task(bot_service.run_bot_lifecycle(bot_id))
-            _running_tasks[bot_id] = task
-            task.add_done_callback(lambda _t, bid=bot_id: _on_task_done(_t, bid))
+            _spawn_lifecycle_task(bot_id)
             queued = False
     if queued:
         await store.update_bot(bot_id, status="queued")
@@ -160,6 +183,33 @@ def _count_active_locked() -> int:
 async def _queue_processor() -> None:
     """Background loop: start queued bots when a slot is free."""
     while True:
+        orchestrator = get_orchestrator()
+        if orchestrator.enabled:
+            try:
+                await asyncio.wait_for(_queue_event.wait(), timeout=5.0)
+            except asyncio.TimeoutError:
+                pass
+            _queue_event.clear()
+            async with orchestrator.scheduler_lock():
+                due_ids = await orchestrator.pop_due_scheduled()
+                for due_id in due_ids:
+                    await orchestrator.enqueue(due_id)
+                while await orchestrator.count_active() < settings.MAX_CONCURRENT_BOTS:
+                    bot_id = await orchestrator.dequeue()
+                    if not bot_id:
+                        break
+                    bot = await store.get_bot(bot_id)
+                    if bot is None:
+                        logger.warning("Redis queue: bot %s was deleted — skipping", bot_id)
+                        continue
+                    if not await orchestrator.try_acquire_lease(bot_id):
+                        await orchestrator.enqueue(bot_id)
+                        break
+                    _spawn_lifecycle_task(bot_id)
+                    await store.update_bot(bot_id, status="joining")
+                    logger.info("Redis queue: started bot %s", bot_id)
+            continue
+
         try:
             await asyncio.wait_for(_queue_event.wait(), timeout=30.0)
         except asyncio.TimeoutError:
@@ -190,9 +240,7 @@ async def _queue_processor() -> None:
                 _queue_event.set()
             continue
         async with _slot_lock:
-            task = asyncio.create_task(bot_service.run_bot_lifecycle(bot_id))
-            _running_tasks[bot_id] = task
-            task.add_done_callback(lambda _t, bid=bot_id: _on_task_done(_t, bid))
+            _spawn_lifecycle_task(bot_id)
         await store.update_bot(bot_id, status="joining")
         logger.info("Queue: started bot %s (%d remaining in queue)", bot_id, len(_bot_queue))
         if _bot_queue:
@@ -923,7 +971,12 @@ async def create_bot(payload: BotCreate, request: Request):
         logger.info("Sandbox bot %s completed instantly with demo transcript", bot.id)
         return _to_response(bot)
 
-    if is_scheduled:
+    orchestrator = get_orchestrator()
+    if is_scheduled and orchestrator.enabled:
+        await orchestrator.schedule(bot.id, _join_at_utc)
+        _queue_event.set()
+        logger.info("Bot %s durably scheduled in Redis orchestration", bot.id)
+    elif is_scheduled:
         # Defer start until join time — does NOT occupy a concurrent slot while waiting.
         delay = max(0, (_join_at_utc - _now()).total_seconds())
         if delay < 1:
@@ -935,6 +988,9 @@ async def create_bot(payload: BotCreate, request: Request):
             handle = loop.call_later(delay, _start_scheduled_bot, bot.id)
             _scheduled_timers[bot.id] = handle
             logger.info("Bot %s scheduled — will start in %.0f s (no slot held)", bot.id, delay)
+    elif orchestrator.enabled:
+        await _start_or_queue_bot(bot.id)
+        bot = await store.get_bot(bot.id) or bot
     else:
         async with _slot_lock:
             active = _count_active_locked()
@@ -945,9 +1001,7 @@ async def create_bot(payload: BotCreate, request: Request):
                 queue_pos = _bot_queue.index(bot.id) + 1
                 _spawned = False
             else:
-                task = asyncio.create_task(bot_service.run_bot_lifecycle(bot.id))
-                _running_tasks[bot.id] = task
-                task.add_done_callback(lambda _t, bid=bot.id: _on_task_done(_t, bid))
+                _spawn_lifecycle_task(bot.id)
                 bot.status = "joining"
                 _spawned = True
         if _spawned:
@@ -1294,6 +1348,9 @@ async def delete_bot(bot_id: str, request: Request):
     sub_user_id = _get_sub_user_from_request(request)
     bot = await _get_or_404(bot_id, account_id, sub_user_id)
     await _check_workspace_role(bot, account_id, "admin")
+    orchestrator = get_orchestrator()
+    if orchestrator.enabled:
+        await orchestrator.cancel_bot(bot_id)
 
     # Cancel scheduled timer if waiting for join_at
     timer = _scheduled_timers.pop(bot_id, None)
@@ -1301,6 +1358,9 @@ async def delete_bot(bot_id: str, request: Request):
         timer.cancel()
         await store.mark_terminal(bot_id, "cancelled", ended_at=_now())
         logger.info("Cancelled scheduled timer for bot %s", bot_id)
+    elif orchestrator.enabled and bot.status in {"scheduled", "queued", "ready"}:
+        await store.mark_terminal(bot_id, "cancelled", ended_at=_now())
+        logger.info("Cancelled Redis-orchestrated waiting bot %s", bot_id)
     elif bot_id in _bot_queue:
         # Bot is queued but not yet running — remove from queue
         _bot_queue.remove(bot_id)
