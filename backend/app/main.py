@@ -72,6 +72,70 @@ FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
 # Task heartbeat registry — tracks last activity per background task
 _task_heartbeats: dict[str, datetime] = {}
 
+
+async def _run_supervised_background_task(
+    name: str,
+    coro_fn,
+    *args,
+    max_restarts: int = 20,
+    heartbeat_interval_s: float = 30.0,
+    **kwargs,
+) -> None:
+    """Run a background coroutine, restart crashes, and refresh liveness.
+
+    Most background workers are infinite loops. Awaiting them directly records
+    only one heartbeat at startup, so `/health` marks healthy workers stale
+    after a few minutes. The supervisor owns a child task and refreshes the
+    heartbeat while that child is still alive.
+    """
+    from datetime import datetime as _dt, timezone as _tz
+
+    restarts = 0
+    backoff = 5.0
+    while restarts < max_restarts:
+        task = None
+        try:
+            _task_heartbeats[name] = _dt.now(_tz.utc)
+            task = asyncio.create_task(coro_fn(*args, **kwargs), name=f"background:{name}")
+
+            while True:
+                done, _pending = await asyncio.wait({task}, timeout=heartbeat_interval_s)
+                _task_heartbeats[name] = _dt.now(_tz.utc)
+                if task not in done:
+                    continue
+
+                await task
+                logger.warning("Background task %r returned unexpectedly; restarting", name)
+                restarts = 0
+                backoff = 5.0
+                break
+        except asyncio.CancelledError:
+            logger.info("Background task %r cancelled", name)
+            if task is not None and not task.done():
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+            _task_heartbeats.pop(name, None)
+            return
+        except Exception:
+            restarts += 1
+            if task is not None and not task.done():
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+            logger.exception(
+                "Background task %r crashed (restart %d/%d) — retrying in %.0f s",
+                name, restarts, max_restarts, backoff,
+            )
+            try:
+                await asyncio.sleep(backoff)
+            except asyncio.CancelledError:
+                _task_heartbeats.pop(name, None)
+                return
+            backoff = min(backoff * 2, 300.0)
+
+    logger.critical("Background task %r exceeded max restarts (%d) — giving up", name, max_restarts)
+    _task_heartbeats.pop(name, None)
+
+
 # ── Lifespan ──────────────────────────────────────────────────────────────────
 
 @asynccontextmanager
@@ -266,38 +330,13 @@ async def lifespan(app: FastAPI):
     # own SIGTERM means the shutdown block runs reliably on every stop.
 
     async def _supervised(name: str, coro_fn, *args, max_restarts: int = 20, **kwargs) -> None:
-        """Run a background coroutine and restart it if it crashes.
-
-        Without this, a single unhandled exception in a background task silently
-        kills the task — webhooks stop retrying, cleanup stops running, etc.
-        This wrapper logs the crash and restarts with exponential backoff.
-        Records a heartbeat on each loop iteration for health monitoring.
-        """
-        from datetime import datetime as _dt, timezone as _tz
-        restarts = 0
-        backoff = 5.0
-        while restarts < max_restarts:
-            try:
-                _task_heartbeats[name] = _dt.now(_tz.utc)
-                await coro_fn(*args, **kwargs)
-                # Coroutine returned normally (shouldn't happen for loops) — restart cleanly
-                _task_heartbeats[name] = _dt.now(_tz.utc)
-                restarts = 0
-                backoff = 5.0
-            except asyncio.CancelledError:
-                logger.info("Background task %r cancelled", name)
-                _task_heartbeats.pop(name, None)
-                return
-            except Exception:
-                restarts += 1
-                logger.exception(
-                    "Background task %r crashed (restart %d/%d) — retrying in %.0f s",
-                    name, restarts, max_restarts, backoff,
-                )
-                await asyncio.sleep(backoff)
-                backoff = min(backoff * 2, 300.0)
-        logger.critical("Background task %r exceeded max restarts (%d) — giving up", name, max_restarts)
-        _task_heartbeats.pop(name, None)
+        await _run_supervised_background_task(
+            name,
+            coro_fn,
+            *args,
+            max_restarts=max_restarts,
+            **kwargs,
+        )
 
     # Start bot queue processor
     queue_task = asyncio.create_task(_supervised("queue_processor", _queue_processor))
