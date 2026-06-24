@@ -723,7 +723,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/WalletResponse"
+                  "$ref": "#/components/schemas/app__api__auth__WalletResponse"
                 }
               }
             }
@@ -820,7 +820,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/WalletResponse"
+                  "$ref": "#/components/schemas/app__api__auth__WalletResponse"
                 }
               }
             }
@@ -9098,6 +9098,469 @@
         ]
       }
     },
+    "/api/v1/analytics": {
+      "get": {
+        "tags": [
+          "Analytics"
+        ],
+        "summary": "Get Analytics",
+        "description": "Aggregate analytics across all bots currently in memory (24-hour window).",
+        "operationId": "get_analytics_api_v1_analytics_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {},
+                "example": {
+                  "total_bots": 42,
+                  "active_bots": 3,
+                  "by_status": {
+                    "done": 36,
+                    "error": 3,
+                    "in_call": 1,
+                    "joining": 1,
+                    "scheduled": 1
+                  },
+                  "by_platform": {
+                    "google_meet": 22,
+                    "zoom": 14,
+                    "microsoft_teams": 6
+                  },
+                  "success_rate": 0.923,
+                  "avg_duration_seconds": 1842.0,
+                  "total_transcript_entries": 6712,
+                  "total_ai_tokens": 184321,
+                  "total_ai_cost_usd": 1.87,
+                  "avg_health_score": 78.4,
+                  "total_meeting_cost_usd": 412.5,
+                  "meetings_per_week": 9.5,
+                  "quiet_participant_rate": 0.18,
+                  "top_workspaces": [
+                    {
+                      "workspace_id": "ws_8c1234ab",
+                      "count": 14
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid Authorization header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted (e.g. admin-only resource, sandbox limits).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found, or not owned by the calling account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate-limit exceeded. Retry after the seconds in the `Retry-After` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Remaining": {
+                "description": "Requests remaining in the current rate-limit window.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-RateLimit-Reset": {
+                "description": "Unix epoch seconds at which the current window resets.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds the caller should wait before retrying. Honour this on 429 and 503 responses; it overrides any backoff your client computes.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/action-items/stats": {
+      "get": {
+        "tags": [
+          "Analytics"
+        ],
+        "summary": "Get Action Items Stats",
+        "description": "Aggregate action-item statistics across all bots in memory.",
+        "operationId": "get_action_items_stats_api_v1_action_items_stats_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {},
+                "example": {
+                  "total": 247,
+                  "by_status": {
+                    "open": 84,
+                    "done": 163
+                  },
+                  "by_assignee": {
+                    "Alice": 32,
+                    "Bob": 28,
+                    "Carol": 41,
+                    "Unassigned": 14
+                  },
+                  "with_due_date": 198,
+                  "overdue": 12,
+                  "completion_rate": 0.66
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid Authorization header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted (e.g. admin-only resource, sandbox limits).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found, or not owned by the calling account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate-limit exceeded. Retry after the seconds in the `Retry-After` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Remaining": {
+                "description": "Requests remaining in the current rate-limit window.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-RateLimit-Reset": {
+                "description": "Unix epoch seconds at which the current window resets.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds the caller should wait before retrying. Honour this on 429 and 503 responses; it overrides any backoff your client computes.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/analytics/recurring": {
+      "get": {
+        "tags": [
+          "Analytics"
+        ],
+        "summary": "Get Recurring Insights",
+        "description": "Recurring meeting trend analysis for a fixed group of attendees.\n\nFinds meetings in the 24-hour in-memory window (and DB archive) that share\nthe same set of participants and returns a time-series of quality metrics.\n\nOptionally pass ``attendees=Alice,Bob`` to filter by participant name; omit\nto return insights across ALL recurring meeting groups.",
+        "operationId": "get_recurring_insights_api_v1_analytics_recurring_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "attendees",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Comma-separated attendee names (e.g. 'Alice,Bob'). Used to group recurring meetings by participant set.",
+              "title": "Attendees"
+            },
+            "description": "Comma-separated attendee names (e.g. 'Alice,Bob'). Used to group recurring meetings by participant set."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 1,
+              "description": "Maximum number of past meetings to include in the trend.",
+              "default": 10,
+              "title": "Limit"
+            },
+            "description": "Maximum number of past meetings to include in the trend."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {},
+                "example": {
+                  "recurring_meetings": [
+                    {
+                      "title": "Sales sync",
+                      "occurrences": 8,
+                      "first_seen": "2026-03-09T15:00:00Z",
+                      "last_seen": "2026-04-27T15:00:00Z",
+                      "avg_duration_seconds": 1820.0,
+                      "trends": {
+                        "talk_time_share": 0.62,
+                        "decisions_per_meeting": 1.4
+                      }
+                    }
+                  ],
+                  "total": 1
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid Authorization header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted (e.g. admin-only resource, sandbox limits).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found, or not owned by the calling account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate-limit exceeded. Retry after the seconds in the `Retry-After` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Remaining": {
+                "description": "Requests remaining in the current rate-limit window.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-RateLimit-Reset": {
+                "description": "Unix epoch seconds at which the current window resets.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds the caller should wait before retrying. Honour this on 429 and 503 responses; it overrides any backoff your client computes.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/analytics/api-usage": {
+      "get": {
+        "tags": [
+          "Analytics"
+        ],
+        "summary": "Get Api Usage",
+        "description": "Account-level API usage summary for the current 24-hour window.\n\nReturns bot counts, token consumption, cost breakdown, error rate,\nand top platforms \u2014 useful for building a usage dashboard.",
+        "operationId": "get_api_usage_api_v1_analytics_api_usage_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {},
+                "example": {
+                  "requests_24h": 4382,
+                  "requests_7d": 28741,
+                  "by_endpoint": {
+                    "POST /api/v1/bot": 142,
+                    "GET /api/v1/bot/{id}": 1208
+                  },
+                  "errors_24h": 47,
+                  "p95_latency_ms": 312,
+                  "tokens_7d": 184321,
+                  "cost_by_operation_7d": {
+                    "analyze_transcript": 0.974,
+                    "transcription": 0.523
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid Authorization header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted (e.g. admin-only resource, sandbox limits).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found, or not owned by the calling account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate-limit exceeded. Retry after the seconds in the `Retry-After` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Remaining": {
+                "description": "Requests remaining in the current rate-limit window.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-RateLimit-Reset": {
+                "description": "Unix epoch seconds at which the current window resets.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds the caller should wait before retrying. Honour this on 429 and 503 responses; it overrides any backoff your client computes.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/api/v1/search": {
       "get": {
         "tags": [
@@ -9371,6 +9834,360 @@
                     "created_at": "2026-05-04T14:58:00Z"
                   }
                 ]
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid Authorization header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted (e.g. admin-only resource, sandbox limits).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found, or not owned by the calling account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate-limit exceeded. Retry after the seconds in the `Retry-After` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Remaining": {
+                "description": "Requests remaining in the current rate-limit window.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-RateLimit-Reset": {
+                "description": "Unix epoch seconds at which the current window resets.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds the caller should wait before retrying. Honour this on 429 and 503 responses; it overrides any backoff your client computes.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/analytics/me": {
+      "get": {
+        "tags": [
+          "Analytics"
+        ],
+        "summary": "Get My Analytics",
+        "description": "Personal usage statistics scoped strictly to the authenticated account.\n\nReturns meetings this month, AI cost, open action items count,\naverage meeting duration, 4-week sentiment trend, and cost by platform.",
+        "operationId": "get_my_analytics_api_v1_analytics_me_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {},
+                "example": {
+                  "account_id": "550e8400-e29b-41d4-a716-446655440000",
+                  "total_meetings": 124,
+                  "total_minutes": 3812,
+                  "credits_remaining_usd": 24.5,
+                  "credits_consumed_30d": 12.4,
+                  "favorite_template": "sales",
+                  "longest_streak_days": 9
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid Authorization header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted (e.g. admin-only resource, sandbox limits).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found, or not owned by the calling account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate-limit exceeded. Retry after the seconds in the `Retry-After` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Remaining": {
+                "description": "Requests remaining in the current rate-limit window.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-RateLimit-Reset": {
+                "description": "Unix epoch seconds at which the current window resets.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds the caller should wait before retrying. Honour this on 429 and 503 responses; it overrides any backoff your client computes.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/analytics/usage": {
+      "get": {
+        "tags": [
+          "Analytics"
+        ],
+        "summary": "Get Usage",
+        "description": "Monthly usage breakdown for the authenticated account: bots used, limit, cost, daily chart.",
+        "operationId": "get_usage_api_v1_analytics_usage_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {},
+                "example": {
+                  "by_day": [
+                    {
+                      "date": "2026-04-28",
+                      "meetings": 4,
+                      "minutes": 124,
+                      "tokens": 6120,
+                      "cost_usd": 0.31
+                    },
+                    {
+                      "date": "2026-04-29",
+                      "meetings": 3,
+                      "minutes": 98,
+                      "tokens": 4810,
+                      "cost_usd": 0.24
+                    }
+                  ],
+                  "total_meetings": 7,
+                  "total_minutes": 222,
+                  "total_tokens": 10930,
+                  "total_cost_usd": 0.55
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid Authorization header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted (e.g. admin-only resource, sandbox limits).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found, or not owned by the calling account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate-limit exceeded. Retry after the seconds in the `Retry-After` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Remaining": {
+                "description": "Requests remaining in the current rate-limit window.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-RateLimit-Reset": {
+                "description": "Unix epoch seconds at which the current window resets.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds the caller should wait before retrying. Honour this on 429 and 503 responses; it overrides any backoff your client computes.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/analytics/trends": {
+      "get": {
+        "tags": [
+          "Analytics"
+        ],
+        "summary": "Get Trends",
+        "description": "Longitudinal analytics: meetings/day, sentiment trend, topic frequency, cost trend.",
+        "operationId": "get_trends_api_v1_analytics_trends_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 365,
+              "minimum": 7,
+              "description": "Number of days to look back",
+              "default": 30,
+              "title": "Days"
+            },
+            "description": "Number of days to look back"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {},
+                "example": {
+                  "weekly": {
+                    "meetings": [
+                      4,
+                      6,
+                      5,
+                      9
+                    ],
+                    "minutes": [
+                      120,
+                      220,
+                      180,
+                      320
+                    ]
+                  },
+                  "month_over_month": {
+                    "meetings": "+18%",
+                    "minutes": "+22%",
+                    "cost_usd": "+8%"
+                  },
+                  "top_topics": [
+                    "onboarding redesign",
+                    "TOS update",
+                    "Q3 planning"
+                  ],
+                  "top_action_owners": [
+                    {
+                      "name": "Alice",
+                      "count": 32
+                    },
+                    {
+                      "name": "Bob",
+                      "count": 28
+                    }
+                  ]
+                }
               }
             }
           },
@@ -13911,6 +14728,1308 @@
         }
       }
     },
+    "/api/v1/admin/wallet": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Get Platform Wallet",
+        "description": "Get the current platform USDC collection wallet address.",
+        "operationId": "get_platform_wallet_api_v1_admin_wallet_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/app__api__admin__WalletResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid Authorization header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted (e.g. admin-only resource, sandbox limits).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found, or not owned by the calling account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate-limit exceeded. Retry after the seconds in the `Retry-After` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Remaining": {
+                "description": "Requests remaining in the current rate-limit window.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-RateLimit-Reset": {
+                "description": "Unix epoch seconds at which the current window resets.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds the caller should wait before retrying. Honour this on 429 and 503 responses; it overrides any backoff your client computes.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Set Platform Wallet",
+        "description": "Set or update the platform USDC collection wallet address.",
+        "operationId": "set_platform_wallet_api_v1_admin_wallet_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WalletUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/app__api__admin__WalletResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid Authorization header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted (e.g. admin-only resource, sandbox limits).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found, or not owned by the calling account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate-limit exceeded. Retry after the seconds in the `Retry-After` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Remaining": {
+                "description": "Requests remaining in the current rate-limit window.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-RateLimit-Reset": {
+                "description": "Unix epoch seconds at which the current window resets.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds the caller should wait before retrying. Honour this on 429 and 503 responses; it overrides any backoff your client computes.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/config": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Get All Platform Config",
+        "description": "Get all platform configuration values.",
+        "operationId": "get_all_platform_config_api_v1_admin_config_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformConfigResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid Authorization header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted (e.g. admin-only resource, sandbox limits).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found, or not owned by the calling account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate-limit exceeded. Retry after the seconds in the `Retry-After` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Remaining": {
+                "description": "Requests remaining in the current rate-limit window.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-RateLimit-Reset": {
+                "description": "Unix epoch seconds at which the current window resets.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds the caller should wait before retrying. Honour this on 429 and 503 responses; it overrides any backoff your client computes.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/credit": {
+      "post": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Manual Credit",
+        "description": "Manually credit a user's account.\n\nUse this to correct missed USDC deposits that the monitor failed to detect\n(e.g. the user sent from an unregistered wallet, or the monitor was not\nrunning when the on-chain transfer occurred).",
+        "operationId": "manual_credit_api_v1_admin_credit_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManualCreditRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManualCreditResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid Authorization header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted (e.g. admin-only resource, sandbox limits).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found, or not owned by the calling account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate-limit exceeded. Retry after the seconds in the `Retry-After` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Remaining": {
+                "description": "Requests remaining in the current rate-limit window.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-RateLimit-Reset": {
+                "description": "Unix epoch seconds at which the current window resets.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds the caller should wait before retrying. Honour this on 429 and 503 responses; it overrides any backoff your client computes.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/rpc-url": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Get Rpc Url Status",
+        "description": "Check whether a CRYPTO_RPC_URL is configured (env var or admin-set).",
+        "operationId": "get_rpc_url_status_api_v1_admin_rpc_url_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RpcUrlResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid Authorization header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted (e.g. admin-only resource, sandbox limits).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found, or not owned by the calling account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate-limit exceeded. Retry after the seconds in the `Retry-After` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Remaining": {
+                "description": "Requests remaining in the current rate-limit window.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-RateLimit-Reset": {
+                "description": "Unix epoch seconds at which the current window resets.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds the caller should wait before retrying. Honour this on 429 and 503 responses; it overrides any backoff your client computes.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Set Rpc Url",
+        "description": "Set the Ethereum RPC URL used by the USDC monitor.\n\nThis stores the URL in the database so the monitor can use it without\nrequiring a server restart or environment variable change.\nThe environment variable `CRYPTO_RPC_URL` always takes precedence if set.",
+        "operationId": "set_rpc_url_api_v1_admin_rpc_url_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RpcUrlRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RpcUrlResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid Authorization header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted (e.g. admin-only resource, sandbox limits).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found, or not owned by the calling account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate-limit exceeded. Retry after the seconds in the `Retry-After` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Remaining": {
+                "description": "Requests remaining in the current rate-limit window.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-RateLimit-Reset": {
+                "description": "Unix epoch seconds at which the current window resets.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds the caller should wait before retrying. Honour this on 429 and 503 responses; it overrides any backoff your client computes.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/usdc/unmatched": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "List Unmatched Transfers",
+        "description": "List USDC transfers that arrived at the platform wallet but could not be\nattributed to any user account because the sender's wallet was not registered.\n\nThese represent funds that were received on-chain but have not yet been credited\nto any user balance. To resolve:\n\n1. Identify the user by their `from_address` (ask them which wallet they used).\n2. Credit their account via `POST /admin/credit`.\n3. Mark the transfer resolved via `POST /admin/usdc/unmatched/{tx_hash}/resolve`.\n\nUse `?resolved=false` (default) to see only pending items, `?resolved=true` for\nresolved ones, or omit the parameter to see all.",
+        "operationId": "list_unmatched_transfers_api_v1_admin_usdc_unmatched_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "resolved",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Resolved"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnmatchedTransferListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid Authorization header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted (e.g. admin-only resource, sandbox limits).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found, or not owned by the calling account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate-limit exceeded. Retry after the seconds in the `Retry-After` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Remaining": {
+                "description": "Requests remaining in the current rate-limit window.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-RateLimit-Reset": {
+                "description": "Unix epoch seconds at which the current window resets.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds the caller should wait before retrying. Honour this on 429 and 503 responses; it overrides any backoff your client computes.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/usdc/unmatched/{tx_hash}/resolve": {
+      "post": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Resolve Unmatched Transfer",
+        "description": "Mark an unmatched USDC transfer as resolved after the account has been manually credited.\n\nCall this after using `POST /admin/credit` to apply the funds to the correct account.",
+        "operationId": "resolve_unmatched_transfer_api_v1_admin_usdc_unmatched__tx_hash__resolve_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "tx_hash",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Tx Hash"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveUnmatchedRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnmatchedTransferItem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid Authorization header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted (e.g. admin-only resource, sandbox limits).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found, or not owned by the calling account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate-limit exceeded. Retry after the seconds in the `Retry-After` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Remaining": {
+                "description": "Requests remaining in the current rate-limit window.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-RateLimit-Reset": {
+                "description": "Unix epoch seconds at which the current window resets.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds the caller should wait before retrying. Honour this on 429 and 503 responses; it overrides any backoff your client computes.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/usdc/rescan": {
+      "post": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Rescan Usdc From Block",
+        "description": "Reset the USDC monitor's last-processed block so it will rescan from a\ngiven block on its next cycle.\n\nUse this when a USDC deposit was missed because the monitor had already\nadvanced past that block (e.g. the user sent from an unregistered wallet\nand later registered it).  After calling this endpoint the monitor will\nre-examine all Transfer events starting at `from_block` on the next 60-second\ntick; duplicate transactions are skipped automatically via idempotency checks.",
+        "operationId": "rescan_usdc_from_block_api_v1_admin_usdc_rescan_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RescanRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RescanResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid Authorization header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted (e.g. admin-only resource, sandbox limits).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found, or not owned by the calling account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate-limit exceeded. Retry after the seconds in the `Retry-After` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Remaining": {
+                "description": "Requests remaining in the current rate-limit window.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-RateLimit-Reset": {
+                "description": "Unix epoch seconds at which the current window resets.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds the caller should wait before retrying. Honour this on 429 and 503 responses; it overrides any backoff your client computes.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/accounts/{account_id}/set-account-type": {
+      "post": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Set Account Type",
+        "description": "Set the account type (`personal` or `business`) for any user account.\n\n- **personal** \u2014 standard single-user account.\n- **business** \u2014 multi-tenant mode; the account can use `X-Sub-User` to\n  isolate data per end-user.",
+        "operationId": "set_account_type_api_v1_admin_accounts__account_id__set_account_type_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Account Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetAccountTypeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetAccountTypeResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid Authorization header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted (e.g. admin-only resource, sandbox limits).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found, or not owned by the calling account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate-limit exceeded. Retry after the seconds in the `Retry-After` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Remaining": {
+                "description": "Requests remaining in the current rate-limit window.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-RateLimit-Reset": {
+                "description": "Unix epoch seconds at which the current window resets.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds the caller should wait before retrying. Honour this on 429 and 503 responses; it overrides any backoff your client computes.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/platform-analytics": {
+      "get": {
+        "tags": [
+          "Admin",
+          "Admin"
+        ],
+        "summary": "Platform Analytics",
+        "description": "Aggregated platform analytics \u2014 no private user data.\n\nReturns counts, trends, feature-adoption rates, and AI token/cost breakdowns.\nTranscript content, meeting URLs, and analysis text are never included.\nResults are cached for 5 minutes.",
+        "operationId": "platform_analytics_api_v1_admin_platform_analytics_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {},
+                "example": {
+                  "total_accounts": 1842,
+                  "active_accounts_30d": 421,
+                  "total_meetings": 18472,
+                  "meetings_30d": 3214,
+                  "by_platform": {
+                    "Zoom": 8412,
+                    "Google Meet": 6231,
+                    "Microsoft Teams": 3128,
+                    "Other": 701
+                  },
+                  "feature_adoption": {
+                    "live_transcription": 0.62,
+                    "agentic": 0.08,
+                    "speaker_analytics": 0.21,
+                    "coaching": 0.09,
+                    "cross_meeting_memory": 0.14
+                  },
+                  "ai_tokens_30d": 18941223,
+                  "ai_cost_30d_usd": 124.47,
+                  "revenue_30d_usd": 4218.5
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid Authorization header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted (e.g. admin-only resource, sandbox limits).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found, or not owned by the calling account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate-limit exceeded. Retry after the seconds in the `Retry-After` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Remaining": {
+                "description": "Requests remaining in the current rate-limit window.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-RateLimit-Reset": {
+                "description": "Unix epoch seconds at which the current window resets.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds the caller should wait before retrying. Honour this on 429 and 503 responses; it overrides any backoff your client computes.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/support-lookup": {
+      "get": {
+        "tags": [
+          "Admin",
+          "Admin"
+        ],
+        "summary": "Support Lookup",
+        "description": "Look up a user via their support key.\n\nThe user generates the key in their dashboard Settings \u2192 Support Access.\nAdmin enters the plaintext key here; the system verifies against the stored\nhash and returns limited account + bot activity data for that user.\nNo transcript content is returned \u2014 only metadata.",
+        "operationId": "support_lookup_api_v1_admin_support_lookup_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "key",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {},
+                "example": {
+                  "account": {
+                    "id": "550e8400-e29b-41d4-a716-446655440000",
+                    "email": "you@example.com",
+                    "account_type": "personal",
+                    "plan": "pro",
+                    "credits_usd": 24.5,
+                    "is_active": true,
+                    "created_at": "2026-04-01T09:00:00Z"
+                  },
+                  "recent_bots": [
+                    {
+                      "id": "bot_8a72c5e1",
+                      "status": "done",
+                      "created_at": "2026-05-04T14:58:00Z",
+                      "platform": "google_meet"
+                    }
+                  ],
+                  "recent_transactions": [
+                    {
+                      "id": "tx_3a82ff9c",
+                      "type": "bot_usage",
+                      "amount_usd": -0.063,
+                      "created_at": "2026-05-04T15:34:18Z"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid Authorization header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted (e.g. admin-only resource, sandbox limits).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found, or not owned by the calling account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate-limit exceeded. Retry after the seconds in the `Retry-After` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Remaining": {
+                "description": "Requests remaining in the current rate-limit window.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-RateLimit-Reset": {
+                "description": "Unix epoch seconds at which the current window resets.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds the caller should wait before retrying. Honour this on 429 and 503 responses; it overrides any backoff your client computes.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/health": {
       "get": {
         "tags": [
@@ -17476,6 +19595,78 @@
           "token_type": "bearer"
         }
       },
+      "ManualCreditRequest": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "title": "Email",
+            "description": "Email of the account to credit."
+          },
+          "amount_usd": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Amount Usd",
+            "description": "Amount in USD to credit (must be positive)."
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note",
+            "description": "Optional admin note recorded in the transaction description."
+          }
+        },
+        "type": "object",
+        "required": [
+          "email",
+          "amount_usd"
+        ],
+        "title": "ManualCreditRequest",
+        "example": {
+          "amount_usd": 25.0,
+          "email": "you@example.com",
+          "note": "USDC transfer 0x12abcd... arrived from unregistered wallet"
+        }
+      },
+      "ManualCreditResponse": {
+        "properties": {
+          "account_id": {
+            "type": "string",
+            "title": "Account Id"
+          },
+          "email": {
+            "type": "string",
+            "title": "Email"
+          },
+          "credited_usd": {
+            "type": "number",
+            "title": "Credited Usd"
+          },
+          "new_balance_usd": {
+            "type": "number",
+            "title": "New Balance Usd"
+          }
+        },
+        "type": "object",
+        "required": [
+          "account_id",
+          "email",
+          "credited_usd",
+          "new_balance_usd"
+        ],
+        "title": "ManualCreditResponse",
+        "example": {
+          "account_id": "550e8400-e29b-41d4-a716-446655440000",
+          "credited_usd": 25.0,
+          "email": "you@example.com",
+          "new_balance_usd": 49.5
+        }
+      },
       "McpToolCall": {
         "properties": {
           "tool": {
@@ -17768,6 +19959,65 @@
           "plan": "pro"
         }
       },
+      "PlatformConfigItem": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "value": {
+            "type": "string",
+            "title": "Value"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "value"
+        ],
+        "title": "PlatformConfigItem"
+      },
+      "PlatformConfigResponse": {
+        "properties": {
+          "configs": {
+            "items": {
+              "$ref": "#/components/schemas/PlatformConfigItem"
+            },
+            "type": "array",
+            "title": "Configs"
+          }
+        },
+        "type": "object",
+        "required": [
+          "configs"
+        ],
+        "title": "PlatformConfigResponse",
+        "example": {
+          "configs": [
+            {
+              "key": "usdc_collection_wallet",
+              "updated_at": "2026-04-15T10:00:00Z",
+              "value": "0xAbCdEf0123456789AbCdEf0123456789AbCdEf01"
+            },
+            {
+              "key": "crypto_rpc_url",
+              "updated_at": "2026-04-15T10:00:00Z",
+              "value": "https://mainnet.infura.io/v3/PROJECT_ID"
+            }
+          ]
+        }
+      },
       "PublicDeletionRequestResponse": {
         "properties": {
           "id": {
@@ -17875,6 +20125,67 @@
           "api_key": "YOUR_API_KEY_RETURNED_HERE",
           "email": "you@example.com",
           "message": "Account created. Use the api_key as your Bearer token: Authorization: Bearer <api_key>"
+        }
+      },
+      "RescanRequest": {
+        "properties": {
+          "from_block": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "From Block",
+            "description": "Block number to start rescanning from."
+          }
+        },
+        "type": "object",
+        "required": [
+          "from_block"
+        ],
+        "title": "RescanRequest",
+        "example": {
+          "from_block": 19500000
+        }
+      },
+      "RescanResponse": {
+        "properties": {
+          "from_block": {
+            "type": "integer",
+            "title": "From Block"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "from_block",
+          "message"
+        ],
+        "title": "RescanResponse",
+        "example": {
+          "from_block": 19500000,
+          "message": "USDC monitor rescan scheduled from block 19500000."
+        }
+      },
+      "ResolveUnmatchedRequest": {
+        "properties": {
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note",
+            "description": "Optional note describing the resolution action taken."
+          }
+        },
+        "type": "object",
+        "title": "ResolveUnmatchedRequest",
+        "example": {
+          "note": "Credited account you@example.com manually after confirming via support ticket #4231."
         }
       },
       "RetentionPolicyResponse": {
@@ -17991,6 +20302,50 @@
             "recording_retention_days": -1
           }
         ]
+      },
+      "RpcUrlRequest": {
+        "properties": {
+          "rpc_url": {
+            "type": "string",
+            "title": "Rpc Url",
+            "description": "Ethereum JSON-RPC endpoint URL (Infura, Alchemy, QuickNode, etc.).",
+            "examples": [
+              "https://mainnet.infura.io/v3/YOUR_KEY"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "rpc_url"
+        ],
+        "title": "RpcUrlRequest",
+        "example": {
+          "rpc_url": "https://mainnet.infura.io/v3/YOUR_KEY"
+        }
+      },
+      "RpcUrlResponse": {
+        "properties": {
+          "rpc_url_set": {
+            "type": "boolean",
+            "title": "Rpc Url Set",
+            "description": "True if an RPC URL is now configured."
+          },
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "description": "'env' if from environment variable, 'db' if set via admin panel."
+          }
+        },
+        "type": "object",
+        "required": [
+          "rpc_url_set",
+          "source"
+        ],
+        "title": "RpcUrlResponse",
+        "example": {
+          "rpc_url_set": true,
+          "source": "db"
+        }
       },
       "SamlConfigCreate": {
         "properties": {
@@ -18137,6 +20492,61 @@
           "interrupted_previous": false,
           "queued": true,
           "task_id": "f1c0a2c3a44d4d2cb6df7c6f3e6f1a2b"
+        }
+      },
+      "SetAccountTypeRequest": {
+        "properties": {
+          "account_type": {
+            "type": "string",
+            "title": "Account Type",
+            "description": "Account type to set: `personal` or `business`.",
+            "examples": [
+              "business"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "account_type"
+        ],
+        "title": "SetAccountTypeRequest",
+        "example": {
+          "account_type": "business"
+        }
+      },
+      "SetAccountTypeResponse": {
+        "properties": {
+          "account_id": {
+            "type": "string",
+            "title": "Account Id"
+          },
+          "email": {
+            "type": "string",
+            "title": "Email"
+          },
+          "account_type": {
+            "type": "string",
+            "title": "Account Type",
+            "description": "New account type."
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "account_id",
+          "email",
+          "account_type",
+          "message"
+        ],
+        "title": "SetAccountTypeResponse",
+        "example": {
+          "account_id": "550e8400-e29b-41d4-a716-446655440000",
+          "account_type": "business",
+          "email": "you@example.com",
+          "message": "Account type updated to 'business'."
         }
       },
       "SpeakerAnalyticsConfig": {
@@ -18455,6 +20865,112 @@
           "type": "bot_usage"
         }
       },
+      "UnmatchedTransferItem": {
+        "properties": {
+          "tx_hash": {
+            "type": "string",
+            "title": "Tx Hash",
+            "description": "Ethereum transaction hash."
+          },
+          "from_address": {
+            "type": "string",
+            "title": "From Address",
+            "description": "Sender's Ethereum address (unrecognized \u2014 not registered on any account)."
+          },
+          "to_address": {
+            "type": "string",
+            "title": "To Address",
+            "description": "Platform wallet address that received the USDC."
+          },
+          "amount_usdc": {
+            "type": "number",
+            "title": "Amount Usdc",
+            "description": "Amount of USDC sent."
+          },
+          "block_number": {
+            "type": "integer",
+            "title": "Block Number",
+            "description": "Ethereum block number of the transfer."
+          },
+          "detected_at": {
+            "type": "string",
+            "title": "Detected At",
+            "description": "ISO-8601 UTC timestamp when the monitor detected the transfer."
+          },
+          "resolved": {
+            "type": "boolean",
+            "title": "Resolved",
+            "description": "True if an admin has manually credited the account."
+          },
+          "resolution_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution Note",
+            "description": "Admin note set when resolving."
+          }
+        },
+        "type": "object",
+        "required": [
+          "tx_hash",
+          "from_address",
+          "to_address",
+          "amount_usdc",
+          "block_number",
+          "detected_at",
+          "resolved"
+        ],
+        "title": "UnmatchedTransferItem",
+        "example": {
+          "amount_usdc": 25.0,
+          "block_number": 19501234,
+          "detected_at": "2026-05-04T15:00:00Z",
+          "from_address": "0x9999999999999999999999999999999999999999",
+          "resolved": false,
+          "to_address": "0xAbCdEf0123456789AbCdEf0123456789AbCdEf01",
+          "tx_hash": "0x12abcd34ef56789012345678901234567890abcdef1234567890abcdef123456"
+        }
+      },
+      "UnmatchedTransferListResponse": {
+        "properties": {
+          "transfers": {
+            "items": {
+              "$ref": "#/components/schemas/UnmatchedTransferItem"
+            },
+            "type": "array",
+            "title": "Transfers"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "transfers",
+          "total"
+        ],
+        "title": "UnmatchedTransferListResponse",
+        "example": {
+          "total": 1,
+          "transfers": [
+            {
+              "amount_usdc": 25.0,
+              "block_number": 19501234,
+              "detected_at": "2026-05-04T15:00:00Z",
+              "from_address": "0x9999999999999999999999999999999999999999",
+              "resolved": false,
+              "to_address": "0xAbCdEf0123456789AbCdEf0123456789AbCdEf01",
+              "tx_hash": "0x12abcd34ef56789012345678901234567890abcdef1234567890abcdef123456"
+            }
+          ]
+        }
+      },
       "UsdcAddressResponse": {
         "properties": {
           "deposit_address": {
@@ -18659,34 +21175,23 @@
           "wallet_address": "0xAbCdEf0123456789AbCdEf0123456789AbCdEf01"
         }
       },
-      "WalletResponse": {
+      "WalletUpdateRequest": {
         "properties": {
           "wallet_address": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Wallet Address",
-            "description": "Your registered wallet address, or null if not set."
-          },
-          "message": {
             "type": "string",
-            "title": "Message",
-            "description": "Status message."
+            "title": "Wallet Address",
+            "description": "Ethereum address (0x..., 42 characters) where users send USDC.",
+            "examples": [
+              "0xAbCdEf0123456789AbCdEf0123456789AbCdEf01"
+            ]
           }
         },
         "type": "object",
         "required": [
-          "wallet_address",
-          "message"
+          "wallet_address"
         ],
-        "title": "WalletResponse",
+        "title": "WalletUpdateRequest",
         "example": {
-          "message": "Wallet address updated.",
           "wallet_address": "0xAbCdEf0123456789AbCdEf0123456789AbCdEf01"
         }
       },
@@ -19296,6 +21801,61 @@
         "description": "Optional request body for share-link creation.",
         "example": {
           "expires_in_hours": 168
+        }
+      },
+      "app__api__admin__WalletResponse": {
+        "properties": {
+          "wallet_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wallet Address",
+            "description": "The platform USDC collection wallet address (ERC-20). Null if not set."
+          }
+        },
+        "type": "object",
+        "required": [
+          "wallet_address"
+        ],
+        "title": "WalletResponse",
+        "example": {
+          "wallet_address": "0xAbCdEf0123456789AbCdEf0123456789AbCdEf01"
+        }
+      },
+      "app__api__auth__WalletResponse": {
+        "properties": {
+          "wallet_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wallet Address",
+            "description": "Your registered wallet address, or null if not set."
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "Status message."
+          }
+        },
+        "type": "object",
+        "required": [
+          "wallet_address",
+          "message"
+        ],
+        "title": "WalletResponse",
+        "example": {
+          "message": "Wallet address updated.",
+          "wallet_address": "0xAbCdEf0123456789AbCdEf0123456789AbCdEf01"
         }
       },
       "ErrorResponse": {
