@@ -89,6 +89,7 @@ def upgrade() -> None:
     sa.Column('id', sa.String(length=36), nullable=False),
     sa.Column('account_id', sa.String(length=36), nullable=True),
     sa.Column('sub_user_id', sa.String(length=255), nullable=True),
+    sa.Column('workspace_id', sa.String(length=36), nullable=True),
     sa.Column('status', sa.String(length=20), nullable=False),
     sa.Column('meeting_url', sa.String(length=2048), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
@@ -106,6 +107,8 @@ def upgrade() -> None:
         batch_op.create_index(batch_op.f('ix_bot_snapshots_expires_at'), ['expires_at'], unique=False)
         batch_op.create_index(batch_op.f('ix_bot_snapshots_share_token_hash'), ['share_token_hash'], unique=False)
         batch_op.create_index(batch_op.f('ix_bot_snapshots_sub_user_id'), ['sub_user_id'], unique=False)
+        batch_op.create_index('ix_bot_snapshots_workspace_created', ['workspace_id', 'created_at'], unique=False)
+        batch_op.create_index(batch_op.f('ix_bot_snapshots_workspace_id'), ['workspace_id'], unique=False)
 
     op.create_table('idempotency_keys',
     sa.Column('id', sa.String(length=36), nullable=False),
@@ -520,6 +523,8 @@ def downgrade() -> None:
 
     op.drop_table('idempotency_keys')
     with op.batch_alter_table('bot_snapshots', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_bot_snapshots_workspace_id'))
+        batch_op.drop_index('ix_bot_snapshots_workspace_created')
         batch_op.drop_index(batch_op.f('ix_bot_snapshots_sub_user_id'))
         batch_op.drop_index(batch_op.f('ix_bot_snapshots_share_token_hash'))
         batch_op.drop_index(batch_op.f('ix_bot_snapshots_expires_at'))

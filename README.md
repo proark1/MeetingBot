@@ -1,8 +1,8 @@
 # JustHereToListen.io API
 
-**Version 2.68.1** — A stateless meeting bot API service with multi-tenant billing, business account support, Google/Microsoft SSO, Python & JS SDKs, webhook retry/delivery logs, bot persona customization, video recording, Prometheus metrics, idempotency keys, cloud storage, email notifications, calendar auto-join, Slack/Notion integrations, GDPR compliance, an opt-in advanced-features layer (in-meeting @bot Q&A, live speaker analytics, smart decision detection, cross-meeting memory, host coaching, agentic delegation), **and a fully usable OpenAPI 3.1 surface with 100% example coverage — every one of the 117 public + 136 admin operations now has summary, description, tags, request example (where applicable), and a 2xx response example**.
+**Version 2.68.2** — A stateless meeting bot API service with multi-tenant billing, business account support, Google/Microsoft SSO, Python & JS SDKs, webhook retry/delivery logs, bot persona customization, video recording, Prometheus metrics, idempotency keys, cloud storage, email notifications, calendar auto-join, Slack/Notion integrations, GDPR compliance, an opt-in advanced-features layer (in-meeting @bot Q&A, live speaker analytics, smart decision detection, cross-meeting memory, host coaching, agentic delegation), **and a fully usable OpenAPI 3.1 surface with 100% example coverage — every one of the 117 public + 136 admin operations now has summary, description, tags, request example (where applicable), and a 2xx response example**.
 
-> **Last updated:** 2026-06-19 · **API version in Swagger UI:** 2.68.1 · **Build:** Security and platform hardening — consistent hashed API keys, guarded MCP bot creation, working SAML admin setup, workspace-shared bot access, calendar join-time scheduling, wallet ownership proof by default, Sentry release tagging, JS lockfile, and docs/SDK drift cleanup. Previous build (2.68.0): meeting reliability hardening and regenerated OpenAPI snapshots. <!-- auto-updated on each release -->
+> **Last updated:** 2026-06-24 · **API version in Swagger UI:** 2.68.2 · **Build:** Second-round hardening — same-origin UI mutation guard, active-workspace RBAC, workspace-validated bot creation, MCP opt-in defaults with workspace/snapshot visibility, repeated SSO key prevention, SAML deployment guard, runtime/dev dependency split, and developer-tool token storage cleanup. Previous build (2.68.1): security and platform hardening. <!-- auto-updated on each release -->
 
 
 Send bots into **Zoom**, **Google Meet**, **Microsoft Teams**, and **onepizza.io** meetings to record, transcribe, and analyse them with **Claude** (Anthropic) or **Gemini** (Google) AI.
@@ -586,7 +586,7 @@ Tag bots with a `workspace_id` at creation to make them visible to all workspace
 | `GET` | `/api/v1/mcp/schema` | Returns the MCP server manifest with available tools |
 | `POST` | `/api/v1/mcp/call` | Execute an MCP tool. Body: `{"tool": "<name>", "arguments": {...}}` |
 
-**16 tools** are exposed — read (`list_meetings`, `get_meeting`, `search_meetings`, `get_action_items`, `get_speaker_analytics`, `get_meeting_cost_summary`, `get_decisions`, `get_live_analytics`, `get_coaching_tips`, `get_related_meetings`), write (`create_bot`, `cancel_bot`, `set_agentic_instructions`, `trigger_agentic_instruction`), and reasoning (`get_meeting_brief`, `ask_chat_qa`). See [`docs/MCP.md`](docs/MCP.md) for the full catalogue, request/response shapes, and a Claude Desktop / Cursor / Cline configuration block. Enable / disable with `MCP_ENABLED` (default `true`).
+**16 tools** are exposed — read (`list_meetings`, `get_meeting`, `search_meetings`, `get_action_items`, `get_speaker_analytics`, `get_meeting_cost_summary`, `get_decisions`, `get_live_analytics`, `get_coaching_tips`, `get_related_meetings`), write (`create_bot`, `cancel_bot`, `set_agentic_instructions`, `trigger_agentic_instruction`), and reasoning (`get_meeting_brief`, `ask_chat_qa`). See [`docs/MCP.md`](docs/MCP.md) for the full catalogue, request/response shapes, and a Claude Desktop / Cursor / Cline configuration block. Enable with `MCP_ENABLED=true` (default `false`).
 
 ### Calendar Auto-Join
 
@@ -1024,7 +1024,7 @@ SAML endpoints (when `SAML_ENABLED=true`):
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `MCP_ENABLED` | `true` | Set `false` to disable MCP server endpoints |
+| `MCP_ENABLED` | `false` | Set `true` to enable MCP server endpoints |
 
 ### CRM integrations
 
@@ -1243,7 +1243,7 @@ Set environment variables and deploy. Add a **PostgreSQL plugin** in Railway —
 
 ```bash
 cd backend
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 pip install -r requirements-crypto.txt  # For USDC support
 playwright install chromium
 uvicorn app.main:app --host 0.0.0.0 --port 8000

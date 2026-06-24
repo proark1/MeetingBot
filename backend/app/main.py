@@ -771,7 +771,7 @@ _PUBLIC_DESCRIPTION = (
     "`POST /api/v1/mcp/call` executes one of 16 tools (read, write, and reasoning) — "
     "e.g. `list_meetings`, `get_meeting`, `search_meetings`, `get_action_items`, "
     "`create_bot`, `cancel_bot`, `ask_chat_qa`, `get_meeting_brief`. "
-    "Enable/disable with `MCP_ENABLED` (default `true`).\n\n"
+    "Enable with `MCP_ENABLED=true` (default `false`).\n\n"
 
     "## SAML 2.0 SSO\n"
     "Set `SAML_ENABLED=true` and `SAML_SP_BASE_URL` to enable enterprise SSO. "
@@ -1015,7 +1015,7 @@ app = FastAPI(
         "`POST /api/v1/mcp/call` executes one of 16 tools (read, write, and reasoning) — "
         "e.g. `list_meetings`, `get_meeting`, `search_meetings`, `get_action_items`, "
         "`create_bot`, `cancel_bot`, `ask_chat_qa`, `get_meeting_brief`. "
-        "Enable/disable with `MCP_ENABLED` (default `true`).\n\n"
+        "Enable with `MCP_ENABLED=true` (default `false`).\n\n"
 
         "## SAML 2.0 SSO\n"
         "Set `SAML_ENABLED=true` and `SAML_SP_BASE_URL`. Admins register IdP configs at "
@@ -1166,6 +1166,65 @@ app.add_middleware(
 app.add_middleware(PrometheusMiddleware)
 
 
+# ── UI CSRF / same-origin mutation guard ──────────────────────────────────────
+
+_UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+
+def _request_origin(request: Request) -> str:
+    """Public origin for same-origin checks, proxy-aware but Host-bound."""
+    scheme = (
+        request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip()
+        or request.url.scheme
+        or "http"
+    ).lower()
+    host = (
+        request.headers.get("x-forwarded-host", "").split(",", 1)[0].strip()
+        or request.headers.get("host", "")
+        or request.url.netloc
+    ).lower()
+    return f"{scheme}://{host}"
+
+
+def _origin_header_matches_request(request: Request) -> bool:
+    """Return True when Origin/Referer proves a same-origin UI mutation."""
+    from urllib.parse import urlparse
+
+    expected = _request_origin(request)
+    candidate = request.headers.get("origin") or request.headers.get("referer")
+    if not candidate:
+        return False
+    try:
+        parsed = urlparse(candidate)
+    except Exception:
+        return False
+    if not parsed.scheme or not parsed.netloc:
+        return False
+    return f"{parsed.scheme.lower()}://{parsed.netloc.lower()}" == expected
+
+
+@app.middleware("http")
+async def enforce_ui_same_origin_mutations(request: Request, call_next):
+    """Reject cross-site browser form posts against cookie-authenticated UI routes.
+
+    API routes use Bearer/API-key auth and are intentionally left to CORS/auth
+    policy. The HTML dashboard/admin surface uses a session cookie, so unsafe
+    non-API methods must prove same-origin via Origin or Referer before any
+    route handler mutates account, billing, webhook, or bot state.
+    """
+    path = request.url.path
+    if (
+        request.method.upper() in _UNSAFE_METHODS
+        and not path.startswith("/api/")
+        and not _origin_header_matches_request(request)
+    ):
+        return _JSONResponse(
+            {"detail": "Cross-site form submission rejected"},
+            status_code=403,
+        )
+    return await call_next(request)
+
+
 # ── Security headers ───────────────────────────────────────────────────────────
 
 @app.middleware("http")
@@ -1194,6 +1253,9 @@ async def add_security_headers(request, call_next):
             "font-src 'self' fonts.gstatic.com; "
             "img-src 'self' data: https:; "
             "connect-src 'self' wss: ws:; "
+            "object-src 'none'; "
+            "base-uri 'self'; "
+            "form-action 'self'; "
             "frame-ancestors 'none';"
         )
     # HSTS: tell browsers to always use HTTPS for this domain (1 year)

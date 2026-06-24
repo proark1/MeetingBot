@@ -9,7 +9,7 @@ Two endpoints, both under `/api/v1/mcp`:
 | `GET` | `/api/v1/mcp/schema` | Returns the MCP server manifest (tool list + JSON schemas) |
 | `POST` | `/api/v1/mcp/call` | Executes a single tool. Body: `{"tool": "<name>", "arguments": {...}}` |
 
-Auth is the same Bearer token used everywhere else (`sk_live_...` / `sk_test_...`). Disable the whole MCP surface by setting `MCP_ENABLED=false` (default `true`).
+Auth is the same Bearer token used everywhere else (`sk_live_...` / `sk_test_...`). The MCP surface is opt-in; enable it with `MCP_ENABLED=true` (default `false`).
 
 ---
 

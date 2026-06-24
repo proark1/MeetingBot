@@ -528,6 +528,7 @@ class Store:
                 bot_id = bot.id
                 bot_account_id = bot.account_id
                 bot_sub_user_id = bot.sub_user_id
+                bot_workspace_id = bot.workspace_id
                 bot_status = bot.status
                 bot_meeting_url = bot.meeting_url
                 bot_created_at = bot.created_at
@@ -646,6 +647,7 @@ class Store:
                         id=bot_id,
                         account_id=bot_account_id,
                         sub_user_id=bot_sub_user_id,
+                        workspace_id=bot_workspace_id,
                         status=bot_status,
                         meeting_url=bot_meeting_url,
                         created_at=bot_created_at,
@@ -656,6 +658,9 @@ class Store:
                     )
                     db.add(snap)
                 else:
+                    snap.account_id = bot_account_id
+                    snap.sub_user_id = bot_sub_user_id
+                    snap.workspace_id = bot_workspace_id
                     snap.status = bot_status
                     snap.expires_at = bot_expires_at
                     snap.share_token_hash = bot_share_token_hash

@@ -99,6 +99,7 @@ def _migrate_schema(conn) -> None:
             f"ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS key_prefix VARCHAR(16)",
             f"ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS key_hash VARCHAR(128)",
             f"ALTER TABLE bot_snapshots ADD COLUMN IF NOT EXISTS sub_user_id VARCHAR(255)",
+            f"ALTER TABLE bot_snapshots ADD COLUMN IF NOT EXISTS workspace_id VARCHAR(36)",
             f"ALTER TABLE bot_snapshots ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP WITH TIME ZONE",
             f"ALTER TABLE bot_snapshots ADD COLUMN IF NOT EXISTS consent_given BOOLEAN NOT NULL DEFAULT FALSE",
             f"ALTER TABLE bot_snapshots ADD COLUMN IF NOT EXISTS opted_out_participants TEXT",
@@ -150,6 +151,7 @@ def _migrate_schema(conn) -> None:
         _pg_indexes = [
             "CREATE INDEX IF NOT EXISTS ix_bot_snapshots_account_created ON bot_snapshots (account_id, created_at)",
             "CREATE INDEX IF NOT EXISTS ix_bot_snapshots_account_sub_user ON bot_snapshots (account_id, sub_user_id)",
+            "CREATE INDEX IF NOT EXISTS ix_bot_snapshots_workspace_created ON bot_snapshots (workspace_id, created_at)",
             "CREATE INDEX IF NOT EXISTS ix_bot_snapshots_share_token_hash ON bot_snapshots (share_token_hash)",
             "CREATE INDEX IF NOT EXISTS ix_webhook_deliveries_retry ON webhook_deliveries (status, next_retry_at)",
             # round-2 fix #5 — drop the old (account_id, key) unique and replace with (account_id, sub_user_id, key)
@@ -216,6 +218,9 @@ def _migrate_schema(conn) -> None:
         if "sub_user_id" not in existing:
             _log.info("Adding column bot_snapshots.sub_user_id")
             conn.execute(text("ALTER TABLE bot_snapshots ADD COLUMN sub_user_id VARCHAR(255)"))
+        if "workspace_id" not in existing:
+            _log.info("Adding column bot_snapshots.workspace_id")
+            conn.execute(text("ALTER TABLE bot_snapshots ADD COLUMN workspace_id VARCHAR(36)"))
         if "expires_at" not in existing:
             _log.info("Adding column bot_snapshots.expires_at")
             conn.execute(text(f"ALTER TABLE bot_snapshots ADD COLUMN expires_at {_dt_type}"))
@@ -316,6 +321,8 @@ def _migrate_schema(conn) -> None:
          "CREATE INDEX IF NOT EXISTS ix_bot_snapshots_account_created ON bot_snapshots (account_id, created_at)"),
         ("ix_bot_snapshots_account_sub_user",
          "CREATE INDEX IF NOT EXISTS ix_bot_snapshots_account_sub_user ON bot_snapshots (account_id, sub_user_id)"),
+        ("ix_bot_snapshots_workspace_created",
+         "CREATE INDEX IF NOT EXISTS ix_bot_snapshots_workspace_created ON bot_snapshots (workspace_id, created_at)"),
         ("ix_bot_snapshots_share_token_hash",
          "CREATE INDEX IF NOT EXISTS ix_bot_snapshots_share_token_hash ON bot_snapshots (share_token_hash)"),
         ("ix_webhook_deliveries_retry",

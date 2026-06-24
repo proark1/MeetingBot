@@ -162,10 +162,18 @@
 <script>
 const API = '/api/v1';
 let wsConn = null;
+let accessToken = '';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
+function getAccessToken() {
+  if (accessToken) return accessToken;
+  const entered = window.prompt('Enter your JustHereToListen.io API key for this tab only:');
+  accessToken = (entered || '').trim();
+  return accessToken;
+}
+
 function authHeaders() {
-  const t = localStorage.getItem('access_token') || '';
+  const t = getAccessToken();
   return t ? { 'Authorization': 'Bearer ' + t } : {};
 }
 
@@ -374,7 +382,7 @@ function toggleWs() {
     return;
   }
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  const token = localStorage.getItem('access_token') || '';
+  const token = getAccessToken();
   const url = `${proto}://${location.host}/api/v1/ws${token ? '?token=' + token : ''}`;
   wsConn = new WebSocket(url);
   wsConn.onopen = () => {

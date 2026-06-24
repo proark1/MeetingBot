@@ -4,7 +4,47 @@ All notable changes to JustHereToListen.io are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.68.1 — **Last updated:** 2026-06-19
+> **Latest version:** 2.68.2 — **Last updated:** 2026-06-24
+
+---
+
+## [2.68.2] - 2026-06-24
+
+Second-round audit hardening for UI security, workspace access, MCP exposure,
+SSO key behavior, and dependency hygiene. No intentional public API breaking
+changes, but MCP now requires explicit `MCP_ENABLED=true`.
+
+### Security
+- **Cookie-authenticated UI mutations now require same-origin Origin/Referer**
+  before state-changing dashboard/admin form posts are accepted.
+- **Dashboard security headers now add `object-src 'none'`, `base-uri 'self'`,
+  and `form-action 'self'` to the HTML CSP.
+- **Standalone developer tools no longer read API tokens from localStorage**;
+  API keys are held in memory for the current tab only.
+- **MCP is opt-in by default** via `MCP_ENABLED=false`, reducing the default
+  AI-tool execution surface in production.
+
+### Fixed
+- **Workspace bot access now requires active workspaces** for shared visibility
+  and role checks, so soft-deleted workspaces no longer expose stale member
+  access.
+- **Bot creation validates `workspace_id`** and requires member role or higher
+  before attaching a bot to a workspace.
+- **MCP meeting tools now reuse bot visibility rules** and include terminal
+  `BotSnapshot` history, including workspace-visible snapshots through a new
+  indexed `bot_snapshots.workspace_id` column.
+- **Repeated OAuth logins no longer mint fresh API keys** for existing accounts
+  that only have hashed one-shot key rows.
+- **SAML now fails clearly when `SAML_SP_BASE_URL` is missing** instead of
+  generating invalid Service Provider metadata/callback URLs.
+
+### Changed
+- **Production requirements no longer include pytest/fakeredis**; test-only
+  dependencies moved to `backend/requirements-dev.txt`, and CI now installs
+  that dev requirements file.
+- **Regression coverage added** for UI same-origin rejection, workspace create
+  validation, inactive workspace hiding, MCP workspace/snapshot visibility, and
+  repeated SSO key prevention.
 
 ---
 

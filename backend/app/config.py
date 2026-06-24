@@ -315,7 +315,7 @@ class Settings(BaseSettings):
     SAML_SP_BASE_URL: str = ""          # e.g. https://app.meetingbot.io (used in SP metadata)
 
     # ── MCP server ─────────────────────────────────────────────────────────────
-    MCP_ENABLED: bool = True
+    MCP_ENABLED: bool = False
 
     # ── PostgreSQL connection pool ─────────────────────────────────────────────
     # Tune these for your deployment's expected concurrency.

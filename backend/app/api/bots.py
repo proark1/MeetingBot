@@ -93,6 +93,7 @@ _queue_event = asyncio.Event()
 # Serialises the "count active bots → spawn or queue" sequence so concurrent
 # create_bot calls can never read a stale count and exceed MAX_CONCURRENT_BOTS.
 _slot_lock = asyncio.Lock()
+_ROLE_ORDER = {"viewer": 0, "member": 1, "admin": 2}
 
 
 def _get_sub_user_from_request(request: Request) -> Optional[str]:
@@ -247,27 +248,8 @@ async def _check_workspace_role(bot: BotSession, account_id: Optional[str], min_
         return
 
     try:
-        from app.db import AsyncSessionLocal
-        from app.models.account import WorkspaceMember
-        from sqlalchemy import select
-
-        _ROLE_ORDER = {"viewer": 0, "member": 1, "admin": 2}
-        min_level = _ROLE_ORDER.get(min_role, 0)
-
-        async with AsyncSessionLocal() as db:
-            result = await db.execute(
-                select(WorkspaceMember).where(
-                    WorkspaceMember.workspace_id == bot.workspace_id,
-                    WorkspaceMember.account_id == account_id,
-                )
-            )
-            member = result.scalar_one_or_none()
-
-        if member is None:
-            raise HTTPException(status_code=403, detail="You are not a member of this workspace")
-
-        member_level = _ROLE_ORDER.get(member.role, 0)
-        if member_level < min_level:
+        role = await _active_workspace_role(bot.workspace_id, account_id)
+        if _ROLE_ORDER.get(role, 0) < _ROLE_ORDER.get(min_role, 0):
             raise HTTPException(
                 status_code=403,
                 detail=f"This action requires workspace role '{min_role}' or higher",
@@ -279,6 +261,53 @@ async def _check_workspace_role(bot: BotSession, account_id: Optional[str], min_
         raise HTTPException(status_code=503, detail="Authorization check temporarily unavailable")
 
 
+async def _active_workspace_role(workspace_id: str, account_id: str) -> str:
+    """Return caller's role in an active workspace, hiding inactive/missing rows."""
+    from app.db import AsyncSessionLocal
+    from app.models.account import Workspace, WorkspaceMember
+    from sqlalchemy import select
+
+    async with AsyncSessionLocal() as db:
+        ws_result = await db.execute(
+            select(Workspace).where(
+                Workspace.id == workspace_id,
+                Workspace.is_active == True,  # noqa: E712
+            )
+        )
+        ws = ws_result.scalar_one_or_none()
+        if ws is None:
+            raise HTTPException(status_code=404, detail=f"Workspace {workspace_id!r} not found")
+        if ws.owner_account_id == account_id:
+            return "admin"
+        member_result = await db.execute(
+            select(WorkspaceMember).where(
+                WorkspaceMember.workspace_id == workspace_id,
+                WorkspaceMember.account_id == account_id,
+            )
+        )
+        member = member_result.scalar_one_or_none()
+        if member is None:
+            raise HTTPException(status_code=404, detail=f"Workspace {workspace_id!r} not found")
+        return member.role
+
+
+async def _validate_workspace_for_create(workspace_id: Optional[str], account_id: Optional[str]) -> None:
+    """Ensure a bot can only be attached to a workspace the caller may use."""
+    if not workspace_id:
+        return
+    if not account_id or account_id == SUPERADMIN_ACCOUNT_ID:
+        raise HTTPException(status_code=401, detail="workspace_id requires per-user authentication")
+    try:
+        role = await _active_workspace_role(workspace_id, account_id)
+    except HTTPException:
+        raise
+    except SQLAlchemyError as exc:
+        logger.error("Workspace create validation failed (DB error): %s", exc)
+        raise HTTPException(status_code=503, detail="Workspace validation temporarily unavailable")
+    if _ROLE_ORDER.get(role, 0) < _ROLE_ORDER["member"]:
+        raise HTTPException(status_code=403, detail="Creating bots in this workspace requires member role or higher")
+
+
 async def _workspace_ids_for_account(account_id: Optional[str]) -> set[str]:
     if not account_id or account_id == SUPERADMIN_ACCOUNT_ID:
         return set()
@@ -286,11 +315,15 @@ async def _workspace_ids_for_account(account_id: Optional[str]) -> set[str]:
     try:
         from app.db import AsyncSessionLocal
         from app.models.account import Workspace, WorkspaceMember
+        from sqlalchemy import select
 
         async with AsyncSessionLocal() as db:
             member_rows = await db.execute(
-                select(WorkspaceMember.workspace_id).where(
+                select(WorkspaceMember.workspace_id)
+                .join(Workspace, Workspace.id == WorkspaceMember.workspace_id)
+                .where(
                     WorkspaceMember.account_id == account_id,
+                    Workspace.is_active == True,  # noqa: E712
                 )
             )
             owner_rows = await db.execute(
@@ -621,6 +654,8 @@ async def create_bot(payload: BotCreate, request: Request):
                 "recognized unsupported platforms."
             ),
         )
+
+    await _validate_workspace_for_create(payload.workspace_id, account_id)
 
     # Check credits and plan limits for per-user accounts (not superadmin / sandbox)
     is_sandbox = getattr(request.state, "sandbox", False)

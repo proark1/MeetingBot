@@ -12,9 +12,13 @@ Authentication: uses the same Bearer token as all other API endpoints.
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
+from pathlib import Path
 from typing import Any, Optional
 
 from app.config import settings
+
+_VERSION_FILE = Path(__file__).resolve().parents[3] / "VERSION"
+_APP_VERSION = _VERSION_FILE.read_text().strip() if _VERSION_FILE.exists() else "2.68.2"
 
 router = APIRouter(prefix="/mcp", tags=["MCP"])
 
@@ -35,7 +39,7 @@ class McpToolCall(BaseModel):
     summary="MCP server manifest",
     responses={200: {"content": {"application/json": {"example": {
         "name": "justheretolisten.io",
-        "version": "2.51.0",
+        "version": _APP_VERSION,
         "description": "MCP server for JustHereToListen.io meeting bots.",
         "tools": [
             {"name": "list_meetings", "description": "List recent meetings."},
