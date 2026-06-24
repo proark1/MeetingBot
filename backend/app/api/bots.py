@@ -1,6 +1,7 @@
 """Bot management API."""
 
 import asyncio
+import json
 import logging
 import uuid
 from collections import deque
@@ -24,6 +25,7 @@ from app.schemas.bot import (
     SayRequest, SayResponse, ChatRequest, ChatResponse,
 )
 from app.services import bot_service, intelligence_service
+from app.services.orchestration_service import get_orchestrator
 from app.store import store, BotSession, _now, decode_list_cursor, encode_list_cursor
 
 logger = logging.getLogger(__name__)
@@ -96,6 +98,12 @@ _slot_lock = asyncio.Lock()
 _ROLE_ORDER = {"viewer": 0, "member": 1, "admin": 2}
 
 
+def _spawn_lifecycle_task(bot_id: str) -> None:
+    task = asyncio.create_task(bot_service.run_bot_lifecycle(bot_id))
+    _running_tasks[bot_id] = task
+    task.add_done_callback(lambda _t, bid=bot_id: _on_task_done(_t, bid))
+
+
 def _get_sub_user_from_request(request: Request) -> Optional[str]:
     """Extract & validate sub_user_id from X-Sub-User header.
 
@@ -119,6 +127,24 @@ async def _start_or_queue_bot(bot_id: str) -> None:
     if bot is None:
         logger.warning("Scheduled bot %s was deleted before join time", bot_id)
         return
+    orchestrator = get_orchestrator()
+    if orchestrator.enabled:
+        async with orchestrator.scheduler_lock():
+            active = await orchestrator.count_active()
+            if active >= settings.MAX_CONCURRENT_BOTS:
+                position = await orchestrator.enqueue(bot_id)
+                await store.update_bot(bot_id, status="queued")
+                logger.info("Bot %s queued in Redis orchestration (position %d)", bot_id, position)
+                return
+            if not await orchestrator.try_acquire_lease(bot_id):
+                position = await orchestrator.enqueue(bot_id)
+                await store.update_bot(bot_id, status="queued")
+                logger.info("Bot %s queued because another worker owns its lease (position %d)", bot_id, position)
+                return
+            _spawn_lifecycle_task(bot_id)
+        await store.update_bot(bot_id, status="joining")
+        logger.info("Bot %s starting now via Redis orchestration", bot_id)
+        return
     async with _slot_lock:
         active = _count_active_locked()
         if active >= settings.MAX_CONCURRENT_BOTS:
@@ -126,9 +152,7 @@ async def _start_or_queue_bot(bot_id: str) -> None:
             _queue_event.set()
             queued = True
         else:
-            task = asyncio.create_task(bot_service.run_bot_lifecycle(bot_id))
-            _running_tasks[bot_id] = task
-            task.add_done_callback(lambda _t, bid=bot_id: _on_task_done(_t, bid))
+            _spawn_lifecycle_task(bot_id)
             queued = False
     if queued:
         await store.update_bot(bot_id, status="queued")
@@ -159,6 +183,33 @@ def _count_active_locked() -> int:
 async def _queue_processor() -> None:
     """Background loop: start queued bots when a slot is free."""
     while True:
+        orchestrator = get_orchestrator()
+        if orchestrator.enabled:
+            try:
+                await asyncio.wait_for(_queue_event.wait(), timeout=5.0)
+            except asyncio.TimeoutError:
+                pass
+            _queue_event.clear()
+            async with orchestrator.scheduler_lock():
+                due_ids = await orchestrator.pop_due_scheduled()
+                for due_id in due_ids:
+                    await orchestrator.enqueue(due_id)
+                while await orchestrator.count_active() < settings.MAX_CONCURRENT_BOTS:
+                    bot_id = await orchestrator.dequeue()
+                    if not bot_id:
+                        break
+                    bot = await store.get_bot(bot_id)
+                    if bot is None:
+                        logger.warning("Redis queue: bot %s was deleted — skipping", bot_id)
+                        continue
+                    if not await orchestrator.try_acquire_lease(bot_id):
+                        await orchestrator.enqueue(bot_id)
+                        break
+                    _spawn_lifecycle_task(bot_id)
+                    await store.update_bot(bot_id, status="joining")
+                    logger.info("Redis queue: started bot %s", bot_id)
+            continue
+
         try:
             await asyncio.wait_for(_queue_event.wait(), timeout=30.0)
         except asyncio.TimeoutError:
@@ -189,9 +240,7 @@ async def _queue_processor() -> None:
                 _queue_event.set()
             continue
         async with _slot_lock:
-            task = asyncio.create_task(bot_service.run_bot_lifecycle(bot_id))
-            _running_tasks[bot_id] = task
-            task.add_done_callback(lambda _t, bid=bot_id: _on_task_done(_t, bid))
+            _spawn_lifecycle_task(bot_id)
         await store.update_bot(bot_id, status="joining")
         logger.info("Queue: started bot %s (%d remaining in queue)", bot_id, len(_bot_queue))
         if _bot_queue:
@@ -306,6 +355,68 @@ async def _validate_workspace_for_create(workspace_id: Optional[str], account_id
         raise HTTPException(status_code=503, detail="Workspace validation temporarily unavailable")
     if _ROLE_ORDER.get(role, 0) < _ROLE_ORDER["member"]:
         raise HTTPException(status_code=403, detail="Creating bots in this workspace requires member role or higher")
+
+
+async def _consent_defaults_for_create(
+    account_id: Optional[str],
+    workspace_id: Optional[str],
+) -> tuple[bool, Optional[str], Optional[str]]:
+    """Resolve account/workspace consent defaults for a new bot."""
+    from app.config import settings as _settings
+
+    require_consent = bool(_settings.CONSENT_ANNOUNCEMENT_ENABLED)
+    consent_message: Optional[str] = None
+    opt_out_phrase: Optional[str] = None
+
+    if not account_id or account_id == SUPERADMIN_ACCOUNT_ID:
+        return require_consent, consent_message, opt_out_phrase
+
+    from app.db import AsyncSessionLocal
+    from app.models.account import ConsentPolicy, Workspace
+
+    try:
+        async with AsyncSessionLocal() as db:
+            policy_result = await db.execute(
+                select(ConsentPolicy).where(ConsentPolicy.account_id == account_id)
+            )
+            policy = policy_result.scalar_one_or_none()
+            if policy is not None:
+                require_consent = require_consent or bool(policy.require_consent)
+                consent_message = policy.consent_message or consent_message
+                opt_out_phrase = policy.opt_out_phrase or opt_out_phrase
+
+            if workspace_id:
+                ws_result = await db.execute(
+                    select(Workspace).where(
+                        Workspace.id == workspace_id,
+                        Workspace.is_active == True,  # noqa: E712
+                    )
+                )
+                ws = ws_result.scalar_one_or_none()
+                if ws is not None:
+                    try:
+                        ws_settings = json.loads(ws.settings or "{}")
+                    except Exception:
+                        ws_settings = {}
+                    require_consent = require_consent or bool(
+                        ws_settings.get("require_consent")
+                        or ws_settings.get("recording_consent_required")
+                    )
+                    consent_message = (
+                        ws_settings.get("consent_message")
+                        or ws_settings.get("recording_consent_message")
+                        or consent_message
+                    )
+                    opt_out_phrase = (
+                        ws_settings.get("consent_opt_out_phrase")
+                        or ws_settings.get("opt_out_phrase")
+                        or opt_out_phrase
+                    )
+    except SQLAlchemyError as exc:
+        logger.error("Consent policy lookup failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Consent policy lookup temporarily unavailable")
+
+    return require_consent, consent_message, opt_out_phrase
 
 
 async def _workspace_ids_for_account(account_id: Optional[str]) -> set[str]:
@@ -694,12 +805,16 @@ async def create_bot(payload: BotCreate, request: Request):
 
     from app.config import settings as _settings
 
-    # Resolve consent: if the user explicitly enabled it, use that; otherwise fall
-    # back to the platform default.  We use `or` intentionally here — the BotCreate
-    # schema defaults consent_enabled to False, so `True` only comes from an explicit
-    # user choice.  The platform default can upgrade False → True but never downgrade.
-    consent_enabled = payload.consent_enabled or _settings.CONSENT_ANNOUNCEMENT_ENABLED
-    consent_message = payload.consent_message  # None = use platform default
+    # Resolve consent from per-bot request, workspace policy, account policy, and
+    # finally platform defaults. Any admin-required policy can upgrade a bot to
+    # consent-enabled; per-bot values win for wording.
+    policy_require_consent, policy_message, policy_opt_out_phrase = await _consent_defaults_for_create(
+        account_id,
+        payload.workspace_id,
+    )
+    consent_enabled = bool(payload.consent_enabled or policy_require_consent)
+    consent_message = payload.consent_message or policy_message
+    consent_opt_out_phrase = payload.consent_opt_out_phrase or policy_opt_out_phrase or _settings.CONSENT_OPT_OUT_PHRASE
 
     # Convert keyword alert configs to plain dicts for storage
     keyword_alerts_dicts = [
@@ -740,6 +855,7 @@ async def create_bot(payload: BotCreate, request: Request):
         # New fields
         consent_enabled=consent_enabled,
         consent_message=consent_message,
+        consent_opt_out_phrase=consent_opt_out_phrase,
         keyword_alerts=keyword_alerts_dicts,
         auto_followup_email=payload.auto_followup_email,
         workspace_id=payload.workspace_id,
@@ -855,7 +971,12 @@ async def create_bot(payload: BotCreate, request: Request):
         logger.info("Sandbox bot %s completed instantly with demo transcript", bot.id)
         return _to_response(bot)
 
-    if is_scheduled:
+    orchestrator = get_orchestrator()
+    if is_scheduled and orchestrator.enabled:
+        await orchestrator.schedule(bot.id, _join_at_utc)
+        _queue_event.set()
+        logger.info("Bot %s durably scheduled in Redis orchestration", bot.id)
+    elif is_scheduled:
         # Defer start until join time — does NOT occupy a concurrent slot while waiting.
         delay = max(0, (_join_at_utc - _now()).total_seconds())
         if delay < 1:
@@ -867,6 +988,9 @@ async def create_bot(payload: BotCreate, request: Request):
             handle = loop.call_later(delay, _start_scheduled_bot, bot.id)
             _scheduled_timers[bot.id] = handle
             logger.info("Bot %s scheduled — will start in %.0f s (no slot held)", bot.id, delay)
+    elif orchestrator.enabled:
+        await _start_or_queue_bot(bot.id)
+        bot = await store.get_bot(bot.id) or bot
     else:
         async with _slot_lock:
             active = _count_active_locked()
@@ -877,9 +1001,7 @@ async def create_bot(payload: BotCreate, request: Request):
                 queue_pos = _bot_queue.index(bot.id) + 1
                 _spawned = False
             else:
-                task = asyncio.create_task(bot_service.run_bot_lifecycle(bot.id))
-                _running_tasks[bot.id] = task
-                task.add_done_callback(lambda _t, bid=bot.id: _on_task_done(_t, bid))
+                _spawn_lifecycle_task(bot.id)
                 bot.status = "joining"
                 _spawned = True
         if _spawned:
@@ -1226,6 +1348,9 @@ async def delete_bot(bot_id: str, request: Request):
     sub_user_id = _get_sub_user_from_request(request)
     bot = await _get_or_404(bot_id, account_id, sub_user_id)
     await _check_workspace_role(bot, account_id, "admin")
+    orchestrator = get_orchestrator()
+    if orchestrator.enabled:
+        await orchestrator.cancel_bot(bot_id)
 
     # Cancel scheduled timer if waiting for join_at
     timer = _scheduled_timers.pop(bot_id, None)
@@ -1233,6 +1358,9 @@ async def delete_bot(bot_id: str, request: Request):
         timer.cancel()
         await store.mark_terminal(bot_id, "cancelled", ended_at=_now())
         logger.info("Cancelled scheduled timer for bot %s", bot_id)
+    elif orchestrator.enabled and bot.status in {"scheduled", "queued", "ready"}:
+        await store.mark_terminal(bot_id, "cancelled", ended_at=_now())
+        logger.info("Cancelled Redis-orchestrated waiting bot %s", bot_id)
     elif bot_id in _bot_queue:
         # Bot is queued but not yet running — remove from queue
         _bot_queue.remove(bot_id)

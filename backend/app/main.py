@@ -57,6 +57,7 @@ from app.api.workspaces import router as workspaces_router
 from app.api.saml import router as saml_router
 from app.api.mcp import router as mcp_router
 from app.api.action_items import router as action_items_router
+from app.api.privacy import router as privacy_router
 from app.deps import require_auth
 from typing import Any
 
@@ -703,7 +704,7 @@ _PUBLIC_DESCRIPTION = (
 
     "## Integrations (Slack & Notion)\n"
     "Push meeting notes automatically to third-party tools after each bot session.\n\n"
-    "- `POST /api/v1/integrations` — create an integration (`type`: `slack` or `notion`)\n"
+    "- `POST /api/v1/integrations` — create an integration (`type`: `slack`, `notion`, `linear`, `jira`, `google_drive`, `hubspot`, or `salesforce`)\n"
     "- **Slack:** provide `config.webhook_url` (Incoming Webhook URL)\n"
     "- **Notion:** provide `config.api_token` and `config.database_id`\n"
     "- `GET /api/v1/integrations` — list all integrations (secrets redacted)\n"
@@ -947,7 +948,7 @@ app = FastAPI(
 
         "## Integrations (Slack & Notion)\n"
         "Push meeting notes automatically to third-party tools after each bot session.\n\n"
-        "- `POST /api/v1/integrations` — create an integration (`type`: `slack` or `notion`)\n"
+        "- `POST /api/v1/integrations` — create an integration (`type`: `slack`, `notion`, `linear`, `jira`, `google_drive`, `hubspot`, or `salesforce`)\n"
         "- **Slack:** provide `config.webhook_url` (Incoming Webhook URL)\n"
         "- **Notion:** provide `config.api_token` and `config.database_id`\n"
         "- `GET /api/v1/integrations` — list all integrations (secrets redacted)\n"
@@ -1448,7 +1449,7 @@ _ROUTE_SUMMARIES: dict[tuple[str, str], str] = {
     ("get", "/api/v1/action-items"): "List action items across all bots",
     ("patch", "/api/v1/action-items/{item_id}"): "Update an action item (status, assignee, due_date)",
     # — Integrations —
-    ("post", "/api/v1/integrations"): "Create an integration (Slack/Notion)",
+    ("post", "/api/v1/integrations"): "Create an integration",
     ("get", "/api/v1/integrations"): "List integrations",
     ("patch", "/api/v1/integrations/{integration_id}"): "Update an integration",
     ("delete", "/api/v1/integrations/{integration_id}"): "Delete an integration",
@@ -2149,6 +2150,7 @@ app.include_router(keyword_alerts_router, prefix="/api/v1", dependencies=_auth)
 app.include_router(workspaces_router,     prefix="/api/v1", dependencies=_auth)
 app.include_router(mcp_router,            prefix="/api/v1", dependencies=_auth)
 app.include_router(action_items_router,   prefix="/api/v1", dependencies=_auth)
+app.include_router(privacy_router,        prefix="/api/v1")              # public deletion intake + own auth
 app.include_router(admin_router,          prefix="/api/v1")              # admin has its own auth (require_admin)
 app.include_router(ws_router,             prefix="/api/v1")              # WS auth handled separately
 app.include_router(ui_router)                                             # web UI (no prefix)

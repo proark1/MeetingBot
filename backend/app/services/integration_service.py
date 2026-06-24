@@ -355,7 +355,10 @@ async def _post_to_linear(api_key: str, team_id: str, bot_data: dict) -> bool:
     successes = 0
 
     for item in action_items:
-        task = item.get("task") or item if isinstance(item, str) else ""
+        if isinstance(item, dict):
+            task = item.get("task") or ""
+        else:
+            task = str(item)
         if not task:
             continue
         assignee_name = item.get("assignee", "") if isinstance(item, dict) else ""
@@ -413,7 +416,10 @@ async def _post_to_jira(base_url: str, token: str, email: str, project_key: str,
     successes = 0
 
     for item in action_items:
-        task = item.get("task") or item if isinstance(item, str) else ""
+        if isinstance(item, dict):
+            task = item.get("task") or ""
+        else:
+            task = str(item)
         if not task:
             continue
         description_text = f"From meeting {bot_id}. {summary[:300]}"
@@ -460,47 +466,53 @@ async def dispatch_integrations(account_id: str, bot_data: dict) -> None:
             )
             integrations = result.scalars().all()
 
-        if not integrations:
-            return
+            if not integrations:
+                return
 
-        from app.services.secrets_at_rest import decrypt_json
-        tasks = []
-        for integration in integrations:
-            config = decrypt_json(integration.config)
+            from app.services.approval_service import queue_task_approvals
+            from app.services.secrets_at_rest import decrypt_json
+            tasks = []
+            for integration in integrations:
+                config = decrypt_json(integration.config)
 
-            if integration.type == "slack":
-                webhook_url = config.get("webhook_url", "")
-                if webhook_url:
-                    tasks.append(_post_to_slack(webhook_url, bot_data))
+                if await queue_task_approvals(session, integration, config, bot_data):
+                    continue
 
-            elif integration.type == "notion":
-                api_token = config.get("api_token", "")
-                database_id = config.get("database_id", "")
-                if api_token and database_id:
-                    tasks.append(_post_to_notion(api_token, database_id, bot_data))
+                if integration.type == "slack":
+                    webhook_url = config.get("webhook_url", "")
+                    if webhook_url:
+                        tasks.append(_post_to_slack(webhook_url, bot_data))
 
-            elif integration.type == "linear":
-                api_key = config.get("api_key", "")
-                team_id = config.get("team_id", "")
-                if api_key and team_id:
-                    tasks.append(_post_to_linear(api_key, team_id, bot_data))
+                elif integration.type == "notion":
+                    api_token = config.get("api_token", "")
+                    database_id = config.get("database_id", "")
+                    if api_token and database_id:
+                        tasks.append(_post_to_notion(api_token, database_id, bot_data))
 
-            elif integration.type == "jira":
-                jira_url = config.get("base_url", "")
-                jira_token = config.get("token", "")
-                jira_email = config.get("email", "")
-                project_key = config.get("project_key", "")
-                if jira_url and jira_token and jira_email and project_key:
-                    tasks.append(_post_to_jira(jira_url, jira_token, jira_email, project_key, bot_data))
+                elif integration.type == "linear":
+                    api_key = config.get("api_key", "")
+                    team_id = config.get("team_id", "")
+                    if api_key and team_id:
+                        tasks.append(_post_to_linear(api_key, team_id, bot_data))
 
-            elif integration.type == "google_drive":
-                access_token = config.get("access_token", "")
-                folder_id = config.get("folder_id")
-                if access_token:
-                    tasks.append(_post_to_google_drive(access_token, folder_id, bot_data))
+                elif integration.type == "jira":
+                    jira_url = config.get("base_url", "")
+                    jira_token = config.get("token", "")
+                    jira_email = config.get("email", "")
+                    project_key = config.get("project_key", "")
+                    if jira_url and jira_token and jira_email and project_key:
+                        tasks.append(_post_to_jira(jira_url, jira_token, jira_email, project_key, bot_data))
+
+                elif integration.type == "google_drive":
+                    access_token = config.get("access_token", "")
+                    folder_id = config.get("folder_id")
+                    if access_token:
+                        tasks.append(_post_to_google_drive(access_token, folder_id, bot_data))
 
             # CRM types are handled by crm_service.dispatch_crm_integrations
             # (called separately from bot_service._post_completion_notifications)
+
+            await session.commit()
 
         if tasks:
             _results = await asyncio.gather(*tasks, return_exceptions=True)

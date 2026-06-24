@@ -365,6 +365,43 @@ class RetentionPolicy(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
 
+class ConsentPolicy(Base):
+    """Per-account recording consent defaults and admin controls."""
+
+    __tablename__ = "consent_policies"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    account_id: Mapped[str] = mapped_column(String(36), nullable=False, unique=True, index=True)
+    require_consent: Mapped[bool] = mapped_column(Boolean, default=True)
+    consent_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    opt_out_phrase: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    auto_redact_opt_outs: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
+class DataDeletionRequest(Base):
+    """Participant or customer request to delete/redact meeting data."""
+
+    __tablename__ = "data_deletion_requests"
+    __table_args__ = (
+        Index("ix_data_deletion_requests_account_created", "account_id", "created_at"),
+        Index("ix_data_deletion_requests_status_created", "status", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    account_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
+    bot_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
+    requester_email: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    participant_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
+    resolution_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    resolved_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class KeywordAlert(Base):
     """Keyword-triggered webhook alert configuration per account."""
 
@@ -497,6 +534,33 @@ class ActionItem(Base):
     # same stage. NULL = no reminder sent yet.
     reminder_stage: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     reminder_sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ActionItemApproval(Base):
+    """Review queue row for shipping a meeting action into an external system."""
+
+    __tablename__ = "action_item_approvals"
+    __table_args__ = (
+        Index("ix_action_item_approvals_account_status", "account_id", "status"),
+        Index("ix_action_item_approvals_bot_created", "bot_id", "created_at"),
+        Index("ix_action_item_approvals_unique_pending", "integration_id", "action_item_id", "destination_type"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    account_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
+    sub_user_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
+    bot_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    action_item_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    integration_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    integration_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    destination_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    payload: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    reviewed_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    delivered_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class MeetingSummary(Base):

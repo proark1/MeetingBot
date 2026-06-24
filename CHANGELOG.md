@@ -4,7 +4,48 @@ All notable changes to JustHereToListen.io are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.68.2 — **Last updated:** 2026-06-24
+> **Latest version:** 2.69.0 — **Last updated:** 2026-06-24
+
+---
+
+## [2.69.0] - 2026-06-24
+
+Privacy, trust, and workflow-review release. Adds account/workspace consent
+controls, participant deletion request intake, approval-gated CRM/task dispatch,
+and a public Trust & Security page.
+
+### Added
+- **Account consent policy API** at `/api/v1/privacy/consent-policy` for
+  requiring recording announcements, setting default consent wording, defining
+  the opt-out phrase, and controlling opt-out redaction behavior.
+- **Public deletion request intake** at `/api/v1/privacy/deletion-requests`.
+  Requests are non-enumerating and can be reviewed by the owning account.
+- **Owner-reviewed meeting erasure** from deletion requests, wiping transcripts,
+  analysis, chapters, speaker stats, and recording references for the associated
+  bot/snapshot.
+- **CRM/task approval queue** for HubSpot, Salesforce, Linear, and Jira when an
+  integration sets `approval_required: true`.
+- **Approval endpoints** under `/api/v1/action-items/approvals` to list, approve,
+  dispatch, or reject queued external work.
+- **Public `/trust` page** with concrete security, privacy, integration, AI, and
+  responsible-disclosure information. `/security` redirects to `/trust`.
+
+### Changed
+- **Integrations API now accepts the documented CRM/task types**:
+  `linear`, `jira`, `google_drive`, `hubspot`, and `salesforce`, in addition to
+  Slack and Notion.
+- **Workspace settings can force consent defaults** for bots created inside a
+  workspace via `require_consent`, `consent_message`, and
+  `consent_opt_out_phrase`.
+- **UI template rendering now uses the current Starlette signature**, restoring
+  compatibility for landing, legal, dashboard, bot detail, top-up, admin, and
+  share pages.
+
+### Fixed
+- **Linear/Jira task creation now handles dict-shaped action items** emitted by
+  the analyzer, not only plain string action items.
+- **Salesforce CRM delivery no longer follows redirects** from configured URLs
+  and applies SSRF checks to configurable Salesforce endpoints.
 
 ---
 

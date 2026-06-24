@@ -94,26 +94,36 @@ async def root(request: Request, db: AsyncSession = Depends(get_db)):
             return RedirectResponse("/dashboard")
     except Exception as exc:
         logger.warning("Root route DB lookup failed (serving landing page): %s", exc)
-    return templates.TemplateResponse("landing.html", {"request": request})
+    return templates.TemplateResponse(request, "landing.html", {"request": request})
 
 
 # ── Legal pages (public) ────────────────────────────────────────────────────────
 
 @router.get("/privacy", response_class=HTMLResponse, include_in_schema=False)
 async def privacy_policy(request: Request):
-    return templates.TemplateResponse("privacy.html", {"request": request})
+    return templates.TemplateResponse(request, "privacy.html", {"request": request})
 
 
 @router.get("/terms", response_class=HTMLResponse, include_in_schema=False)
 async def terms_of_service(request: Request):
-    return templates.TemplateResponse("terms.html", {"request": request})
+    return templates.TemplateResponse(request, "terms.html", {"request": request})
+
+
+@router.get("/trust", response_class=HTMLResponse, include_in_schema=False)
+async def trust_center(request: Request):
+    return templates.TemplateResponse(request, "trust.html", {"request": request})
+
+
+@router.get("/security", response_class=HTMLResponse, include_in_schema=False)
+async def security_page(request: Request):
+    return RedirectResponse("/trust", status_code=302)
 
 
 # ── Register ──────────────────────────────────────────────────────────────────
 
 @router.get("/register", response_class=HTMLResponse, include_in_schema=False)
 async def register_page(request: Request):
-    return templates.TemplateResponse("register.html", {
+    return templates.TemplateResponse(request, "register.html", {
         "request": request,
         "account": None,
         "google_sso_enabled": bool(settings.GOOGLE_CLIENT_ID),
@@ -135,7 +145,7 @@ async def register_submit(
 
     # Check password length
     if len(password) < 8:
-        return templates.TemplateResponse("register.html", {
+        return templates.TemplateResponse(request, "register.html", {
             "request": request,
             "account": None,
             "flash": _flash("danger", "Password must be at least 8 characters."),
@@ -144,7 +154,7 @@ async def register_submit(
     # Check email not taken
     existing = await db.execute(select(Account).where(Account.email == email))
     if existing.scalar_one_or_none():
-        return templates.TemplateResponse("register.html", {
+        return templates.TemplateResponse(request, "register.html", {
             "request": request,
             "account": None,
             "flash": _flash("danger", "Email already registered. Try logging in."),
@@ -185,7 +195,7 @@ async def register_submit(
 
 @router.get("/login", response_class=HTMLResponse, include_in_schema=False)
 async def login_page(request: Request):
-    return templates.TemplateResponse("login.html", {
+    return templates.TemplateResponse(request, "login.html", {
         "request": request,
         "account": None,
         "google_sso_enabled": bool(settings.GOOGLE_CLIENT_ID),
@@ -205,7 +215,7 @@ async def login_submit(
     result = await db.execute(select(Account).where(Account.email == email))
     account = result.scalar_one_or_none()
     if not account or not _verify_password(password, account.hashed_password):
-        return templates.TemplateResponse("login.html", {
+        return templates.TemplateResponse(request, "login.html", {
             "request": request,
             "account": None,
             "flash": _flash("danger", "Invalid email or password."),
@@ -382,7 +392,7 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
     if new_key and request.query_params.get("created") == "1":
         flash = _flash("success", "API key created successfully.")
 
-    return templates.TemplateResponse("dashboard.html", {
+    return templates.TemplateResponse(request, "dashboard.html", {
         "request": request,
         "account": account,
         "is_admin": _is_admin(account),
@@ -470,7 +480,7 @@ async def bot_session_page(
                 bot = None
 
     if bot is None or bot.account_id != account.id:
-        return templates.TemplateResponse("dashboard.html", {
+        return templates.TemplateResponse(request, "dashboard.html", {
             "request": request,
             "account": account,
             "is_admin": _is_admin(account),
@@ -498,7 +508,7 @@ async def bot_session_page(
     _recording_ok = bool(bot.recording_path and _os.path.exists(bot.recording_path))
     _video_ok = bool(bot.video_path and _os.path.exists(bot.video_path))
 
-    return templates.TemplateResponse("bot.html", {
+    return templates.TemplateResponse(request, "bot.html", {
         "request": request,
         "account": account,
         "is_admin": _is_admin(account),
@@ -730,7 +740,7 @@ async def topup_page(request: Request, db: AsyncSession = Depends(get_db)):
 
     amounts = settings.stripe_top_up_amounts or [10, 25, 50, 100]
 
-    return templates.TemplateResponse("topup.html", {
+    return templates.TemplateResponse(request, "topup.html", {
         "request": request,
         "account": account,
         "is_admin": _is_admin(account),
@@ -981,7 +991,7 @@ async def admin_page(request: Request, db: AsyncSession = Depends(get_db)):
     elif err == "invalid_amount":
         flash = _flash("danger", "Invalid amount.")
 
-    return templates.TemplateResponse("admin.html", {
+    return templates.TemplateResponse(request, "admin.html", {
         "request": request,
         "account": account,
         "is_admin": True,
@@ -2167,7 +2177,7 @@ async def share_meeting(token: str, request: Request):
         transcript = snapshot_data.get("transcript") or []
         created_at = snapshot_data.get("created_at")
 
-    return templates.TemplateResponse("share.html", {
+    return templates.TemplateResponse(request, "share.html", {
         "request": request,
         "bot_id": (ctx_id[:12] + "…") if ctx_id else "",
         "platform": platform,

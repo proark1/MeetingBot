@@ -17,7 +17,15 @@ from typing import Any, Optional
 import httpx as _httpx
 
 logger = logging.getLogger(__name__)
-_http_client = _httpx.AsyncClient(timeout=15, follow_redirects=True)
+_http_client = _httpx.AsyncClient(timeout=15, follow_redirects=False)
+
+
+async def _ssrf_blocked(url: str) -> str | None:
+    try:
+        from app.services.webhook_service import check_url_ssrf
+    except Exception:  # pragma: no cover
+        return None
+    return await check_url_ssrf(url)
 
 
 def _truncate(text: str, max_len: int = 4000) -> str:
@@ -174,6 +182,10 @@ async def _post_to_salesforce(instance_url: str, access_token: str, config: dict
     }
 
     url = f"{instance_url.rstrip('/')}/services/data/v59.0/sobjects/Task/"
+    blocked = await _ssrf_blocked(url)
+    if blocked is not None:
+        logger.warning("Salesforce integration blocked by SSRF guard url=%s reason=%s", url, blocked)
+        return False
 
     try:
         resp = await _http_client.post(url, headers=headers, json=task)
@@ -200,6 +212,9 @@ async def _get_salesforce_token(config: dict) -> tuple[str, str]:
     password = config.get("password") or settings.SALESFORCE_PASSWORD
     security_token = config.get("security_token") or settings.SALESFORCE_SECURITY_TOKEN
     login_url = config.get("login_url", "https://login.salesforce.com")
+    blocked = await _ssrf_blocked(f"{login_url.rstrip('/')}/services/oauth2/token")
+    if blocked is not None:
+        raise RuntimeError(f"Salesforce login URL blocked by SSRF guard: {blocked}")
 
     data = {
         "grant_type": "password",
@@ -238,33 +253,39 @@ async def dispatch_crm_integrations(account_id: str, bot_data: dict) -> None:
             )
             integrations = result.scalars().all()
 
-        if not integrations:
-            return
+            if not integrations:
+                return
 
-        from app.services.secrets_at_rest import decrypt_json
-        tasks = []
-        for integration in integrations:
-            config = decrypt_json(integration.config)
+            from app.services.approval_service import queue_crm_approval
+            from app.services.secrets_at_rest import decrypt_json
+            tasks = []
+            for integration in integrations:
+                config = decrypt_json(integration.config)
 
-            if integration.type == "hubspot":
-                access_token = config.get("access_token", "")
-                if access_token:
-                    tasks.append(_post_to_hubspot(access_token, config, bot_data))
-                else:
-                    logger.warning("HubSpot integration %s missing access_token", integration.id)
+                if await queue_crm_approval(session, integration, config, bot_data):
+                    continue
 
-            elif integration.type == "salesforce":
-                # Prefer stored access_token; fall back to username-password flow
-                access_token = config.get("access_token", "")
-                instance_url = config.get("instance_url", "")
-                if not access_token:
-                    try:
-                        instance_url, access_token = await _get_salesforce_token(config)
-                    except Exception as exc:
-                        logger.error("Salesforce token fetch failed for integration %s: %s", integration.id, exc)
-                        continue
-                if instance_url and access_token:
-                    tasks.append(_post_to_salesforce(instance_url, access_token, config, bot_data))
+                if integration.type == "hubspot":
+                    access_token = config.get("access_token", "")
+                    if access_token:
+                        tasks.append(_post_to_hubspot(access_token, config, bot_data))
+                    else:
+                        logger.warning("HubSpot integration %s missing access_token", integration.id)
+
+                elif integration.type == "salesforce":
+                    # Prefer stored access_token; fall back to username-password flow
+                    access_token = config.get("access_token", "")
+                    instance_url = config.get("instance_url", "")
+                    if not access_token:
+                        try:
+                            instance_url, access_token = await _get_salesforce_token(config)
+                        except Exception as exc:
+                            logger.error("Salesforce token fetch failed for integration %s: %s", integration.id, exc)
+                            continue
+                    if instance_url and access_token:
+                        tasks.append(_post_to_salesforce(instance_url, access_token, config, bot_data))
+
+            await session.commit()
 
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
