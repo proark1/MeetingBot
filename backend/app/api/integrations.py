@@ -1,4 +1,4 @@
-"""Integrations API — manage Slack and Notion integrations per account."""
+"""Integrations API — manage third-party integrations per account."""
 
 import logging
 import uuid
@@ -16,19 +16,23 @@ from app.models.account import Integration
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/integrations", tags=["Integrations"])
 
-_ALLOWED_TYPES = {"slack", "notion"}
+_ALLOWED_TYPES = {"slack", "notion", "linear", "jira", "google_drive", "hubspot", "salesforce"}
 
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
 
 class IntegrationCreate(BaseModel):
-    type: str = Field(description="Integration type: `slack` or `notion`.")
+    type: str = Field(description="Integration type: `slack`, `notion`, `linear`, `jira`, `google_drive`, `hubspot`, or `salesforce`.")
     name: str = Field(default="", max_length=100, description="Human-readable label.")
     config: dict = Field(
         description=(
             "Integration config dict.  "
             "**Slack:** `{webhook_url: str}`.  "
-            "**Notion:** `{api_token: str, database_id: str}`."
+            "**Notion:** `{api_token: str, database_id: str}`.  "
+            "**Linear:** `{api_key: str, team_id: str, approval_required?: bool}`.  "
+            "**Jira:** `{base_url: str, email: str, token: str, project_key: str, approval_required?: bool}`.  "
+            "**HubSpot:** `{access_token: str, approval_required?: bool}`.  "
+            "**Salesforce:** `{instance_url: str, access_token: str, approval_required?: bool}`."
         )
     )
 
@@ -44,6 +48,11 @@ class IntegrationCreate(BaseModel):
                     "type": "notion",
                     "name": "Meeting notes",
                     "config": {"api_token": "secret_...", "database_id": "abc123"},
+                },
+                {
+                    "type": "linear",
+                    "name": "Product tasks",
+                    "config": {"api_key": "lin_api_...", "team_id": "team_123", "approval_required": True},
                 },
             ]
         }
@@ -78,6 +87,17 @@ def _redact_config(integration_type: str, config: dict) -> dict:
     elif integration_type == "notion":
         if "api_token" in redacted:
             redacted["api_token"] = "secret_***"
+    elif integration_type in {"linear", "google_drive", "hubspot"}:
+        for key in ("api_key", "access_token"):
+            if key in redacted:
+                redacted[key] = "***"
+    elif integration_type == "jira":
+        if "token" in redacted:
+            redacted["token"] = "***"
+    elif integration_type == "salesforce":
+        for key in ("access_token", "client_secret", "password", "security_token"):
+            if key in redacted:
+                redacted[key] = "***"
     return redacted
 
 
@@ -159,6 +179,30 @@ def _validate_integration_config(type_: str, config: dict) -> None:
             raise HTTPException(status_code=422, detail="Notion integration requires config.api_token")
         if not config.get("database_id"):
             raise HTTPException(status_code=422, detail="Notion integration requires config.database_id")
+    if type_ == "linear":
+        if not config.get("api_key"):
+            raise HTTPException(status_code=422, detail="Linear integration requires config.api_key")
+        if not config.get("team_id"):
+            raise HTTPException(status_code=422, detail="Linear integration requires config.team_id")
+    if type_ == "jira":
+        for key in ("base_url", "email", "token", "project_key"):
+            if not config.get(key):
+                raise HTTPException(status_code=422, detail=f"Jira integration requires config.{key}")
+    if type_ == "google_drive" and not config.get("access_token"):
+        raise HTTPException(status_code=422, detail="Google Drive integration requires config.access_token")
+    if type_ == "hubspot" and not config.get("access_token"):
+        raise HTTPException(status_code=422, detail="HubSpot integration requires config.access_token")
+    if type_ == "salesforce":
+        has_token = config.get("instance_url") and config.get("access_token")
+        has_password_flow = all(config.get(k) for k in ("client_id", "client_secret", "username", "password", "security_token"))
+        if not (has_token or has_password_flow):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "Salesforce integration requires either config.instance_url + config.access_token "
+                    "or username-password OAuth fields"
+                ),
+            )
 
 
 async def _block_integration_ssrf(type_: str, config: dict) -> None:
@@ -170,6 +214,17 @@ async def _block_integration_ssrf(type_: str, config: dict) -> None:
         if url:
             from app.api.webhooks import _block_ssrf
             await _block_ssrf(url)
+    if type_ == "jira":
+        url = config.get("base_url")
+        if url:
+            from app.api.webhooks import _block_ssrf
+            await _block_ssrf(f"{str(url).rstrip('/')}/rest/api/3/issue")
+    if type_ == "salesforce":
+        from app.api.webhooks import _block_ssrf
+        if config.get("instance_url"):
+            await _block_ssrf(f"{str(config['instance_url']).rstrip('/')}/services/data/v59.0/sobjects/Task/")
+        if config.get("login_url"):
+            await _block_ssrf(f"{str(config['login_url']).rstrip('/')}/services/oauth2/token")
 
 
 @router.post("", response_model=IntegrationResponse, status_code=201)

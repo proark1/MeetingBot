@@ -92,6 +92,7 @@ class BotSession:
     # ── Consent / opt-out ──────────────────────────────────────────────────────
     consent_enabled: bool = False       # announce recording and honour opt-out requests
     consent_message: Optional[str] = None   # custom consent announcement text
+    consent_opt_out_phrase: Optional[str] = None  # per-bot/account opt-out phrase override
     opted_out_participants: list = field(default_factory=list)  # names of participants who opted out
 
     # ── Keyword alerts ─────────────────────────────────────────────────────────
@@ -570,6 +571,7 @@ class Store:
                     "sub_user_id": bot.sub_user_id,
                     "consent_enabled": bot.consent_enabled,
                     "consent_message": bot.consent_message,
+                    "consent_opt_out_phrase": bot.consent_opt_out_phrase,
                     "opted_out_participants": bot.opted_out_participants,
                     "keyword_alerts": bot.keyword_alerts,
                     "auto_followup_email": bot.auto_followup_email,
@@ -981,6 +983,7 @@ async def load_persisted_bots() -> int:
                     sub_user_id=d.get("sub_user_id"),
                     consent_enabled=d.get("consent_enabled", False),
                     consent_message=d.get("consent_message"),
+                    consent_opt_out_phrase=d.get("consent_opt_out_phrase"),
                     opted_out_participants=d.get("opted_out_participants") or [],
                     keyword_alerts=d.get("keyword_alerts") or [],
                     auto_followup_email=d.get("auto_followup_email", False),

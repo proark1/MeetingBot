@@ -1,8 +1,8 @@
 # JustHereToListen.io API
 
-**Version 2.68.2** — A stateless meeting bot API service with multi-tenant billing, business account support, Google/Microsoft SSO, Python & JS SDKs, webhook retry/delivery logs, bot persona customization, video recording, Prometheus metrics, idempotency keys, cloud storage, email notifications, calendar auto-join, Slack/Notion integrations, GDPR compliance, an opt-in advanced-features layer (in-meeting @bot Q&A, live speaker analytics, smart decision detection, cross-meeting memory, host coaching, agentic delegation), **and a fully usable OpenAPI 3.1 surface with 100% example coverage — every one of the 117 public + 136 admin operations now has summary, description, tags, request example (where applicable), and a 2xx response example**.
+**Version 2.69.0** — A stateless meeting bot API service with multi-tenant billing, business account support, Google/Microsoft SSO, Python & JS SDKs, webhook retry/delivery logs, bot persona customization, video recording, Prometheus metrics, idempotency keys, cloud storage, email notifications, calendar auto-join, Slack/Notion/CRM/task integrations, GDPR/privacy controls, consent policy enforcement, task approval queues, an opt-in advanced-features layer (in-meeting @bot Q&A, live speaker analytics, smart decision detection, cross-meeting memory, host coaching, agentic delegation), **and a fully usable OpenAPI 3.1 surface with examples across the public and admin operation set**.
 
-> **Last updated:** 2026-06-24 · **API version in Swagger UI:** 2.68.2 · **Build:** Second-round hardening — same-origin UI mutation guard, active-workspace RBAC, workspace-validated bot creation, MCP opt-in defaults with workspace/snapshot visibility, repeated SSO key prevention, SAML deployment guard, runtime/dev dependency split, and developer-tool token storage cleanup. Previous build (2.68.1): security and platform hardening. <!-- auto-updated on each release -->
+> **Last updated:** 2026-06-24 · **API version in Swagger UI:** 2.69.0 · **Build:** Privacy/workflow release — account and workspace consent policy enforcement, public participant deletion request intake, owner-reviewed erasure, CRM/task approval queues, expanded integration API support, public Trust & Security page, and current-Starlette template rendering compatibility. Previous build (2.68.2): second-round hardening. <!-- auto-updated on each release -->
 
 
 Send bots into **Zoom**, **Google Meet**, **Microsoft Teams**, and **onepizza.io** meetings to record, transcribe, and analyse them with **Claude** (Anthropic) or **Gemini** (Google) AI.
@@ -12,6 +12,12 @@ Send bots into **Zoom**, **Google Meet**, **Microsoft Teams**, and **onepizza.io
 ---
 
 ## Recent changes (2026-04-16)
+
+### Privacy and workflow controls (v2.69.0)
+- **Consent policy controls** — account-level `/api/v1/privacy/consent-policy` and workspace settings can require recording announcements, set default wording, and define the opt-out phrase applied to new bots.
+- **Participant deletion request intake** — public `/api/v1/privacy/deletion-requests` accepts non-enumerating deletion requests; authenticated owners review and can complete erasure from the same API surface.
+- **CRM/task approval queues** — HubSpot, Salesforce, Linear, and Jira integrations can set `approval_required: true` so extracted work is queued for review before it reaches external systems.
+- **Public Trust & Security page** — `/trust` documents tenant isolation, consent, retention, integration safety, AI processing, and disclosure contact details.
 
 ### Interactive bot — voice + chat, both ways (v2.34.0)
 - **Unified live transcript** — every voice utterance AND every chat message now flows through the same `transcript` array with a new `source: "voice" | "chat"` field. Chat messages are captured at 4 Hz from the meeting chat panel on Google Meet / Zoom / Teams / onepizza, deduped by stable per-line hash, and persisted alongside voice entries.
@@ -527,12 +533,12 @@ Full payload posted to `webhook_url` when a bot finishes.
 | `PUT` | `/api/v1/auth/account-type` | Switch account type. Body: `{account_type: "personal"\|"business"}`. Returns `{account_type, message}`. No effect on existing data or credits |
 | `DELETE` | `/api/v1/auth/account` | **GDPR erasure** — permanently delete account and all data. Irreversible. Deletes recordings from cloud storage |
 
-### Integrations (Slack, Notion, HubSpot, Salesforce)
+### Integrations (Slack, Notion, HubSpot, Salesforce, Linear, Jira, Google Drive)
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/api/v1/integrations` | List all integrations for the current account |
-| `POST` | `/api/v1/integrations` | Create integration. Body: `{type: "slack"\|"notion"\|"hubspot"\|"salesforce"\|"linear"\|"jira", name?, config}` |
+| `POST` | `/api/v1/integrations` | Create integration. Body: `{type: "slack"\|"notion"\|"hubspot"\|"salesforce"\|"linear"\|"jira"\|"google_drive", name?, config}` |
 | `PATCH` | `/api/v1/integrations/{id}` | Update integration config |
 | `DELETE` | `/api/v1/integrations/{id}` | Delete integration. HTTP 204 |
 
@@ -542,12 +548,24 @@ Integration config by type:
 - **HubSpot** — `config.access_token` (private app access token); meeting summaries are posted as HubSpot Note engagements
 - **Salesforce** — `config.instance_url` + `config.access_token`; meeting summaries are posted as Salesforce Tasks
 - **Linear** — `config.api_key` + `config.team_id`
-- **Jira** — `config.base_url` + `config.api_token` + `config.project_key`
+- **Jira** — `config.base_url` + `config.email` + `config.token` + `config.project_key`
+- **Google Drive** — `config.access_token` + optional `config.folder_id`
+
+Set `config.approval_required: true` on HubSpot, Salesforce, Linear, or Jira integrations to queue CRM/task work for human review instead of sending it automatically.
 
 When a bot completes, all active integrations fire automatically:
 - **Slack** — posts a rich Block Kit message to the webhook URL (summary, action items, decisions, participants)
 - **Notion** — creates a page in the configured database (summary, action items as to-dos, decisions, transcript)
 - **HubSpot / Salesforce** — posts meeting notes as CRM engagements/tasks
+- **Linear / Jira** — creates task issues from extracted action items, or queues them for approval when `approval_required` is enabled
+
+### Action approvals
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/v1/action-items/approvals` | List queued CRM/task approvals. Query params: `status?`, `integration_type?`, `limit?`, `offset?` |
+| `POST` | `/api/v1/action-items/approvals/{id}/approve` | Approve and dispatch a queued CRM/task action |
+| `POST` | `/api/v1/action-items/approvals/{id}/reject` | Reject a queued CRM/task action without dispatching |
 
 ### Retention Policies
 
@@ -557,6 +575,18 @@ When a bot completes, all active integrations fire automatically:
 | `PUT` | `/api/v1/retention` | Set retention policy. Body: `{bot_retention_days?, recording_retention_days?, transcript_retention_days?}`. Use `-1` for keep-forever |
 
 A background task enforces policies nightly. Platform-wide defaults are set via `DEFAULT_BOT_RETENTION_DAYS` (90 days) and `DEFAULT_RECORDING_RETENTION_DAYS` (30 days) env vars. Per-account policies override the global defaults.
+
+### Privacy controls
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/v1/privacy/consent-policy` | Get account-level consent defaults |
+| `PUT` | `/api/v1/privacy/consent-policy` | Require recording consent, set default announcement text, opt-out phrase, and opt-out redaction behavior |
+| `POST` | `/api/v1/privacy/deletion-requests` | Public participant deletion request intake. Returns only request id/status and does not reveal meeting ownership |
+| `GET` | `/api/v1/privacy/deletion-requests` | List deletion requests for the authenticated account |
+| `PATCH` | `/api/v1/privacy/deletion-requests/{id}` | Resolve a request and optionally erase the associated meeting content |
+
+Public Trust & Security page: `/trust` (`/security` redirects there).
 
 ### Keyword Alerts
 
@@ -976,6 +1006,7 @@ Pass `Idempotency-Key: <unique-string>` in the `POST /api/v1/bot` request. Repla
 | `CONSENT_OPT_OUT_PHRASE` | `opt out` | Case-insensitive phrase that triggers transcript redaction for that participant |
 
 Per-bot override: set `consent_enabled: true` in `POST /api/v1/bot`.
+Account default: use `GET/PUT /api/v1/privacy/consent-policy`. Workspace default: set `require_consent`, `consent_message`, and `consent_opt_out_phrase` in workspace settings.
 
 ### Data retention
 

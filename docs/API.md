@@ -7,7 +7,7 @@ Base URLs:
 | Local dev | `http://localhost:8000` |
 | Production | `https://api.justheretolisten.io` |
 
-All endpoints live under `/api/v1`. The full machine-readable surface — 117 public + 136 admin operations, every one with summary, description, tags, request example, and a 2xx response example — is at [`/api/docs`](http://localhost:8000/api/docs) (Swagger UI) and [`/api/redoc`](http://localhost:8000/api/redoc) (ReDoc).
+All endpoints live under `/api/v1`. The full machine-readable surface is at [`/api/docs`](http://localhost:8000/api/docs) (Swagger UI) and [`/api/redoc`](http://localhost:8000/api/redoc) (ReDoc).
 
 ---
 
@@ -115,11 +115,12 @@ The router prefixes are mounted under `/api/v1`. See Swagger for full schemas.
 | `/bot` | Create / read / cancel bots, transcripts, recordings, exports, agentic instructions, Q&A |
 | `/webhook` | Register webhook endpoints, view delivery logs, replay |
 | `/templates` | List analysis templates and create custom ones |
-| `/action-items` | Cross-meeting action item queries |
+| `/action-items` | Cross-meeting action item queries and CRM/task approval queue |
 | `/calendar` | iCal feeds for calendar auto-join |
-| `/integrations` | Slack, Notion, Linear, Jira |
+| `/integrations` | Slack, Notion, Linear, Jira, Google Drive, HubSpot, Salesforce |
 | `/keyword-alerts` | Real-time keyword webhook triggers |
 | `/workspaces` | Multi-user shared workspaces |
+| `/privacy` | Consent policy and participant deletion request workflows |
 | `/billing` | Stripe / USDC top-ups, credit balance, invoices |
 | `/mcp` | Model Context Protocol server (see [MCP.md](./MCP.md)) |
 | `/admin` | Platform admin (requires admin account) |

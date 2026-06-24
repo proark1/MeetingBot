@@ -1,0 +1,80 @@
+{% extends "legal_base.html" %}
+{% block title %}Trust & Security — JustHereToListen.io{% endblock %}
+{% block legal_body %}
+<h1>Trust & Security</h1>
+<p class="legal-meta">Last updated: 24 June 2026</p>
+
+<div class="legal-callout">
+  JustHereToListen.io is built for sensitive meeting data: recordings,
+  transcripts, chat messages, summaries, action items, CRM exports, and
+  workflow automations. This page summarizes the controls available to
+  customers and administrators.
+</div>
+
+<h2>Security Architecture</h2>
+<ul>
+  <li><strong>Tenant isolation.</strong> Meeting data is scoped by account, optional business sub-user, and workspace membership.</li>
+  <li><strong>API authentication.</strong> User API keys are stored as peppered HMAC hashes with prefix lookup; dashboard sessions use signed JWT cookies.</li>
+  <li><strong>Role-based access.</strong> Workspace roles separate viewer, member, and admin capabilities for shared meetings.</li>
+  <li><strong>Transport security.</strong> Production deployments should run behind HTTPS/TLS only.</li>
+  <li><strong>Secrets at rest.</strong> Integration and OAuth tokens are encrypted at rest when <code>ENCRYPTION_KEY</code> is configured.</li>
+  <li><strong>Delivery signing.</strong> Webhook deliveries can be signed and retried with persistent delivery logs.</li>
+</ul>
+
+<h2>Meeting Privacy Controls</h2>
+<ul>
+  <li><strong>Consent announcements.</strong> Bots can announce recording and transcription when they join a meeting.</li>
+  <li><strong>Account consent policy.</strong> Account administrators can require consent, set the default announcement, and define the opt-out phrase through the Privacy API.</li>
+  <li><strong>Workspace consent policy.</strong> Workspace settings can force consent for every bot created inside that workspace.</li>
+  <li><strong>Opt-out redaction.</strong> Participants who say or type the opt-out phrase are redacted from the transcript.</li>
+  <li><strong>Deletion request intake.</strong> Participants can submit a deletion request without an account. Owners review and complete erasure.</li>
+</ul>
+
+<h2>Data Lifecycle</h2>
+<ul>
+  <li><strong>Retention policies.</strong> Accounts can set separate retention windows for bot data, recordings, and transcripts.</li>
+  <li><strong>Recording cleanup.</strong> Retention enforcement removes audio/video artifacts independently from transcripts and summaries.</li>
+  <li><strong>Account erasure.</strong> GDPR account deletion purges account-owned rows across mapped data tables and deletes cloud recordings where configured.</li>
+  <li><strong>Export controls.</strong> Meeting data can be exported as JSON, Markdown, PDF, and SRT by authenticated owners.</li>
+</ul>
+
+<h2>Administrative Controls</h2>
+<ul>
+  <li>Google and Microsoft SSO for user sign-in.</li>
+  <li>SAML configuration for enterprise workspaces.</li>
+  <li>Workspace member management with admin/member/viewer roles.</li>
+  <li>Support-access keys that are user-generated, expiring, and stored only as hashes.</li>
+  <li>Audit logs for security-relevant account actions.</li>
+</ul>
+
+<h2>Integration Safety</h2>
+<ul>
+  <li>Slack, Notion, Google Drive, Linear, Jira, HubSpot, and Salesforce integrations are account-scoped.</li>
+  <li>URL-bearing integrations are checked for private/internal targets before registration and delivery.</li>
+  <li>CRM and task integrations can require approval before action items are sent into external systems.</li>
+  <li>Integration secrets are redacted in API responses.</li>
+</ul>
+
+<h2>AI Processing</h2>
+<ul>
+  <li>Meeting content may be processed by configured AI providers for transcription, summarization, Q&A, action-item extraction, coaching, and semantic search.</li>
+  <li>Optional PII redaction can mask emails, phone numbers, SSNs, credit card numbers, and similar identifiers before analysis.</li>
+  <li>Customers can choose supported transcription providers per bot when configured by the deployment.</li>
+</ul>
+
+<h2>Compliance Status</h2>
+<p>
+  JustHereToListen.io includes product controls that support GDPR-style access,
+  deletion, retention, and minimization workflows. Formal certifications such
+  as SOC 2, ISO 27001, HIPAA/BAA, and regional data residency depend on the
+  operator's deployment, infrastructure, vendors, and contractual setup.
+</p>
+
+<h2>Responsible Disclosure</h2>
+<p>
+  Report suspected security issues to
+  <a href="mailto:security@justheretolisten.io">security@justheretolisten.io</a>.
+  Include affected endpoint paths, reproduction steps, and whether any data
+  exposure may have occurred.
+</p>
+{% endblock %}

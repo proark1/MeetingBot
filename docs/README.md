@@ -13,6 +13,6 @@ The full machine-readable contract lives at:
 - **Swagger UI** — [`/api/docs`](http://localhost:8000/api/docs) (public endpoints)
 - **ReDoc** — [`/api/redoc`](http://localhost:8000/api/redoc)
 - **Admin schema** — [`/api/v1/admin/docs`](http://localhost:8000/api/v1/admin/docs) (admin accounts only)
-- **OpenAPI snapshot** — [`api/openapi.json`](../api/openapi.json) — 117 public + 136 admin operations, every operation has summary, description, tags, request example, and a 2xx response example
+- **OpenAPI snapshot** — [`api/openapi.json`](../api/openapi.json) — public + admin operations with summaries, descriptions, tags, request examples where applicable, and 2xx response examples
 
 If you only have five minutes, read [API.md → Quickstart](./API.md#quickstart-cURL).

@@ -69,6 +69,35 @@ def upgrade() -> None:
         batch_op.create_index(batch_op.f('ix_action_items_status'), ['status'], unique=False)
         batch_op.create_index(batch_op.f('ix_action_items_sub_user_id'), ['sub_user_id'], unique=False)
 
+    op.create_table('action_item_approvals',
+    sa.Column('id', sa.String(length=36), nullable=False),
+    sa.Column('account_id', sa.String(length=36), nullable=True),
+    sa.Column('sub_user_id', sa.String(length=255), nullable=True),
+    sa.Column('bot_id', sa.String(length=36), nullable=False),
+    sa.Column('action_item_id', sa.String(length=64), nullable=True),
+    sa.Column('integration_id', sa.String(length=36), nullable=False),
+    sa.Column('integration_type', sa.String(length=50), nullable=False),
+    sa.Column('destination_type', sa.String(length=50), nullable=False),
+    sa.Column('payload', sa.Text(), nullable=False),
+    sa.Column('status', sa.String(length=20), nullable=False),
+    sa.Column('error_message', sa.Text(), nullable=True),
+    sa.Column('reviewed_by', sa.String(length=36), nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('reviewed_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('delivered_at', sa.DateTime(timezone=True), nullable=True),
+    sa.PrimaryKeyConstraint('id')
+    )
+    with op.batch_alter_table('action_item_approvals', schema=None) as batch_op:
+        batch_op.create_index('ix_action_item_approvals_account_status', ['account_id', 'status'], unique=False)
+        batch_op.create_index(batch_op.f('ix_action_item_approvals_account_id'), ['account_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_action_item_approvals_action_item_id'), ['action_item_id'], unique=False)
+        batch_op.create_index('ix_action_item_approvals_bot_created', ['bot_id', 'created_at'], unique=False)
+        batch_op.create_index(batch_op.f('ix_action_item_approvals_bot_id'), ['bot_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_action_item_approvals_integration_id'), ['integration_id'], unique=False)
+        batch_op.create_index('ix_action_item_approvals_unique_pending', ['integration_id', 'action_item_id', 'destination_type'], unique=False)
+        batch_op.create_index(batch_op.f('ix_action_item_approvals_status'), ['status'], unique=False)
+        batch_op.create_index(batch_op.f('ix_action_item_approvals_sub_user_id'), ['sub_user_id'], unique=False)
+
     op.create_table('audit_logs',
     sa.Column('id', sa.String(length=36), nullable=False),
     sa.Column('account_id', sa.String(length=36), nullable=True),
@@ -109,6 +138,42 @@ def upgrade() -> None:
         batch_op.create_index(batch_op.f('ix_bot_snapshots_sub_user_id'), ['sub_user_id'], unique=False)
         batch_op.create_index('ix_bot_snapshots_workspace_created', ['workspace_id', 'created_at'], unique=False)
         batch_op.create_index(batch_op.f('ix_bot_snapshots_workspace_id'), ['workspace_id'], unique=False)
+
+    op.create_table('consent_policies',
+    sa.Column('id', sa.String(length=36), nullable=False),
+    sa.Column('account_id', sa.String(length=36), nullable=False),
+    sa.Column('require_consent', sa.Boolean(), nullable=False),
+    sa.Column('consent_message', sa.Text(), nullable=True),
+    sa.Column('opt_out_phrase', sa.String(length=100), nullable=True),
+    sa.Column('auto_redact_opt_outs', sa.Boolean(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
+    sa.PrimaryKeyConstraint('id')
+    )
+    with op.batch_alter_table('consent_policies', schema=None) as batch_op:
+        batch_op.create_index(batch_op.f('ix_consent_policies_account_id'), ['account_id'], unique=True)
+
+    op.create_table('data_deletion_requests',
+    sa.Column('id', sa.String(length=36), nullable=False),
+    sa.Column('account_id', sa.String(length=36), nullable=True),
+    sa.Column('bot_id', sa.String(length=36), nullable=True),
+    sa.Column('requester_email', sa.String(length=255), nullable=False),
+    sa.Column('participant_name', sa.String(length=255), nullable=True),
+    sa.Column('reason', sa.Text(), nullable=True),
+    sa.Column('status', sa.String(length=20), nullable=False),
+    sa.Column('resolution_note', sa.Text(), nullable=True),
+    sa.Column('resolved_by', sa.String(length=36), nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('resolved_at', sa.DateTime(timezone=True), nullable=True),
+    sa.PrimaryKeyConstraint('id')
+    )
+    with op.batch_alter_table('data_deletion_requests', schema=None) as batch_op:
+        batch_op.create_index('ix_data_deletion_requests_account_created', ['account_id', 'created_at'], unique=False)
+        batch_op.create_index(batch_op.f('ix_data_deletion_requests_account_id'), ['account_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_data_deletion_requests_bot_id'), ['bot_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_data_deletion_requests_requester_email'), ['requester_email'], unique=False)
+        batch_op.create_index(batch_op.f('ix_data_deletion_requests_status'), ['status'], unique=False)
+        batch_op.create_index('ix_data_deletion_requests_status_created', ['status', 'created_at'], unique=False)
 
     op.create_table('idempotency_keys',
     sa.Column('id', sa.String(length=36), nullable=False),
@@ -522,6 +587,19 @@ def downgrade() -> None:
         batch_op.drop_index('ix_idempotency_account_sub_key')
 
     op.drop_table('idempotency_keys')
+    with op.batch_alter_table('data_deletion_requests', schema=None) as batch_op:
+        batch_op.drop_index('ix_data_deletion_requests_status_created')
+        batch_op.drop_index(batch_op.f('ix_data_deletion_requests_status'))
+        batch_op.drop_index(batch_op.f('ix_data_deletion_requests_requester_email'))
+        batch_op.drop_index(batch_op.f('ix_data_deletion_requests_bot_id'))
+        batch_op.drop_index(batch_op.f('ix_data_deletion_requests_account_id'))
+        batch_op.drop_index('ix_data_deletion_requests_account_created')
+
+    op.drop_table('data_deletion_requests')
+    with op.batch_alter_table('consent_policies', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_consent_policies_account_id'))
+
+    op.drop_table('consent_policies')
     with op.batch_alter_table('bot_snapshots', schema=None) as batch_op:
         batch_op.drop_index(batch_op.f('ix_bot_snapshots_workspace_id'))
         batch_op.drop_index('ix_bot_snapshots_workspace_created')
@@ -540,6 +618,18 @@ def downgrade() -> None:
         batch_op.drop_index(batch_op.f('ix_audit_logs_account_id'))
 
     op.drop_table('audit_logs')
+    with op.batch_alter_table('action_item_approvals', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_action_item_approvals_sub_user_id'))
+        batch_op.drop_index(batch_op.f('ix_action_item_approvals_status'))
+        batch_op.drop_index('ix_action_item_approvals_unique_pending')
+        batch_op.drop_index(batch_op.f('ix_action_item_approvals_integration_id'))
+        batch_op.drop_index(batch_op.f('ix_action_item_approvals_bot_id'))
+        batch_op.drop_index('ix_action_item_approvals_bot_created')
+        batch_op.drop_index(batch_op.f('ix_action_item_approvals_action_item_id'))
+        batch_op.drop_index(batch_op.f('ix_action_item_approvals_account_id'))
+        batch_op.drop_index('ix_action_item_approvals_account_status')
+
+    op.drop_table('action_item_approvals')
     with op.batch_alter_table('action_items', schema=None) as batch_op:
         batch_op.drop_index(batch_op.f('ix_action_items_sub_user_id'))
         batch_op.drop_index(batch_op.f('ix_action_items_status'))
