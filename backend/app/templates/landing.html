@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
   <style>
     :root {
       --primary: #1B2033;
@@ -22,10 +22,10 @@
       --amber: #f59e0b;
       --red: #ef4444;
       --bg: #ffffff;
-      --bg-alt: #EDE4DF;
-      --bg-muted: #E5DDD7;
-      --bg-border: #D8CFC8;
-      --border: #D8CFC8;
+      --bg-alt: #F4F6F8;
+      --bg-muted: #EDF0F4;
+      --bg-border: #E3E7EC;
+      --border: #E3E7EC;
       --border-glow: rgba(27,32,51,0.35);
       --text-primary: #1B2033;
       --text-secondary: #6B7280;
@@ -50,7 +50,7 @@
 
     body {
       font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-      background: #EDE4DF;
+      background: #F4F6F8;
       color: var(--text-primary);
       overflow-x: hidden;
       line-height: 1.65;
@@ -59,7 +59,7 @@
 
     /* ── Navbar ── */
     .navbar {
-      background: rgba(237, 228, 223, 0.85) !important;
+      background: rgba(244,246,248, 0.85) !important;
       backdrop-filter: blur(24px);
       -webkit-backdrop-filter: blur(24px);
       border-bottom: 1px solid var(--border);
@@ -119,7 +119,7 @@
       padding: 7rem 0 5rem;
       text-align: center;
       overflow: visible;
-      background: #EDE4DF;
+      background: #F4F6F8;
     }
 
     .hero-glow {
@@ -494,7 +494,7 @@
 
     .pricing-card:hover {
       transform: translateY(-3px);
-      border-color: #DDD7CF;
+      border-color: #E3E7EC;
       box-shadow: 0 8px 30px rgba(0,0,0,0.06);
     }
 
@@ -640,7 +640,7 @@
       position: relative;
       overflow: hidden;
       padding: 7rem 0;
-      background: #EDE4DF;
+      background: #F4F6F8;
     }
 
     .cta-glow {
@@ -1011,20 +1011,67 @@
     [data-theme="dark"] .cta-section { background: linear-gradient(135deg, #1a1b2e 0%, #252636 100%); }
 
     .theme-toggle-landing {
-      background: none; border: 1px solid var(--border, #D8CFC8); border-radius: 6px;
+      background: none; border: 1px solid var(--border, #E3E7EC); border-radius: 6px;
       padding: 4px 7px; cursor: pointer; color: var(--text-secondary, #6B7280);
       transition: all 0.2s; display: inline-flex; align-items: center;
     }
-    .theme-toggle-landing:hover { background: var(--bg-muted, #E5DDD7); }
+    .theme-toggle-landing:hover { background: var(--bg-muted, #EDF0F4); }
     .theme-toggle-landing .icon-sun { display: none; }
     .theme-toggle-landing .icon-moon { display: block; }
     [data-theme="dark"] .theme-toggle-landing { border-color: #3d3e52; color: #9ca3af; }
     [data-theme="dark"] .theme-toggle-landing:hover { background: #252636; }
     [data-theme="dark"] .theme-toggle-landing .icon-sun { display: block; }
     [data-theme="dark"] .theme-toggle-landing .icon-moon { display: none; }
-  </style>
+
+    /* ── Inline line-icons (sprite via <use>) ── */
+    .feature-icon svg { width: 54%; height: 54%; }
+    .int-icon svg, .trust-icon svg, .mode-icon svg { width: 1.05em; height: 1.05em; vertical-align: -0.15em; }
+    .lic { width: 1em; height: 1em; vertical-align: -0.14em; stroke: currentColor; fill: none; }
+  
+    /* JHTL v2 landing layer */
+    .btn-nav-cta{ background:var(--accent)!important; border:none!important; color:#fff!important; box-shadow:0 2px 10px rgba(255,84,54,.3); }
+    .btn-nav-cta:hover{ background:var(--accent-press)!important; color:#fff!important; }
+    [data-theme="dark"] .btn-nav-cta{ background:var(--accent)!important; color:#1A0F0C!important; }
+    .hero{ background:linear-gradient(180deg,#FAF4EE 0%,#F4F6F8 100%)!important; }
+    .hero-glow{ background:radial-gradient(ellipse at center, rgba(255,84,54,.12) 0%, rgba(255,84,54,.05) 40%, transparent 70%)!important; }
+    .grad-text{ background:linear-gradient(120deg,#FF5436 0%,#FF9A3D 100%); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; }
+    [data-theme="dark"] .grad-text{ background:linear-gradient(120deg,#FF6A4D 0%,#FFB14D 100%); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; }
+    .btn-pricing-outline{ border-color:var(--accent); color:var(--accent); }
+    .btn-pricing-outline:hover{ background:var(--accent-soft); border-color:var(--accent); color:var(--accent-press); }
+    :root{
+      --accent:#FF5436; --accent-press:#E63E1F; --accent-soft:#FFE9E3;
+      --primary:#16182B; --primary-dark:#0C0D1A; --text-primary:#16182B;
+      --bg:#FAF4EE; --bg-alt:#F4F6F8; --bg-muted:#EDF0F4;
+      --border:#E3E7EC; --bg-border:#E3E7EC;
+      --font-display:'Space Grotesk','Inter',system-ui,sans-serif;
+    }
+    body{ background:var(--bg); color:var(--text-primary); }
+    .hero-title, .section-title, h1, h2, h3 { font-family:var(--font-display); letter-spacing:-0.03em; }
+    /* Primary CTAs = coral */
+    .btn-hero-primary{ background:var(--accent); border:none; color:#fff; box-shadow:0 6px 24px rgba(255,84,54,.32); }
+    .btn-hero-primary:hover{ background:var(--accent-press); color:#fff; box-shadow:0 10px 34px rgba(255,84,54,.42); }
+    .btn-hero-secondary{ border:1px solid var(--accent); color:var(--accent); background:#fff; }
+    .btn-hero-secondary:hover{ background:var(--accent-soft); border-color:var(--accent); color:var(--accent-press); }
+    .btn-nav{ background:var(--accent)!important; border-color:var(--accent)!important; color:#fff!important; box-shadow:0 2px 10px rgba(255,84,54,.3); }
+    .btn-nav:hover{ background:var(--accent-press)!important; color:#fff!important; }
+    a.nav-link:hover{ color:var(--accent); }
+    /* Accent metrics + surfaces */
+    .stat-num{ color:var(--accent); font-family:var(--font-display); }
+    .stats-bar{ background:var(--bg-alt); }
+    .platform-pill{ background:#fff; border-color:var(--border); }
+    .feature-card, .pricing-card{ border-color:var(--border); border-radius:18px; }
+    .feature-card:hover{ border-color:var(--accent); box-shadow:0 10px 30px rgba(255,84,54,.10); }
+    /* dark-mode counterparts for the v2 overrides */
+    [data-theme="dark"] body{ background:#0E0F1A; }
+    [data-theme="dark"] .hero{ background:linear-gradient(180deg,#0E0F1A 0%,#16182B 100%)!important; }
+    [data-theme="dark"] .hero-glow{ background:radial-gradient(ellipse at center, rgba(255,84,54,.16) 0%, rgba(255,84,54,.05) 40%, transparent 70%)!important; opacity:1; }
+    [data-theme="dark"] .hero-title{ color:#F1EFF7; }
+    [data-theme="dark"] .hero-title .grad-text{ background:linear-gradient(120deg,#FF6A4D 0%,#FFB14D 100%)!important; -webkit-background-clip:text!important; -webkit-text-fill-color:transparent!important; background-clip:text!important; }
+    [data-theme="dark"] .stats-bar{ background:#121320; }
+</style>
 </head>
 <body>
+{% include "_icon_sprite.html" %}
 
 <!-- ────────────────────────────────────────────────────────────────
      NAVBAR
@@ -1034,7 +1081,7 @@
     <a class="navbar-brand" href="/">JustHereToListen.io</a>
 
     <button class="navbar-toggler border-0" type="button" data-bs-toggle="collapse" data-bs-target="#nav">
-      <span style="color:var(--text-secondary);font-size:1.2rem">☰</span>
+      <span style="color:var(--text-secondary);font-size:1.2rem"><svg class="lic" aria-hidden="true"><use href="#i-menu"/></svg></span>
     </button>
 
     <div class="collapse navbar-collapse" id="nav">
@@ -1068,10 +1115,10 @@
     <!-- ── Mode Switcher ── -->
     <div class="mode-switcher" id="modeSwitcher">
       <button class="mode-btn active" data-mode="teams" onclick="switchMode('teams')">
-        <span class="mode-icon">👥</span> For Teams
+        <span class="mode-icon"><svg aria-hidden="true"><use href="#i-users"/></svg></span> For Teams
       </button>
       <button class="mode-btn" data-mode="developers" onclick="switchMode('developers')">
-        <span class="mode-icon">⌨️</span> For Developers
+        <span class="mode-icon"><svg aria-hidden="true"><use href="#i-monitor"/></svg></span> For Developers
       </button>
     </div>
 
@@ -1150,7 +1197,7 @@
           </div>
           <div class="transcript-line" style="background:rgba(27,32,51,0.03)">
             <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.5rem">
-              <div class="ai-chip">⚡ AI — Action Items</div>
+              <div class="ai-chip"><svg class="lic" aria-hidden="true"><use href="#i-zap"/></svg> AI — Action Items</div>
               <span style="font-size:0.7rem;color:var(--text-muted)">just now</span>
             </div>
             <div class="action-item-line" style="padding:0;margin-bottom:0.3rem">
@@ -1163,17 +1210,17 @@
             </div>
           </div>
           <div style="padding:0.6rem 1.25rem;background:rgba(245,158,11,0.05);border-top:1px solid var(--border);display:flex;align-items:center;gap:0.6rem;">
-            <span style="font-size:0.75rem">🏆</span>
+            <span style="font-size:0.75rem"><svg class="lic" aria-hidden="true"><use href="#i-trophy"/></svg></span>
             <span style="font-size:0.78rem;color:#d97706;font-weight:600">Coaching: Sarah speaking 72% of the time — others may need space to contribute.</span>
           </div>
         </div>
       </div>
 
       <div class="trust-bar">
-        <div class="trust-item"><span class="trust-icon">📅</span> Calendar auto-join</div>
-        <div class="trust-item"><span class="trust-icon">💬</span> Slack & Notion sync</div>
-        <div class="trust-item"><span class="trust-icon">📧</span> Email digests</div>
-        <div class="trust-item"><span class="trust-icon">🔒</span> Enterprise-grade security</div>
+        <div class="trust-item"><span class="trust-icon"><svg aria-hidden="true"><use href="#i-calendar"/></svg></span> Calendar auto-join</div>
+        <div class="trust-item"><span class="trust-icon"><svg aria-hidden="true"><use href="#i-chat"/></svg></span> Slack & Notion sync</div>
+        <div class="trust-item"><span class="trust-icon"><svg aria-hidden="true"><use href="#i-mail"/></svg></span> Email digests</div>
+        <div class="trust-item"><span class="trust-icon"><svg aria-hidden="true"><use href="#i-lock"/></svg></span> Enterprise-grade security</div>
       </div>
     </div>
 
@@ -1251,17 +1298,17 @@
             <div><span class="tok-obj">wscat</span> <span class="tok-str">-c</span> wss://api.justheretolisten.io/ws/bot_abc123</div>
           </div>
           <div style="padding:0.6rem 1.25rem;background:rgba(16,185,129,0.05);border-top:1px solid var(--border);display:flex;align-items:center;gap:0.6rem">
-            <span style="font-size:0.75rem">⚡</span>
+            <span style="font-size:0.75rem"><svg class="lic" aria-hidden="true"><use href="#i-zap"/></svg></span>
             <span style="font-size:0.78rem;color:#059669;font-weight:600">13 webhook events · HMAC-SHA256 signed · Exponential backoff retry</span>
           </div>
         </div>
       </div>
 
       <div class="trust-bar">
-        <div class="trust-item"><span class="trust-icon">🧪</span> Sandbox test keys</div>
-        <div class="trust-item"><span class="trust-icon">📦</span> Auto-gen SDKs</div>
-        <div class="trust-item"><span class="trust-icon">🪝</span> Webhook playground</div>
-        <div class="trust-item"><span class="trust-icon">🤖</span> MCP server</div>
+        <div class="trust-item"><span class="trust-icon"><svg aria-hidden="true"><use href="#i-playground"/></svg></span> Sandbox test keys</div>
+        <div class="trust-item"><span class="trust-icon"><svg aria-hidden="true"><use href="#i-package"/></svg></span> Auto-gen SDKs</div>
+        <div class="trust-item"><span class="trust-icon"><svg aria-hidden="true"><use href="#i-webhooks"/></svg></span> Webhook playground</div>
+        <div class="trust-item"><span class="trust-icon"><svg aria-hidden="true"><use href="#i-bot"/></svg></span> MCP server</div>
       </div>
     </div>
   </div>
@@ -1316,7 +1363,7 @@
       <div class="col-md-4">
         <div class="feature-card">
           <div class="feature-tag live">Live</div>
-          <div class="feature-icon icon-indigo">🎙️</div>
+          <div class="feature-icon icon-indigo"><svg aria-hidden="true"><use href="#i-mic"/></svg></div>
           <h3>Live Transcription</h3>
           <p>Word-by-word transcription streaming in real time via WebSocket. Speaker-diarized, punctuated, and timestamped. Powered by Whisper.</p>
         </div>
@@ -1324,7 +1371,7 @@
       <div class="col-md-4">
         <div class="feature-card">
           <div class="feature-tag live">Live</div>
-          <div class="feature-icon icon-purple">⚡</div>
+          <div class="feature-icon icon-purple"><svg aria-hidden="true"><use href="#i-zap"/></svg></div>
           <h3>Live Action Item Extraction</h3>
           <p>Claude AI scans the transcript every 10 entries and extracts new action items in structured JSON — pushed over WebSocket instantly.</p>
         </div>
@@ -1332,7 +1379,7 @@
       <div class="col-md-4">
         <div class="feature-card">
           <div class="feature-tag live">Live</div>
-          <div class="feature-icon icon-amber">🏆</div>
+          <div class="feature-icon icon-amber"><svg aria-hidden="true"><use href="#i-trophy"/></svg></div>
           <h3>Coaching Alerts</h3>
           <p>Detects dominant speakers in real time. If someone holds over 70% of talk time in a 5-minute window, a coaching alert fires via webhook.</p>
         </div>
@@ -1340,7 +1387,7 @@
       <div class="col-md-4">
         <div class="feature-card">
           <div class="feature-tag live">Live</div>
-          <div class="feature-icon icon-cyan">🌐</div>
+          <div class="feature-icon icon-cyan"><svg aria-hidden="true"><use href="#i-globe"/></svg></div>
           <h3>Real-Time Translation</h3>
           <p>Set a target language (BCP-47) on bot creation. Each transcript entry gets translated live via Gemini Flash and broadcast alongside the original.</p>
         </div>
@@ -1348,7 +1395,7 @@
       <div class="col-md-4">
         <div class="feature-card">
           <div class="feature-tag live">Live</div>
-          <div class="feature-icon icon-red">🔍</div>
+          <div class="feature-icon icon-red"><svg aria-hidden="true"><use href="#i-search"/></svg></div>
           <h3>Competitor & Keyword Alerts</h3>
           <p>Define keywords and competitor names. JustHereToListen.io detects mentions in real time, runs sentiment analysis, and fires <code>bot.live_keyword_alert</code> webhooks.</p>
         </div>
@@ -1356,7 +1403,7 @@
       <div class="col-md-4">
         <div class="feature-card">
           <div class="feature-tag live">Live</div>
-          <div class="feature-icon icon-green">💬</div>
+          <div class="feature-icon icon-green"><svg aria-hidden="true"><use href="#i-chat"/></svg></div>
           <h3>Live Q&A on Transcript</h3>
           <p>Ask Claude a question about the meeting in progress. <code>POST /bot/{id}/ask-live</code> queries the accumulated transcript and returns an instant answer.</p>
         </div>
@@ -1367,7 +1414,7 @@
       <div class="col-md-6">
         <div class="feature-card">
           <div class="feature-tag live">Live</div>
-          <div class="feature-icon icon-amber">🔊</div>
+          <div class="feature-icon icon-amber"><svg aria-hidden="true"><use href="#i-volume"/></svg></div>
           <h3>Voice Response (TTS)</h3>
           <p>Bot speaks back when mentioned in the meeting. Choose between Edge TTS (fast, free) or Gemini TTS (natural-sounding). Configure <code>mention_response_mode</code> for text, voice, or both.</p>
         </div>
@@ -1375,7 +1422,7 @@
       <div class="col-md-6">
         <div class="feature-card">
           <div class="feature-tag live">Live</div>
-          <div class="feature-icon icon-cyan">⚙️</div>
+          <div class="feature-icon icon-cyan"><svg aria-hidden="true"><use href="#i-settings"/></svg></div>
           <h3>Transcription Provider Choice</h3>
           <p>Choose between Gemini (cloud, speaker-diarized) or Whisper (local, privacy-first) transcription per bot. Set <code>transcription_provider</code> to match your latency and compliance needs.</p>
         </div>
@@ -1400,28 +1447,28 @@
     <div class="row g-3">
       <div class="col-md-3">
         <div class="feature-card">
-          <div class="feature-icon icon-red">🎥</div>
+          <div class="feature-icon icon-red"><svg aria-hidden="true"><use href="#i-meeting"/></svg></div>
           <h3>Audio & Video Recording</h3>
           <p>Record audio (WAV) and optional video (MP4) of every meeting. Store locally or push to S3 automatically. Enable with <code>record_video: true</code>.</p>
         </div>
       </div>
       <div class="col-md-3">
         <div class="feature-card">
-          <div class="feature-icon icon-indigo">📤</div>
+          <div class="feature-icon icon-indigo"><svg aria-hidden="true"><use href="#i-upload"/></svg></div>
           <h3>Export Formats</h3>
           <p>Export transcripts and analyses as Markdown, PDF, JSON, or SRT subtitles. <code>GET /bot/{id}/export/{format}</code> — ready for your pipeline.</p>
         </div>
       </div>
       <div class="col-md-3">
         <div class="feature-card">
-          <div class="feature-icon icon-green">🔗</div>
+          <div class="feature-icon icon-green"><svg aria-hidden="true"><use href="#i-chain"/></svg></div>
           <h3>Shareable Meeting Links</h3>
           <p>Generate a public share link for any meeting's results. Share transcripts, summaries, and action items with stakeholders who weren't in the call.</p>
         </div>
       </div>
       <div class="col-md-3">
         <div class="feature-card">
-          <div class="feature-icon icon-purple">🧠</div>
+          <div class="feature-icon icon-purple"><svg aria-hidden="true"><use href="#i-sparkles"/></svg></div>
           <h3>Post-Meeting Q&A</h3>
           <p>Ask questions about any completed meeting. <code>POST /bot/{id}/ask</code> queries the full transcript and returns AI-powered answers with source references.</p>
         </div>
@@ -1473,14 +1520,14 @@
         <div class="row g-3 h-100">
           <div class="col-12">
             <div class="feature-card">
-              <div class="feature-icon icon-amber" style="width:36px;height:36px;border-radius:8px;font-size:1rem;margin-bottom:0.8rem">💰</div>
+              <div class="feature-icon icon-amber" style="width:36px;height:36px;border-radius:8px;font-size:1rem;margin-bottom:0.8rem"><svg aria-hidden="true"><use href="#i-dollar"/></svg></div>
               <h3 style="font-size:0.95rem">Meeting Cost Estimator</h3>
               <p>Pass an average hourly rate and headcount. JustHereToListen.io calculates total meeting cost in USD — surfaced in every bot response.</p>
             </div>
           </div>
           <div class="col-12">
             <div class="feature-card">
-              <div class="feature-icon icon-purple" style="width:36px;height:36px;border-radius:8px;font-size:1rem;margin-bottom:0.8rem">🔇</div>
+              <div class="feature-icon icon-purple" style="width:36px;height:36px;border-radius:8px;font-size:1rem;margin-bottom:0.8rem"><svg aria-hidden="true"><use href="#i-volume"/></svg></div>
               <h3 style="font-size:0.95rem">Quiet Participant Alerts</h3>
               <p>After the call, identify attendees who were present but barely spoke. Fires a coaching summary webhook with quiet participant names.</p>
             </div>
@@ -1492,28 +1539,28 @@
     <div class="row g-3">
       <div class="col-md-3">
         <div class="feature-card">
-          <div class="feature-icon icon-indigo">📊</div>
+          <div class="feature-icon icon-indigo"><svg aria-hidden="true"><use href="#i-barchart"/></svg></div>
           <h3>Speaker Analytics</h3>
           <p>Talk time %, words per minute, turn count, and sentiment — per participant, per meeting.</p>
         </div>
       </div>
       <div class="col-md-3">
         <div class="feature-card">
-          <div class="feature-icon icon-green">🔄</div>
+          <div class="feature-icon icon-green"><svg aria-hidden="true"><use href="#i-refresh"/></svg></div>
           <h3>Recurring Meeting Insights</h3>
           <p>Query <code>/analytics/recurring</code> to see health score trends, duration drift, and action item completion rates across a recurring meeting group.</p>
         </div>
       </div>
       <div class="col-md-3">
         <div class="feature-card">
-          <div class="feature-icon icon-cyan">📑</div>
+          <div class="feature-icon icon-cyan"><svg aria-hidden="true"><use href="#i-file"/></svg></div>
           <h3>AI Summaries & Chapters</h3>
           <p>Claude generates structured summaries with key decisions, action items, and topic-based chapters with timestamps.</p>
         </div>
       </div>
       <div class="col-md-3">
         <div class="feature-card">
-          <div class="feature-icon icon-amber">🏢</div>
+          <div class="feature-icon icon-amber"><svg aria-hidden="true"><use href="#i-building"/></svg></div>
           <h3>Org-Level Analytics</h3>
           <p>Total meeting cost, avg health score, meetings per week, quiet participant rate, platform breakdown — across your whole organization.</p>
         </div>
@@ -1523,14 +1570,14 @@
     <div class="row g-3 mt-3">
       <div class="col-md-6">
         <div class="feature-card">
-          <div class="feature-icon icon-purple">📋</div>
+          <div class="feature-icon icon-purple"><svg aria-hidden="true"><use href="#i-file"/></svg></div>
           <h3>10 Analysis Templates</h3>
           <p>Built-in templates for sales calls, standups, 1-on-1s, retros, kickoffs, all-hands, postmortems, interviews, and design reviews. Or pass a <code>prompt_override</code> for fully custom analysis.</p>
         </div>
       </div>
       <div class="col-md-6">
         <div class="feature-card">
-          <div class="feature-icon icon-green">✉️</div>
+          <div class="feature-icon icon-green"><svg aria-hidden="true"><use href="#i-mail"/></svg></div>
           <h3>Auto Follow-up Email</h3>
           <p>Automatically generate and send follow-up emails after every meeting. Includes summary, action items, and next steps. Enable with <code>auto_followup_email: true</code>.</p>
         </div>
@@ -1556,7 +1603,7 @@
       <div class="col-md-4">
         <div class="feature-card">
           <div class="feature-tag enterprise">Enterprise</div>
-          <div class="feature-icon icon-red">🔒</div>
+          <div class="feature-icon icon-red"><svg aria-hidden="true"><use href="#i-lock"/></svg></div>
           <h3>PII Detection & Redaction</h3>
           <p>Enable <code>pii_redaction: true</code> on any bot. JustHereToListen.io automatically detects and replaces emails, phone numbers, SSNs, and credit card numbers with <code>[REDACTED]</code> before storage and analysis.</p>
         </div>
@@ -1564,7 +1611,7 @@
       <div class="col-md-4">
         <div class="feature-card">
           <div class="feature-tag enterprise">Enterprise</div>
-          <div class="feature-icon icon-indigo">🏛️</div>
+          <div class="feature-icon icon-indigo"><svg aria-hidden="true"><use href="#i-shield-check"/></svg></div>
           <h3>Workspaces & RBAC</h3>
           <p>Organize bots into workspaces. Assign members as viewer, member, or admin. Viewers read transcripts; only admins can delete bots or access billing.</p>
         </div>
@@ -1572,35 +1619,35 @@
       <div class="col-md-4">
         <div class="feature-card">
           <div class="feature-tag enterprise">Enterprise</div>
-          <div class="feature-icon icon-cyan">🔑</div>
+          <div class="feature-icon icon-cyan"><svg aria-hidden="true"><use href="#i-keys"/></svg></div>
           <h3>SAML SSO</h3>
           <p>Plug in your IdP (Okta, Azure AD, Google Workspace) with SAML 2.0. Domain-locked accounts, automatic provisioning, and session management.</p>
         </div>
       </div>
       <div class="col-md-4">
         <div class="feature-card">
-          <div class="feature-icon icon-green">🤝</div>
+          <div class="feature-icon icon-green"><svg aria-hidden="true"><use href="#i-users"/></svg></div>
           <h3>Participant Consent</h3>
           <p>Consent management built in. Track who has opted out, suppress their audio, and flag consent status per bot for audit trails.</p>
         </div>
       </div>
       <div class="col-md-4">
         <div class="feature-card">
-          <div class="feature-icon icon-amber">📅</div>
+          <div class="feature-icon icon-amber"><svg aria-hidden="true"><use href="#i-calendar"/></svg></div>
           <h3>Calendar Auto-Join</h3>
           <p>Connect Google or Outlook calendars. JustHereToListen.io automatically dispatches a bot to every upcoming meeting — no manual API calls needed.</p>
         </div>
       </div>
       <div class="col-md-4">
         <div class="feature-card">
-          <div class="feature-icon icon-purple">🗄️</div>
+          <div class="feature-icon icon-purple"><svg aria-hidden="true"><use href="#i-package"/></svg></div>
           <h3>Data Retention Policies</h3>
           <p>Set custom retention windows per workspace. Recordings, transcripts, and analyses are automatically purged after your configured TTL.</p>
         </div>
       </div>
       <div class="col-md-4">
         <div class="feature-card">
-          <div class="feature-icon icon-amber">🎨</div>
+          <div class="feature-icon icon-amber"><svg aria-hidden="true"><use href="#i-palette"/></svg></div>
           <h3>Bot Customization</h3>
           <p>White-label the bot with a custom display name and avatar. Participants see your brand, not ours. Set <code>bot_name</code> and <code>bot_avatar_url</code> on creation.</p>
         </div>
@@ -1680,7 +1727,7 @@
           <div class="col-12">
             <div class="feature-card">
               <div class="feature-tag dev">Developer</div>
-              <div class="feature-icon icon-indigo" style="width:36px;height:36px;border-radius:8px;font-size:1rem;margin-bottom:0.8rem">🧪</div>
+              <div class="feature-icon icon-indigo" style="width:36px;height:36px;border-radius:8px;font-size:1rem;margin-bottom:0.8rem"><svg aria-hidden="true"><use href="#i-playground"/></svg></div>
               <h3>Sandbox / Test Keys</h3>
               <p>Generate <code>sk_test_</code> keys. Bots complete instantly with a pre-built demo transcript. Zero credits consumed. Perfect for CI/CD pipelines and integration testing.</p>
             </div>
@@ -1688,7 +1735,7 @@
           <div class="col-12">
             <div class="feature-card">
               <div class="feature-tag dev">Developer</div>
-              <div class="feature-icon icon-purple" style="width:36px;height:36px;border-radius:8px;font-size:1rem;margin-bottom:0.8rem">🪝</div>
+              <div class="feature-icon icon-purple" style="width:36px;height:36px;border-radius:8px;font-size:1rem;margin-bottom:0.8rem"><svg aria-hidden="true"><use href="#i-webhooks"/></svg></div>
               <h3>Webhook Playground</h3>
               <p>Register webhooks with HMAC-SHA256 signing, test them live from the UI, inspect delivery logs with retry history, and filter by event type.</p>
             </div>
@@ -1696,7 +1743,7 @@
           <div class="col-12">
             <div class="feature-card">
               <div class="feature-tag dev">Developer</div>
-              <div class="feature-icon icon-cyan" style="width:36px;height:36px;border-radius:8px;font-size:1rem;margin-bottom:0.8rem">📦</div>
+              <div class="feature-icon icon-cyan" style="width:36px;height:36px;border-radius:8px;font-size:1rem;margin-bottom:0.8rem"><svg aria-hidden="true"><use href="#i-package"/></svg></div>
               <h3>Auto-Generated SDKs</h3>
               <p>Every release tag triggers a GitHub Action that downloads the OpenAPI schema and generates Python + JavaScript SDKs — automatically published to PyPI.</p>
             </div>
@@ -1709,7 +1756,7 @@
       <div class="col-md-6">
         <div class="feature-card">
           <div class="feature-tag dev">Developer</div>
-          <div class="feature-icon icon-amber" style="width:36px;height:36px;border-radius:8px;font-size:1rem;margin-bottom:0.8rem">⏰</div>
+          <div class="feature-icon icon-amber" style="width:36px;height:36px;border-radius:8px;font-size:1rem;margin-bottom:0.8rem"><svg aria-hidden="true"><use href="#i-clock"/></svg></div>
           <h3>Scheduled Bot Joins</h3>
           <p>Schedule a bot to join at a specific time via the <code>join_at</code> field. Perfect for recurring meetings or future calendar events dispatched through your API.</p>
         </div>
@@ -1717,7 +1764,7 @@
       <div class="col-md-6">
         <div class="feature-card">
           <div class="feature-tag dev">Developer</div>
-          <div class="feature-icon icon-green" style="width:36px;height:36px;border-radius:8px;font-size:1rem;margin-bottom:0.8rem">📖</div>
+          <div class="feature-icon icon-green" style="width:36px;height:36px;border-radius:8px;font-size:1rem;margin-bottom:0.8rem"><svg aria-hidden="true"><use href="#i-docs"/></svg></div>
           <h3>Domain Vocabulary</h3>
           <p>Pass custom vocabulary terms to improve transcription accuracy for industry jargon, product names, and acronyms. Set the <code>vocabulary</code> array on bot creation (up to 100 terms).</p>
         </div>
@@ -1739,39 +1786,39 @@
     </div>
     <div class="integration-grid">
       <div class="integration-item">
-        <div class="int-icon">💬</div>
+        <div class="int-icon"><svg aria-hidden="true"><use href="#i-chat"/></svg></div>
         <div class="int-name">Slack</div>
       </div>
       <div class="integration-item">
-        <div class="int-icon">📝</div>
+        <div class="int-icon"><svg aria-hidden="true"><use href="#i-file"/></svg></div>
         <div class="int-name">Notion</div>
       </div>
       <div class="integration-item">
-        <div class="int-icon">📅</div>
+        <div class="int-icon"><svg aria-hidden="true"><use href="#i-calendar"/></svg></div>
         <div class="int-name">Google Calendar</div>
       </div>
       <div class="integration-item">
-        <div class="int-icon">🗓️</div>
+        <div class="int-icon"><svg aria-hidden="true"><use href="#i-calendar"/></svg></div>
         <div class="int-name">Outlook</div>
       </div>
       <div class="integration-item">
-        <div class="int-icon">🔀</div>
+        <div class="int-icon"><svg aria-hidden="true"><use href="#i-shuffle"/></svg></div>
         <div class="int-name">Zapier</div>
       </div>
       <div class="integration-item">
-        <div class="int-icon">🧩</div>
+        <div class="int-icon"><svg aria-hidden="true"><use href="#i-puzzle"/></svg></div>
         <div class="int-name">Make</div>
       </div>
       <div class="integration-item">
-        <div class="int-icon">📊</div>
+        <div class="int-icon"><svg aria-hidden="true"><use href="#i-barchart"/></svg></div>
         <div class="int-name">HubSpot CRM</div>
       </div>
       <div class="integration-item">
-        <div class="int-icon">🔗</div>
+        <div class="int-icon"><svg aria-hidden="true"><use href="#i-chain"/></svg></div>
         <div class="int-name">Webhooks</div>
       </div>
       <div class="integration-item">
-        <div class="int-icon">🖥️</div>
+        <div class="int-icon"><svg aria-hidden="true"><use href="#i-monitor"/></svg></div>
         <div class="int-name">MCP Server</div>
       </div>
     </div>

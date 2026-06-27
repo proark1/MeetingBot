@@ -28,7 +28,7 @@
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.07em;
-    color: #968E84;
+    color: #94A3B8;
     padding: 0.35rem 0.75rem;
     margin-top: 0.5rem;
   }
@@ -52,8 +52,8 @@
     text-align: left;
     text-decoration: none;
   }
-  .admin-nav-item:hover { background: #EDE4DF; color: #1B2033; }
-  .admin-nav-item.active { background: #EEEAE7; color: #111827; font-weight: 600; }
+  .admin-nav-item:hover { background: #F4F6F8; color: #1B2033; }
+  .admin-nav-item.active { background: #E9EDF4; color: #111827; font-weight: 600; }
 
   .admin-nav-badge {
     margin-left: auto;
@@ -79,7 +79,7 @@
     display: flex;
     gap: 0.15rem;
     margin-bottom: 1.25rem;
-    border-bottom: 1px solid #D8CFC8;
+    border-bottom: 1px solid #E3E7EC;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
   }
@@ -148,6 +148,14 @@
     .admin-nav-item { flex: 0 0 auto; font-size: 12px; padding: 0.4rem 0.65rem; white-space: nowrap; border-radius: 20px; }
     .admin-nav-item.active { border-radius: 20px; }
   }
+
+  /* JHTL v2 admin layer */
+  .admin-sidebar{ background:var(--white); border:1px solid var(--border); border-radius:var(--radius); }
+  .admin-nav-item{ color:var(--gray); border-radius:10px; }
+  .admin-nav-item:hover{ background:var(--accent-soft); color:var(--accent-press); }
+  .admin-nav-item.active{ background:var(--accent); color:#fff; font-weight:600; }
+  .admin-nav-item.active .admin-nav-badge{ background:rgba(255,255,255,.25); color:#fff; }
+  [data-theme="dark"] .admin-nav-item.active{ background:var(--accent); color:#1A0F0C; }
 </style>
 
 <div class="admin-layout">
@@ -160,26 +168,26 @@
       <div class="admin-sidebar-label">Navigate</div>
 
       <a href="/" class="admin-nav-item" style="color:#94a3b8">
-        <span>🏠</span> Home
+        <svg class="ic" aria-hidden="true"><use href="#i-home"/></svg> Home
       </a>
       <a href="/dashboard" class="admin-nav-item" style="color:#94a3b8">
-        <span>◀</span> Back to Dashboard
+        <svg class="ic" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg> Back to Dashboard
       </a>
       <a href="/logout" class="admin-nav-item" style="color:#f87171">
-        <span>⎋</span> Log Out
+        <svg class="ic" aria-hidden="true"><use href="#i-logout"/></svg> Log Out
       </a>
 
       <div class="admin-sidebar-label">Admin</div>
 
       <button class="admin-nav-item active" data-section="overview" aria-current="page">
-        <span aria-hidden="true">📊</span> Overview
+        <svg class="ic" aria-hidden="true"><use href="#i-overview"/></svg> Overview
       </button>
       <button class="admin-nav-item" data-section="users">
-        <span>👥</span> Users
+        <svg class="ic" aria-hidden="true"><use href="#i-users"/></svg> Users
         <span class="admin-nav-badge warn">{{ stats.total_accounts }}</span>
       </button>
       <button class="admin-nav-item" data-section="billing">
-        <span>💵</span> Billing
+        <svg class="ic" aria-hidden="true"><use href="#i-dollar"/></svg> Billing
         {% if stats.unmatched_pending > 0 %}
         <span class="admin-nav-badge">{{ stats.unmatched_pending }}</span>
         {% endif %}
@@ -188,23 +196,23 @@
       <div class="admin-sidebar-label">Infrastructure</div>
 
       <button class="admin-nav-item" data-section="analytics">
-        <span>📈</span> Analytics
+        <svg class="ic" aria-hidden="true"><use href="#i-analytics"/></svg> Analytics
       </button>
       <button class="admin-nav-item" data-section="support">
-        <span>🔑</span> Support Lookup
+        <svg class="ic" aria-hidden="true"><use href="#i-search"/></svg> Support Lookup
       </button>
       <button class="admin-nav-item" data-section="audit">
-        <span>🛡️</span> Audit Log
+        <svg class="ic" aria-hidden="true"><use href="#i-admin"/></svg> Audit Log
       </button>
 
       <button class="admin-nav-item" data-section="system">
-        <span>⚙️</span> System Status
+        <svg class="ic" aria-hidden="true"><use href="#i-settings"/></svg> System Status
         {% if not crypto_rpc_configured %}
         <span class="admin-nav-badge">!</span>
         {% endif %}
       </button>
       <button class="admin-nav-item" data-section="crypto">
-        <span>⛓️</span> USDC / Crypto
+        <svg class="ic" aria-hidden="true"><use href="#i-chain"/></svg> USDC / Crypto
         {% if stats.unmatched_pending > 0 %}
         <span class="admin-nav-badge">{{ stats.unmatched_pending }}</span>
         {% endif %}
@@ -213,13 +221,13 @@
       <div class="admin-sidebar-label">Links</div>
 
       <a href="/api/v1/admin/docs" target="_blank" class="admin-nav-item" style="font-size:12px;color:#1B2033">
-        <span>↗</span> Admin API Docs
+        <svg class="ic" aria-hidden="true"><use href="#i-external"/></svg> Admin API Docs
       </a>
       <a href="/api/docs" target="_blank" class="admin-nav-item" style="font-size:12px;color:#1B2033">
-        <span>↗</span> Public API Docs
+        <svg class="ic" aria-hidden="true"><use href="#i-external"/></svg> Public API Docs
       </a>
       <a href="/webhook-playground" target="_blank" class="admin-nav-item" style="font-size:12px;color:#1B2033">
-        <span>↗</span> Webhook Playground
+        <svg class="ic" aria-hidden="true"><use href="#i-external"/></svg> Webhook Playground
       </a>
     </div>
   </aside>
@@ -232,7 +240,7 @@
     <!-- ── Critical alert ──────────────────────────────────────────────── -->
     {% if not crypto_rpc_configured %}
     <div class="alert alert-danger d-flex align-items-start gap-3 mb-3" role="alert">
-      <div style="font-size:1.3rem;flex-shrink:0">🚨</div>
+      <div style="flex-shrink:0;color:#dc2626"><svg width="22" height="22" aria-hidden="true"><use href="#i-alert"/></svg></div>
       <div>
         <strong>USDC monitoring disabled — Crypto RPC URL not configured.</strong><br>
         USDC deposits will never be detected until this is set.
@@ -292,7 +300,7 @@
 
         <div class="col-md-6">
           <div class="card card-pad h-100">
-            <div class="section-title mb-3">Bot Activity <span style="font-weight:400;color:#968E84;font-size:11px">(24h)</span></div>
+            <div class="section-title mb-3">Bot Activity <span style="font-weight:400;color:#94A3B8;font-size:11px">(24h)</span></div>
             <div class="d-flex justify-content-between align-items-center py-2 border-bottom">
               <span style="font-size:13px;color:#64748b">Total</span>
               <span class="fw-bold">{{ bot_stats.total }}</span>
@@ -554,7 +562,7 @@
           <div class="row g-2 align-items-end">
             <div class="col-md-3">
               <label class="form-label text-muted" style="font-size:11px;font-weight:600;text-transform:uppercase">Action filter</label>
-              <select id="auditActionFilter" class="form-select form-select-sm" style="background:#0f172a;border-color:rgba(255,255,255,0.12);color:#D8CFC8;">
+              <select id="auditActionFilter" class="form-select form-select-sm" style="background:#0f172a;border-color:rgba(255,255,255,0.12);color:#E3E7EC;">
                 <option value="">All actions</option>
                 <option value="bot.created">bot.created</option>
                 <option value="bot.deleted">bot.deleted</option>
@@ -569,7 +577,7 @@
             </div>
             <div class="col-md-3">
               <label class="form-label text-muted" style="font-size:11px;font-weight:600;text-transform:uppercase">Account ID</label>
-              <input type="text" id="auditAccountFilter" class="form-control form-control-sm" placeholder="(any)" style="background:#0f172a;border-color:rgba(255,255,255,0.12);color:#D8CFC8;">
+              <input type="text" id="auditAccountFilter" class="form-control form-control-sm" placeholder="(any)" style="background:#0f172a;border-color:rgba(255,255,255,0.12);color:#E3E7EC;">
             </div>
             <div class="col-md-2">
               <button class="btn btn-sm btn-primary w-100" onclick="loadAuditLog()">Search</button>
@@ -582,7 +590,7 @@
       <div class="card" style="background:#1e293b;border:1px solid rgba(255,255,255,0.08);">
         <div class="card-body p-0">
           <div id="auditTableWrap" style="overflow-x:auto;">
-            <table class="table table-sm mb-0" style="font-size:12.5px;color:#DDD7CF;">
+            <table class="table table-sm mb-0" style="font-size:12.5px;color:#E3E7EC;">
               <thead>
                 <tr style="border-bottom:1px solid rgba(255,255,255,0.08);">
                   <th class="px-3 py-2" style="color:#64748b;font-weight:600;">Time (UTC)</th>
@@ -814,7 +822,7 @@
           <h2>Platform Analytics</h2>
           <p>Aggregated usage metrics — no private user data. Cached 5 minutes.</p>
         </div>
-        <button class="btn btn-outline-secondary btn-sm" id="analytics-refresh-btn" onclick="_loadAnalytics(true)">↺ Refresh</button>
+        <button class="btn btn-outline-secondary btn-sm" id="analytics-refresh-btn" onclick="_loadAnalytics(true)"><svg class="ic" aria-hidden="true"><use href="#i-refresh"/></svg>Refresh</button>
       </div>
 
       <div id="analytics-loading" class="text-center py-5 text-muted" style="font-size:13.5px">Loading analytics…</div>
@@ -975,7 +983,7 @@
         <div class="atab-panel" data-atab="users" style="display:none">
           <div class="card">
             <div class="px-4 pt-3 pb-2 d-flex justify-content-between align-items-center">
-              <div class="section-title mb-0">Per-User Activity <span style="font-size:11px;font-weight:400;color:#968E84">(no private data — top 100 by bots)</span></div>
+              <div class="section-title mb-0">Per-User Activity <span style="font-size:11px;font-weight:400;color:#94A3B8">(no private data — top 100 by bots)</span></div>
               <input type="text" id="analytics-user-search" class="form-control form-control-sm" placeholder="Search email…"
                 oninput="_filterAnalyticsUsers(this.value)" style="width:180px">
             </div>
@@ -1233,7 +1241,7 @@ function _renderAnalytics(d) {
   // Platform doughnut
   const platforms = d.platforms || {};
   const platLabels = Object.keys(platforms);
-  const platColors = ['#1B2033','#22c55e','#3b82f6','#f59e0b','#ef4444','#968E84'];
+  const platColors = ['#1B2033','#22c55e','#3b82f6','#f59e0b','#ef4444','#94A3B8'];
   const platCtx = document.getElementById('chart-platforms').getContext('2d');
   _analyticsCharts.platforms = new Chart(platCtx, {
     type: 'doughnut',
@@ -1292,7 +1300,7 @@ function _renderAnalytics(d) {
       <div class="d-flex justify-content-between" style="font-size:12.5px">
         <span>${label}</span><span class="text-muted">${_fmt(count)} bots (${pct}%)</span>
       </div>
-      <div style="background:#D8CFC8;border-radius:4px;height:6px">
+      <div style="background:#E3E7EC;border-radius:4px;height:6px">
         <div style="background:#1B2033;border-radius:4px;height:6px;width:${pct}%;transition:width 0.4s"></div>
       </div>
     </div>`;
@@ -1317,7 +1325,7 @@ function _renderAnalytics(d) {
   // ── Plan distribution (doughnut) ────────────────────────────────────────
   const planData = d.plan_counts || {};
   const planLabels = Object.keys(planData);
-  const _planColors = {free:'#968E84', starter:'#1B2033', pro:'#22c55e', business:'#f59e0b'};
+  const _planColors = {free:'#94A3B8', starter:'#1B2033', pro:'#22c55e', business:'#f59e0b'};
   if (planLabels.length) {
     const pCtx = document.getElementById('chart-plans').getContext('2d');
     _analyticsCharts.plans = new Chart(pCtx, {
@@ -1412,7 +1420,7 @@ function _renderAnalytics(d) {
       <div class="d-flex justify-content-between mb-1"><span>Done</span><strong style="color:#22c55e">${_fmt(ai.done)}</strong></div>
     </div>
     <div style="font-size:12.5px" class="mb-1">Completion rate: <strong>${aiPct}%</strong></div>
-    <div style="background:#D8CFC8;border-radius:4px;height:8px">
+    <div style="background:#E3E7EC;border-radius:4px;height:8px">
       <div style="background:#22c55e;border-radius:4px;height:8px;width:${aiPct}%;transition:width 0.4s"></div>
     </div>`;
 

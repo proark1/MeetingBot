@@ -12,49 +12,61 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
   <style>
     :root {
-      --primary: #1B2033;
-      --primary-dark: #111827;
-      --primary-light: #EEEAE7;
-      --primary-subtle: rgba(27,32,51,0.06);
-      --dark: #1B2033;
-      --dark-2: #2A3048;
-      --gray: #6B7280;
-      --light: #EDE4DF;
+      /* ── Bold design language v2 ──────────────────────────────────────
+         Navy ink = structure & text · Coral = action & energy
+         Warm cream = canvas · Space Grotesk = display type            */
+      --accent: #FF5436;            /* signature coral — primary actions */
+      --accent-press: #E63E1F;
+      --accent-soft: #FFE9E3;       /* coral tint for active/hover states */
+      --accent-ink: #ffffff;
+      --primary: #16182B;           /* navy ink — dark surfaces, headings */
+      --primary-dark: #0C0D1A;
+      --primary-light: #FFE9E3;
+      --primary-subtle: rgba(255,84,54,0.07);
+      --dark: #16182B;
+      --dark-2: #2C3047;
+      --gray: #6B6F7E;
+      --canvas: #F4F6F8;            /* warm cream page background */
+      --light: #F4F6F8;             /* warm hover / subtle surface */
       --white: #ffffff;
-      --success: #10b981;
-      --warning: #f59e0b;
-      --danger: #ef4444;
-      --border: #D8CFC8;
-      --border-light: #E5DDD7;
-      --shadow: 0 1px 2px rgba(0,0,0,0.04);
-      --shadow-sm: 0 1px 3px rgba(0,0,0,0.05), 0 1px 2px rgba(0,0,0,0.03);
-      --shadow-md: 0 4px 12px rgba(0,0,0,0.05);
-      --shadow-lg: 0 8px 24px rgba(0,0,0,0.06);
+      --success: #16A34A;
+      --warning: #D9870B;
+      --danger: #E0392B;
+      --border: #E3E7EC;
+      --border-light: #EDF0F4;
+      --radius: 16px;
+      --radius-lg: 20px;
+      --font-display: 'Space Grotesk','Inter',system-ui,sans-serif;
+      --shadow: 0 1px 2px rgba(31,25,20,0.05);
+      --shadow-sm: 0 1px 3px rgba(31,25,20,0.06), 0 1px 2px rgba(31,25,20,0.04);
+      --shadow-md: 0 6px 18px rgba(31,25,20,0.07), 0 2px 6px rgba(31,25,20,0.05);
+      --shadow-lg: 0 16px 40px rgba(31,25,20,0.10), 0 4px 12px rgba(31,25,20,0.06);
     }
 
     /* ── Dark mode ────────────────────────────────────────────────────── */
     [data-theme="dark"] {
-      --primary: #c8cad0;
-      --primary-dark: #e5e7eb;
-      --primary-light: #1e2030;
-      --primary-subtle: rgba(200,202,208,0.08);
-      --dark: #e5e7eb;
-      --dark-2: #d1d5db;
-      --gray: #9ca3af;
-      --light: #1a1b2e;
-      --white: #13141f;
+      --accent: #FF6A4D;
+      --accent-press: #FF8266;
+      --accent-soft: #3A211B;
+      --accent-ink: #1A0F0C;
+      --primary: #FF6A4D;
+      --primary-dark: #FF8266;
+      --primary-light: #3A211B;
+      --primary-subtle: rgba(255,106,77,0.14);
+      --dark: #ECEAF2;
+      --dark-2: #C9CCDA;
+      --gray: #9AA0B4;
+      --canvas: #0E0F1A;
+      --light: #1C1E30;
+      --white: #14151F;
       --success: #34d399;
       --warning: #fbbf24;
       --danger: #f87171;
-      --border: #2d2e3f;
-      --border-light: #252636;
-      --shadow: 0 1px 2px rgba(0,0,0,0.3);
-      --shadow-sm: 0 1px 3px rgba(0,0,0,0.4);
-      --shadow-md: 0 4px 12px rgba(0,0,0,0.3);
-      --shadow-lg: 0 8px 24px rgba(0,0,0,0.4);
+      --border: #2A2E44;
+      --border-light: #23263A;
       color-scheme: dark;
     }
     [data-theme="dark"] body { background: #0f1019; color: #e5e7eb; }
@@ -229,7 +241,7 @@
 
     body {
       font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: #EDE4DF;
+      background: #F4F6F8;
       color: #1B2033;
       min-height: 100vh;
       margin: 0;
@@ -300,7 +312,7 @@
     .nav-links a:hover { color: var(--dark); background: var(--border-light); }
     .nav-links a.nav-active { color: var(--primary); background: var(--primary-light); }
     .nav-links a.admin-link { color: #991b1b; font-weight: 600; }
-    .nav-links a.admin-link:hover { color: #7f1d1d; background: #EEEAE7; }
+    .nav-links a.admin-link:hover { color: #7f1d1d; background: #E9EDF4; }
 
     .nav-right {
       display: flex;
@@ -526,7 +538,7 @@
     }
     .form-control, .form-select {
       border-radius: 8px;
-      border: 1px solid #D8CFC8;
+      border: 1px solid #E3E7EC;
       font-size: 13.5px;
       padding: 0.45rem 0.75rem;
       transition: border-color 0.15s, box-shadow 0.15s;
@@ -584,12 +596,12 @@
       padding: 0.6rem 0.75rem;
       background: var(--light);
     }
-    .table tbody td { padding: 0.65rem 0.75rem; border-color: #E5DDD7; vertical-align: middle; }
+    .table tbody td { padding: 0.65rem 0.75rem; border-color: #EDF0F4; vertical-align: middle; }
     .table-hover tbody tr:hover { background: var(--light); }
 
     /* ── Code ────────────────────────────────────────────────────────────── */
     code {
-      background: #E5DDD7;
+      background: #EDF0F4;
       color: #1B2033;
       padding: 2px 6px;
       border-radius: 4px;
@@ -611,7 +623,7 @@
     .tx-debit  { color: #dc2626; font-weight: 600; }
 
     /* ── Progress ────────────────────────────────────────────────────────── */
-    .progress { height: 6px; border-radius: 3px; background: #D8CFC8; }
+    .progress { height: 6px; border-radius: 3px; background: #E3E7EC; }
     .progress-bar { border-radius: 3px; }
 
     /* ── Dividers ────────────────────────────────────────────────────────── */
@@ -817,11 +829,17 @@
     [data-theme="dark"] .sidebar-link.admin { color: #f59e0b; }
 
     .sidebar-icon {
-      font-size: 15px;
       flex-shrink: 0;
-      opacity: 0.8;
-      width: 18px; text-align: center;
+      opacity: 0.65;
+      width: 18px; height: 18px;
+      stroke: currentColor; fill: none;
     }
+    .sidebar-link:hover .sidebar-icon { opacity: 0.9; }
+
+    /* ── Inline icon helper — line icons in buttons, chips, headings ── */
+    .ic { width: 15px; height: 15px; flex-shrink: 0; stroke: currentColor; fill: none; vertical-align: -2.5px; }
+    .btn .ic { width: 14px; height: 14px; margin-right: 6px; }
+    .ic-lg { width: 32px; height: 32px; stroke: currentColor; fill: none; stroke-width: 1.5; }
     .sidebar-link-badge {
       margin-left: auto;
       background: #fee2e2;
@@ -832,7 +850,7 @@
       border-radius: 10px;
       line-height: 1.5;
     }
-    .sidebar-link-badge.blue { background: #E5DDD7; color: #1d4ed8; }
+    .sidebar-link-badge.blue { background: #EDF0F4; color: #1d4ed8; }
     .sidebar-link.active .sidebar-link-badge { background: rgba(255,255,255,0.2); color: #fff; }
 
     .sidebar-footer {
@@ -987,6 +1005,81 @@
       .app-topbar { padding: 0.65rem 0.85rem; }
       .app-topbar .topbar-title { font-size: 1rem; }
     }
+
+    /* ════════════════════════════════════════════════════════════════════
+       JHTL v2 — bold component layer.  Coral = action, navy = structure,
+       Space Grotesk = display.  Appended last so it overrides earlier rules.
+       ════════════════════════════════════════════════════════════════════ */
+    body { background: var(--canvas); }
+
+    /* Display typography */
+    .app-nav-brand, .sidebar-brand, .page-title, .topbar-title, .section-title,
+    .stat-value, h1, h2, h3 { font-family: var(--font-display); letter-spacing: -0.02em; }
+    .page-title, .topbar-title { font-weight: 700; }
+
+    /* Links = coral */
+    a { color: var(--accent); }
+    a:hover { color: var(--accent-press); }
+    .app-nav-brand, .app-nav-brand:hover,
+    .sidebar-brand, .sidebar-brand:hover { color: var(--dark); }
+
+    /* Buttons — coral primary */
+    .btn { border-radius: 10px; font-weight: 600; }
+    .btn-sm, .btn-xs { border-radius: 8px; }
+    .btn-primary, .btn-nav-cta {
+      background: var(--accent); border-color: var(--accent); color: var(--accent-ink);
+      box-shadow: 0 2px 10px rgba(255,84,54,.28);
+    }
+    .btn-primary:hover, .btn-nav-cta:hover {
+      background: var(--accent-press); border-color: var(--accent-press); color: #fff;
+      box-shadow: 0 4px 16px rgba(255,84,54,.38);
+    }
+    .btn-outline-primary { border-color: var(--accent); color: var(--accent); }
+    .btn-outline-primary:hover { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-press); }
+    [data-theme="dark"] .btn-primary, [data-theme="dark"] .btn-nav-cta {
+      background: var(--accent); border-color: var(--accent); color: #1A0F0C;
+    }
+    [data-theme="dark"] .btn-primary:hover, [data-theme="dark"] .btn-nav-cta:hover {
+      background: var(--accent-press); border-color: var(--accent-press); color: #1A0F0C;
+    }
+    [data-theme="dark"] .btn-outline-primary { border-color: var(--accent); color: var(--accent); }
+    [data-theme="dark"] .btn-outline-primary:hover { background: var(--accent-soft); color: #fff; }
+
+    /* Focus rings = coral */
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .form-control:focus, .form-select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(255,84,54,.16); }
+
+    /* Cards — rounder, soft lift */
+    .card, .stat-card { border-radius: var(--radius); }
+    .card:hover, .stat-card:hover { box-shadow: var(--shadow-md); }
+
+    /* Brand mark — coral */
+    .brand-icon, .sidebar-brand .brand-icon { background: var(--accent) !important; box-shadow: 0 2px 8px rgba(255,84,54,.30); }
+    [data-theme="dark"] .brand-icon, [data-theme="dark"] .sidebar-brand .brand-icon { background: var(--accent) !important; }
+
+    /* Top-nav active */
+    .nav-links a.nav-active, [data-theme="dark"] .nav-links a.nav-active { color: var(--accent); background: var(--accent-soft); }
+
+    /* Sidebar nav */
+    .sidebar-link { border-radius: 10px; }
+    .sidebar-link:hover { background: var(--accent-soft); color: var(--accent-press); }
+    .sidebar-link.active { background: var(--accent); color: #fff; box-shadow: 0 2px 8px rgba(255,84,54,.30); }
+    .sidebar-link.active .sidebar-icon { opacity: 1; }
+    .sidebar-link.active .sidebar-link-badge { background: rgba(255,255,255,.25); color: #fff; }
+    [data-theme="dark"] .sidebar-link:hover { background: #23263A; color: #fff; }
+    [data-theme="dark"] .sidebar-link.active { background: var(--accent); color: #1A0F0C; }
+
+    /* Surfaces */
+    .app-topbar { background: rgba(248,243,238,.82); }
+    [data-theme="dark"] .app-topbar { background: rgba(14,15,26,.85); }
+    [data-theme="dark"] .app-sidebar { background: #121320; }
+
+    /* Chips — full pill */
+    .chip { border-radius: 999px; }
+
+    /* Accent helpers */
+    .text-accent { color: var(--accent) !important; }
+    .stat-value.accent { color: var(--accent); }
   </style>
 </head>
 <body>
@@ -1002,71 +1095,73 @@
    _path is scoped to the sidebar with {% with %} so it doesn't leak.
    ════════════════════════════════════════════════════════════════════ #}
 <div class="app-shell">
+{% include "_icon_sprite.html" %}
 {% with _path = request.url.path %}
 
   <div class="sidebar-overlay" id="sidebarOverlay" onclick="closeAppSidebar()"></div>
 
   <aside class="app-sidebar" id="appSidebar" aria-label="Primary navigation">
     <a class="sidebar-brand" href="/dashboard">
-      <span class="brand-icon" aria-hidden="true">🎧</span>
+      <span class="brand-icon" aria-hidden="true"><svg width="17" height="17" viewBox="0 0 24 24" style="color:#fff"><use href="#i-brand"/></svg></span>
       <span>JustHereToListen.io</span>
     </a>
 
     <nav class="sidebar-scroll" role="navigation">
       <div class="sidebar-section-label">Main</div>
       <a href="/dashboard" class="sidebar-link {% if _path == '/dashboard' %}active{% endif %}">
-        <span class="sidebar-icon" aria-hidden="true">📊</span> Overview
+        <svg class="sidebar-icon" aria-hidden="true"><use href="#i-overview"/></svg> Overview
       </a>
       <a href="/dashboard#section-bots" class="sidebar-link" data-section-link="bots">
-        <span class="sidebar-icon" aria-hidden="true">🎬</span> New Meeting
+        <svg class="sidebar-icon" aria-hidden="true"><use href="#i-meeting"/></svg> New Meeting
       </a>
       <a href="/dashboard#section-history" class="sidebar-link" data-section-link="history">
-        <span class="sidebar-icon" aria-hidden="true">📋</span> Meeting History
+        <svg class="sidebar-icon" aria-hidden="true"><use href="#i-history"/></svg> Meeting History
       </a>
       <a href="/dashboard#section-analytics" class="sidebar-link" data-section-link="analytics">
-        <span class="sidebar-icon" aria-hidden="true">📈</span> Analytics
+        <svg class="sidebar-icon" aria-hidden="true"><use href="#i-analytics"/></svg> Analytics
       </a>
       <a href="/dashboard#section-action-items" class="sidebar-link" data-section-link="action-items">
-        <span class="sidebar-icon" aria-hidden="true">✅</span> Action Items
+        <svg class="sidebar-icon" aria-hidden="true"><use href="#i-actions"/></svg> Action Items
       </a>
 
       <div class="sidebar-section-label">Workspace</div>
       <a href="/dashboard#section-api-keys" class="sidebar-link" data-section-link="api-keys">
-        <span class="sidebar-icon" aria-hidden="true">🔑</span> API Keys
+        <svg class="sidebar-icon" aria-hidden="true"><use href="#i-keys"/></svg> API Keys
       </a>
       <a href="/dashboard#section-webhooks" class="sidebar-link" data-section-link="webhooks">
-        <span class="sidebar-icon" aria-hidden="true">🪝</span> Webhooks
+        <svg class="sidebar-icon" aria-hidden="true"><use href="#i-webhooks"/></svg> Webhooks
       </a>
       <a href="/webhook-playground" class="sidebar-link {% if _path == '/webhook-playground' %}active{% endif %}">
-        <span class="sidebar-icon" aria-hidden="true">🧪</span> Webhook Playground
+        <svg class="sidebar-icon" aria-hidden="true"><use href="#i-playground"/></svg> Webhook Playground
       </a>
       <a href="/dashboard#section-integrations" class="sidebar-link" data-section-link="integrations">
-        <span class="sidebar-icon" aria-hidden="true">🔌</span> Integrations
+        <svg class="sidebar-icon" aria-hidden="true"><use href="#i-integrations"/></svg> Integrations
       </a>
       <a href="/dashboard#section-calendar" class="sidebar-link" data-section-link="calendar">
-        <span class="sidebar-icon" aria-hidden="true">📅</span> Calendar
+        <svg class="sidebar-icon" aria-hidden="true"><use href="#i-calendar"/></svg> Calendar
       </a>
       <a href="/dashboard#section-workspaces" class="sidebar-link" data-section-link="workspaces">
-        <span class="sidebar-icon" aria-hidden="true">🏢</span> Workspaces
+        <svg class="sidebar-icon" aria-hidden="true"><use href="#i-workspaces"/></svg> Workspaces
       </a>
 
       <div class="sidebar-section-label">Account</div>
       <a href="/topup" class="sidebar-link {% if _path == '/topup' %}active{% endif %}">
-        <span class="sidebar-icon" aria-hidden="true">💳</span> Billing
+        <svg class="sidebar-icon" aria-hidden="true"><use href="#i-billing"/></svg> Billing
         {% if balance is defined and balance < 0.10 %}
         <span class="sidebar-link-badge">Low</span>
         {% endif %}
       </a>
       <a href="/dashboard#section-settings" class="sidebar-link" data-section-link="settings">
-        <span class="sidebar-icon" aria-hidden="true">⚙️</span> Settings
+        <svg class="sidebar-icon" aria-hidden="true"><use href="#i-settings"/></svg> Settings
       </a>
       {% if is_admin %}
       <a href="/admin" class="sidebar-link admin {% if _path == '/admin' %}active{% endif %}">
-        <span class="sidebar-icon" aria-hidden="true">🛡️</span> Admin Panel
+        <svg class="sidebar-icon" aria-hidden="true"><use href="#i-admin"/></svg> Admin Panel
       </a>
       {% endif %}
       <a href="/api/docs" target="_blank" rel="noopener" class="sidebar-link">
-        <span class="sidebar-icon" aria-hidden="true">📖</span> API Docs ↗
+        <svg class="sidebar-icon" aria-hidden="true"><use href="#i-docs"/></svg> API Docs
+        <svg class="sidebar-icon" aria-hidden="true" style="width:13px;height:13px;margin-left:auto;opacity:0.5"><use href="#i-external"/></svg>
       </a>
 
       {% if balance is defined %}

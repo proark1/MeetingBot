@@ -4,9 +4,30 @@ All notable changes to JustHereToListen.io are documented here.
 
 Format: `## [version] - YYYY-MM-DD` followed by categorised bullet points.
 
-> **Latest version:** 2.69.0 — **Last updated:** 2026-06-24
+> **Latest version:** 2.70.0 — **Last updated:** 2026-06-27
 
 ---
+
+## [2.70.0] - 2026-06-27
+
+UI/UX redesign — a bold, distinctive design system applied across the entire web surface.
+
+### Changed
+- New design language: coral (`#FF5436`) action accent, navy ink, warm cream canvas,
+  and the Space Grotesk display typeface, defined via shared tokens in `base.html`
+  and propagated to every standalone page.
+- Dashboard: removed the duplicated page title, unified the stat-card grid, and
+  recoloured the onboarding checklist links.
+- Login / register: restyled with the new language and full dark-mode support.
+- Landing page: bolder hero with a gradient highlight, coral CTAs, warm canvas.
+- Admin, billing, legal, share, API-dashboard, and webhook-playground pages brought
+  onto the new system.
+
+### Fixed
+- Dark mode: dashboard stat cards, the admin sub-nav panel, and the developer-tool
+  pages no longer render with light backgrounds.
+- `/webhook-playground` and `/api-dashboard` are now rendered through Jinja so the
+  shared icon-sprite `{% include %}` resolves instead of printing as literal text.
 
 ## [2.69.0] - 2026-06-24
 

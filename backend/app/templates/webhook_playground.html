@@ -8,22 +8,22 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
   <style>
     :root {
       --primary: #1B2033; --primary-dark: #111827;
       --dark: #1B2033; --dark-2: #2A3048; --gray: #6B7280;
       --success: #10b981; --warning: #f59e0b; --danger: #ef4444;
-      --border: #D8CFC8;
+      --border: #E3E7EC;
     }
     * { box-sizing: border-box; }
-    body { font-family: 'Inter', sans-serif; background: #EDE4DF; color: #1B2033; font-size: 14px; margin: 0; }
+    body { font-family: 'Inter', sans-serif; background: #F4F6F8; color: #1B2033; font-size: 14px; margin: 0; }
 
     .app-nav {
-      background: rgba(237,228,223,0.85); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+      background: rgba(244,246,248,0.85); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
       padding: 0 1.75rem; height: 58px;
       display: flex; align-items: center; justify-content: space-between;
-      border-bottom: 1px solid #D8CFC8; position: sticky; top: 0; z-index: 1000;
+      border-bottom: 1px solid #E3E7EC; position: sticky; top: 0; z-index: 1000;
     }
     .app-nav-brand { font-weight: 700; font-size: 1.05rem; color: #1B2033; text-decoration: none; }
     .app-nav a { color: #6B7280; font-size: .85rem; text-decoration: none; }
@@ -49,13 +49,13 @@
     .badge-success { background: #d1fae5; color: #065f46; }
     .badge-danger  { background: #fee2e2; color: #991b1b; }
     .badge-warning { background: #fef3c7; color: #A03D22; }
-    .badge-info    { background: #FAEEE5; color: #1e40af; }
+    .badge-info    { background: #EFF6FF; color: #1e40af; }
 
     .btn { display: inline-flex; align-items: center; gap: .35rem; padding: .45rem .9rem; border-radius: 6px; font-size: .82rem; font-weight: 500; cursor: pointer; border: none; text-decoration: none; transition: opacity .15s; }
     .btn:hover { opacity: .85; }
     .btn-primary { background: var(--primary); color: white; }
     .btn-sm { padding: .3rem .65rem; font-size: .78rem; }
-    .btn-outline { background: transparent; border: 1px solid var(--border); color: #4A3F33; }
+    .btn-outline { background: transparent; border: 1px solid var(--border); color: #475569; }
 
     .form-control { width: 100%; padding: .45rem .75rem; border: 1px solid var(--border); border-radius: 6px; font-size: .85rem; outline: none; }
     .form-control:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(27,32,51,.1); }
@@ -72,12 +72,33 @@
     .toast { background: var(--dark-2); color: white; padding: .65rem 1rem; border-radius: 8px; font-size: .83rem; max-width: 320px; box-shadow: 0 4px 12px rgba(0,0,0,.2); }
     .toast.success { border-left: 3px solid var(--success); }
     .toast.error   { border-left: 3px solid var(--danger); }
-  </style>
+  
+    /* JHTL v2 devtool layer */
+    :root{ --primary:#FF5436; --primary-dark:#E63E1F; --border:#E7DCD2; --gray:#6B6F7E; }
+    body{ background:#F3EAE2; }
+    h1, .page-header h1, .stat-value{ font-family:'Space Grotesk','Inter',system-ui,sans-serif; letter-spacing:-0.02em; }
+    .app-nav{ background:rgba(248,243,238,.85); border-color:var(--border); }
+    .stat-card, .card{ border-radius:14px; }
+    a{ color:#FF5436; }
+    /* dark mode (these pages shipped light-only) */
+    [data-theme="dark"]{ --primary:#FF6A4D; --primary-dark:#FF8266; --border:#2A2E44; --gray:#9AA0B4; --dark:#ECEAF2; --dark-2:#C9CCDA; }
+    [data-theme="dark"] body{ background:#0E0F1A; color:#ECEAF2; }
+    [data-theme="dark"] .app-nav{ background:rgba(14,15,26,.85); }
+    [data-theme="dark"] .app-nav-brand, [data-theme="dark"] .app-nav a{ color:#ECEAF2; }
+    [data-theme="dark"] .page-header{ background:#121320; }
+    [data-theme="dark"] .stat-card, [data-theme="dark"] .card{ background:#181A2B; }
+    [data-theme="dark"] .card-header{ border-color:#2A2E44; }
+    [data-theme="dark"] .btn-outline{ color:#C9CCDA; border-color:#2A2E44; }
+    [data-theme="dark"] .form-control, [data-theme="dark"] textarea, [data-theme="dark"] select{ background:#181A2B; color:#ECEAF2; border-color:#2A2E44; }
+    [data-theme="dark"] code, [data-theme="dark"] pre{ background:#181A2B; color:#ECEAF2; }
+    [data-theme="dark"] table th, [data-theme="dark"] table td{ border-color:#2A2E44; color:#ECEAF2; }
+</style>
 </head>
 <body>
+{% include "_icon_sprite.html" %}
 
 <nav class="app-nav">
-  <a href="/" class="app-nav-brand">🎧 JustHereToListen.io</a>
+  <a href="/" class="app-nav-brand"><svg width="18" height="18" style="vertical-align:-3px;stroke:currentColor;fill:none" aria-hidden="true"><use href="#i-brand"/></svg> JustHereToListen.io</a>
   <div style="display:flex;gap:1.25rem;align-items:center;">
     <a href="/dashboard">Dashboard</a>
     <a href="/api/docs">API Docs</a>
@@ -98,7 +119,7 @@
       <div class="card">
         <div class="card-header">
           Registered Webhooks
-          <button class="btn btn-primary btn-sm" onclick="loadWebhooks()">↻ Refresh</button>
+          <button class="btn btn-primary btn-sm" onclick="loadWebhooks()"><svg width="13" height="13" style="vertical-align:-1px;stroke:currentColor;fill:none;margin-right:4px" aria-hidden="true"><use href="#i-refresh"/></svg>Refresh</button>
         </div>
         <div class="card-body" style="padding:.75rem;">
           <div id="webhookList"><p class="text-muted" style="font-size:.82rem;padding:.5rem;">Loading…</p></div>
@@ -121,7 +142,7 @@
           <button class="btn btn-outline btn-sm" onclick="toggleWs()" id="wsBtn">Connect</button>
         </div>
         <div class="card-body" style="padding:.5rem;">
-          <div id="liveEvents" style="font-size:.75rem;font-family:monospace;max-height:180px;overflow-y:auto;background:#f8fafc;border-radius:6px;padding:.5rem;color:#4A3F33;">
+          <div id="liveEvents" style="font-size:.75rem;font-family:monospace;max-height:180px;overflow-y:auto;background:#f8fafc;border-radius:6px;padding:.5rem;color:#475569;">
             <em>Not connected.</em>
           </div>
         </div>
@@ -133,7 +154,7 @@
       <div class="card">
         <div class="card-header">
           Recent Deliveries (all webhooks)
-          <button class="btn btn-outline btn-sm" onclick="loadDeliveries()">↻ Refresh</button>
+          <button class="btn btn-outline btn-sm" onclick="loadDeliveries()"><svg width="13" height="13" style="vertical-align:-1px;stroke:currentColor;fill:none;margin-right:4px" aria-hidden="true"><use href="#i-refresh"/></svg>Refresh</button>
         </div>
         <div id="deliveriesWrap">
           <table>
@@ -231,7 +252,7 @@ async function loadWebhooks() {
   if (!list.length) {
     el.innerHTML = `
       <div class="empty-state" style="padding:1.5rem 0.5rem">
-        <div style="font-size:1.6rem;line-height:1;margin-bottom:0.5rem" aria-hidden="true">🔔</div>
+        <div style="line-height:1;margin-bottom:0.5rem;color:#94a3b8" aria-hidden="true"><svg width="26" height="26" style="stroke:currentColor;fill:none"><use href="#i-bell"/></svg></div>
         <div style="font-size:0.95rem;font-weight:600;color:var(--dark);margin-bottom:0.25rem">No webhooks yet</div>
         <div style="font-size:0.8rem;line-height:1.45;max-width:280px;margin:0 auto 0.75rem">
           Get notified the moment a bot finishes recording, transcribing, or detects a keyword.
@@ -329,7 +350,7 @@ async function loadDeliveries() {
   rows = await res.json();
   if (!rows.length) {
     body.innerHTML = `<tr><td colspan="6"><div class="empty-state" style="padding:2rem 1rem">
-      <div style="font-size:1.6rem;line-height:1;margin-bottom:0.5rem" aria-hidden="true">📬</div>
+      <div style="line-height:1;margin-bottom:0.5rem;color:#94a3b8" aria-hidden="true"><svg width="26" height="26" style="stroke:currentColor;fill:none"><use href="#i-inbox"/></svg></div>
       <div style="font-weight:600;color:var(--dark);margin-bottom:0.25rem">No deliveries yet</div>
       <div style="font-size:0.8rem;max-width:320px;margin:0 auto">
         Once a bot completes a meeting, every webhook delivery (including retries) will show up here.

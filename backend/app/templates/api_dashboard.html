@@ -8,22 +8,22 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
   <style>
     :root {
       --primary: #1B2033; --primary-dark: #111827;
       --dark: #1B2033; --dark-2: #2A3048; --gray: #6B7280;
       --success: #10b981; --warning: #f59e0b; --danger: #ef4444;
-      --border: #D8CFC8;
+      --border: #E3E7EC;
     }
     * { box-sizing: border-box; }
-    body { font-family: 'Inter', sans-serif; background: #EDE4DF; color: #1B2033; font-size: 14px; margin: 0; }
+    body { font-family: 'Inter', sans-serif; background: #F4F6F8; color: #1B2033; font-size: 14px; margin: 0; }
 
     .app-nav {
-      background: rgba(237,228,223,0.85); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+      background: rgba(244,246,248,0.85); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
       padding: 0 1.75rem; height: 58px;
       display: flex; align-items: center; justify-content: space-between;
-      border-bottom: 1px solid #D8CFC8; position: sticky; top: 0; z-index: 1000;
+      border-bottom: 1px solid #E3E7EC; position: sticky; top: 0; z-index: 1000;
     }
     .app-nav-brand { font-weight: 700; font-size: 1.05rem; color: #1B2033; text-decoration: none; }
     .app-nav a { color: #6B7280; font-size: .85rem; text-decoration: none; }
@@ -57,14 +57,14 @@
     .bar-fill  { height: 100%; border-radius: 999px; background: var(--primary); transition: width .4s; }
 
     .badge { display: inline-flex; align-items: center; padding: .2rem .55rem; border-radius: 999px; font-size: .72rem; font-weight: 600; }
-    .badge-primary { background: #EEEAE7; color: #111827; }
+    .badge-primary { background: #E9EDF4; color: #111827; }
     .badge-success { background: #d1fae5; color: #065f46; }
     .badge-warning { background: #fef3c7; color: #111827; }
     .badge-danger  { background: #fee2e2; color: #991b1b; }
 
     .btn { display: inline-flex; align-items: center; gap: .35rem; padding: .45rem .9rem; border-radius: 6px; font-size: .82rem; font-weight: 500; cursor: pointer; border: none; text-decoration: none; transition: opacity .15s; }
     .btn:hover { opacity: .85; }
-    .btn-outline { background: transparent; border: 1px solid var(--border); color: #4A3F33; }
+    .btn-outline { background: transparent; border: 1px solid var(--border); color: #475569; }
     .btn-sm { padding: .3rem .65rem; font-size: .78rem; }
 
     .empty-state { text-align: center; padding: 2rem 1rem; color: var(--gray); font-size: .85rem; }
@@ -73,7 +73,7 @@
     /* Skeleton placeholder + retry block. */
     @keyframes skShimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
     .skel {
-      background: linear-gradient(90deg, #E5DDD7 25%, #f5efeb 50%, #E5DDD7 75%);
+      background: linear-gradient(90deg, #EDF0F4 25%, #F4F6F8 50%, #EDF0F4 75%);
       background-size: 200% 100%;
       animation: skShimmer 1.5s infinite;
       border-radius: 6px; color: transparent !important; pointer-events: none; user-select: none;
@@ -93,12 +93,32 @@
     .toast { background: var(--dark-2); color: white; padding: .65rem 1rem; border-radius: 8px; font-size: .83rem; max-width: 320px; box-shadow: 0 4px 12px rgba(0,0,0,.2); }
     .toast.success { border-left: 3px solid var(--success); }
     .toast.error   { border-left: 3px solid var(--danger); }
-  </style>
+  
+    /* JHTL v2 devtool layer */
+    :root{ --primary:#FF5436; --primary-dark:#E63E1F; --border:#E7DCD2; --gray:#6B6F7E; }
+    body{ background:#F3EAE2; }
+    h1, .page-header h1, .stat-value{ font-family:'Space Grotesk','Inter',system-ui,sans-serif; letter-spacing:-0.02em; }
+    .app-nav{ background:rgba(248,243,238,.85); border-color:var(--border); }
+    .stat-card, .card{ border-radius:14px; }
+    a{ color:#FF5436; }
+    /* dark mode (these pages shipped light-only) */
+    [data-theme="dark"]{ --primary:#FF6A4D; --primary-dark:#FF8266; --border:#2A2E44; --gray:#9AA0B4; --dark:#ECEAF2; --dark-2:#C9CCDA; }
+    [data-theme="dark"] body{ background:#0E0F1A; color:#ECEAF2; }
+    [data-theme="dark"] .app-nav{ background:rgba(14,15,26,.85); }
+    [data-theme="dark"] .app-nav-brand, [data-theme="dark"] .app-nav a{ color:#ECEAF2; }
+    [data-theme="dark"] .page-header{ background:#121320; }
+    [data-theme="dark"] .stat-card, [data-theme="dark"] .card{ background:#181A2B; }
+    [data-theme="dark"] .card-header{ border-color:#2A2E44; }
+    [data-theme="dark"] .btn-outline{ color:#C9CCDA; border-color:#2A2E44; }
+    [data-theme="dark"] .form-control, [data-theme="dark"] textarea, [data-theme="dark"] select{ background:#181A2B; color:#ECEAF2; border-color:#2A2E44; }
+    [data-theme="dark"] code, [data-theme="dark"] pre{ background:#181A2B; color:#ECEAF2; }
+    [data-theme="dark"] table th, [data-theme="dark"] table td{ border-color:#2A2E44; color:#ECEAF2; }
+</style>
 </head>
 <body>
 
 <nav class="app-nav">
-  <a href="/" class="app-nav-brand">🎧 JustHereToListen.io</a>
+  <a href="/" class="app-nav-brand"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px" aria-hidden="true"><path d="M4 14v-2a8 8 0 0 1 16 0v2"/><path d="M20 16a2 2 0 0 1-2 2h-1v-6h1a2 2 0 0 1 2 2zM4 16a2 2 0 0 0 2 2h1v-6H6a2 2 0 0 0-2 2z"/></svg> JustHereToListen.io</a>
   <div style="display:flex;gap:1.25rem;align-items:center;">
     <a href="/dashboard">Dashboard</a>
     <a href="/api/docs">API Docs</a>
@@ -163,7 +183,7 @@
       <div class="card">
         <div class="card-header">
           Platform Overview
-          <button class="btn btn-outline btn-sm" id="refreshBtn" onclick="loadAll()" aria-label="Refresh dashboard data">↻ Refresh</button>
+          <button class="btn btn-outline btn-sm" id="refreshBtn" onclick="loadAll()" aria-label="Refresh dashboard data"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:4px" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>Refresh</button>
         </div>
         <div class="card-body">
           <div class="row g-3" id="analyticsGrid">

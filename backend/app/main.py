@@ -2152,23 +2152,26 @@ _auth = [Depends(require_auth)]
 # ── Developer tool web routes ──────────────────────────────────────────────────
 
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
+# Render the two standalone tool pages through Jinja so shared partials pulled in
+# via {% include %} (e.g. the icon sprite) resolve instead of rendering as literal
+# text. (They were previously streamed as raw file contents.)
+from fastapi.templating import Jinja2Templates  # noqa: E402
+_tool_templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 
 
 @app.get("/webhook-playground", include_in_schema=False, response_class=HTMLResponse)
-async def webhook_playground():
+async def webhook_playground(request: Request):
     """Webhook testing playground — view delivery history and send test events."""
-    tmpl = _TEMPLATES_DIR / "webhook_playground.html"
-    if tmpl.exists():
-        return HTMLResponse(tmpl.read_text(encoding="utf-8"))
+    if (_TEMPLATES_DIR / "webhook_playground.html").exists():
+        return _tool_templates.TemplateResponse(request, "webhook_playground.html", {"request": request})
     return HTMLResponse("<h1>Webhook Playground</h1><p>Template not found.</p>", status_code=500)
 
 
 @app.get("/api-dashboard", include_in_schema=False, response_class=HTMLResponse)
-async def api_dashboard():
+async def api_dashboard(request: Request):
     """API usage dashboard — view bot counts, token usage, and cost breakdowns."""
-    tmpl = _TEMPLATES_DIR / "api_dashboard.html"
-    if tmpl.exists():
-        return HTMLResponse(tmpl.read_text(encoding="utf-8"))
+    if (_TEMPLATES_DIR / "api_dashboard.html").exists():
+        return _tool_templates.TemplateResponse(request, "api_dashboard.html", {"request": request})
     return HTMLResponse("<h1>API Dashboard</h1><p>Template not found.</p>", status_code=500)
 
 

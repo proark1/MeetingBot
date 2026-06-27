@@ -15,7 +15,7 @@
   }
   /* Progress bar for in-progress statuses */
   .status-progress {
-    height: 3px; background: var(--border, #D8CFC8); border-radius: 2px;
+    height: 3px; background: var(--border, #E3E7EC); border-radius: 2px;
     overflow: hidden; margin-top: 0.5rem;
   }
   .status-progress-bar {
@@ -191,7 +191,7 @@
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.75rem">
     <div class="section-title" style="margin-bottom:0">Participants</div>
     {% if bot.status == "done" %}
-    <button class="btn btn-sm btn-outline-secondary" onclick="openSpeakerModal()">✏️ Edit Speakers</button>
+    <button class="btn btn-sm btn-outline-secondary" onclick="openSpeakerModal()"><svg class="ic" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>Edit Speakers</button>
     {% endif %}
   </div>
   <div class="d-flex flex-wrap gap-2" id="participants-chips">
@@ -350,7 +350,7 @@
           </td>
           <td>
             <div class="d-flex align-items-center gap-2">
-              <div style="background:#D8CFC8;border-radius:4px;height:6px;width:80px;overflow:hidden">
+              <div style="background:#E3E7EC;border-radius:4px;height:6px;width:80px;overflow:hidden">
                 <div style="background:#1B2033;height:100%;width:{{ s.talk_pct }}%"></div>
               </div>
               {{ "%.0f"|format(s.talk_pct) }}%
@@ -389,7 +389,7 @@
 
   {% if bot.analysis.summary %}
   <div class="mb-4" style="background:linear-gradient(135deg,rgba(59,130,246,0.05) 0%,rgba(59,130,246,0.01) 100%);border-left:3px solid #3b82f6;border-radius:8px;padding:1rem 1.25rem">
-    <div class="section-subtitle mb-2" style="font-weight:700;color:#0f172a;display:flex;align-items:center;gap:0.4rem"><span style="font-size:1.1rem">📝</span> Summary</div>
+    <div class="section-subtitle mb-2" style="font-weight:700;color:#0f172a;display:flex;align-items:center;gap:0.4rem"><svg width="17" height="17" style="stroke:currentColor;fill:none;flex-shrink:0" aria-hidden="true"><use href="#i-file"/></svg> Summary</div>
     <p style="color:#334155;margin:0;line-height:1.7">{{ bot.analysis.summary }}</p>
   </div>
   {% endif %}
@@ -420,7 +420,7 @@
 
   {% if bot.analysis.key_points %}
   <div class="mb-3" style="background:linear-gradient(135deg,rgba(245,158,11,0.05) 0%,rgba(245,158,11,0.01) 100%);border-left:3px solid #f59e0b;border-radius:8px;padding:1rem 1.25rem">
-    <div class="section-subtitle mb-2" style="font-weight:700;color:#0f172a;display:flex;align-items:center;gap:0.4rem"><span style="font-size:1.1rem">⚡</span> Key Points</div>
+    <div class="section-subtitle mb-2" style="font-weight:700;color:#0f172a;display:flex;align-items:center;gap:0.4rem"><svg width="17" height="17" style="stroke:currentColor;fill:none;flex-shrink:0" aria-hidden="true"><use href="#i-zap"/></svg> Key Points</div>
     <ul style="margin:0;padding-left:1.25rem;color:#334155">
       {% for point in bot.analysis.key_points %}
       <li style="margin-bottom:4px">{{ point }}</li>
@@ -431,10 +431,10 @@
 
   {% if bot.analysis.action_items %}
   <div class="mb-3" style="background:linear-gradient(135deg,rgba(139,92,246,0.05) 0%,rgba(139,92,246,0.01) 100%);border-left:3px solid #8b5cf6;border-radius:8px;padding:1rem 1.25rem">
-    <div class="section-subtitle mb-2" style="font-weight:700;color:#0f172a;display:flex;align-items:center;gap:0.4rem"><span style="font-size:1.1rem">✅</span> Action Items</div>
+    <div class="section-subtitle mb-2" style="font-weight:700;color:#0f172a;display:flex;align-items:center;gap:0.4rem"><svg width="17" height="17" style="stroke:currentColor;fill:none;flex-shrink:0" aria-hidden="true"><use href="#i-actions"/></svg> Action Items</div>
     <div style="display:flex;flex-direction:column;gap:6px">
       {% for item in bot.analysis.action_items %}
-      <div style="background:#f8fafc;border:1px solid #D8CFC8;border-radius:8px;padding:10px 14px;display:flex;gap:10px;align-items:flex-start">
+      <div style="background:var(--light);border:1px solid var(--border);border-radius:8px;padding:10px 14px;display:flex;gap:10px;align-items:flex-start">
         <span style="color:#1B2033;margin-top:1px">☐</span>
         <div>
           <span style="color:#0f172a">{{ item.task if item.task else item }}</span>
@@ -449,7 +449,7 @@
 
   {% if bot.analysis.decisions %}
   <div class="mb-3" style="background:linear-gradient(135deg,rgba(16,185,129,0.05) 0%,rgba(16,185,129,0.01) 100%);border-left:3px solid #10b981;border-radius:8px;padding:1rem 1.25rem">
-    <div class="section-subtitle mb-2" style="font-weight:700;color:#0f172a;display:flex;align-items:center;gap:0.4rem"><span style="font-size:1.1rem">🔨</span> Decisions</div>
+    <div class="section-subtitle mb-2" style="font-weight:700;color:#0f172a;display:flex;align-items:center;gap:0.4rem"><svg width="17" height="17" style="stroke:currentColor;fill:none;flex-shrink:0" aria-hidden="true"><use href="#i-check"/></svg> Decisions</div>
     <ul style="margin:0;padding-left:1.25rem;color:#334155">
       {% for d in bot.analysis.decisions %}
       <li style="margin-bottom:4px">{{ d }}</li>
@@ -460,7 +460,7 @@
 
   {% if bot.analysis.next_steps %}
   <div class="mb-3" style="background:linear-gradient(135deg,rgba(59,130,246,0.04) 0%,transparent 100%);border-left:3px solid #60a5fa;border-radius:8px;padding:1rem 1.25rem">
-    <div class="section-subtitle mb-2" style="font-weight:700;color:#0f172a;display:flex;align-items:center;gap:0.4rem"><span style="font-size:1.1rem">➡️</span> Next Steps</div>
+    <div class="section-subtitle mb-2" style="font-weight:700;color:#0f172a;display:flex;align-items:center;gap:0.4rem"><svg width="17" height="17" style="stroke:currentColor;fill:none;flex-shrink:0" aria-hidden="true"><use href="#i-arrow-right"/></svg> Next Steps</div>
     <ul style="margin:0;padding-left:1.25rem;color:#334155">
       {% for step in bot.analysis.next_steps %}
       <li style="margin-bottom:4px">{{ step }}</li>
@@ -471,7 +471,7 @@
 
   {% if bot.analysis.risks_blockers %}
   <div class="mb-3" style="background:linear-gradient(135deg,rgba(239,68,68,0.05) 0%,rgba(239,68,68,0.01) 100%);border-left:3px solid #ef4444;border-radius:8px;padding:1rem 1.25rem">
-    <div class="section-subtitle mb-2" style="font-weight:700;color:#0f172a;display:flex;align-items:center;gap:0.4rem"><span style="font-size:1.1rem">⚠️</span> Risks &amp; Blockers</div>
+    <div class="section-subtitle mb-2" style="font-weight:700;color:#0f172a;display:flex;align-items:center;gap:0.4rem"><svg width="17" height="17" style="stroke:currentColor;fill:none;flex-shrink:0" aria-hidden="true"><use href="#i-alert"/></svg> Risks &amp; Blockers</div>
     <ul style="margin:0;padding-left:1.25rem;color:#dc2626">
       {% for item in bot.analysis.risks_blockers %}
       <li style="margin-bottom:4px">{{ item }}</li>
@@ -482,7 +482,7 @@
 
   {% if bot.analysis.unresolved_items %}
   <div class="mb-3" style="background:linear-gradient(135deg,rgba(245,158,11,0.04) 0%,transparent 100%);border-left:3px solid #f59e0b;border-radius:8px;padding:1rem 1.25rem">
-    <div class="section-subtitle mb-2" style="font-weight:700;color:#0f172a;display:flex;align-items:center;gap:0.4rem"><span style="font-size:1.1rem">❓</span> Unresolved Items</div>
+    <div class="section-subtitle mb-2" style="font-weight:700;color:#0f172a;display:flex;align-items:center;gap:0.4rem"><svg width="17" height="17" style="stroke:currentColor;fill:none;flex-shrink:0" aria-hidden="true"><use href="#i-clock"/></svg> Unresolved Items</div>
     <ul style="margin:0;padding-left:1.25rem;color:#A03D22">
       {% for item in bot.analysis.unresolved_items %}
       <li style="margin-bottom:4px">{{ item }}</li>
@@ -494,7 +494,7 @@
   {% if bot.analysis.next_meeting %}
   <div class="mb-3">
     <div class="section-subtitle mb-1" style="font-weight:600;color:#0f172a">Next Meeting</div>
-    <span class="chip chip-gray" style="background:#eff6ff;color:#1d4ed8">📅 {{ bot.analysis.next_meeting }}</span>
+    <span class="chip chip-gray" style="background:#eff6ff;color:#1d4ed8"><svg width="13" height="13" style="vertical-align:-2px;stroke:currentColor;fill:none" aria-hidden="true"><use href="#i-calendar"/></svg> {{ bot.analysis.next_meeting }}</span>
   </div>
   {% endif %}
 </div>
@@ -580,7 +580,7 @@
         <button class="btn btn-primary btn-sm w-100" id="ask-submit" onclick="askMeeting()">Ask</button>
         <div id="ask-result" class="mt-3" style="display:none">
           <div class="section-subtitle mb-1" style="font-weight:600;font-size:12px">Answer</div>
-          <div id="ask-answer" style="font-size:13.5px;line-height:1.6;background:#f8fafc;border:1px solid #D8CFC8;border-radius:8px;padding:12px"></div>
+          <div id="ask-answer" style="font-size:13.5px;line-height:1.6;background:var(--light);border:1px solid var(--border);border-radius:8px;padding:12px"></div>
         </div>
       </div>
     </div>
@@ -699,7 +699,7 @@ async function shareBot() {
     if (!box) {
       box = document.createElement('div');
       box.id = 'share-link-box';
-      box.style.cssText = 'margin-top:0.5rem;padding:0.6rem 0.8rem;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap';
+      box.style.cssText = 'margin-top:0.5rem;padding:0.6rem 0.8rem;background:var(--light);border:1px solid var(--border);border-radius:6px;display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap';
       btn.parentNode.insertBefore(box, btn.nextSibling);
     }
     box.innerHTML = '';

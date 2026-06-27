@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
   <style>
     :root {
       --primary: #1B2033;
@@ -27,7 +27,7 @@
     /* Left panel */
     .auth-left {
       flex: 0 0 420px;
-      background: linear-gradient(150deg, #EDE4DF 0%, #E5DDD7 50%, #EDE4DF 100%);
+      background: linear-gradient(150deg, #F4F6F8 0%, #EDF0F4 50%, #F4F6F8 100%);
       display: flex;
       flex-direction: column;
       padding: 2.5rem;
@@ -74,6 +74,7 @@
       justify-content: center;
       font-size: 16px;
     }
+    .brand-icon svg { stroke: currentColor; fill: none; }
 
     .auth-headline {
       color: var(--dark);
@@ -152,7 +153,7 @@
     /* Right panel */
     .auth-right {
       flex: 1;
-      background: #EDE4DF;
+      background: #F4F6F8;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -162,7 +163,7 @@
     .auth-form-card {
       background: white;
       border-radius: 16px;
-      border: 1px solid #D8CFC8;
+      border: 1px solid #E3E7EC;
       box-shadow: 0 4px 6px -1px rgba(0,0,0,.04), 0 2px 4px -2px rgba(0,0,0,.03);
       padding: 2.25rem;
       width: 100%;
@@ -189,7 +190,7 @@
     }
     .form-control {
       border-radius: 8px;
-      border: 1px solid #DDD7CF;
+      border: 1px solid #E3E7EC;
       font-size: 14px;
       padding: 0.52rem 0.8rem;
       font-family: 'Inter', sans-serif;
@@ -225,7 +226,7 @@
       height: 0;
     }
     .type-card {
-      border: 1.5px solid #D8CFC8;
+      border: 1.5px solid #E3E7EC;
       border-radius: 9px;
       padding: 0.85rem 0.9rem;
       transition: all 0.15s;
@@ -233,7 +234,7 @@
     }
     .type-option input[type="radio"]:checked + .type-card {
       border-color: #1B2033;
-      background: #EEEAE7;
+      background: #E9EDF4;
       box-shadow: 0 0 0 2px rgba(27,32,51,0.12);
     }
     .type-card:hover { border-color: #94a3b8; }
@@ -276,7 +277,7 @@
       content: '';
       flex: 1;
       height: 1px;
-      background: #D8CFC8;
+      background: #E3E7EC;
     }
 
     .btn-sso {
@@ -286,7 +287,7 @@
       gap: 0.6rem;
       width: 100%;
       background: white;
-      border: 1px solid #D8CFC8;
+      border: 1px solid #E3E7EC;
       border-radius: 8px;
       color: #374151;
       font-size: 13.5px;
@@ -298,7 +299,7 @@
       font-family: 'Inter', sans-serif;
       margin-bottom: 0.55rem;
     }
-    .btn-sso:hover { background: #EDE4DF; border-color: #DDD7CF; color: #0f172a; }
+    .btn-sso:hover { background: #F4F6F8; border-color: #E3E7EC; color: #0f172a; }
 
     .alert {
       border-radius: 8px;
@@ -454,9 +455,54 @@
       border-radius: 50%; animation: spin 0.6s linear infinite;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
-  </style>
+  
+    /* JHTL v2 auth layer */
+    :root{
+      --accent:#FF5436; --accent-press:#E63E1F; --accent-soft:#FFE9E3;
+      --dark:#16182B; --canvas:#F4F6F8; --paper:#ffffff; --line:#E3E7EC;
+      --muted:#6B6F7E; --font-display:'Space Grotesk','Inter',system-ui,sans-serif;
+    }
+    [data-theme="dark"]{
+      --accent:#FF6A4D; --accent-press:#FF8266; --accent-soft:#3A211B;
+      --dark:#ECEAF2; --canvas:#0E0F1A; --paper:#181A2B; --line:#2A2E44; --muted:#9AA0B4;
+    }
+    body{ background:var(--canvas); color:var(--dark); }
+    .auth-left{ background:linear-gradient(150deg,#F4F6F8 0%,#EDF0F4 55%,#FBF5EF 100%); }
+    [data-theme="dark"] .auth-left{ background:linear-gradient(150deg,#141627 0%,#1B1E33 60%,#121320 100%); }
+    .auth-left::before{ background:radial-gradient(circle, rgba(255,84,54,.12) 0%, transparent 70%); }
+    .auth-left::after{ background:radial-gradient(circle, rgba(255,84,54,.07) 0%, transparent 70%); }
+    .brand-logo{ color:var(--dark); }
+    .brand-icon{ background:var(--accent)!important; box-shadow:0 2px 8px rgba(255,84,54,.32); }
+    .auth-headline{ font-family:var(--font-display); letter-spacing:-0.03em; color:var(--dark); font-size:2.05rem; line-height:1.15; }
+    .auth-description{ color:var(--muted); }
+    .feature-list li{ color:var(--dark); }
+    .feature-icon{ background:var(--accent-soft)!important; color:var(--accent)!important; }
+    .auth-footer-left{ color:var(--muted); }
+    .auth-footer-left a{ color:var(--accent); }
+    .auth-right{ background:transparent; }
+    .auth-form-card{ background:var(--paper); border:1px solid var(--line); border-radius:22px;
+      box-shadow:0 18px 48px rgba(31,25,20,.12), 0 4px 12px rgba(31,25,20,.06); }
+    [data-theme="dark"] .auth-form-card{ box-shadow:0 18px 56px rgba(0,0,0,.55); }
+    .form-title{ font-family:var(--font-display); letter-spacing:-0.02em; color:var(--dark); font-size:1.55rem; }
+    .form-subtitle{ color:var(--muted); }
+    .form-label{ color:var(--dark); }
+    .form-control{ border-radius:11px; border:1px solid var(--line); background:var(--paper); color:var(--dark); }
+    .form-control::placeholder{ color:var(--muted); opacity:1; }
+    .form-control:focus{ border-color:var(--accent); box-shadow:0 0 0 3px rgba(255,84,54,.16); }
+    :focus-visible{ outline:2px solid var(--accent)!important; outline-offset:2px; }
+    .btn-primary-auth{ background:var(--accent); border-radius:11px; box-shadow:0 2px 10px rgba(255,84,54,.32); }
+    .btn-primary-auth:hover{ background:var(--accent-press); }
+    [data-theme="dark"] .btn-primary-auth{ color:#1A0F0C; }
+    .divider{ color:var(--muted); }
+    .divider::before,.divider::after{ background:var(--line); }
+    .btn-sso{ background:var(--paper); border:1px solid var(--line); color:var(--dark); border-radius:11px; }
+    .btn-sso:hover{ background:var(--accent-soft); border-color:var(--accent); color:var(--accent-press); }
+    .auth-footer-link{ color:var(--muted); }
+    .auth-footer-link a{ color:var(--accent); }
+</style>
 </head>
 <body>
+{% include "_icon_sprite.html" %}
 
   <button class="theme-toggle-auth" onclick="toggleTheme()" aria-label="Toggle dark mode">
     <svg class="icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
@@ -466,7 +512,7 @@
   <!-- Left branding panel -->
   <div class="auth-left">
     <a href="/" class="brand-logo">
-      <div class="brand-icon">🎧</div>
+      <div class="brand-icon"><svg width="18" height="18" style="color:#fff" aria-hidden="true"><use href="#i-brand"/></svg></div>
       JustHereToListen.io
     </a>
 
@@ -537,14 +583,14 @@
             <label class="type-option">
               <input type="radio" name="account_type" value="personal" checked>
               <div class="type-card">
-                <div class="type-card-title">👤 Personal</div>
+                <div class="type-card-title"><svg width="15" height="15" style="vertical-align:-2px;stroke:currentColor;fill:none" aria-hidden="true"><use href="#i-user"/></svg> Personal</div>
                 <div class="type-card-desc">Individual use and small teams</div>
               </div>
             </label>
             <label class="type-option">
               <input type="radio" name="account_type" value="business">
               <div class="type-card">
-                <div class="type-card-title">🏢 Business</div>
+                <div class="type-card-title"><svg width="15" height="15" style="vertical-align:-2px;stroke:currentColor;fill:none" aria-hidden="true"><use href="#i-building"/></svg> Business</div>
                 <div class="type-card-desc">Multi-user SaaS platform</div>
               </div>
             </label>

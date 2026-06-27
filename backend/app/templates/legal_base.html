@@ -8,14 +8,16 @@
   <script>
     (function(){var t=localStorage.getItem('theme');if(t==='dark')document.documentElement.setAttribute('data-theme','dark');else if(!t&&window.matchMedia('(prefers-color-scheme:dark)').matches)document.documentElement.setAttribute('data-theme','dark');})();
   </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
   <style>
     :root{
-      --bg:#EDE4DF; --surface:#ffffff; --ink:#1B2033; --muted:#6B7280;
-      --border:#D8CFC8; --primary:#1B2033; --accent:#2A3048;
+      --bg:#F3EAE2; --surface:#ffffff; --ink:#16182B; --muted:#6B6F7E;
+      --border:#E7DCD2; --primary:#FF5436; --accent:#FF5436;
     }
     [data-theme="dark"]{
-      --bg:#0f1019; --surface:#1a1b2e; --ink:#e5e7eb; --muted:#9ca3af;
-      --border:#2d2e3f; --primary:#c8cad0; --accent:#374151; color-scheme:dark;
+      --bg:#0E0F1A; --surface:#181A2B; --ink:#ECEAF2; --muted:#9AA0B4;
+      --border:#2A2E44; --primary:#FF6A4D; --accent:#FF6A4D; color-scheme:dark;
     }
     *{box-sizing:border-box;}
     body{
@@ -51,11 +53,16 @@
       color:var(--muted); font-size:13px; display:flex; gap:1.25rem; flex-wrap:wrap; }
     .legal-footer a{ color:var(--muted); text-decoration:none; }
     .legal-footer a:hover{ color:var(--ink); }
-  </style>
+  
+    /* JHTL v2 legal layer */
+    .legal-brand, .legal-wrap h1, .legal-wrap h2, .legal-wrap h3 { font-family:'Space Grotesk','Inter',system-ui,sans-serif; letter-spacing:-0.02em; }
+    .legal-brand .ic{ box-shadow:0 2px 8px rgba(255,84,54,.30); }
+    [data-theme="dark"] .legal-wrap a{ color:var(--accent); }
+</style>
 </head>
 <body>
   <nav class="legal-nav">
-    <a class="legal-brand" href="/"><span class="ic" aria-hidden="true">🎧</span><span>JustHereToListen.io</span></a>
+    <a class="legal-brand" href="/"><span class="ic" aria-hidden="true"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px"><path d="M4 14v-2a8 8 0 0 1 16 0v2"/><path d="M20 16a2 2 0 0 1-2 2h-1v-6h1a2 2 0 0 1 2 2zM4 16a2 2 0 0 0 2 2h1v-6H6a2 2 0 0 0-2 2z"/></svg></span><span>JustHereToListen.io</span></a>
     <a class="back" href="/">← Back to home</a>
   </nav>
   <main class="legal-wrap">
