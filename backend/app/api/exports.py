@@ -8,16 +8,14 @@ from html import escape as _he
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response, PlainTextResponse
 from pydantic import BaseModel
-from slowapi import Limiter as _Limiter
-from slowapi.util import get_remote_address as _get_remote_address
 from typing import Any, Dict, List, Optional
 
+from app._limiter import limiter as _limiter
 from app.deps import SUPERADMIN_ACCOUNT_ID
 from app.store import store, BotSession
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/bot", tags=["Exports"])
-_limiter = _Limiter(key_func=_get_remote_address)
 
 
 def _fmt_duration(start, end) -> str:

@@ -207,29 +207,23 @@ async def _process_feed(feed, account_id: str) -> int:
             join_at = now  # already past — join immediately
 
         try:
-            import uuid as _uuid
-            from app.store import store, BotSession
-            from app.services import bot_service as _bot_service
-            from app.api.bots import _scheduled_timers, _start_or_queue_bot, _start_scheduled_bot
+            from app.api.bots import create_bot_with_guardrails
+            from app.schemas.bot import BotCreate
 
             meeting_url = event["meeting_url"]
-            bot = BotSession(
-                id=str(_uuid.uuid4()),
+            payload = BotCreate(
                 meeting_url=meeting_url,
-                meeting_platform=_bot_service.detect_platform(meeting_url),
                 bot_name=feed.bot_name or "JustHereToListen.io",
-                status="scheduled",
                 join_at=join_at,
-                account_id=account_id,
+                allow_demo_mode=False,
                 metadata={"calendar_event": event["summary"], "calendar_feed_id": feed.id},
             )
-            await store.create_bot(bot)
-            delay = max(0, (join_at - now).total_seconds())
-            if delay < 1:
-                await _start_or_queue_bot(bot.id)
-            else:
-                loop = asyncio.get_running_loop()
-                _scheduled_timers[bot.id] = loop.call_later(delay, _start_scheduled_bot, bot.id)
+            bot, _replayed = await create_bot_with_guardrails(
+                payload,
+                account_id=account_id,
+                sub_user_id=None,
+                is_sandbox=False,
+            )
             _dispatched[cache_key] = _time.monotonic()
             dispatched += 1
             logger.info(

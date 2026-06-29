@@ -568,8 +568,6 @@ async def _tool_get_meeting_brief(args: dict, account_id: Optional[str]) -> dict
 
 async def _tool_create_bot(args: dict, account_id: Optional[str], is_sandbox: bool = False) -> dict:
     from app.schemas.bot import BotCreate
-    from app.services import bot_service
-    from app.store import store
 
     meeting_url = args.get("meeting_url", "").strip()
     if not meeting_url:
@@ -587,93 +585,21 @@ async def _tool_create_bot(args: dict, account_id: Optional[str], is_sandbox: bo
     except Exception as exc:
         return {"error": f"Invalid arguments: {exc}"}
 
-    import uuid
-    from app.store import BotSession
-    from app.deps import SUPERADMIN_ACCOUNT_ID
+    from app.api.bots import create_bot_with_guardrails
 
-    bot_id = str(uuid.uuid4())
-    normalized_url = bot_service.normalize_meeting_url(str(payload.meeting_url))
-    platform = bot_service.detect_platform(normalized_url)
-    if not bot_service.supports_real_recording(platform) and not payload.allow_demo_mode:
-        return {
-            "error": (
-                "Real recording is only available for Google Meet, Zoom, Microsoft Teams, "
-                "and onepizza.io. Set allow_demo_mode=true to create a demo transcript for "
-                "recognized unsupported platforms."
-            )
-        }
-
-    from app.api.bots import _validate_workspace_for_create
-    await _validate_workspace_for_create(payload.workspace_id, account_id)
-
-    billable_account = bool(account_id and account_id != SUPERADMIN_ACCOUNT_ID and not is_sandbox)
-    if billable_account:
-        from app.db import AsyncSessionLocal
-        from app.services.credit_service import check_credits, check_plan_limit
-
-        async with AsyncSessionLocal() as db:
-            await check_credits(account_id, db)
-        await check_plan_limit(account_id)
-
-    bot = BotSession(
-        id=bot_id,
-        meeting_url=normalized_url,
-        meeting_platform=platform,
-        bot_name=payload.bot_name,
-        status="ready",
-        account_id=account_id if account_id != SUPERADMIN_ACCOUNT_ID else None,
-        workspace_id=payload.workspace_id,
-        template=payload.template,
-        respond_on_mention=payload.respond_on_mention,
+    bot, _replayed = await create_bot_with_guardrails(
+        payload,
+        account_id=account_id,
+        is_sandbox=is_sandbox,
     )
-    await store.create_bot(bot)
-
-    if billable_account:
-        from app.services.credit_service import increment_monthly_usage
-
-        try:
-            await increment_monthly_usage(account_id)
-        except Exception:
-            await store.delete_bot(bot_id)
-            raise
-
-    if is_sandbox:
-        from app.services import intelligence_service
-
-        demo_transcript = await intelligence_service.generate_demo_transcript(bot.meeting_url)
-        now = datetime.now(timezone.utc)
-        await store.update_bot(
-            bot.id,
-            status="done",
-            transcript=demo_transcript,
-            is_demo_transcript=True,
-            started_at=now,
-            ended_at=now,
-            duration_seconds=0,
-            participants=[e.get("speaker") for e in demo_transcript if e.get("speaker")],
-        )
-        started = await store.get_bot(bot_id)
-        return {
-            "bot_id": bot_id,
-            "status": started.status if started else "done",
-            "platform": platform,
-            "sandbox": True,
-        }
-
-    # Route through the shared slot-admission path so MCP-created bots respect
-    # MAX_CONCURRENT_BOTS and are tracked exactly like HTTP-created bots. The
-    # previous direct create_task(run_bot_lifecycle(bot_id, use_real_bot)) call
-    # passed a second positional arg the coroutine does not accept, raising
-    # TypeError and leaving the bot stuck in "ready" forever.
-    from app.api.bots import _start_or_queue_bot
-
-    await _start_or_queue_bot(bot_id)
-    started = await store.get_bot(bot_id)
-    return {
-        "bot_id": bot_id,
-        "status": started.status if started else bot.status,
-        "platform": platform,
+    result = {
+        "bot_id": bot.id,
+        "status": bot.status,
+        "platform": bot.meeting_platform,
     }
+    if is_sandbox:
+        result["sandbox"] = True
+    return result
 
 
 async def _tool_cancel_bot(args: dict, account_id: Optional[str]) -> dict:

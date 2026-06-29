@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM python:3.12-slim-bookworm
 
 # ── System dependencies ───────────────────────────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -43,33 +43,38 @@ WORKDIR /app
 
 # Flush Python stdout/stderr immediately so logs appear in Railway even if the process crashes
 ENV PYTHONUNBUFFERED=1
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 # ── Python dependencies ───────────────────────────────────────────────────────
 COPY backend/requirements.txt requirements.txt
 COPY backend/requirements-crypto.txt requirements-crypto.txt
 # Core deps first (fast — no heavy native extensions)
 RUN pip install --no-cache-dir --prefer-binary -r requirements.txt
-# Crypto deps in a separate layer (web3 + eth-account are large).
-# If this step times out or fails, the app still starts and USDC payments return 503.
-RUN pip install --no-cache-dir --prefer-binary -r requirements-crypto.txt || \
-    echo "WARNING: Crypto packages (web3/eth-account) could not be installed. USDC payments will be unavailable."
+# Crypto deps in a separate layer (web3 + eth-account are large); fail the
+# image build if declared payment dependencies cannot be installed.
+RUN pip install --no-cache-dir --prefer-binary -r requirements-crypto.txt
 
 # ── Playwright: install Chromium and its system deps ─────────────────────────
-RUN playwright install chromium
-# playwright install-deps fails on Debian Trixie due to missing ttf-ubuntu-font-family/ttf-unifont
-# Install the Debian equivalents manually
+RUN playwright install chromium && chmod -R a+rX /ms-playwright
+# Install additional font coverage used by headed Chromium sessions.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-unifont \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Application source ────────────────────────────────────────────────────────
-COPY backend/app/ app/
-COPY frontend/ frontend/
-COPY backend/start.sh start.sh
-RUN chmod +x /app/start.sh
+RUN groupadd --system meetingbot \
+    && useradd --system --gid meetingbot --home-dir /home/meetingbot --create-home --shell /usr/sbin/nologin meetingbot
+COPY --chown=meetingbot:meetingbot backend/app/ app/
+COPY --chown=meetingbot:meetingbot frontend/ frontend/
+COPY --chown=meetingbot:meetingbot backend/start.sh start.sh
+RUN chmod +x /app/start.sh \
+    && mkdir -p /app/data/recordings /app/data/screenshots /app/data/debug /tmp/runtime-meetingbot \
+    && chown -R meetingbot:meetingbot /app /tmp/runtime-meetingbot /ms-playwright /home/meetingbot \
+    && chmod 700 /tmp/runtime-meetingbot
 RUN test -f /app/frontend/index.html || (echo "ERROR: frontend/index.html not found in build context" && exit 1)
 
 # Verify all Python imports resolve correctly — fails the build if there are errors
+USER meetingbot
 RUN python -c "from app.main import app; print('Import verification passed')"
 
 EXPOSE 8000

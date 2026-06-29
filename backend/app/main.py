@@ -215,7 +215,11 @@ async def lifespan(app: FastAPI):
             )
 
     # ── Hard production guardrails (security audit H1 / C-2 / W-1) ─────────────
-    _prod_like = settings.ENVIRONMENT.lower() in {"production", "prod", "staging"}
+    _prod_like = (
+        settings.ENVIRONMENT.lower() in {"production", "prod", "staging"}
+        or bool(settings.API_KEY)
+        or not settings.DATABASE_URL.startswith("sqlite")
+    )
     if _prod_like:
         # A weak/short secret silently rotates per-restart (logging everyone out)
         # and is brute-forceable. Fail fast regardless of DB type — the default
@@ -225,11 +229,11 @@ async def lifespan(app: FastAPI):
                 "FATAL: JWT_SECRET must be a strong value (>=32 chars) in "
                 "production. Generate one with:  export JWT_SECRET=$(openssl rand -hex 32)"
             )
-        if not settings.ENCRYPTION_KEY:
-            logger.warning(
-                "⚠ ENCRYPTION_KEY is not set — at-rest encryption of SSO/integration "
-                "tokens and meeting snapshots falls back to JWT_SECRET. Set a separate "
-                "ENCRYPTION_KEY (openssl rand -hex 32) for key separation."
+        if not settings.ENCRYPTION_KEY or len(settings.ENCRYPTION_KEY) < 32:
+            raise SystemExit(
+                "FATAL: ENCRYPTION_KEY must be a strong value (>=32 chars) in "
+                "production. It protects integration tokens, webhook secrets, "
+                "OAuth tokens, and meeting snapshots at rest."
             )
         # The in-memory bot Store is single-process; >1 worker/replica corrupts
         # live bot state and breaks the global MAX_CONCURRENT_BOTS cap. Refuse to

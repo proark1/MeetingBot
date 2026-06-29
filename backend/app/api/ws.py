@@ -1,22 +1,72 @@
 """WebSocket connection manager — broadcasts bot lifecycle events to connected clients.
 
-Each connection is authenticated via a Bearer token passed as the `token` query
-parameter.  Events are filtered so each client only receives events for its own
-bots (superadmin / unauthenticated dev-mode connections receive all events).
+Each connection is authenticated with a short-lived ticket from
+``POST /api/v1/ws/ticket``.  Legacy ``?token=`` auth is still accepted for
+backwards compatibility, but clients should avoid placing long-lived API keys
+or JWTs in WebSocket URLs.
 """
 
 import asyncio
 import hmac
 import json
 import logging
+import secrets
+import time
 from typing import Optional
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 
-from app.deps import SUPERADMIN_ACCOUNT_ID
+from app.deps import SUPERADMIN_ACCOUNT_ID, get_current_account_id
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+_WS_TICKET_TTL_S = 60
+_WS_TICKET_MAX = 5000
+_ws_tickets: dict[str, tuple[Optional[str], float]] = {}
+
+
+def _prune_ws_tickets() -> None:
+    now = time.time()
+    expired = [t for t, (_, exp) in _ws_tickets.items() if exp <= now]
+    for ticket in expired:
+        _ws_tickets.pop(ticket, None)
+    while len(_ws_tickets) > _WS_TICKET_MAX:
+        _ws_tickets.pop(next(iter(_ws_tickets)), None)
+
+
+@router.post("/ws/ticket")
+async def create_ws_ticket(
+    request: Request,
+    account_id: Optional[str] = Depends(get_current_account_id),
+):
+    """Issue a single-use, short-lived WebSocket ticket.
+
+    Browser clients should fetch this endpoint with their normal cookie/Bearer
+    auth, then connect to ``/api/v1/ws?ticket=...``.  The ticket is intentionally
+    short-lived so URL logs never contain long-lived credentials.
+    """
+    from app.config import settings
+    from app import deps as _deps
+
+    if account_id is None and (settings.API_KEY or _deps.require_bearer_in_dev_mode):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    _prune_ws_tickets()
+    ticket = secrets.token_urlsafe(32)
+    _ws_tickets[ticket] = (account_id, time.time() + _WS_TICKET_TTL_S)
+    return {"ticket": ticket, "expires_in": _WS_TICKET_TTL_S}
+
+
+def _consume_ws_ticket(ticket: Optional[str]) -> tuple[bool, bool, Optional[str]]:
+    if not ticket:
+        return False, False, None
+    _prune_ws_tickets()
+    row = _ws_tickets.pop(ticket, None)
+    if row is None:
+        return True, False, None
+    account_id, expires_at = row
+    if expires_at <= time.time():
+        return True, False, None
+    return True, True, account_id
 
 
 async def _resolve_ws_account(token: Optional[str]) -> Optional[str]:
@@ -138,10 +188,16 @@ manager = ConnectionManager()
 
 
 @router.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = None) -> None:
+async def websocket_endpoint(
+    websocket: WebSocket,
+    ticket: Optional[str] = None,
+    token: Optional[str] = None,
+) -> None:
     """Real-time event stream via WebSocket.
 
-    **Authentication:** Pass your API key or JWT as `?token=<key>`.
+    **Authentication:** Prefer `POST /api/v1/ws/ticket`, then connect with
+    `?ticket=<ticket>`. Legacy `?token=<key>` still works for older clients but
+    should be avoided because URLs are commonly logged.
 
     **Message format (JSON):**
     ```json
@@ -166,14 +222,20 @@ async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = None) 
     """
     from app.config import settings
 
-    account_id = await _resolve_ws_account(token)
+    ticket_supplied, ticket_valid, account_id = _consume_ws_ticket(ticket)
+    if ticket_supplied and not ticket_valid:
+        await websocket.close(code=4003, reason="Invalid or expired ticket")
+        return
+    if not ticket_supplied:
+        cookie_token = websocket.cookies.get("mb_token")
+        account_id = await _resolve_ws_account(token or cookie_token)
 
     if account_id == "__db_error__":
         await websocket.close(code=4503, reason="Service temporarily unavailable")
         return
 
     # Reject unauthenticated connections when auth is required
-    if account_id is None and token is not None:
+    if account_id is None and (token is not None or websocket.cookies.get("mb_token")):
         # Token was provided but invalid
         await websocket.close(code=4003, reason="Invalid token")
         return

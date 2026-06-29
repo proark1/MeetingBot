@@ -11,11 +11,10 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
-from slowapi import Limiter
-from slowapi.util import get_remote_address
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
+from app._limiter import limiter as _limiter
 from app.config import settings
 from app.deps import SUPERADMIN_ACCOUNT_ID
 from app.schemas.bot import (
@@ -30,29 +29,6 @@ from app.store import store, BotSession, _now, decode_list_cursor, encode_list_c
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/bot", tags=["Bots"])
-
-
-def _safe_get_remote_address(request: Request) -> str:
-    """Rate-limiter key function that handles missing client (internal ASGI calls).
-
-    X-Forwarded-For is honoured ONLY when ``TRUST_PROXY_HEADERS`` is enabled
-    in settings — otherwise a client could spoof their rate-limit identity by
-    setting the header. Internal ASGI calls (where ``request.client`` is None)
-    fall back to a constant key so the rate limiter still functions but cannot
-    be tricked into bucketing by attacker-controlled values.
-    """
-    if request.client:
-        if settings.TRUST_PROXY_HEADERS:
-            xff = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
-            if xff:
-                return xff
-        return get_remote_address(request)
-    if settings.TRUST_PROXY_HEADERS:
-        return request.headers.get("X-Forwarded-For", "127.0.0.1").split(",")[0].strip() or "127.0.0.1"
-    return "127.0.0.1"
-
-
-_limiter = Limiter(key_func=_safe_get_remote_address)
 
 
 class BotStatsResponse(BaseModel):
@@ -685,6 +661,261 @@ async def validate_meeting_url(payload: ValidateMeetingUrlRequest, request: Requ
     )
 
 
+async def create_bot_with_guardrails(
+    payload: BotCreate,
+    *,
+    account_id: Optional[str],
+    sub_user_id: Optional[str] = None,
+    is_sandbox: bool = False,
+    idempotency_key_raw: str = "",
+) -> tuple[BotSession, bool]:
+    """Create, quota-reserve, and schedule a bot through the shared guardrails.
+
+    Used by both ``POST /bot`` and calendar auto-join so non-HTTP dispatches do
+    not bypass billing, plan limits, feature gates, consent defaults, webhook
+    SSRF checks, idempotency, or scheduler/queue semantics.
+    """
+    _normalized_url = bot_service.normalize_meeting_url(str(payload.meeting_url))
+    _detected_platform = bot_service.detect_platform(_normalized_url)
+    if not bot_service.supports_real_recording(_detected_platform) and not payload.allow_demo_mode:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Real recording is only available for Google Meet, Zoom, Microsoft Teams, "
+                "and onepizza.io. Set allow_demo_mode=true to create a demo transcript for "
+                "recognized unsupported platforms."
+            ),
+        )
+
+    await _validate_workspace_for_create(payload.workspace_id, account_id)
+
+    if account_id and account_id != SUPERADMIN_ACCOUNT_ID and not is_sandbox:
+        from app.db import AsyncSessionLocal
+        from app.services.credit_service import check_credits, check_plan_limit
+        try:
+            async with asyncio.timeout(5):
+                async with AsyncSessionLocal() as db:
+                    await check_credits(account_id, db)
+                await check_plan_limit(account_id)
+        except asyncio.TimeoutError:
+            logger.warning("Plan/credit check timed out for account %s", account_id)
+            raise HTTPException(
+                status_code=503,
+                detail="Plan/credit check timed out — please retry shortly.",
+            )
+
+    if account_id and account_id != SUPERADMIN_ACCOUNT_ID and not is_sandbox:
+        from app.deps import check_feature
+        from app.db import AsyncSessionLocal as _ASL
+        async with _ASL() as _fdb:
+            if getattr(payload, "translation_language", None):
+                await check_feature("translation", account_id, _fdb)
+            if getattr(payload, "pii_redaction", False):
+                await check_feature("pii_redaction", account_id, _fdb)
+            if getattr(payload, "keyword_alerts", None):
+                await check_feature("keyword_alerts", account_id, _fdb)
+
+    _join_at_utc = None
+    if payload.join_at is not None:
+        _join_at_utc = payload.join_at if payload.join_at.tzinfo else payload.join_at.replace(tzinfo=timezone.utc)
+    is_scheduled = _join_at_utc is not None and _join_at_utc > _now()
+
+    from app.config import settings as _settings
+
+    policy_require_consent, policy_message, policy_opt_out_phrase = await _consent_defaults_for_create(
+        account_id,
+        payload.workspace_id,
+    )
+    consent_enabled = bool(payload.consent_enabled or policy_require_consent)
+    consent_message = payload.consent_message or policy_message
+    consent_opt_out_phrase = payload.consent_opt_out_phrase or policy_opt_out_phrase or _settings.CONSENT_OPT_OUT_PHRASE
+
+    keyword_alerts_dicts = [
+        {"keyword": ka.keyword, "webhook_url": ka.webhook_url}
+        for ka in (payload.keyword_alerts or [])
+    ]
+
+    from app.api.webhooks import _block_ssrf
+    if payload.webhook_url:
+        await _block_ssrf(payload.webhook_url)
+    for _ka in (payload.keyword_alerts or []):
+        if _ka.webhook_url:
+            await _block_ssrf(_ka.webhook_url)
+
+    bot = BotSession(
+        id=str(uuid.uuid4()),
+        meeting_url=_normalized_url,
+        meeting_platform=_detected_platform,
+        bot_name=payload.bot_name,
+        status="scheduled" if is_scheduled else "ready",
+        webhook_url=payload.webhook_url,
+        join_at=payload.join_at,
+        analysis_mode=payload.analysis_mode,
+        template=payload.template,
+        prompt_override=payload.prompt_override,
+        vocabulary=payload.vocabulary or [],
+        respond_on_mention=payload.respond_on_mention,
+        mention_response_mode=payload.mention_response_mode,
+        tts_provider=payload.tts_provider,
+        start_muted=payload.start_muted,
+        live_transcription=payload.live_transcription,
+        metadata=payload.metadata,
+        account_id=account_id if account_id != SUPERADMIN_ACCOUNT_ID else None,
+        sub_user_id=sub_user_id,
+        bot_avatar_url=payload.bot_avatar_url,
+        record_video=payload.record_video,
+        consent_enabled=consent_enabled,
+        consent_message=consent_message,
+        consent_opt_out_phrase=consent_opt_out_phrase,
+        keyword_alerts=keyword_alerts_dicts,
+        auto_followup_email=payload.auto_followup_email,
+        workspace_id=payload.workspace_id,
+        transcription_provider=payload.transcription_provider,
+        translation_language=payload.translation_language,
+        pii_redaction=payload.pii_redaction,
+        avg_hourly_rate_usd=payload.avg_hourly_rate_usd,
+        enable_chat_qa=payload.enable_chat_qa,
+        chat_qa_config=(payload.chat_qa.model_dump() if payload.chat_qa else {}),
+        enable_speaker_analytics=payload.enable_speaker_analytics,
+        speaker_analytics_config=(payload.speaker_analytics.model_dump() if payload.speaker_analytics else {}),
+        enable_decision_detection=payload.enable_decision_detection,
+        enable_cross_meeting_memory=payload.enable_cross_meeting_memory,
+        cross_meeting_memory_config=(payload.cross_meeting_memory.model_dump() if payload.cross_meeting_memory else {}),
+        enable_coaching=payload.enable_coaching,
+        coaching_config=(payload.coaching.model_dump() if payload.coaching else {}),
+        agentic_autonomy=payload.agentic_autonomy,
+        agentic_instructions=[ai.model_dump() for ai in (payload.agentic_instructions or [])],
+    )
+    await store.create_bot(bot)
+
+    reserved_monthly_usage = False
+
+    async def _delete_bot_and_release_usage() -> None:
+        await store.delete_bot(bot.id)
+        if reserved_monthly_usage and account_id and account_id != SUPERADMIN_ACCOUNT_ID:
+            try:
+                from app.services.credit_service import decrement_monthly_usage
+                await decrement_monthly_usage(account_id)
+            except Exception as exc:
+                logger.warning("Failed to release monthly usage reservation for %s: %s", account_id, exc)
+
+    if account_id and account_id != SUPERADMIN_ACCOUNT_ID and not is_sandbox:
+        from app.services.credit_service import increment_monthly_usage
+        try:
+            await increment_monthly_usage(account_id)
+            reserved_monthly_usage = True
+        except HTTPException:
+            await _delete_bot_and_release_usage()
+            raise
+        except Exception as exc:
+            logger.error("Failed to increment monthly usage for %s: %s", account_id, exc)
+            await _delete_bot_and_release_usage()
+            raise HTTPException(
+                status_code=503,
+                detail="Could not reserve a usage slot — please retry.",
+            )
+
+    if idempotency_key_raw:
+        from app.db import AsyncSessionLocal
+        from app.models.account import IdempotencyKey as IKModel
+        from datetime import timedelta
+        from sqlalchemy.exc import IntegrityError
+        try:
+            async with AsyncSessionLocal() as db:
+                ik = IKModel(
+                    account_id=account_id,
+                    sub_user_id=sub_user_id,
+                    key=idempotency_key_raw,
+                    bot_id=bot.id,
+                    expires_at=_now() + timedelta(hours=settings.IDEMPOTENCY_TTL_HOURS),
+                )
+                db.add(ik)
+                try:
+                    await db.commit()
+                except IntegrityError:
+                    await db.rollback()
+                    await _delete_bot_and_release_usage()
+                    ik_result = await db.execute(
+                        select(IKModel).where(
+                            IKModel.account_id == account_id,
+                            IKModel.sub_user_id == sub_user_id,
+                            IKModel.key == idempotency_key_raw,
+                        )
+                    )
+                    ik_row = ik_result.scalar_one_or_none()
+                    if ik_row:
+                        existing = await store.get_bot(ik_row.bot_id)
+                        if existing:
+                            return existing, True
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Idempotency-Key conflict — concurrent request in flight",
+                    )
+        except HTTPException:
+            raise
+        except Exception as _ik_exc:
+            logger.exception("Failed to store idempotency key — rolling back bot %s", bot.id)
+            await _delete_bot_and_release_usage()
+            raise HTTPException(status_code=500, detail="Failed to register idempotency key") from _ik_exc
+
+    if is_sandbox:
+        demo_transcript = await intelligence_service.generate_demo_transcript(bot.meeting_url)
+        now = _now()
+        await store.update_bot(
+            bot.id,
+            status="done",
+            transcript=demo_transcript,
+            is_demo_transcript=True,
+            started_at=now,
+            ended_at=now,
+            duration_seconds=0,
+            participants=[e.get("speaker") for e in demo_transcript if e.get("speaker")],
+        )
+        refreshed = await store.get_bot(bot.id)
+        logger.info("Sandbox bot %s completed instantly with demo transcript", bot.id)
+        return refreshed or bot, False
+
+    orchestrator = get_orchestrator()
+    if is_scheduled and orchestrator.enabled:
+        await orchestrator.schedule(bot.id, _join_at_utc)
+        _queue_event.set()
+        logger.info("Bot %s durably scheduled in Redis orchestration", bot.id)
+    elif is_scheduled:
+        delay = max(0, (_join_at_utc - _now()).total_seconds())
+        if delay < 1:
+            await _start_or_queue_bot(bot.id)
+            bot = await store.get_bot(bot.id) or bot
+        else:
+            loop = asyncio.get_running_loop()
+            handle = loop.call_later(delay, _start_scheduled_bot, bot.id)
+            _scheduled_timers[bot.id] = handle
+            logger.info("Bot %s scheduled — will start in %.0f s (no slot held)", bot.id, delay)
+    elif orchestrator.enabled:
+        await _start_or_queue_bot(bot.id)
+        bot = await store.get_bot(bot.id) or bot
+    else:
+        async with _slot_lock:
+            active = _count_active_locked()
+            if active >= settings.MAX_CONCURRENT_BOTS:
+                _bot_queue.append(bot.id)
+                _queue_event.set()
+                bot.status = "queued"
+                queue_pos = _bot_queue.index(bot.id) + 1
+                _spawned = False
+            else:
+                _spawn_lifecycle_task(bot.id)
+                bot.status = "joining"
+                _spawned = True
+        if _spawned:
+            await store.update_bot(bot.id, status="joining")
+        else:
+            await store.update_bot(bot.id, status="queued")
+            logger.info("Bot %s queued (position %d)", bot.id, queue_pos)
+
+    logger.info("Created bot %s for %s (status=%s)", bot.id, bot.meeting_url, bot.status)
+    return bot, False
+
+
 @router.post("", response_model=BotResponse, status_code=201)
 @_limiter.limit("20/minute")
 async def create_bot(payload: BotCreate, request: Request):
@@ -754,265 +985,21 @@ async def create_bot(payload: BotCreate, request: Request):
         except Exception:
             logger.exception("Idempotency key lookup failed")
 
-    _normalized_url = bot_service.normalize_meeting_url(str(payload.meeting_url))
-    _detected_platform = bot_service.detect_platform(_normalized_url)
-    if not bot_service.supports_real_recording(_detected_platform) and not payload.allow_demo_mode:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                "Real recording is only available for Google Meet, Zoom, Microsoft Teams, "
-                "and onepizza.io. Set allow_demo_mode=true to create a demo transcript for "
-                "recognized unsupported platforms."
-            ),
-        )
-
-    await _validate_workspace_for_create(payload.workspace_id, account_id)
-
-    # Check credits and plan limits for per-user accounts (not superadmin / sandbox)
-    is_sandbox = getattr(request.state, "sandbox", False)
-    if account_id and account_id != SUPERADMIN_ACCOUNT_ID and not is_sandbox:
-        from app.db import AsyncSessionLocal
-        from app.services.credit_service import check_credits, check_plan_limit
-        # Bound DB latency so a slow query can't wedge connection-pool slots.
-        try:
-            async with asyncio.timeout(5):
-                async with AsyncSessionLocal() as db:
-                    await check_credits(account_id, db)
-                await check_plan_limit(account_id)
-        except asyncio.TimeoutError:
-            logger.warning("Plan/credit check timed out for account %s", account_id)
-            raise HTTPException(
-                status_code=503,
-                detail="Plan/credit check timed out — please retry shortly.",
-            )
-
-    # Feature gating for premium bot options
-    if account_id and account_id != SUPERADMIN_ACCOUNT_ID and not is_sandbox:
-        from app.deps import check_feature
-        from app.db import AsyncSessionLocal as _ASL
-        async with _ASL() as _fdb:
-            if getattr(payload, "translation_language", None):
-                await check_feature("translation", account_id, _fdb)
-            if getattr(payload, "pii_redaction", False):
-                await check_feature("pii_redaction", account_id, _fdb)
-            if getattr(payload, "keyword_alerts", None):
-                await check_feature("keyword_alerts", account_id, _fdb)
-
-    _join_at_utc = None
-    if payload.join_at is not None:
-        _join_at_utc = payload.join_at if payload.join_at.tzinfo else payload.join_at.replace(tzinfo=timezone.utc)
-    is_scheduled = _join_at_utc is not None and _join_at_utc > _now()
-
-    from app.config import settings as _settings
-
-    # Resolve consent from per-bot request, workspace policy, account policy, and
-    # finally platform defaults. Any admin-required policy can upgrade a bot to
-    # consent-enabled; per-bot values win for wording.
-    policy_require_consent, policy_message, policy_opt_out_phrase = await _consent_defaults_for_create(
-        account_id,
-        payload.workspace_id,
-    )
-    consent_enabled = bool(payload.consent_enabled or policy_require_consent)
-    consent_message = payload.consent_message or policy_message
-    consent_opt_out_phrase = payload.consent_opt_out_phrase or policy_opt_out_phrase or _settings.CONSENT_OPT_OUT_PHRASE
-
-    # Convert keyword alert configs to plain dicts for storage
-    keyword_alerts_dicts = [
-        {"keyword": ka.keyword, "webhook_url": ka.webhook_url}
-        for ka in (payload.keyword_alerts or [])
-    ]
-
-    # SSRF protection: validate per-bot webhook_url before storing
-    from app.api.webhooks import _block_ssrf
-    if payload.webhook_url:
-        await _block_ssrf(payload.webhook_url)
-    for _ka in (payload.keyword_alerts or []):
-        if _ka.webhook_url:
-            await _block_ssrf(_ka.webhook_url)
-
-    bot = BotSession(
-        id=str(uuid.uuid4()),
-        meeting_url=_normalized_url,
-        meeting_platform=_detected_platform,
-        bot_name=payload.bot_name,
-        status="scheduled" if is_scheduled else "ready",
-        webhook_url=payload.webhook_url,
-        join_at=payload.join_at,
-        analysis_mode=payload.analysis_mode,
-        template=payload.template,
-        prompt_override=payload.prompt_override,
-        vocabulary=payload.vocabulary or [],
-        respond_on_mention=payload.respond_on_mention,
-        mention_response_mode=payload.mention_response_mode,
-        tts_provider=payload.tts_provider,
-        start_muted=payload.start_muted,
-        live_transcription=payload.live_transcription,
-        metadata=payload.metadata,
-        account_id=account_id if account_id != SUPERADMIN_ACCOUNT_ID else None,
+    bot, replayed = await create_bot_with_guardrails(
+        payload,
+        account_id=account_id,
         sub_user_id=sub_user_id,
-        bot_avatar_url=payload.bot_avatar_url,
-        record_video=payload.record_video,
-        # New fields
-        consent_enabled=consent_enabled,
-        consent_message=consent_message,
-        consent_opt_out_phrase=consent_opt_out_phrase,
-        keyword_alerts=keyword_alerts_dicts,
-        auto_followup_email=payload.auto_followup_email,
-        workspace_id=payload.workspace_id,
-        transcription_provider=payload.transcription_provider,
-        translation_language=payload.translation_language,
-        pii_redaction=payload.pii_redaction,
-        avg_hourly_rate_usd=payload.avg_hourly_rate_usd,
-        # ── Opt-in advanced features ──────────────────────────────────────────
-        enable_chat_qa=payload.enable_chat_qa,
-        chat_qa_config=(payload.chat_qa.model_dump() if payload.chat_qa else {}),
-        enable_speaker_analytics=payload.enable_speaker_analytics,
-        speaker_analytics_config=(payload.speaker_analytics.model_dump() if payload.speaker_analytics else {}),
-        enable_decision_detection=payload.enable_decision_detection,
-        enable_cross_meeting_memory=payload.enable_cross_meeting_memory,
-        cross_meeting_memory_config=(payload.cross_meeting_memory.model_dump() if payload.cross_meeting_memory else {}),
-        enable_coaching=payload.enable_coaching,
-        coaching_config=(payload.coaching.model_dump() if payload.coaching else {}),
-        agentic_autonomy=payload.agentic_autonomy,
-        agentic_instructions=[ai.model_dump() for ai in (payload.agentic_instructions or [])],
+        is_sandbox=getattr(request.state, "sandbox", False),
+        idempotency_key_raw=idempotency_key_raw,
     )
-    await store.create_bot(bot)
-
-    # Atomically reserve a quota slot (race-safe enforcement of plan limits).
-    # increment_monthly_usage now raises 402 if the cap was reached between
-    # the earlier check_plan_limit and this point — never swallow that.
-    if account_id and account_id != SUPERADMIN_ACCOUNT_ID and not is_sandbox:
-        from app.services.credit_service import increment_monthly_usage
-        try:
-            await increment_monthly_usage(account_id)
-        except HTTPException:
-            await store.delete_bot(bot.id)  # roll back the bot we just stored
-            raise
-        except Exception as exc:
-            # Fail closed: a quota-reservation failure must not let the bot run
-            # un-metered (that would be a quota bypass). Roll back and surface a
-            # 503 so the caller retries rather than silently under-counting.
-            logger.error("Failed to increment monthly usage for %s: %s", account_id, exc)
-            await store.delete_bot(bot.id)
-            raise HTTPException(
-                status_code=503,
-                detail="Could not reserve a usage slot — please retry.",
-            )
-
-    # ── Store idempotency key ─────────────────────────────────────────────────
-    # Registered BEFORE the sandbox fast-path so repeated sandbox (sk_test_*)
-    # calls with the same Idempotency-Key replay the original demo bot instead
-    # of minting a new one each time.
-    if idempotency_key_raw:
-        from app.db import AsyncSessionLocal
-        from app.models.account import IdempotencyKey as IKModel
-        from datetime import timedelta
-        from sqlalchemy.exc import IntegrityError
-        try:
-            async with AsyncSessionLocal() as db:
-                ik = IKModel(
-                    account_id=account_id,
-                    sub_user_id=sub_user_id,
-                    key=idempotency_key_raw,
-                    bot_id=bot.id,
-                    expires_at=_now() + timedelta(hours=settings.IDEMPOTENCY_TTL_HOURS),
-                )
-                db.add(ik)
-                try:
-                    await db.commit()
-                except IntegrityError:
-                    # Concurrent request with the same key won the race — replay
-                    # its bot record instead of creating a duplicate.
-                    await db.rollback()
-                    await store.delete_bot(bot.id)
-                    ik_result = await db.execute(
-                        select(IKModel).where(
-                            IKModel.account_id == account_id,
-                            IKModel.sub_user_id == sub_user_id,
-                            IKModel.key == idempotency_key_raw,
-                        )
-                    )
-                    ik_row = ik_result.scalar_one_or_none()
-                    if ik_row:
-                        existing = await store.get_bot(ik_row.bot_id)
-                        if existing:
-                            from fastapi.responses import JSONResponse
-                            return JSONResponse(
-                                content=_to_response(existing).model_dump(mode="json"),
-                                status_code=200,
-                                headers={"X-Idempotency-Replayed": "true"},
-                            )
-                    raise HTTPException(
-                        status_code=409,
-                        detail="Idempotency-Key conflict — concurrent request in flight",
-                    )
-        except HTTPException:
-            raise
-        except Exception as _ik_exc:
-            logger.exception("Failed to store idempotency key — rolling back bot %s", bot.id)
-            await store.delete_bot(bot.id)
-            raise HTTPException(status_code=500, detail="Failed to register idempotency key") from _ik_exc
-
-    # ── Sandbox fast-path: return demo bot instantly, no credits deducted ─────
-    if is_sandbox:
-        demo_transcript = await intelligence_service.generate_demo_transcript(bot.meeting_url)
-        now = _now()
-        await store.update_bot(
-            bot.id,
-            status="done",
-            transcript=demo_transcript,
-            is_demo_transcript=True,
-            started_at=now,
-            ended_at=now,
-            duration_seconds=0,
-            participants=[e.get("speaker") for e in demo_transcript if e.get("speaker")],
+    if replayed:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            content=_to_response(bot).model_dump(mode="json"),
+            status_code=200,
+            headers={"X-Idempotency-Replayed": "true"},
         )
-        bot = await store.get_bot(bot.id)
-        logger.info("Sandbox bot %s completed instantly with demo transcript", bot.id)
-        return _to_response(bot)
 
-    orchestrator = get_orchestrator()
-    if is_scheduled and orchestrator.enabled:
-        await orchestrator.schedule(bot.id, _join_at_utc)
-        _queue_event.set()
-        logger.info("Bot %s durably scheduled in Redis orchestration", bot.id)
-    elif is_scheduled:
-        # Defer start until join time — does NOT occupy a concurrent slot while waiting.
-        delay = max(0, (_join_at_utc - _now()).total_seconds())
-        if delay < 1:
-            # join_at is essentially now — start immediately instead of scheduling a 0s timer
-            await _start_or_queue_bot(bot.id)
-            bot = await store.get_bot(bot.id)  # refresh status after start/queue
-        else:
-            loop = asyncio.get_running_loop()
-            handle = loop.call_later(delay, _start_scheduled_bot, bot.id)
-            _scheduled_timers[bot.id] = handle
-            logger.info("Bot %s scheduled — will start in %.0f s (no slot held)", bot.id, delay)
-    elif orchestrator.enabled:
-        await _start_or_queue_bot(bot.id)
-        bot = await store.get_bot(bot.id) or bot
-    else:
-        async with _slot_lock:
-            active = _count_active_locked()
-            if active >= settings.MAX_CONCURRENT_BOTS:
-                _bot_queue.append(bot.id)
-                _queue_event.set()
-                bot.status = "queued"
-                queue_pos = _bot_queue.index(bot.id) + 1
-                _spawned = False
-            else:
-                _spawn_lifecycle_task(bot.id)
-                bot.status = "joining"
-                _spawned = True
-        if _spawned:
-            await store.update_bot(bot.id, status="joining")
-        else:
-            await store.update_bot(bot.id, status="queued")
-            logger.info("Bot %s queued (position %d)", bot.id, queue_pos)
-
-    logger.info("Created bot %s for %s (status=%s)", bot.id, bot.meeting_url, bot.status)
-
-    # Audit log — fire-and-forget but tracked so the task isn't GC'd mid-await
     from app.services.audit_log_service import log_event as _audit
     from app.services.background_tasks import tracked_task as _tracked
     _tracked(_audit(

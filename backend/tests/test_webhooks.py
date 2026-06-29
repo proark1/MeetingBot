@@ -63,3 +63,40 @@ async def test_reject_localhost_webhook(auth_client: httpx.AsyncClient):
         json={"url": "http://localhost:8080/hook", "events": ["bot.done"]},
     )
     assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_webhook_secret_persisted_encrypted_and_restored(auth_client: httpx.AsyncClient):
+    """Webhook HMAC secrets should be encrypted in the DB and plaintext in memory."""
+    plaintext = "whsec_" + ("super-secret-value-" * 6)
+    resp = await auth_client.post(
+        "/api/v1/webhook",
+        json={
+            "url": "https://example.com/encrypted-secret-hook",
+            "events": ["bot.done"],
+            "secret": plaintext,
+        },
+    )
+    assert resp.status_code in (200, 201)
+    wh_id = resp.json()["id"]
+
+    from app.db import AsyncSessionLocal
+    from app.models.account import Webhook
+    from app.services.secrets_at_rest import decrypt_text
+    from app.store import load_persisted_webhooks, store
+    from sqlalchemy import select
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(Webhook).where(Webhook.id == wh_id))
+        row = result.scalar_one()
+
+    assert row.secret != plaintext
+    assert decrypt_text(row.secret) == plaintext
+
+    async with store._lock:
+        store._webhooks.clear()
+    loaded = await load_persisted_webhooks()
+    assert loaded >= 1
+    restored = await store.get_webhook(wh_id)
+    assert restored is not None
+    assert restored.secret == plaintext

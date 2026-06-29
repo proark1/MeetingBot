@@ -855,6 +855,7 @@ Machine-readable `error_code` values: `bad_request`, `unauthorized`, `forbidden`
 |----------|---------|-------------|
 | `API_KEY` | — | Legacy superadmin key (bypasses per-user auth; leave empty to use per-user accounts) |
 | `JWT_SECRET` | auto-generated | Secret for signing web UI JWT tokens. Generate a stable value with `openssl rand -hex 32`. If unset, a random secret is generated on each startup (sessions are invalidated on every restart) |
+| `ENCRYPTION_KEY` | — | Separate encryption-at-rest key for OAuth/integration tokens, webhook HMAC secrets, and persisted meeting data. Required for production-like deployments (`ENVIRONMENT=production`/`staging`, non-SQLite DB, or `API_KEY` set). Generate with `openssl rand -hex 32` |
 | `JWT_EXPIRE_HOURS` | `24` | JWT token lifetime in hours |
 | `ADMIN_EMAILS` | — | Comma-separated list of email addresses granted admin access on login (e.g. `admin@acme.com,ops@acme.com`). Accounts in this list get admin access without needing `is_admin=true` in the database |
 
@@ -1258,10 +1259,11 @@ meeting-join ready.
 docker compose up --build
 ```
 
-The `docker-compose.yml` automatically starts a **PostgreSQL 16** service and wires the `DATABASE_URL` and `JWT_SECRET` from your `.env` file. Copy `.env.example` (or create `.env`) with at least:
+The `docker-compose.yml` automatically starts a **PostgreSQL 16** service and wires `DATABASE_URL`, `JWT_SECRET`, and `ENCRYPTION_KEY` from your `.env` file. Copy `.env.example` (or create `.env`) with at least:
 
 ```
 JWT_SECRET=$(openssl rand -hex 32)
+ENCRYPTION_KEY=$(openssl rand -hex 32)
 POSTGRES_PASSWORD=$(openssl rand -hex 16)
 DATABASE_URL=postgresql://meetingbot:${POSTGRES_PASSWORD}@db:5432/meetingbot
 ```

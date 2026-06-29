@@ -891,8 +891,10 @@ class Store:
         try:
             from app.db import AsyncSessionLocal
             from app.models.account import Webhook as WebhookModel
+            from app.services.secrets_at_rest import encrypt_text
             from sqlalchemy import select as _select
 
+            secret_at_rest = encrypt_text(wh.secret)
             async with AsyncSessionLocal() as db:
                 result = await db.execute(_select(WebhookModel).where(WebhookModel.id == wh.id))
                 row = result.scalar_one_or_none()
@@ -902,7 +904,7 @@ class Store:
                         account_id=wh.account_id,
                         url=wh.url,
                         events=json.dumps(wh.events),
-                        secret=wh.secret,
+                        secret=secret_at_rest,
                         is_active=wh.is_active,
                         created_at=wh.created_at,
                         delivery_attempts=wh.delivery_attempts,
@@ -915,7 +917,7 @@ class Store:
                     row.account_id = wh.account_id
                     row.url = wh.url
                     row.events = json.dumps(wh.events)
-                    row.secret = wh.secret
+                    row.secret = secret_at_rest
                     row.is_active = wh.is_active
                     row.delivery_attempts = wh.delivery_attempts
                     row.last_delivery_at = wh.last_delivery_at
@@ -1185,6 +1187,7 @@ async def load_persisted_webhooks() -> int:
     try:
         from app.db import AsyncSessionLocal
         from app.models.account import Webhook as WebhookModel
+        from app.services.secrets_at_rest import decrypt_text
         from sqlalchemy import select as _select
 
         async with AsyncSessionLocal() as db:
@@ -1201,7 +1204,7 @@ async def load_persisted_webhooks() -> int:
                     id=row.id,
                     url=row.url,
                     events=events,
-                    secret=row.secret,
+                    secret=decrypt_text(row.secret),
                     is_active=row.is_active,
                     created_at=(row.created_at if row.created_at and row.created_at.tzinfo else (row.created_at.replace(tzinfo=timezone.utc) if row.created_at else datetime.now(timezone.utc))),
                     delivery_attempts=row.delivery_attempts or 0,

@@ -19,12 +19,9 @@ os.environ["ADMIN_EMAILS"] = "admin@test.com"
 os.environ["MCP_ENABLED"] = "true"
 
 
-# ── Disable every slowapi Limiter instance for tests ────────────────────────
-# The app instantiates `Limiter(...)` in several routers (app/_limiter.py,
-# app/api/auth.py, app/api/bots.py, app/api/webhooks.py, app/api/exports.py).
-# Rather than hunting them down and disabling each one, monkey-patch the class
-# __init__ so every instance is born with .enabled = False. Must run before
-# any app module that creates a Limiter is imported.
+# ── Disable slowapi limiters for tests ───────────────────────────────────────
+# The app uses a shared limiter from app/_limiter.py. Monkey-patch the class
+# __init__ anyway so tests remain insulated if a new router instantiates one.
 from slowapi import Limiter as _Limiter  # noqa: E402
 
 _orig_limiter_init = _Limiter.__init__

@@ -8,11 +8,10 @@ from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from jose import JWTError, jwt
-from slowapi import Limiter as _Limiter
-from slowapi.util import get_remote_address as _get_remote_address
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app._limiter import limiter as _share_limiter
 from app.config import settings
 from app.db import get_db
 from app.deps import _admin_emails
@@ -23,7 +22,6 @@ from app.models.account import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["UI"])
-_share_limiter = _Limiter(key_func=_get_remote_address)
 
 _TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
@@ -141,6 +139,7 @@ async def register_submit(
 ):
     from app.api.auth import _hash_password, generate_api_key, api_key_storage_fields
     import uuid
+    from datetime import datetime, timezone, timedelta
     from decimal import Decimal
 
     # Check password length
@@ -149,15 +148,29 @@ async def register_submit(
             "request": request,
             "account": None,
             "flash": _flash("danger", "Password must be at least 8 characters."),
+            "google_sso_enabled": bool(settings.GOOGLE_CLIENT_ID),
+            "microsoft_sso_enabled": bool(settings.MICROSOFT_CLIENT_ID),
+        })
+
+    normalized_email = (email or "").strip().lower()
+    if not normalized_email:
+        return templates.TemplateResponse(request, "register.html", {
+            "request": request,
+            "account": None,
+            "flash": _flash("danger", "Email is required."),
+            "google_sso_enabled": bool(settings.GOOGLE_CLIENT_ID),
+            "microsoft_sso_enabled": bool(settings.MICROSOFT_CLIENT_ID),
         })
 
     # Check email not taken
-    existing = await db.execute(select(Account).where(Account.email == email))
+    existing = await db.execute(select(Account).where(Account.email == normalized_email))
     if existing.scalar_one_or_none():
         return templates.TemplateResponse(request, "register.html", {
             "request": request,
             "account": None,
             "flash": _flash("danger", "Email already registered. Try logging in."),
+            "google_sso_enabled": bool(settings.GOOGLE_CLIENT_ID),
+            "microsoft_sso_enabled": bool(settings.MICROSOFT_CLIENT_ID),
         })
 
     # Validate account_type
@@ -166,10 +179,11 @@ async def register_submit(
 
     account = Account(
         id=str(uuid.uuid4()),
-        email=email,
+        email=normalized_email,
         hashed_password=_hash_password(password),
         credits_usd=Decimal("0"),
         account_type=account_type,
+        monthly_reset_at=datetime.now(timezone.utc) + timedelta(days=30),
     )
     db.add(account)
 
@@ -182,6 +196,15 @@ async def register_submit(
     )
     db.add(api_key)
     await db.commit()
+
+    from app.services.audit_log_service import log_event as _audit
+    from app.services.background_tasks import tracked_task as _tracked
+    _tracked(_audit(
+        account_id=account.id,
+        action="auth.register",
+        ip_address=request.client.host if request.client else None,
+        actor_email=account.email,
+    ), name=f"audit-ui-register-{account.id}")
 
     # Log in immediately
     from app.api.auth import _create_jwt
@@ -211,10 +234,37 @@ async def login_submit(
     db: AsyncSession = Depends(get_db),
 ):
     from app.api.auth import _verify_password, _create_jwt
+    from datetime import datetime, timezone, timedelta
 
-    result = await db.execute(select(Account).where(Account.email == email))
+    normalized_email = (email or "").strip().lower()
+    result = await db.execute(select(Account).where(Account.email == normalized_email))
     account = result.scalar_one_or_none()
+
+    _LOCKOUT_ATTEMPTS = 10
+    _LOCKOUT_MINUTES = 30
+    if account and (account.failed_login_attempts or 0) >= _LOCKOUT_ATTEMPTS:
+        lockout_until = (
+            account.last_failed_login_at + timedelta(minutes=_LOCKOUT_MINUTES)
+            if account.last_failed_login_at
+            else None
+        )
+        if lockout_until and lockout_until.tzinfo is None:
+            lockout_until = lockout_until.replace(tzinfo=timezone.utc)
+        if lockout_until and datetime.now(timezone.utc) < lockout_until:
+            return templates.TemplateResponse(request, "login.html", {
+                "request": request,
+                "account": None,
+                "flash": _flash("danger", f"Account temporarily locked. Try again after {lockout_until.strftime('%H:%M UTC')}."),
+                "google_sso_enabled": bool(settings.GOOGLE_CLIENT_ID),
+                "microsoft_sso_enabled": bool(settings.MICROSOFT_CLIENT_ID),
+            }, status_code=429)
+        account.failed_login_attempts = 0
+
     if not account or not _verify_password(password, account.hashed_password):
+        if account:
+            account.failed_login_attempts = (account.failed_login_attempts or 0) + 1
+            account.last_failed_login_at = datetime.now(timezone.utc)
+            await db.commit()
         return templates.TemplateResponse(request, "login.html", {
             "request": request,
             "account": None,
@@ -222,8 +272,29 @@ async def login_submit(
             "google_sso_enabled": bool(settings.GOOGLE_CLIENT_ID),
             "microsoft_sso_enabled": bool(settings.MICROSOFT_CLIENT_ID),
         })
+    if not account.is_active:
+        return templates.TemplateResponse(request, "login.html", {
+            "request": request,
+            "account": None,
+            "flash": _flash("danger", "Account is disabled."),
+            "google_sso_enabled": bool(settings.GOOGLE_CLIENT_ID),
+            "microsoft_sso_enabled": bool(settings.MICROSOFT_CLIENT_ID),
+        }, status_code=403)
+
+    if account.failed_login_attempts:
+        account.failed_login_attempts = 0
+        account.last_failed_login_at = None
+        await db.commit()
 
     token = _create_jwt(account.id)
+    from app.services.audit_log_service import log_event as _audit
+    from app.services.background_tasks import tracked_task as _tracked
+    _tracked(_audit(
+        account_id=account.id,
+        action="auth.login",
+        ip_address=request.client.host if request.client else None,
+        actor_email=account.email,
+    ), name=f"audit-ui-login-{account.id}")
     response = RedirectResponse("/dashboard", status_code=303)
     response.set_cookie(_COOKIE, token, httponly=True, samesite="lax", secure=True, max_age=settings.JWT_EXPIRE_HOURS * 3600)
     return response

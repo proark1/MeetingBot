@@ -174,8 +174,8 @@ class Webhook(Base):
     account_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
     url: Mapped[str] = mapped_column(String(2048), nullable=False)
     events: Mapped[str] = mapped_column(Text, nullable=False)  # JSON-serialized list of event names
-    # Stored in plaintext — required to compute HMAC-SHA256 signatures on outgoing deliveries
-    secret: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    # Encrypted at rest; decrypted into memory only for outbound HMAC signing.
+    secret: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     delivery_attempts: Mapped[int] = mapped_column(Integer, default=0)

@@ -20,6 +20,7 @@ import os
 import re
 import struct
 import subprocess
+import tempfile
 import time
 from collections import defaultdict, deque
 from pathlib import Path
@@ -42,6 +43,14 @@ _WAV_HEADER_SIZE = 44          # standard WAV header length (bytes)
 _PCM_BYTES_PER_S = 32_000      # 16 kHz, mono, s16le = 32 000 bytes/s
 SCREENSHOT_DIR = Path("/app/data/screenshots")
 _SCREENSHOT_MAX_AGE_S = 7 * 86_400  # 7 days
+
+
+def _default_runtime_dir() -> str:
+    return str(Path(tempfile.gettempdir()) / "runtime-meetingbot")
+
+
+def _pulse_runtime_dir() -> str:
+    return os.environ.get("XDG_RUNTIME_DIR") or _default_runtime_dir()
 
 
 def _prune_screenshots() -> None:
@@ -145,7 +154,7 @@ def _start_pulseaudio() -> bool:
     if _pulse_ok():
         return True
     try:
-        rt = "/tmp/runtime-meetingbot"
+        rt = _pulse_runtime_dir()
         os.makedirs(rt, exist_ok=True)
         env = {**os.environ, "XDG_RUNTIME_DIR": rt}
         subprocess.run(
@@ -560,7 +569,7 @@ def _start_ffmpeg(
         # Carry PulseAudio server address explicitly so ffmpeg connects to the
         # same server even if XDG_RUNTIME_DIR is not set in the child env.
         pulse_env = {**os.environ}
-        rt = os.environ.get("XDG_RUNTIME_DIR", "/tmp/runtime-meetingbot")
+        rt = _pulse_runtime_dir()
         pulse_env.setdefault("PULSE_SERVER", f"unix:{rt}/pulse/native")
 
         # Capture stderr to a file so we can diagnose "no audio captured"
@@ -2580,7 +2589,10 @@ import hashlib as _chat_hashlib
 
 def _chat_message_id(line: str) -> str:
     """Stable short hash used to dedup chat messages across polls."""
-    return _chat_hashlib.sha1(line.encode("utf-8", errors="ignore")).hexdigest()[:16]
+    return _chat_hashlib.blake2s(
+        line.encode("utf-8", errors="ignore"),
+        digest_size=8,
+    ).hexdigest()
 
 
 async def _chat_capture_loop(
@@ -4263,9 +4275,8 @@ async def run_browser_bot(
         # Explicitly point Chrome at the PulseAudio server so it does not
         # fall back to a dummy audio output or PipeWire, both of which would
         # mean no audio reaches our null-sink monitor (and thus no recording).
-        # start.sh sets XDG_RUNTIME_DIR=/tmp/runtime-meetingbot, so the socket
-        # lives at /tmp/runtime-meetingbot/pulse/native.
-        rt = os.environ.get("XDG_RUNTIME_DIR", "/tmp/runtime-meetingbot")
+        # start.sh sets XDG_RUNTIME_DIR, so the socket lives below that runtime dir.
+        rt = _pulse_runtime_dir()
         default_pulse = f"unix:{rt}/pulse/native"
         env["PULSE_SERVER"] = os.environ.get("PULSE_SERVER", default_pulse)
         env["PULSE_SINK"]   = pulse_sink

@@ -28,6 +28,7 @@ jobs:
           DATABASE_URL: "sqlite+aiosqlite:///./openapi-check.db"
           JWT_SECRET: "ci-only-not-a-real-secret"
           API_KEY: "ci-superadmin"
+          ENCRYPTION_KEY: "ci-only-openapi-encryption-key-32chars"
           CORS_ORIGINS: "*"
         run: |
           python scripts/generate_openapi.py --check --admin

@@ -12,11 +12,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.security import OAuth2PasswordRequestForm
 from jose import jwt
 from pydantic import BaseModel, EmailStr, Field
-from slowapi import Limiter
-from slowapi.util import get_remote_address
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app._limiter import limiter as _limiter
 from app.config import settings
 from app.db import get_db
 from app.deps import get_current_account_id, SUPERADMIN_ACCOUNT_ID
@@ -24,7 +23,6 @@ from app.models.account import Account, ApiKey
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["Auth"])
-_limiter = Limiter(key_func=get_remote_address)
 
 
 def _hash_password(password: str) -> str:

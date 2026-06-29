@@ -8,16 +8,14 @@ import asyncio
 import logging
 
 from fastapi import APIRouter, HTTPException, Request as _Request
-from slowapi import Limiter as _Limiter
-from slowapi.util import get_remote_address as _get_remote_address
 
+from app._limiter import limiter as _limiter
 from app.deps import SUPERADMIN_ACCOUNT_ID
 from app.schemas.webhook import WebhookCreate, WebhookResponse
 from app.store import store, WebhookEntry
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/webhook", tags=["Webhooks"])
-_limiter = _Limiter(key_func=_get_remote_address)
 
 # All supported webhook event names (wildcard "*" also accepted)
 WEBHOOK_EVENTS: list[str] = [

@@ -21,9 +21,11 @@ def _client_ip(request) -> str:
         if settings.TRUST_PROXY_HEADERS:
             xff = request.headers.get("x-forwarded-for", "")
             if xff:
-                return xff.split(",")[0].strip()
+                return xff.split(",")[0].strip() or "127.0.0.1"
     except Exception:
         pass
+    if getattr(request, "client", None) is None:
+        return "127.0.0.1"
     return get_remote_address(request)
 
 

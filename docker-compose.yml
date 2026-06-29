@@ -32,6 +32,8 @@ services:
       - DATABASE_URL=${DATABASE_URL}
       # JWT — required, must be set to a strong secret
       - JWT_SECRET=${JWT_SECRET}
+      # Encryption-at-rest key — required with PostgreSQL/API-key deployments
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
       # AI providers — set at least one; Anthropic takes precedence when both are set
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}

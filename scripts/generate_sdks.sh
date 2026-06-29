@@ -34,7 +34,7 @@ echo "Regenerating SDKs from $(basename "$SCHEMA") ($(wc -c < "$SCHEMA") bytes)"
 # ── Python SDK (typed httpx client) ───────────────────────────────────────────
 echo
 echo "── Python: openapi-python-client → sdk/python/generated/ ──"
-python -m pip install --quiet --upgrade "openapi-python-client>=0.21"
+python -m pip install --quiet --upgrade "openapi-python-client>=0.21,<0.22"
 rm -rf "$REPO_ROOT/sdk/python/generated"
 (
   cd "$REPO_ROOT/sdk/python"
@@ -42,35 +42,25 @@ rm -rf "$REPO_ROOT/sdk/python/generated"
     --path "$SCHEMA" \
     --output-path generated \
     --overwrite \
-    --meta=none \
-    || echo "openapi-python-client failed (non-fatal — hand-written SDK still works)"
+    --meta=none
 )
 
 # ── TypeScript types-only file ────────────────────────────────────────────────
 echo
 echo "── TypeScript: openapi-typescript → sdk/js/src/openapi-types.ts ──"
-if command -v npx >/dev/null 2>&1; then
-  npx --yes openapi-typescript "$SCHEMA" \
-    --output "$REPO_ROOT/sdk/js/src/openapi-types.ts" \
-    || echo "openapi-typescript failed (non-fatal — hand-written SDK still works)"
-else
-  echo "SKIP: npx not on PATH"
-fi
+command -v npx >/dev/null 2>&1 || { echo "ERROR: npx not on PATH" >&2; exit 1; }
+npx --yes openapi-typescript "$SCHEMA" \
+  --output "$REPO_ROOT/sdk/js/src/openapi-types.ts"
 
 # ── Full TypeScript client (optional) ─────────────────────────────────────────
 echo
 echo "── TypeScript: openapi-typescript-codegen → sdk/js/generated/ ──"
-if command -v npx >/dev/null 2>&1; then
-  rm -rf "$REPO_ROOT/sdk/js/generated"
-  npx --yes openapi-typescript-codegen \
-    --input "$SCHEMA" \
-    --output "$REPO_ROOT/sdk/js/generated" \
-    --client fetch \
-    --useUnionTypes \
-    || echo "openapi-typescript-codegen failed (non-fatal — types-only file still produced)"
-else
-  echo "SKIP: npx not on PATH"
-fi
+rm -rf "$REPO_ROOT/sdk/js/generated"
+npx --yes openapi-typescript-codegen \
+  --input "$SCHEMA" \
+  --output "$REPO_ROOT/sdk/js/generated" \
+  --client fetch \
+  --useUnionTypes
 
 echo
 echo "Done."

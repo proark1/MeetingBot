@@ -44,6 +44,14 @@ def _get_tts_http_client() -> httpx.AsyncClient:
 # always drains through PulseAudio before the next one starts.
 _tts_play_lock: asyncio.Lock | None = None
 
+
+def _pulse_runtime_dir() -> str:
+    return os.environ.get("XDG_RUNTIME_DIR") or os.path.join(
+        tempfile.gettempdir(),
+        "runtime-meetingbot",
+    )
+
+
 def _get_play_lock() -> asyncio.Lock:
     global _tts_play_lock
     if _tts_play_lock is None:
@@ -223,7 +231,7 @@ async def play_audio(path: str, sink: str) -> None:
 
     try:
         pulse_env = {**os.environ}
-        rt = os.environ.get("XDG_RUNTIME_DIR", "/tmp/runtime-meetingbot")
+        rt = _pulse_runtime_dir()
         pulse_env.setdefault("PULSE_SERVER", f"unix:{rt}/pulse/native")
         pulse_env["PULSE_SINK"] = sink
 

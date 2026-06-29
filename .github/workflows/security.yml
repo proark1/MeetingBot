@@ -20,17 +20,13 @@ jobs:
       - name: Install security tools
         run: pip install pip-audit bandit
 
-      # Dependency CVE scan against the pinned requirements. Advisory for now
-      # (continue-on-error) so a newly-disclosed CVE doesn't block unrelated
-      # PRs — flip to blocking once the dependency backlog is triaged.
+      # Dependency CVE scan against the pinned requirements.
       - name: pip-audit (dependency CVEs)
         working-directory: backend
-        continue-on-error: true
         run: pip-audit -r requirements.txt
 
       # Static analysis of application code. -ll = medium+ severity,
-      # -ii = medium+ confidence (cuts false positives). Advisory for now.
+      # -ii = medium+ confidence (cuts false positives).
       - name: bandit (SAST)
         working-directory: backend
-        continue-on-error: true
         run: bandit -r app/ -ll -ii

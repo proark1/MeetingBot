@@ -394,7 +394,7 @@ async function sendTest() {
 }
 
 // ── WebSocket live events ──────────────────────────────────────────────────────
-function toggleWs() {
+async function toggleWs() {
   if (wsConn) {
     wsConn.close();
     wsConn = null;
@@ -404,7 +404,25 @@ function toggleWs() {
   }
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   const token = getAccessToken();
-  const url = `${proto}://${location.host}/api/v1/ws${token ? '?token=' + token : ''}`;
+  let url = `${proto}://${location.host}/api/v1/ws`;
+  try {
+    const headers = token ? {'Authorization': `Bearer ${token}`} : {};
+    const ticketResp = await fetch('/api/v1/ws/ticket', {
+      method: 'POST',
+      headers,
+      credentials: 'same-origin',
+    });
+    if (ticketResp.ok) {
+      const ticketData = await ticketResp.json();
+      if (ticketData.ticket) {
+        url += `?ticket=${encodeURIComponent(ticketData.ticket)}`;
+      }
+    } else if (token) {
+      url += `?token=${encodeURIComponent(token)}`;
+    }
+  } catch (_) {
+    if (token) url += `?token=${encodeURIComponent(token)}`;
+  }
   wsConn = new WebSocket(url);
   wsConn.onopen = () => {
     document.getElementById('wsBtn').textContent = 'Disconnect';

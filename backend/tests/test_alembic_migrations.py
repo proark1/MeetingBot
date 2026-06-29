@@ -5,6 +5,7 @@ produces the full table set, and that there is a single migration head (no
 accidentally-forked revision tree).
 """
 import os
+import sys
 import tempfile
 from pathlib import Path
 
@@ -50,7 +51,7 @@ def test_baseline_upgrade_creates_schema():
         env.setdefault("CORS_ORIGINS", "*")
 
         result = subprocess.run(
-            ["alembic", "upgrade", "head"],
+            [sys.executable, "-m", "alembic", "upgrade", "head"],
             cwd=str(_BACKEND), env=env, capture_output=True, text=True,
         )
         assert result.returncode == 0, f"alembic upgrade failed:\n{result.stderr}"

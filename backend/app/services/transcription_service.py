@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import re
+import tempfile
 import time
 import uuid
 from typing import Any, Optional
@@ -112,7 +113,8 @@ async def _split_audio(audio_path: str, chunk_s: int = _CHUNK_SIZE_S) -> list[st
     Returns a sorted list of temp file paths (caller must delete them).
     """
     uid = uuid.uuid4().hex
-    pattern = f"/tmp/chunk_{uid}_%03d.wav"
+    chunk_pattern = os.path.join(tempfile.gettempdir(), f"chunk_{uid}_*.wav")
+    pattern = os.path.join(tempfile.gettempdir(), f"chunk_{uid}_%03d.wav")
     proc = await asyncio.create_subprocess_exec(
         "ffmpeg", "-y", "-i", audio_path,
         "-f", "segment", "-segment_time", str(chunk_s),
@@ -126,15 +128,14 @@ async def _split_audio(audio_path: str, chunk_s: int = _CHUNK_SIZE_S) -> list[st
         proc.kill()
         await proc.wait()
         logger.error("ffmpeg audio split timed out after 600s for %s", audio_path)
-        # Clean up any partial chunk files ffmpeg wrote before being killed —
-        # repeated timeouts would otherwise leak /tmp space until disk exhaustion.
-        for partial in _glob.glob(f"/tmp/chunk_{uid}_*.wav"):
+        # Clean up any partial chunk files ffmpeg wrote before being killed.
+        for partial in _glob.glob(chunk_pattern):
             try:
                 os.unlink(partial)
             except OSError:
                 pass
         return []
-    chunks = sorted(_glob.glob(f"/tmp/chunk_{uid}_*.wav"))
+    chunks = sorted(_glob.glob(chunk_pattern))
     logger.info("Split %s into %d chunk(s)", audio_path, len(chunks))
     return chunks
 

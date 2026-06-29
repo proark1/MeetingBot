@@ -137,9 +137,24 @@ let _wsRetryDelay = 1000;
 let _ws = null;
 let _wsKeepaliveTimer = null;
 
-function connectWS() {
+async function connectWS() {
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
-  _ws = new WebSocket(`${proto}//${location.host}/api/v1/ws`);
+  let url = `${proto}//${location.host}/api/v1/ws`;
+  try {
+    const ticketResp = await fetch("/api/v1/ws/ticket", {
+      method: "POST",
+      credentials: "same-origin",
+    });
+    if (ticketResp.ok) {
+      const ticketData = await ticketResp.json();
+      if (ticketData.ticket) {
+        url += `?ticket=${encodeURIComponent(ticketData.ticket)}`;
+      }
+    }
+  } catch (_) {
+    // Dev-mode websocket connections can still be unauthenticated.
+  }
+  _ws = new WebSocket(url);
 
   _ws.onopen = () => {
     _wsRetryDelay = 1000;

@@ -13,18 +13,15 @@ import hmac
 import ipaddress
 import json
 import logging
+import ssl
 import socket
 from datetime import datetime, timezone, timedelta
 from urllib.parse import urlparse
-
-import httpx
 
 from app.api.ws import manager as ws_manager
 from app.config import settings
 
 logger = logging.getLogger(__name__)
-
-_http_client: httpx.AsyncClient | None = None
 
 # Per-webhook locks to prevent concurrent state mutation race conditions.
 # Uses an LRU-bounded dict to prevent unbounded memory growth.
@@ -80,25 +77,9 @@ def _get_webhook_lock(wh_id: str) -> asyncio.Lock:
     return lock
 
 
-def _get_client() -> httpx.AsyncClient:
-    global _http_client
-    if _http_client is None or _http_client.is_closed:
-        _http_client = httpx.AsyncClient(
-            timeout=settings.WEBHOOK_TIMEOUT_SECONDS,
-            follow_redirects=False,
-            limits=httpx.Limits(
-                max_connections=100,
-                max_keepalive_connections=20,
-                keepalive_expiry=30,
-            ),
-        )
-    return _http_client
-
-
 async def close_http_client() -> None:
-    global _http_client
-    if _http_client and not _http_client.is_closed:
-        await _http_client.aclose()
+    """Compatibility shutdown hook; pinned webhook delivery owns no async client."""
+    return None
 
 
 def _retry_delays() -> list[int]:
@@ -236,6 +217,7 @@ SSRF_BLOCKED_NETS: list = [ipaddress.ip_network(n) for n in [
     "fe80::/10",         # IPv6 link-local
 ]]
 SSRF_ALLOWED_SCHEMES = {"http", "https"}
+SSRF_LOCALHOST_NAMES = {"localhost", ipaddress.ip_address(0).compressed}
 
 
 def _is_blocked_ip(addr) -> bool:
@@ -247,17 +229,15 @@ def _is_blocked_ip(addr) -> bool:
 async def check_url_ssrf(url: str) -> "str | None":
     """Resolve a URL's hostname and return ``None`` if safe, else an error string.
 
-    Defends against DNS-rebinding/TOCTOU SSRF: every delivery resolves the host
-    fresh and verifies the IP isn't private/loopback/cloud-metadata. Note: there
-    is still a tiny window between this resolution and httpx's own resolution
-    where DNS could flip — pinning the connection IP would close it fully and
-    is left as a future hardening step.
+    Used at registration/update time. Delivery uses a stricter path that
+    resolves the host, validates every returned address, and connects to the
+    exact validated IP for the HTTP attempt.
     """
     parsed = urlparse(url)
     if parsed.scheme not in SSRF_ALLOWED_SCHEMES:
         return f"scheme {parsed.scheme!r} not allowed"
     host = parsed.hostname or ""
-    if not host or host.lower() in ("localhost", "0.0.0.0"):
+    if not host or host.lower() in SSRF_LOCALHOST_NAMES:
         return "host targets localhost"
 
     # IP literal — check directly
@@ -307,6 +287,121 @@ async def check_url_ssrf(url: str) -> "str | None":
 
 # ── Single-attempt HTTP delivery ───────────────────────────────────────────────
 
+def _header_host(parsed) -> str:
+    host = parsed.hostname or ""
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    if parsed.port:
+        return f"{host}:{parsed.port}"
+    return host
+
+
+def _post_pinned_sync(url: str, body: str, headers: dict, ip: str) -> "tuple[int, str]":
+    """POST to a pre-validated IP while preserving HTTP Host and TLS SNI.
+
+    httpx validates a host, then performs its own DNS lookup later. A malicious
+    DNS server can rebind between those two steps. This small HTTP/1.1 client
+    connects to the exact IP address we already validated, while HTTPS still
+    verifies the certificate against the original hostname via SNI.
+    """
+    parsed = urlparse(url)
+    host = parsed.hostname or ""
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    target = parsed.path or "/"
+    if parsed.query:
+        target = f"{target}?{parsed.query}"
+
+    body_bytes = body.encode()
+    request_headers = {
+        "Host": _header_host(parsed),
+        "Content-Length": str(len(body_bytes)),
+        "Connection": "close",
+        **headers,
+    }
+    header_blob = "".join(
+        f"{name}: {str(value).replace(chr(13), '').replace(chr(10), '')}\r\n"
+        for name, value in request_headers.items()
+    )
+    request = (
+        f"POST {target} HTTP/1.1\r\n"
+        f"{header_blob}\r\n"
+    ).encode() + body_bytes
+
+    timeout = max(1, int(settings.WEBHOOK_TIMEOUT_SECONDS))
+    with socket.create_connection((ip, port), timeout=timeout) as sock:
+        sock.settimeout(timeout)
+        if parsed.scheme == "https":
+            ctx = ssl.create_default_context()
+            with ctx.wrap_socket(sock, server_hostname=host) as tls_sock:
+                tls_sock.sendall(request)
+                raw = _recv_response(tls_sock)
+        else:
+            sock.sendall(request)
+            raw = _recv_response(sock)
+
+    header_part, _, response_body = raw.partition(b"\r\n\r\n")
+    status_line = header_part.splitlines()[0].decode("iso-8859-1", errors="replace")
+    try:
+        status_code = int(status_line.split()[1])
+    except Exception as exc:
+        raise RuntimeError(f"Malformed HTTP response: {status_line!r}") from exc
+    return status_code, response_body[:2000].decode("utf-8", errors="replace")
+
+
+def _recv_response(sock) -> bytes:
+    chunks: list[bytes] = []
+    total = 0
+    max_bytes = 65536
+    while total < max_bytes:
+        chunk = sock.recv(min(8192, max_bytes - total))
+        if not chunk:
+            break
+        chunks.append(chunk)
+        total += len(chunk)
+    return b"".join(chunks)
+
+
+async def _resolve_public_ips(url: str) -> "tuple[list[str], str | None]":
+    parsed = urlparse(url)
+    host = parsed.hostname or ""
+    if parsed.scheme not in SSRF_ALLOWED_SCHEMES:
+        return [], f"scheme {parsed.scheme!r} not allowed"
+    if not host or host.lower() in SSRF_LOCALHOST_NAMES:
+        return [], "host targets localhost"
+
+    try:
+        addr = ipaddress.ip_address(host)
+        if _is_blocked_ip(addr):
+            return [], f"address {host} is private/reserved"
+        return [str(addr)], None
+    except ValueError:
+        pass
+
+    try:
+        infos = await asyncio.wait_for(
+            asyncio.to_thread(socket.getaddrinfo, host, parsed.port or (443 if parsed.scheme == "https" else 80)),
+            timeout=5.0,
+        )
+    except asyncio.TimeoutError:
+        return [], "DNS resolution timed out"
+    except socket.gaierror as exc:
+        return [], f"DNS resolution failed: {exc}"
+
+    ips: list[str] = []
+    for *_, sockaddr in infos:
+        try:
+            addr = ipaddress.ip_address(sockaddr[0])
+        except ValueError:
+            continue
+        if _is_blocked_ip(addr):
+            return [], f"resolves to private/reserved address ({sockaddr[0]})"
+        if str(addr) not in ips:
+            ips.append(str(addr))
+    if not ips:
+        return [], "DNS resolution returned no usable addresses"
+    return ips, None
+
+
 async def _attempt_delivery(url: str, body: str, headers: dict) -> "tuple[int | None, str]":
     """Fire a single HTTP POST.  Returns (status_code, response_text).
 
@@ -314,19 +409,21 @@ async def _attempt_delivery(url: str, body: str, headers: dict) -> "tuple[int | 
     TOCTOU defense) — registration-time validation isn't enough because DNS
     can change between register and fire.
     """
-    ssrf_err = await check_url_ssrf(url)
+    ips, ssrf_err = await _resolve_public_ips(url)
     if ssrf_err is not None:
         logger.warning("Webhook delivery blocked by SSRF guard  url=%s  reason=%s", url, ssrf_err)
         # Return 403 (not None) so _classify_status marks this as permanent "fail"
         # rather than "retry".  A blocked URL will not become unblocked on retry.
         return 403, f"SSRF blocked: {ssrf_err}"
 
-    client = _get_client()
-    try:
-        resp = await client.post(url, content=body, headers=headers)
-        return resp.status_code, resp.text[:2000]
-    except Exception as exc:
-        return None, str(exc)
+    last_exc: Exception | None = None
+    for ip in ips:
+        try:
+            return await asyncio.to_thread(_post_pinned_sync, url, body, headers, ip)
+        except Exception as exc:
+            last_exc = exc
+            logger.debug("Pinned webhook POST failed url=%s ip=%s: %s", url, ip, exc)
+    return None, str(last_exc) if last_exc else "delivery failed"
 
 
 # ── Core dispatch ──────────────────────────────────────────────────────────────
