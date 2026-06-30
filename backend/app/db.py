@@ -172,12 +172,15 @@ def _migrate_schema(conn) -> None:
         ]
         existing_tables = set(inspect(conn).get_table_names())
         for idx_sql in _pg_indexes:
-            _tbl = idx_sql.split(" ON ")[1].split(" ")[0]
-            if _tbl in existing_tables:
-                try:
-                    conn.execute(text(idx_sql))
-                except Exception as _idx_exc:
-                    _log.debug("Index migration skipped (already exists): %s", _idx_exc)
+            # DROP INDEX statements have no "ON" clause; execute them directly.
+            if " ON " in idx_sql:
+                _tbl = idx_sql.split(" ON ")[1].split(" ")[0]
+                if _tbl not in existing_tables:
+                    continue
+            try:
+                conn.execute(text(idx_sql))
+            except Exception as _idx_exc:
+                _log.debug("Index migration skipped (already exists or schema mismatch): %s", _idx_exc)
         return
 
     # ── SQLite fallback (dev/test only) — inspector-based checks ──────────────
