@@ -46,6 +46,32 @@ _BOT_STATUS_LABELS = {
     "cancelled": "Cancelled",
 }
 
+_WEBHOOK_EVENT_DESCRIPTIONS = {
+    "bot.joining": "Bot is connecting to the meeting",
+    "bot.in_call": "Bot has joined and is recording",
+    "bot.call_ended": "Meeting ended and processing is starting",
+    "bot.transcript_ready": "Raw transcript is available",
+    "bot.analysis_ready": "AI analysis is complete",
+    "bot.done": "All processing finished",
+    "bot.error": "Bot encountered an error",
+    "bot.cancelled": "Bot was cancelled",
+    "bot.keyword_alert": "Configured keyword was detected",
+    "bot.live_transcript": "Live transcript entry during the call",
+    "bot.live_transcript_translated": "Translated live transcript entry",
+    "bot.live_chat_message": "Live meeting chat message",
+    "bot.live_action_items": "AI-extracted action items during the call",
+    "bot.live_keyword_alert": "Real-time keyword alert with sentiment",
+    "bot.recurring_intel_ready": "Recurring meeting intelligence is ready",
+    "bot.decision_detected": "Decision or commitment was detected",
+    "bot.coaching_tip": "Real-time host coaching tip",
+    "bot.coaching_alert": "Speaker or meeting-dynamics alert",
+    "bot.speaker_analytics": "Live speaker analytics snapshot",
+    "bot.agentic_action": "Agentic instruction was delivered",
+    "action_item.due_soon": "Tracked action item is nearing its due date",
+    "action_item.overdue": "Tracked action item is overdue",
+    "bot.test": "Test event from the webhook tools",
+}
+
 
 def _format_status(value: str) -> str:
     """Render a bot status with a stable, human-friendly label."""
@@ -61,6 +87,49 @@ _COOKIE = "mb_token"
 
 def _get_token_from_request(request: Request) -> Optional[str]:
     return request.cookies.get(_COOKIE)
+
+
+def _wants_json(request: Request) -> bool:
+    return "application/json" in request.headers.get("Accept", "").lower()
+
+
+async def _call_internal_api_json(
+    request: Request,
+    method: str,
+    path: str,
+    *,
+    json_body: Optional[dict] = None,
+    params: Optional[dict] = None,
+) -> tuple[dict, int]:
+    """Call an authenticated JSON API endpoint using the dashboard JWT cookie."""
+    token = _get_token_from_request(request)
+    if not token:
+        return {"detail": "Unauthenticated"}, 401
+
+    import httpx
+    from app.main import app as _app
+
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=_app),
+        base_url="http://internal",
+    ) as client:
+        resp = await client.request(
+            method,
+            path,
+            json=json_body,
+            params=params,
+            headers={"Authorization": f"Bearer {token}", "X-Forwarded-For": client_ip},
+        )
+    try:
+        data = resp.json()
+    except Exception:
+        data = {"detail": resp.text or resp.reason_phrase}
+    return data, resp.status_code
+
+
+def _json_response(data: dict, status_code: int) -> JSONResponse:
+    return JSONResponse(data, status_code=status_code)
 
 
 async def _get_account_from_request(request: Request, db: AsyncSession) -> Optional[Account]:
@@ -436,6 +505,8 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
         flash = _flash("danger", "Invalid Ethereum address. Must be 0x followed by 40 hex characters.")
     if request.query_params.get("wallet") == "taken":
         flash = _flash("danger", "This wallet address is already linked to another account.")
+    if request.query_params.get("wallet") == "signature_required":
+        flash = _flash("danger", "Wallet ownership signature is required before this address can receive USDC attribution.")
     if request.query_params.get("notify") == "saved":
         flash = _flash("success", "Notification preferences updated.")
     if request.query_params.get("acct_type") == "saved":
@@ -462,6 +533,12 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
     new_key = request.query_params.get("new_key")
     if new_key and request.query_params.get("created") == "1":
         flash = _flash("success", "API key created successfully.")
+
+    from app.api.webhooks import WEBHOOK_EVENTS
+    webhook_events = [
+        {"name": event, "description": _WEBHOOK_EVENT_DESCRIPTIONS.get(event, "Webhook event")}
+        for event in WEBHOOK_EVENTS
+    ]
 
     return templates.TemplateResponse(request, "dashboard.html", {
         "request": request,
@@ -491,6 +568,7 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
         "all_calendar_feeds": all_calendar_feeds,
         # Recent bots
         "recent_bots": recent_bots,
+        "webhook_events": webhook_events,
     })
 
 
@@ -551,6 +629,7 @@ async def bot_session_page(
                 bot = None
 
     if bot is None or bot.account_id != account.id:
+        from app.api.webhooks import WEBHOOK_EVENTS
         return templates.TemplateResponse(request, "dashboard.html", {
             "request": request,
             "account": account,
@@ -573,6 +652,10 @@ async def bot_session_page(
             "all_integrations": [],
             "calendar_feeds": [],
             "all_calendar_feeds": [],
+            "webhook_events": [
+                {"name": event, "description": _WEBHOOK_EVENT_DESCRIPTIONS.get(event, "Webhook event")}
+                for event in WEBHOOK_EVENTS
+            ],
         })
 
     import os as _os
@@ -689,46 +772,50 @@ async def revoke_key_ui(
 async def save_wallet_ui(
     request: Request,
     wallet_address: str = Form(default=""),
+    wallet_signature: str = Form(default=""),
     db: AsyncSession = Depends(get_db),
 ):
-    _wants_json = "application/json" in request.headers.get("Accept", "")
+    wants_json = _wants_json(request)
     account = await _get_account_from_request(request, db)
     if not account:
-        if _wants_json:
+        if wants_json:
             return JSONResponse({"detail": "Unauthenticated"}, status_code=401)
         return RedirectResponse("/login")
 
     # Support JSON body
     raw_address = wallet_address
-    if _wants_json:
+    signature = wallet_signature
+    if wants_json:
         try:
             body = await request.json()
             raw_address = body.get("wallet_address", "")
+            signature = body.get("signature", "")
         except Exception:
             pass
 
     import re
     address = raw_address.strip().lower()
     if not re.match(r"^0x[0-9a-f]{40}$", address):
-        if _wants_json:
+        if wants_json:
             return JSONResponse({"detail": "Invalid Ethereum address"}, status_code=400)
         return RedirectResponse("/dashboard?wallet=error", status_code=303)
 
-    from app.models.account import Account as AccountModel
-    existing = await db.execute(
-        select(AccountModel).where(AccountModel.wallet_address == address, AccountModel.id != account.id)
+    data, status = await _call_internal_api_json(
+        request,
+        "PUT",
+        "/api/v1/auth/wallet",
+        json_body={"wallet_address": address, "signature": signature or None},
     )
-    if existing.scalar_one_or_none():
-        if _wants_json:
-            return JSONResponse({"detail": "Wallet address already registered to another account"}, status_code=409)
+    if wants_json:
+        return _json_response(data, status)
+    if status < 400:
+        return RedirectResponse("/dashboard?wallet=saved", status_code=303)
+    detail = str(data.get("detail", "")).lower()
+    if status == 409 or "already" in detail:
         return RedirectResponse("/dashboard?wallet=taken", status_code=303)
-
-    account.wallet_address = address
-    await db.commit()
-
-    if _wants_json:
-        return JSONResponse({"wallet_address": address, "message": "Wallet address saved"})
-    return RedirectResponse("/dashboard?wallet=saved", status_code=303)
+    if "signature" in detail:
+        return RedirectResponse("/dashboard?wallet=signature_required", status_code=303)
+    return RedirectResponse("/dashboard?wallet=error", status_code=303)
 
 
 @router.post("/dashboard/notifications", include_in_schema=False)
@@ -1361,63 +1448,65 @@ async def add_integration_ui(
     db: AsyncSession = Depends(get_db),
 ):
     """Add a Slack or Notion integration from the dashboard UI."""
-    import json, uuid
-    _wants_json = "application/json" in request.headers.get("Accept", "")
+    wants_json = _wants_json(request)
     account = await _get_account_from_request(request, db)
     if not account:
-        if _wants_json:
+        if wants_json:
             return JSONResponse({"detail": "Unauthenticated"}, status_code=401)
         return RedirectResponse("/login")
 
     # Support JSON body
-    if _wants_json:
+    body = {}
+    if wants_json:
         try:
             body = await request.json()
-            integ_type = body.get("integ_type", integ_type)
-            name = body.get("name", name)
-            slack_webhook_url = body.get("slack_webhook_url", slack_webhook_url)
-            notion_api_token = body.get("notion_api_token", notion_api_token)
-            notion_database_id = body.get("notion_database_id", notion_database_id)
         except Exception:
-            pass
+            body = {}
 
-    if integ_type == "slack":
-        url = slack_webhook_url.strip()
-        if not url.startswith("https://hooks.slack.com/"):
-            if _wants_json:
-                return JSONResponse({"detail": "Invalid Slack webhook URL"}, status_code=400)
-            return RedirectResponse("/dashboard?integ_error=invalid_slack_url#integrations", status_code=303)
-        config = json.dumps({"webhook_url": url})
-        display_name = name.strip() or "Slack"
-    elif integ_type == "notion":
-        token = notion_api_token.strip()
-        db_id = notion_database_id.strip()
-        if not token or not db_id:
-            if _wants_json:
-                return JSONResponse({"detail": "Notion API token and database ID are required"}, status_code=400)
-            return RedirectResponse("/dashboard?integ_error=notion_missing_fields#integrations", status_code=303)
-        config = json.dumps({"api_token": token, "database_id": db_id})
-        display_name = name.strip() or "Notion"
+    type_ = (body.get("type") or body.get("integ_type") or integ_type or "").strip()
+    display_name = (body.get("name") or name or "").strip()
+    if type_ == "slack":
+        url = (
+            body.get("webhook_url")
+            or body.get("slack_webhook_url")
+            or slack_webhook_url
+            or ""
+        ).strip()
+        payload = {"type": "slack", "name": display_name or "Slack", "config": {"webhook_url": url}}
+    elif type_ == "notion":
+        token = (
+            body.get("api_token")
+            or body.get("notion_token")
+            or body.get("notion_api_token")
+            or notion_api_token
+            or ""
+        ).strip()
+        db_id = (body.get("database_id") or body.get("notion_database_id") or notion_database_id or "").strip()
+        payload = {
+            "type": "notion",
+            "name": display_name or "Notion",
+            "config": {"api_token": token, "database_id": db_id},
+        }
     else:
-        if _wants_json:
+        if wants_json:
             return JSONResponse({"detail": "Invalid integration type"}, status_code=400)
         return RedirectResponse("/dashboard?integ_error=invalid_type#integrations", status_code=303)
 
-    from app.models.account import Integration
-    integ = Integration(
-        id=str(uuid.uuid4()),
-        account_id=account.id,
-        type=integ_type,
-        name=display_name,
-        config=config,
-        is_active=True,
+    data, status = await _call_internal_api_json(
+        request,
+        "POST",
+        "/api/v1/integrations",
+        json_body=payload,
     )
-    db.add(integ)
-    await db.commit()
-    logger.info("Added %s integration for account %s", integ_type, account.email)
-
-    if _wants_json:
-        return JSONResponse({"id": integ.id, "type": integ_type, "name": display_name, "is_active": True})
+    if wants_json:
+        return _json_response(data, status)
+    if status >= 400:
+        detail = str(data.get("detail", "")).lower()
+        if "slack" in detail:
+            return RedirectResponse("/dashboard?integ_error=invalid_slack_url#integrations", status_code=303)
+        if "notion" in detail:
+            return RedirectResponse("/dashboard?integ_error=notion_missing_fields#integrations", status_code=303)
+        return RedirectResponse("/dashboard?integ_error=invalid_type#integrations", status_code=303)
     return RedirectResponse("/dashboard?integ_added=1#integrations", status_code=303)
 
 
@@ -1487,17 +1576,16 @@ async def add_calendar_ui(
     db: AsyncSession = Depends(get_db),
 ):
     """Add an iCal calendar feed from the dashboard UI."""
-    import uuid
-    _wants_json = "application/json" in request.headers.get("Accept", "")
+    wants_json = _wants_json(request)
     account = await _get_account_from_request(request, db)
     if not account:
-        if _wants_json:
+        if wants_json:
             return JSONResponse({"detail": "Unauthenticated"}, status_code=401)
         return RedirectResponse("/login")
 
     # Support JSON body
     cal_name, cal_url, cal_bot_name, cal_auto = name, ical_url, bot_name, auto_record
-    if _wants_json:
+    if wants_json:
         try:
             body = await request.json()
             cal_name = body.get("name", name)
@@ -1509,26 +1597,26 @@ async def add_calendar_ui(
 
     url = cal_url.strip()
     if not url.startswith(("http://", "https://")):
-        if _wants_json:
+        if wants_json:
             return JSONResponse({"detail": "Invalid calendar URL — must start with http:// or https://"}, status_code=400)
         return RedirectResponse("/dashboard?cal_error=invalid_url#calendar", status_code=303)
 
-    from app.models.account import CalendarFeed
-    feed = CalendarFeed(
-        id=str(uuid.uuid4()),
-        account_id=account.id,
-        name=(cal_name.strip() or "My Calendar")[:100],
-        ical_url=url,
-        bot_name=(cal_bot_name.strip() or None),
-        auto_record=(cal_auto == "on"),
-        is_active=True,
+    data, status = await _call_internal_api_json(
+        request,
+        "POST",
+        "/api/v1/calendar",
+        json_body={
+            "name": (cal_name.strip() or "My Calendar")[:100],
+            "ical_url": url,
+            "bot_name": (cal_bot_name.strip() or None),
+            "auto_record": (cal_auto == "on"),
+            "is_active": True,
+        },
     )
-    db.add(feed)
-    await db.commit()
-    logger.info("Added calendar feed '%s' for account %s", feed.name, account.email)
-
-    if _wants_json:
-        return JSONResponse({"id": feed.id, "name": feed.name, "url": feed.ical_url, "is_active": True})
+    if wants_json:
+        return _json_response(data, status)
+    if status >= 400:
+        return RedirectResponse("/dashboard?cal_error=invalid_url#calendar", status_code=303)
     return RedirectResponse("/dashboard?cal_added=1#calendar", status_code=303)
 
 
@@ -1595,35 +1683,19 @@ async def create_webhook_ui(request: Request, db: AsyncSession = Depends(get_db)
     The main /api/v1/webhook endpoint requires Bearer auth; this route accepts the
     JWT cookie used by the dashboard and delegates to the same store logic.
     """
-    account = await _get_account_from_request(request, db)
-    if not account:
+    if not _get_token_from_request(request):
         return JSONResponse({"detail": "Unauthenticated"}, status_code=401)
     try:
         body = await request.json()
     except Exception:
         return JSONResponse({"detail": "Invalid JSON body"}, status_code=400)
-
-    url = (body.get("url") or "").strip()
-    if not url:
-        return JSONResponse({"detail": "url is required"}, status_code=400)
-
-    from app.api.webhooks import _block_ssrf
-    from app.store import store as _wh_store
-    try:
-        await _block_ssrf(url)
-    except Exception as exc:
-        return JSONResponse({"detail": str(exc)}, status_code=400)
-
-    events = body.get("events") or ["*"]
-    secret = body.get("secret") or None
-    wh = await _wh_store.new_webhook(url=url, events=events, secret=secret)
-    return JSONResponse({
-        "id": wh.id,
-        "url": wh.url,
-        "events": wh.events,
-        "is_active": wh.is_active,
-        "created_at": wh.created_at.isoformat() if wh.created_at else None,
-    })
+    data, status = await _call_internal_api_json(
+        request,
+        "POST",
+        "/api/v1/webhook",
+        json_body=body,
+    )
+    return _json_response(data, status)
 
 
 # ── Bot creation proxy (cookie-auth wrapper) ─────────────────────────────────
@@ -1851,12 +1923,23 @@ async def share_bot_ui(bot_id: str, request: Request, db: AsyncSession = Depends
     import httpx
     from app.main import app as _app
     client_ip = request.client.host if request.client else "127.0.0.1"
+    body = None
+    if _wants_json(request):
+        try:
+            body = await request.json()
+        except Exception:
+            body = None
 
     try:
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=_app), base_url="http://internal") as client:
+            request_kwargs = {
+                "headers": {"Authorization": f"Bearer {token}", "X-Forwarded-For": client_ip}
+            }
+            if body is not None:
+                request_kwargs["json"] = body
             resp = await client.post(
                 f"/api/v1/bot/{bot_id}/share",
-                headers={"Authorization": f"Bearer {token}", "X-Forwarded-For": client_ip},
+                **request_kwargs,
             )
         try:
             data = resp.json()
@@ -1997,7 +2080,8 @@ async def search_transcripts_ui(request: Request, db: AsyncSession = Depends(get
     try:
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=_app), base_url="http://internal") as client:
             resp = await client.get(
-                f"/api/v1/search?q={q}",
+                "/api/v1/search",
+                params={"q": q},
                 headers={"Authorization": f"Bearer {token}", "X-Forwarded-For": client_ip},
             )
         return JSONResponse(resp.json(), status_code=resp.status_code)

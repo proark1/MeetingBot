@@ -11,7 +11,12 @@ Send bots into **Zoom**, **Google Meet**, **Microsoft Teams**, and **onepizza.io
 
 ---
 
-## Recent changes (2026-04-16)
+## Recent changes (2026-06-30)
+
+### Dashboard security and product controls
+- **Dashboard mutations reuse API guardrails** — wallet linking, webhook registration, calendar feeds, and integrations now go through the same API validation path as external clients, preserving tenant scoping, SSRF checks, feature gates, and encryption-at-rest.
+- **Safer sharing and USDC wallet setup** — dashboard share links expose an expiry selector, and USDC wallet linking requires an ownership signature instead of accepting any public address.
+- **Privacy, retention, and business controls in the UI** — account-level consent defaults, retention settings, business `sub_user_id`, workspace scoping, and advanced bot options are now visible in the dashboard.
 
 ### Privacy and workflow controls (v2.69.0)
 - **Consent policy controls** — account-level `/api/v1/privacy/consent-policy` and workspace settings can require recording announcements, set default wording, and define the opt-out phrase applied to new bots.
@@ -68,9 +73,9 @@ Send bots into **Zoom**, **Google Meet**, **Microsoft Teams**, and **onepizza.io
 - **Queue processor re-signals** — When a bot finishes, the queue processor is woken immediately to start the next queued bot (no 30-second delay).
 
 ### Security
-- **Cookie-auth proxy routes** — All dashboard API calls (bot creation, cancel, share, speakers, ask, email) route through `/dashboard/*` proxy endpoints that accept the JWT cookie and forward with proper Bearer token.
+- **Cookie-auth proxy routes** — Dashboard mutations route through `/dashboard/*` proxy endpoints that accept the JWT cookie and forward with proper Bearer auth, so UI flows reuse the API's validation, tenant scoping, encryption, feature gates, and SSRF checks.
 - **XSS prevention** — All dynamic values in bot table rows are HTML-escaped via `_escHtml()`.
-- **CORS restricted in production** — When `API_KEY` is set and `CORS_ORIGINS` is still `*`, CORS auto-restricts to same-origin.
+- **CORS restricted in production** — Production-like deployments (`ENVIRONMENT=production`, legacy `API_KEY`, or non-SQLite database) auto-restrict wildcard CORS to same-origin unless `CORS_ORIGINS` is explicitly set.
 
 ### Landing page
 - **Dark navy + warm beige theme** — Complete visual overhaul across all 11 templates.
@@ -85,7 +90,7 @@ Send bots into **Zoom**, **Google Meet**, **Microsoft Teams**, and **onepizza.io
 2. A headless Chromium browser joins the call, records audio, and transcribes it
 3. AI analyses the transcript (summary, action items, decisions, sentiment, topics, chapters)
 4. Full results are **POSTed to your `webhook_url`** when done, or you poll `GET /api/v1/bot/{id}`
-5. Results stay in memory for **24 hours** — save them to your own storage before then
+5. Recent results stay hot in memory for **24 hours**; persisted bot data and recordings follow the account retention policy described below.
 
 ---
 
@@ -571,8 +576,8 @@ When a bot completes, all active integrations fire automatically:
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/api/v1/retention` | Get per-account retention policy. Returns `{bot_retention_days, recording_retention_days, transcript_retention_days}` |
-| `PUT` | `/api/v1/retention` | Set retention policy. Body: `{bot_retention_days?, recording_retention_days?, transcript_retention_days?}`. Use `-1` for keep-forever |
+| `GET` | `/api/v1/auth/retention` | Get per-account retention policy. Returns `{bot_retention_days, recording_retention_days, transcript_retention_days}` |
+| `PUT` | `/api/v1/auth/retention` | Set retention policy. Body: `{bot_retention_days?, recording_retention_days?, transcript_retention_days?}`. Use `-1` for keep-forever |
 
 A background task enforces policies nightly. Platform-wide defaults are set via `DEFAULT_BOT_RETENTION_DAYS` (90 days) and `DEFAULT_RECORDING_RETENTION_DAYS` (30 days) env vars. Per-account policies override the global defaults.
 
@@ -1016,7 +1021,7 @@ Account default: use `GET/PUT /api/v1/privacy/consent-policy`. Workspace default
 | `DEFAULT_BOT_RETENTION_DAYS` | `90` | Days to keep bot data in the database (`-1` = keep forever) |
 | `DEFAULT_RECORDING_RETENTION_DAYS` | `30` | Days to keep audio/video recording files on disk (`-1` = keep forever) |
 
-Per-account overrides via `GET/PUT /api/v1/retention`. A background task enforces policies nightly.
+Per-account overrides via `GET/PUT /api/v1/auth/retention`. A background task enforces policies nightly.
 
 ### Keyword alerts
 
@@ -1187,7 +1192,7 @@ scheduled (join_at set)                                                         
 
 The bot auto-leaves when it has been the only participant for `BOT_ALONE_TIMEOUT` seconds (default 5 min).
 
-**Result retention:** Results are kept in memory for 24 hours after completion. Save them to your own storage before then.
+**Result lifecycle:** Completed bots are kept hot in memory for 24 hours for fast dashboard/API reads. Database snapshots, transcripts, and recording files are governed by the account retention policy (`GET/PUT /api/v1/auth/retention`) and platform defaults.
 
 ---
 

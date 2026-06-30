@@ -940,11 +940,16 @@ async def create_bot(payload: BotCreate, request: Request):
     """
     account_id: Optional[str] = getattr(request.state, "account_id", None)
 
-    # Resolve sub_user_id: body field takes precedence, then X-Sub-User header
-    sub_user_id = payload.sub_user_id
-    if not sub_user_id:
-        header_val = request.headers.get("X-Sub-User", "").strip()[:255]
-        sub_user_id = header_val or None
+    # Resolve sub_user_id: body field takes precedence, then X-Sub-User header.
+    # Use the same validator as read/export paths so scoped records cannot be
+    # created with an identifier that later requests would reject.
+    from app.deps import validate_sub_user
+    raw_sub_user_id = (
+        payload.sub_user_id
+        if payload.sub_user_id is not None
+        else request.headers.get("X-Sub-User")
+    )
+    sub_user_id = validate_sub_user(raw_sub_user_id)
 
     # ── Idempotency key check ─────────────────────────────────────────────────
     # Idempotency requires an authenticated tenant — anonymous callers would

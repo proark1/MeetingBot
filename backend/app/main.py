@@ -795,7 +795,7 @@ _PUBLIC_DESCRIPTION = (
     "`CONSENT_ANNOUNCEMENT_ENABLED` and `CONSENT_OPT_OUT_PHRASE` env vars.\n\n"
 
     "## Data retention policies\n"
-    "`GET/PUT /api/v1/retention` — configure per-account retention days for bots, recordings, "
+    "`GET/PUT /api/v1/auth/retention` — configure per-account retention days for bots, recordings, "
     "and transcripts. Use `-1` for keep-forever. Platform defaults: "
     "`DEFAULT_BOT_RETENTION_DAYS` (90 days), `DEFAULT_RECORDING_RETENTION_DAYS` (30 days). "
     "A background task enforces policies nightly.\n\n"
@@ -1039,7 +1039,7 @@ app = FastAPI(
         "`CONSENT_OPT_OUT_PHRASE` env vars.\n\n"
 
         "## Data retention policies\n"
-        "`GET/PUT /api/v1/retention` — configure per-account retention days for bots, recordings, "
+        "`GET/PUT /api/v1/auth/retention` — configure per-account retention days for bots, recordings, "
         "and transcripts. Use `-1` for keep-forever. Platform defaults: "
         "`DEFAULT_BOT_RETENTION_DAYS` (90 days), `DEFAULT_RECORDING_RETENTION_DAYS` (30 days). "
         "A background task enforces policies nightly.\n\n"
@@ -2098,10 +2098,20 @@ def _incident_id() -> str:
 async def _validation_exception_handler(request, exc: _RequestValidationError):
     """Wrap Pydantic validation errors into the machine-readable structure."""
     iid = _incident_id()
+    errors = []
+    for err in exc.errors():
+        clean = dict(err)
+        ctx = clean.get("ctx")
+        if isinstance(ctx, dict):
+            clean["ctx"] = {
+                key: str(value) if isinstance(value, BaseException) else value
+                for key, value in ctx.items()
+            }
+        errors.append(clean)
     return _JSONResponse(
         status_code=422,
         content={
-            "detail": exc.errors(),
+            "detail": errors,
             "error_code": "validation_error",
             "incident_id": iid,
             "retryable": False,

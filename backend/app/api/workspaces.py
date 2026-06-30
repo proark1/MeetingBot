@@ -62,14 +62,15 @@ class WorkspaceUpdate(BaseModel):
 
 
 class WorkspaceMemberAdd(BaseModel):
-    account_id: str = Field(description="Account ID of the member to add.")
+    account_id: Optional[str] = Field(default=None, description="Account ID of the member to add.")
+    email: Optional[str] = Field(default=None, description="Email address of the member to add.")
     role: str = Field(
         default="member",
         description="Role: 'admin', 'member', or 'viewer'.",
     )
 
     model_config = {"json_schema_extra": {"example": {
-        "account_id": "5a0e8400-e29b-41d4-a716-446655440111",
+        "email": "teammate@example.com",
         "role": "member",
     }}}
 
@@ -368,18 +369,26 @@ async def add_workspace_member(workspace_id: str, payload: WorkspaceMemberAdd, r
     async with AsyncSessionLocal() as db:
         await _get_workspace_with_access(workspace_id, account_id, db, require_role="admin")
 
-        # Verify target account exists
-        acc_result = await db.execute(
-            select(Account).where(Account.id == payload.account_id)
-        )
-        if acc_result.scalar_one_or_none() is None:
-            raise HTTPException(status_code=404, detail=f"Account {payload.account_id!r} not found")
+        target_account_id = (payload.account_id or "").strip()
+        target_email = (payload.email or "").strip().lower()
+        if target_email:
+            acc_result = await db.execute(select(Account).where(Account.email == target_email))
+            target = acc_result.scalar_one_or_none()
+            if target is None:
+                raise HTTPException(status_code=404, detail=f"Account with email {target_email!r} not found")
+            target_account_id = target.id
+        elif target_account_id:
+            acc_result = await db.execute(select(Account).where(Account.id == target_account_id))
+            if acc_result.scalar_one_or_none() is None:
+                raise HTTPException(status_code=404, detail=f"Account {target_account_id!r} not found")
+        else:
+            raise HTTPException(status_code=422, detail="Provide either account_id or email")
 
         # Check if already a member
         existing = await db.execute(
             select(WorkspaceMember).where(
                 WorkspaceMember.workspace_id == workspace_id,
-                WorkspaceMember.account_id == payload.account_id,
+                WorkspaceMember.account_id == target_account_id,
             )
         )
         if existing.scalar_one_or_none() is not None:
@@ -387,7 +396,7 @@ async def add_workspace_member(workspace_id: str, payload: WorkspaceMemberAdd, r
 
         member = WorkspaceMember(
             workspace_id=workspace_id,
-            account_id=payload.account_id,
+            account_id=target_account_id,
             role=payload.role,
             invited_by=account_id,
         )

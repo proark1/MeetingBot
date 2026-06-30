@@ -107,7 +107,17 @@ class WebhookEventList(BaseModel):
     - `bot.keyword_alert` — A monitored keyword was detected in the transcript
     - `bot.live_transcript` — Real-time transcript entry (during call)
     - `bot.live_transcript_translated` — Translated live transcript entry
+    - `bot.live_chat_message` — Live chat message observed during the call
+    - `bot.live_action_items` — AI-extracted action items during the call
+    - `bot.live_keyword_alert` — Real-time keyword alert with sentiment
     - `bot.recurring_intel_ready` — Recurring meeting intelligence report ready
+    - `bot.decision_detected` — Decision or commitment detected during/after analysis
+    - `bot.coaching_tip` — Real-time host coaching tip
+    - `bot.coaching_alert` — Meeting dynamics alert
+    - `bot.speaker_analytics` — Speaker analytics snapshot
+    - `bot.agentic_action` — Agentic instruction delivered
+    - `action_item.due_soon` — Tracked action item is nearing its due date
+    - `action_item.overdue` — Tracked action item is overdue
     - `bot.test` — Test event sent from webhook playground
     """
     events: list[str]
@@ -119,6 +129,9 @@ class WebhookEventList(BaseModel):
             "bot.done", "bot.error", "bot.cancelled",
             "bot.keyword_alert",
             "bot.live_transcript", "bot.live_transcript_translated", "bot.live_chat_message",
-            "bot.recurring_intel_ready", "bot.test",
+            "bot.live_action_items", "bot.live_keyword_alert",
+            "bot.recurring_intel_ready", "bot.decision_detected", "bot.coaching_tip",
+            "bot.coaching_alert", "bot.speaker_analytics", "bot.agentic_action",
+            "action_item.due_soon", "action_item.overdue", "bot.test",
         ],
     }}}
